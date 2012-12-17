@@ -337,7 +337,7 @@ namespace LegionRuntime {
       // Check privileges for the region requirement
       check_privilege();
 #ifdef LEGION_SPY
-      LegionSpy::log_mapping_operation(unique_id, parent_ctx->get_unique_id(), parent_ctx->ctx_id);
+      LegionSpy::log_mapping_operation(unique_id, parent_ctx->get_unique_id(), parent_ctx->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
       LegionSpy::log_logical_requirement(unique_id,0,true,req.region.index_space.id, req.region.field_space.id,
                                         req.region.tree_id, req.privilege, req.prop, req.redop);
       LegionSpy::log_requirement_fields(unique_id, 0, req.privilege_fields);
@@ -362,7 +362,7 @@ namespace LegionRuntime {
       // Check privileges for the region requirement
       check_privilege();
 #ifdef LEGION_SPY
-      LegionSpy::log_mapping_operation(unique_id, parent_ctx->get_unique_id(), parent_ctx->ctx_id);
+      LegionSpy::log_mapping_operation(unique_id, parent_ctx->get_unique_id(), parent_ctx->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
       LegionSpy::log_logical_requirement(unique_id,0,true,requirement.region.index_space.id, requirement.region.field_space.id,
                                         requirement.region.tree_id, requirement.privilege, requirement.prop, requirement.redop);
       LegionSpy::log_requirement_fields(unique_id, 0, requirement.privilege_fields);
@@ -440,7 +440,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> 
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
       MappingOperation::get_accessor(GenerationID gen_id) const
     //--------------------------------------------------------------------------
     {
@@ -456,7 +456,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> 
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
       MappingOperation::get_field_accessor(GenerationID gen_id, FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -523,7 +523,8 @@ namespace LegionRuntime {
       assert(idx == 0);
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_mapping_dependence(parent_ctx->get_unique_id(), parent_ctx->ctx_id, prev.op->get_unique_id(),
+      LegionSpy::log_mapping_dependence(parent_ctx->get_unique_id(), parent_ctx->ctx_id, 
+                                        runtime->utility_proc.id, parent_ctx->get_gen(), prev.op->get_unique_id(),
                                         prev.idx, get_unique_id(), idx, dtype);
 #endif
       if (prev.op->add_waiting_dependence(this, prev.idx, prev.gen))
@@ -610,6 +611,7 @@ namespace LegionRuntime {
       {
         Event start_event = physical_instance.get_ready_event();
 #ifdef LEGION_SPY
+        LegionSpy::log_mapping_user(this->get_unique_id(), physical_instance.get_manager()->get_unique_id());
         if (!start_event.exists())
         {
           UserEvent new_start = UserEvent::create_user_event();
@@ -641,6 +643,7 @@ namespace LegionRuntime {
         }
 #ifdef LEGION_SPY
         LegionSpy::log_map_events(get_unique_id(), ready_event, unmapped_event);
+        LegionSpy::log_mapping_user(get_unique_id(), physical_instance.get_manager()->get_unique_id());
 #endif
         // finally we can trigger the event saying that we're mapped
         mapped_event.trigger();
@@ -818,7 +821,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                  parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -835,7 +839,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                            parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -852,7 +857,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                            parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -870,7 +876,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                          parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -887,7 +894,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                          parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -904,7 +912,8 @@ namespace LegionRuntime {
       performed = false;
       parent->register_child_deletion(this);
 #ifdef LEGION_SPY
-      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), parent->ctx_id);
+      LegionSpy::log_deletion_operation(get_unique_id(), parent->get_unique_id(), 
+                          parent->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen());
 #endif
     }
 
@@ -1210,13 +1219,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void TaskContext::initialize_task(Context parent, Processor::TaskFuncID tid,
-                                      void *a, size_t len, 
+                                      void *a, size_t len, bool index_space,
                                       const Predicate &predicate,
                                       MapperID mid, MappingTagID t)
     //--------------------------------------------------------------------------
     {
       task_id = tid;
       arglen = len;
+      is_index_space = index_space;
       if (arglen > 0)
       {
         args = malloc(arglen);
@@ -1237,15 +1247,16 @@ namespace LegionRuntime {
       // Initialize remaining fields in the Task as well
       if (parent != NULL)
         orig_proc = parent->get_executing_processor();
+#ifdef LEGION_SPY
+      if (parent_ctx != NULL)
+        LegionSpy::log_task_operation(get_unique_id(), tid, parent_ctx->get_unique_id(), 
+          parent_ctx->ctx_id, runtime->utility_proc.id, parent_ctx->get_gen(), this->is_index_space);
+#endif
       // Intialize fields in any sub-types
       initialize_subtype_fields();
       // Register with the parent task, only NULL if initializing top-level task
       if (parent != NULL)
         parent->register_child_task(this);
-#ifdef LEGION_SPY
-      if (parent_ctx != NULL)
-        LegionSpy::log_task_operation(get_unique_id(), tid, parent_ctx->get_unique_id(), parent_ctx->ctx_id);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1487,7 +1498,8 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_mapping_dependence(parent_ctx->get_unique_id(), parent_ctx->ctx_id, prev.op->get_unique_id(),
+      LegionSpy::log_mapping_dependence(parent_ctx->get_unique_id(), parent_ctx->ctx_id, 
+                                        runtime->utility_proc.id, parent_ctx->get_gen(), prev.op->get_unique_id(),
                                         prev.idx, get_unique_id(), idx, dtype);
 #endif
       if (prev.op->add_waiting_dependence(this, prev.idx, prev.gen))
@@ -2791,6 +2803,11 @@ namespace LegionRuntime {
         physical_region_impls[idx] = new PhysicalRegionImpl(idx, regions[idx].region, 
             (physical_instances[idx].is_virtual_ref() ? NULL : physical_instances[idx].get_manager()));
         physical_regions[idx] = PhysicalRegion(physical_region_impls[idx]);
+#ifdef LEGION_SPY
+        if (!physical_instances[idx].is_virtual_ref())
+          LegionSpy::log_task_user(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, idx,
+                                    physical_instances[idx].get_manager()->get_unique_id());
+#endif
       }
       // If we're not remote, then we can release all the source copy instances
       if (!is_remote())
@@ -3489,7 +3506,8 @@ namespace LegionRuntime {
       }
       // Record the dependences
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
-      LegionSpy::log_task_events(get_unique_id(), is_index_space, (is_index_space ? *((unsigned*)index_point) : 0), 
+      LegionSpy::log_task_events(runtime->utility_proc.id, this->get_gen(), this->ctx_id, get_unique_id(), is_index_space, 
+                                  (is_index_space ? *((unsigned*)index_point) : 0), 
                                   start_condition, get_termination_event());
 #endif
       // Launch the task, passing the pointer to this Context as the argument
@@ -5630,6 +5648,12 @@ namespace LegionRuntime {
           }
         }
       }
+#ifdef LEGION_SPY
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        LegionSpy::log_task_instance_requirement(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, idx, regions[idx].region.get_index_space().id); 
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------

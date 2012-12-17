@@ -119,15 +119,6 @@ namespace LegionRuntime {
     };
 
     // enum and namepsaces don't really get along well
-    enum AccessorType {
-      AccessorGeneric            = 0x00000001, //LowLevel::AccessorGeneric,
-      AccessorArray              = 0x00000002, //LowLevel::AccessorArray,
-      AccessorArrayReductionFold = 0x00000004, //LowLevel::AccessorArrayReductionFold,
-      AccessorGPU                = 0x00000008, //LowLevel::AccessorGPU,
-      AccessorGPUReductionFold   = 0x00000010, //LowLevel::AccessorGPUReductionFold,
-      AccessorReductionList      = 0x00000020, //LowLevel::AccessorReductionList,
-    };
-
     enum PrivilegeMode {
       NO_ACCESS  = 0x00000000,
       READ_ONLY  = 0x00000001,

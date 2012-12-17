@@ -1054,11 +1054,11 @@ namespace LegionRuntime {
       PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term);
       RegionNode *top_node = get_node(start_region);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, true/*premap*/, rm.sanitizing, false/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, true/*premap*/, rm.sanitizing, false/*closing*/, field_mask);
 #endif
       top_node->register_physical_region(user, rm);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, false/*premap*/, rm.sanitizing, false/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, false/*premap*/, rm.sanitizing, false/*closing*/, field_mask);
 #endif
     }
 
@@ -1077,12 +1077,12 @@ namespace LegionRuntime {
       closer.add_upper_target(ref.view->as_instance_view());
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.upper_targets.back()->logical_region == close_node);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
 #endif
       close_node->issue_final_close_operation(rm.ctx, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
 #endif
       // Now get the event for when the close is done
       return ref.view->as_instance_view()->get_valid_event(field_mask);
@@ -1103,12 +1103,12 @@ namespace LegionRuntime {
       ReductionCloser closer(user, rm, close_node, ref.view->as_reduction_view());
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.target->logical_region == close_node);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
 #endif
       close_node->issue_final_close_operation(rm.ctx, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
 #endif
       return ref.view->as_reduction_view()->get_valid_event(field_mask);
     }
@@ -1550,7 +1550,7 @@ namespace LegionRuntime {
       {
         RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/);
+        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/, packing_mask);
 #endif
         top_node->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, true/*recurse*/);
       }
@@ -1558,7 +1558,7 @@ namespace LegionRuntime {
       {
         PartitionNode *top_node = get_node(req.partition);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/);
+        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/, packing_mask);
 #endif
         top_node->parent->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, false/*recurse*/);
         top_node->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, true/*recurse*/);
@@ -1613,7 +1613,7 @@ namespace LegionRuntime {
         top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, true/*top*/);
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, false/*pack*/, true/*send*/);
+        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, false/*pack*/, true/*send*/, unpacking_mask);
 #endif
       }
       else
@@ -1623,7 +1623,7 @@ namespace LegionRuntime {
         top_node->parent->unpack_physical_state(ctx, derez, false/*recurse*/);
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node->parent, ctx, false/*pack*/, true/*send*/);
+        TreeStateLogger::capture_state(runtime, idx, task_name, top_node->parent, ctx, false/*pack*/, true/*send*/, unpacking_mask);
 #endif
       }
     }
@@ -2035,7 +2035,7 @@ namespace LegionRuntime {
           (*it)->find_views_from(req.region, unique_views, ordered_views, packing_mask);
         }
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/);
+        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/, packing_mask);
 #endif
       }
       else
@@ -2051,7 +2051,7 @@ namespace LegionRuntime {
         {
           RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
-          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/);
+          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/, packing_mask);
 #endif
           std::set<InstanceManager*> needed_managers;
           result += top_node->compute_diff_state_size(ctx, packing_mask,
@@ -2068,7 +2068,7 @@ namespace LegionRuntime {
         {
           PartitionNode *top_node = get_node(req.partition);
 #ifdef DEBUG_HIGH_LEVEL
-          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*return*/);
+          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*return*/, packing_mask);
 #endif
           std::set<InstanceManager*> needed_managers;
           result += top_node->compute_diff_state_size(ctx, packing_mask,
@@ -2523,7 +2523,7 @@ namespace LegionRuntime {
         top_node->initialize_physical_context(ctx, true/*clear*/, unpacking_mask, top_node->is_top_of_context(ctx));
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/); 
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/);
+        TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
 #endif
         // We also need to update the field states of the parent
         // partition so that it knows that this region is open
@@ -2558,12 +2558,12 @@ namespace LegionRuntime {
         if (req.handle_type == SINGULAR)
         {
           RegionNode *top_node = get_node(req.region);
-          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/);
+          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
         }
         else
         {
           PartitionNode *top_node = get_node(req.partition);
-          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/);
+          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
         }
 #endif
       }
@@ -2640,7 +2640,7 @@ namespace LegionRuntime {
         (*it)->find_views_from(handle, unique_views, ordered_views, packing_mask);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/);
+      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask);
 #endif
       return result;
     }
@@ -2697,7 +2697,7 @@ namespace LegionRuntime {
       // Finally we can do the unpack operation
       top_node->unpack_physical_state(ctx, derez, true/*recurse*/, shift);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, shift);
+      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, shift, unpacking_mask);
 #endif
     }
     
@@ -2749,7 +2749,7 @@ namespace LegionRuntime {
         (*it)->find_views_from(handle, unique_views, ordered_views, packing_mask);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/);
+      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask);
 #endif
       return result;
     }
@@ -2817,7 +2817,7 @@ namespace LegionRuntime {
         return;
       top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, 0/*shift*/);
+      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, 0/*shift*/, unpacking_mask);
 #endif
     }
 
@@ -4145,6 +4145,7 @@ namespace LegionRuntime {
                               "Change 'MAX_FIELDS' at the top of legion_types.h and recompile.", MAX_FIELDS);
         exit(ERROR_MAX_FIELD_OVERFLOW);
       }
+      sanity_check();
 #endif
     }
 
@@ -4337,6 +4338,9 @@ namespace LegionRuntime {
       result->total_index_fields = max_id;
       // No shift since this field space is just returning
       result->shift = 0;
+#ifdef DEBUG_HIGH_LEVEL
+      result->sanity_check();
+#endif
       return result;
     }
 
@@ -4515,6 +4519,52 @@ namespace LegionRuntime {
         result.set_bit<FIELD_SHIFT,FIELD_MASK>(finder->second.idx);
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    char* FieldSpaceNode::to_string(const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!!mask);
+#endif
+      char *result = (char*)malloc(MAX_FIELDS*4); 
+      bool first = true;
+      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+      {
+        if (is_set(it->first, mask))
+        {
+          if (first)
+          {
+            sprintf(result,"%d",it->first);
+            first = false;
+          }
+          else
+          {
+            char temp[8];
+            sprintf(temp,",%d",it->first);
+            strcat(result, temp);
+          }
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!first); // we should have written something
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::sanity_check(void) const
+    //--------------------------------------------------------------------------
+    {
+      std::set<unsigned> indexes;
+      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+      {
+        assert(indexes.find(it->second.idx) == indexes.end());
+        indexes.insert(it->second.idx);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -5256,7 +5306,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::FieldState::print_state(TreeStateLogger *logger) const
+    void RegionTreeNode::FieldState::print_state(TreeStateLogger *logger, FieldMask capture_mask) const
     //--------------------------------------------------------------------------
     {
       switch (open_state)
@@ -5293,7 +5343,10 @@ namespace LegionRuntime {
       for (std::map<Color,FieldMask>::const_iterator it = open_children.begin();
             it != open_children.end(); it++)
       {
-        char *mask_buffer = it->second.to_string();
+        FieldMask overlap = it->second & capture_mask;
+        if (!overlap)
+          continue;
+        char *mask_buffer = overlap.to_string();
         logger->log("Color %d   Mask %s", it->first, mask_buffer);
         free(mask_buffer);
       }
@@ -6146,6 +6199,9 @@ namespace LegionRuntime {
             }
           }
           // Do this if we couldn't find a better choice
+          // Note we can't do this in the read-only case because we might end up issuing
+          // multiple copies to the same location.
+          if (!IS_READ_ONLY(user.usage))
           {
             // These are instances which have space for all the required fields
             // but only a subset of those fields contain valid data.
@@ -6291,7 +6347,6 @@ namespace LegionRuntime {
       std::vector<std::pair<InstanceView*,FieldMask> > src_instances;
       std::vector<IndexSpace::CopySrcDstField> dst_fields;
 
-      FieldMask copy_mask_copy = copy_mask;
       // No need to call the mapper if there is only one valid instance
       if (valid_instances.size() == 1)
       {
@@ -6335,14 +6390,14 @@ namespace LegionRuntime {
               continue;
             }
             // Check to see if their are valid fields in the copy mask
-            if (!(copy_mask * it->second))
+            FieldMask op_mask = copy_mask & it->second;
+            if (!!op_mask)
             {
-              FieldMask op_mask = copy_mask & it->second;
               it->first->copy_from(rm, op_mask, preconditions, src_fields);
               dst->copy_to(rm, op_mask, preconditions, dst_fields);
               src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
               // update the copy mask
-              copy_mask -= it->second;
+              copy_mask -= op_mask;
               // Check for the fast out
               if (!copy_mask)
               {
@@ -6361,7 +6416,7 @@ namespace LegionRuntime {
               !copy_ready && mit != available_memories.end(); mit++)
         {
           for (std::list<std::pair<InstanceView*,FieldMask> >::iterator it = valid_instances.begin();
-                it != valid_instances.end(); it++)
+                it != valid_instances.end(); /*nothing*/)
           {
             if ((*mit) != it->first->get_location())
             {
@@ -6369,14 +6424,14 @@ namespace LegionRuntime {
               continue;
             }
             // Check to see if their are valid fields in the copy mask
-            if (!(copy_mask * it->second))
+            FieldMask op_mask = copy_mask & it->second;
+            if (!!op_mask)
             {
-              FieldMask op_mask = copy_mask & it->second;
               it->first->copy_from(rm, op_mask, preconditions, src_fields);
               dst->copy_to(rm, op_mask, preconditions, dst_fields);
               src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
               // update the copy mask
-              copy_mask -= it->second;
+              copy_mask -= op_mask;
               // Check for the fast out
               if (!copy_mask)
               {
@@ -6398,6 +6453,7 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!dst_fields.empty());
+        assert(src_fields.size() == dst_fields.size());
 #endif
         Event copy_pre = Event::merge_events(preconditions);
 #ifdef LEGION_SPY
@@ -6431,12 +6487,15 @@ namespace LegionRuntime {
         for (std::vector<std::pair<InstanceView*,FieldMask> >::const_iterator it = src_instances.begin();
               it != src_instances.end(); it++)
         {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!!it->second);
+#endif
           update_mask |= it->second;
 #ifdef LEGION_SPY
           {
-            char *string_mask = copy_mask.to_string();
-            LegionSpy::log_copy_operation(it->first->manager->get_instance().id, dst->manager->get_instance().id,
-                                          it->first->manager->get_location().id, dst->manager->get_location().id,
+            FieldSpaceNode *field_node = context->get_node(handle.field_space);
+            char *string_mask = field_node->to_string(it->second);
+            LegionSpy::log_copy_operation(it->first->manager->get_unique_id(), dst->manager->get_unique_id(),
                                           handle.index_space.id, handle.field_space.id, handle.tree_id,
                                           copy_pre, copy_post, string_mask);
             free(string_mask);
@@ -6684,6 +6743,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL); // should never happen
 #endif
+#ifdef LEGION_SPY
+        LegionSpy::log_physical_instance(manager->get_instance().id, location.id, handle.index_space.id,
+                                          handle.field_space.id, handle.tree_id);
+        LegionSpy::log_instance_manager(manager->get_instance().id, manager->get_unique_id());
+#endif
       }
       return result;
     }
@@ -6747,6 +6811,12 @@ namespace LegionRuntime {
         result = context->create_reduction_view(manager, this, true/*made local*/);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL); // should never happen
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_physical_reduction(manager->get_instance().id, location.id, handle.index_space.id,
+                                          handle.field_space.id, handle.tree_id, manager->is_foldable(),
+                                          manager->get_pointer_space().id);
+        LegionSpy::log_reduction_manager(manager->get_instance().id, manager->get_unique_id());
 #endif
       }
       return result;
@@ -7415,19 +7485,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::print_physical_context(ContextID ctx, TreeStateLogger *logger)
+    void RegionNode::print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
       logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
           handle.index_space.id, handle.field_space.id,handle.tree_id,
           row_source->color, logger->get_depth());
       logger->down();
+      std::map<Color,FieldMask> to_traverse;
       if (physical_states.find(ctx) != physical_states.end())
       {
         PhysicalState &state = physical_states[ctx];
         // Dirty Mask
         {
-          char *dirty_buffer = state.dirty_mask.to_string();
+          FieldMask overlap = state.dirty_mask & capture_mask;
+          char *dirty_buffer = overlap.to_string();
           logger->log("Dirty Mask: %s",dirty_buffer);
           free(dirty_buffer);
         }
@@ -7438,7 +7510,10 @@ namespace LegionRuntime {
           for (std::map<InstanceView*,FieldMask>::const_iterator it = state.valid_views.begin();
                 it != state.valid_views.end(); it++)
           {
-            char *valid_mask = it->second.to_string();
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            char *valid_mask = overlap.to_string();
             logger->log("Instance %x   Memory %x   Mask %s",
                 it->first->get_instance().id, it->first->get_location().id, valid_mask);
             free(valid_mask);
@@ -7452,7 +7527,10 @@ namespace LegionRuntime {
           for (std::map<ReductionView*,FieldMask>::const_iterator it = state.reduction_views.begin();
                 it != state.reduction_views.end(); it++)
           {
-            char *valid_mask = it->second.to_string();
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            char *valid_mask = overlap.to_string();
             logger->log("Reduction Instance %x   Memory %x  Mask %s",
                 it->first->get_instance().id, it->first->get_location().id, valid_mask);
             free(valid_mask);
@@ -7466,7 +7544,20 @@ namespace LegionRuntime {
           for (std::list<FieldState>::const_iterator it = state.field_states.begin();
                 it != state.field_states.end(); it++)
           {
-            it->print_state(logger);
+            it->print_state(logger, capture_mask);
+            if (it->valid_fields * capture_mask)
+              continue;
+            for (std::map<Color,FieldMask>::const_iterator cit = it->open_children.begin();
+                  cit != it->open_children.end(); cit++)
+            {
+              FieldMask overlap = cit->second & capture_mask;
+              if (!overlap)
+                continue;
+              if (to_traverse.find(cit->first) == to_traverse.end())
+                to_traverse[cit->first] = overlap;
+              else
+                to_traverse[cit->first] |= overlap;
+            }
           }
           logger->up();
         }
@@ -7477,11 +7568,10 @@ namespace LegionRuntime {
       }
       logger->log("");
 
-      // Now do all the children
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,FieldMask>::const_iterator it = to_traverse.begin();
+            it != to_traverse.end(); it++)
       {
-        it->second->print_physical_context(ctx, logger);
+        color_map[it->first]->print_physical_context(ctx, logger, it->second);
       }
 
       logger->up();
@@ -8229,13 +8319,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::print_physical_context(ContextID ctx, TreeStateLogger *logger)
+    void PartitionNode::print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
       logger->log("Partition Node (%d,%d,%d) Color %d disjoint %d at depth %d",
           handle.index_partition, handle.field_space.id, handle.tree_id, 
           row_source->color, disjoint, logger->get_depth());
       logger->down();
+      std::map<Color,FieldMask> to_traverse;
       if (physical_states.find(ctx) != physical_states.end())
       {
         PhysicalState &state = physical_states[ctx];
@@ -8246,7 +8337,20 @@ namespace LegionRuntime {
           for (std::list<FieldState>::const_iterator it = state.field_states.begin();
                 it != state.field_states.end(); it++)
           {
-            it->print_state(logger);
+            it->print_state(logger, capture_mask);
+            if (it->valid_fields * capture_mask)
+              continue;
+            for (std::map<Color,FieldMask>::const_iterator cit = it->open_children.begin();
+                  cit != it->open_children.end(); cit++)
+            {
+              FieldMask overlap = cit->second & capture_mask;
+              if (!overlap)
+                continue;
+              if (to_traverse.find(cit->first) == to_traverse.end())
+                to_traverse[cit->first] = overlap;
+              else
+                to_traverse[cit->first] |= overlap;
+            }
           }
           logger->up();
         }
@@ -8258,10 +8362,10 @@ namespace LegionRuntime {
       logger->log("");
 
       // Now do all the children
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,FieldMask>::const_iterator it = to_traverse.begin();
+            it != to_traverse.end(); it++)
       {
-        it->second->print_physical_context(ctx, logger);
+        color_map[it->first]->print_physical_context(ctx, logger, it->second);
       }
 
       logger->up();
@@ -8409,6 +8513,9 @@ namespace LegionRuntime {
       }
       InstanceManager *clone = context->create_instance_manager(location, instance, new_infos,
                                                     fspace, mask, false/*remote*/, true/*clone*/);
+#ifdef LEGION_SPY
+      LegionSpy::log_instance_manager(instance.id, clone->get_unique_id());
+#endif
       return clone;
     }
 
@@ -8980,7 +9087,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> ListReductionManager::get_accessor(void) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> ListReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
       // TODO: Implement this
@@ -8989,7 +9096,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> ListReductionManager::get_field_accessor(FieldID fid) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> ListReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -9001,7 +9108,12 @@ namespace LegionRuntime {
     ReductionManager* ListReductionManager::clone_manager(void) const
     //--------------------------------------------------------------------------
     {
-      return context->create_reduction_manager(location, instance, redop, op, remote, true/*clone*/, ptr_space);
+      ReductionManager *result = context->create_reduction_manager(location, instance, 
+                                            redop, op, remote, true/*clone*/, ptr_space);
+#ifdef LEGION_SPY
+      LegionSpy::log_reduction_manager(instance.id, result->get_unique_id());
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9045,14 +9157,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> FoldReductionManager::get_accessor(void) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> FoldReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
       return instance.get_accessor();
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> FoldReductionManager::get_field_accessor(FieldID fid) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> FoldReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       // Should never be called 
@@ -9295,6 +9407,9 @@ namespace LegionRuntime {
         else
           epoch_users[uid] |= user.field_mask;
       }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_state();
+#endif
       return InstanceRef(wait_event, manager->get_location(), manager->get_instance(),
                           this, false/*copy*/, (IS_ATOMIC(user.usage) ? manager->get_lock() : Lock::NO_LOCK));
     }
@@ -9346,6 +9461,9 @@ namespace LegionRuntime {
 #endif
         epoch_copy_users[copy_term] = mask;
       }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_state();
+#endif
       return InstanceRef(copy_term, manager->get_location(), manager->get_instance(),
                           this, true/*copy*/);
     }
@@ -10654,6 +10772,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!manager->is_clone());
+      sanity_check_state();
 #endif
       // Pack all the valid events, the epoch users, and the epoch copy users,
       // also pack any added users that need to be sent back
@@ -10857,6 +10976,9 @@ namespace LegionRuntime {
     void InstanceView::pack_return_state(const FieldMask &pack_mask, bool overwrite, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_state();
+#endif
       rez.serialize(local_view);
       rez.serialize(overwrite);
       if (local_view)
@@ -11261,39 +11383,8 @@ namespace LegionRuntime {
           result->deleted_copy_users[copy_event] = redop;
 #endif
       }
-
 #ifdef DEBUG_HIGH_LEVEL
-      // Big sanity check
-      // Each valid event should have exactly one valid field
-      FieldMask valid_shadow;
-      for (std::map<Event,FieldMask>::const_iterator it = result->valid_events.begin();
-            it != result->valid_events.end(); it++)
-      {
-        assert(!(valid_shadow & it->second));
-        valid_shadow |= it->second;
-      }
-      // There should be an entry for each epoch user
-      for (std::map<UniqueID,FieldMask>::const_iterator it = result->epoch_users.begin();
-            it != result->epoch_users.end(); it++)
-      {
-        assert((result->users.find(it->first) != result->users.end())
-               || (result->added_users.find(it->first) != result->added_users.end())
-#ifdef LEGION_SPY
-               || (result->deleted_users.find(it->first) != result->deleted_users.end())
-#endif
-               );
-      }
-      // Same thing for epoch copy users
-      for (std::map<Event,FieldMask>::const_iterator it = result->epoch_copy_users.begin();
-            it != result->epoch_copy_users.end(); it++)
-      {
-        assert((result->copy_users.find(it->first) != result->copy_users.end())
-               || (result->added_copy_users.find(it->first) != result->added_copy_users.end())
-#ifdef LEGION_SPY
-               || (result->deleted_copy_users.find(it->first) != result->deleted_copy_users.end())
-#endif
-            );
-      }
+      result->sanity_check_state();
 #endif
     }
 
@@ -11444,6 +11535,54 @@ namespace LegionRuntime {
         derez.deserialize<T>(target[idx]);
       }
     }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    void InstanceView::sanity_check_state(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Big sanity check
+      // Each valid event should have exactly one valid field
+
+      // This is not a valid check if we can have tasks that map in parallel but may
+      // issue multiple copies to update the same data.  See the comment in map_physical_region.
+      // We can now have multiple valid events for
+      // a field if two people in read-only mode issue the same copy to update a field
+      // in parallel.  All the rest of the code for finding valid events will record
+      // all the valid events for a field as a prerequisite.
+#if 1
+      FieldMask valid_shadow;
+      for (std::map<Event,FieldMask>::const_iterator it = valid_events.begin();
+            it != valid_events.end(); it++)
+      {
+        assert(!(valid_shadow & it->second));
+        valid_shadow |= it->second;
+      }
+#endif
+      // There should be an entry for each epoch user
+      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+            it != epoch_users.end(); it++)
+      {
+        assert((users.find(it->first) != users.end())
+               || (added_users.find(it->first) != added_users.end())
+#ifdef LEGION_SPY
+               || (deleted_users.find(it->first) != deleted_users.end())
+#endif
+               );
+      }
+      // Same thing for epoch copy users
+      for (std::map<Event,FieldMask>::const_iterator it = epoch_copy_users.begin();
+            it != epoch_copy_users.end(); it++)
+      {
+        assert((copy_users.find(it->first) != copy_users.end())
+               || (added_copy_users.find(it->first) != added_copy_users.end())
+#ifdef LEGION_SPY
+               || (deleted_copy_users.find(it->first) != deleted_copy_users.end())
+#endif
+            );
+      }
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Reduction View 
@@ -12003,11 +12142,11 @@ namespace LegionRuntime {
       }
       // Log the reduction operation
       {
-        char *string_mask = reduce_mask.to_string();
-        LegionSpy::log_reduction_operation(this->manager->get_instance().id, dst->get_manager()->get_instance().id,
-                                           this->manager->get_location().id, dst->get_manager()->get_location().id, 
+        FieldSpaceNode *field_node = context->get_node(logical_region->handle.field_space);
+        char *string_mask = field_node->to_string(reduce_mask);
+        LegionSpy::log_reduction_operation(this->manager->get_unique_id(), dst->get_manager()->get_unique_id(),
                                            logical_region->handle.index_space.id, logical_region->handle.field_space.id,
-                                           logical_region->handle.tree_id, reduce_pre, reduce_post, string_mask);
+                                           logical_region->handle.tree_id, reduce_pre, reduce_post, manager->redop, string_mask);
         free(string_mask);
       }
 #endif

@@ -1215,6 +1215,7 @@ namespace LegionRuntime {
         return op.map->get_logical_region(gen_id);
     }
 
+#ifdef OLD_STUFF
     //--------------------------------------------------------------------------
     bool PhysicalRegion::has_accessor(AccessorType at) const
     //--------------------------------------------------------------------------
@@ -1245,11 +1246,20 @@ namespace LegionRuntime {
       }
       return ((at & accessor_map) != 0);
     }
+#endif
+
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegion::get_accessor(void) const
+    {
+      if (is_impl)
+        return op.impl->get_accessor();
+      else
+        return op.map->get_accessor(gen_id);
+    }
 
 #ifdef DEBUG_HIGH_LEVEL
 #define GET_ACCESSOR_IMPL(AT)                                                     \
     template<>                                                                    \
-    LowLevel::RegionAccessor<LowLevel::AT> PhysicalRegion::get_accessor<AT>(void) const \
+    Accessor::RegionAccessor<Accessor::AccessorType::AT> PhysicalRegion::get_accessor<AT>(void) const \
     {                                                                             \
       bool has_access = has_accessor(AT);                                         \
       if (!has_access)                                                            \
@@ -1277,13 +1287,21 @@ namespace LegionRuntime {
       return generic.convert<LowLevel::AT>();                                     \
     }
 #endif
-    GET_ACCESSOR_IMPL(AccessorGeneric)
-    GET_ACCESSOR_IMPL(AccessorArray)
-    GET_ACCESSOR_IMPL(AccessorArrayReductionFold)
-    GET_ACCESSOR_IMPL(AccessorGPU)
-    GET_ACCESSOR_IMPL(AccessorGPUReductionFold)
-    GET_ACCESSOR_IMPL(AccessorReductionList)
+    // GET_ACCESSOR_IMPL(AccessorGeneric)
+    // GET_ACCESSOR_IMPL(AccessorArray)
+    // GET_ACCESSOR_IMPL(AccessorArrayReductionFold)
+    // GET_ACCESSOR_IMPL(AccessorGPU)
+    // GET_ACCESSOR_IMPL(AccessorGPUReductionFold)
+    // GET_ACCESSOR_IMPL(AccessorReductionList)
 #undef GET_ACCESSOR_IMPL
+
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegion::get_field_accessor(FieldID fid) const
+    {
+      if (is_impl)
+        return op.impl->get_field_accessor(fid);
+      else
+        return op.map->get_field_accessor(gen_id, fid);
+    }
 
 #ifdef DEBUG_HIGH_LEVEL
 #define GET_FIELD_ACCESSOR_IMPL(AT)                                                       \
@@ -1316,7 +1334,7 @@ namespace LegionRuntime {
       return generic.convert<LowLevel::AT>();                                             \
     }
 #endif
-    GET_FIELD_ACCESSOR_IMPL(AccessorGeneric)
+    //GET_FIELD_ACCESSOR_IMPL(AccessorGeneric)
     //GET_FIELD_DACCESSOR_IMPL(AccessorArray)
     //GET_FIELD_ACCESSOR_IMPL(AccessorArrayReductionFold)
     //GET_FIELD_ACCESSOR_IMPL(AccessorGPU)
@@ -1606,14 +1624,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> PhysicalRegionImpl::get_accessor(void) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegionImpl::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
       return manager->get_accessor(); 
     }
 
     //--------------------------------------------------------------------------
-    LowLevel::RegionAccessor<LowLevel::AccessorGeneric> PhysicalRegionImpl::get_field_accessor(FieldID fid) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegionImpl::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       return manager->get_field_accessor(fid);
@@ -3201,7 +3219,7 @@ namespace LegionRuntime {
         IndividualTask *top = get_available_individual_task(NULL/*no parent*/);
         // Initialize the task, copying arguments
         top->initialize_task(NULL/*no parent*/, HighLevelRuntime::legion_main_id,
-                              &HighLevelRuntime::get_input_args(), sizeof(InputArgs),
+                              &HighLevelRuntime::get_input_args(), sizeof(InputArgs), false/*is index space*/,
                               Predicate::TRUE_PRED, 0/*map id*/, 0/*mapping tag*/); 
         // Mark the top level task so it knows to reclaim itself
         top->top_level_task = true;
@@ -3210,7 +3228,56 @@ namespace LegionRuntime {
         top->executing_processor = *first_cpu;
         find_manager(*first_cpu)->initialize_mappable(top, 0);
 #ifdef LEGION_SPY
-        LegionSpy::log_top_level_task(top->get_unique_id(), top->ctx_id, HighLevelRuntime::legion_main_id);
+        LegionSpy::log_top_level_task(utility_proc.id, top->get_gen(), top->get_unique_id(), top->ctx_id, HighLevelRuntime::legion_main_id);
+        // Also log all the low-level information for the shape of the machine
+        {
+          std::set<Processor> utility_procs;
+          const std::set<Processor> &all_procs = m->get_all_processors();
+          // Find all the utility processors
+          for (std::set<Processor>::const_iterator it = all_procs.begin();
+                it != all_procs.end(); it++)
+            utility_procs.insert(it->get_utility_processor());
+          // Log utility processors
+          for (std::set<Processor>::const_iterator it = utility_procs.begin();
+                it != utility_procs.end(); it++)
+            LegionSpy::log_utility_processor(it->id);
+          // Log processors
+          for (std::set<Processor>::const_iterator it = all_procs.begin();
+                it != all_procs.end(); it++)
+          {
+            Processor::Kind k = m->get_processor_kind(*it);
+            LegionSpy::log_processor(it->id, it->get_utility_processor().id, k); 
+          }
+          // Log memories
+          const std::set<Memory> &all_mems = m->get_all_memories();
+          for (std::set<Memory>::const_iterator it = all_mems.begin();
+                it != all_mems.end(); it++)
+            LegionSpy::log_memory(it->id, m->get_memory_size(*it));
+          // Log Proc-Mem Affinity
+          for (std::set<Processor>::const_iterator pit = all_procs.begin();
+                pit != all_procs.end(); pit++)
+          {
+            std::vector<ProcessorMemoryAffinity> affinities;
+            m->get_proc_mem_affinity(affinities, *pit);
+            for (std::vector<ProcessorMemoryAffinity>::const_iterator it = affinities.begin();
+                  it != affinities.end(); it++)
+            {
+              LegionSpy::log_proc_mem_affinity(pit->id, it->m.id, it->bandwidth, it->latency);
+            }
+          }
+          // Log Mem-Mem Affinity
+          for (std::set<Memory>::const_iterator mit = all_mems.begin();
+                mit != all_mems.begin(); mit++)
+          {
+            std::vector<MemoryMemoryAffinity> affinities;
+            m->get_mem_mem_affinity(affinities, *mit);
+            for (std::vector<MemoryMemoryAffinity>::const_iterator it = affinities.begin();
+                  it != affinities.end(); it++)
+            {
+              LegionSpy::log_mem_mem_affinity(it->m1.id, it->m2.id, it->bandwidth, it->latency);
+            }
+          }
+        }
 #endif
         // Pack up the future and a pointer to the context so we can deactivate the task
         // context when we're done.  This will make sure that everything gets
@@ -3747,7 +3814,7 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_EXECUTE_TASK);
       IndividualTask *task = get_available_individual_task(ctx);
-      task->initialize_task(ctx, task_id, arg.get_ptr(), arg.get_size(),
+      task->initialize_task(ctx, task_id, arg.get_ptr(), arg.get_size(), false/*is index space*/,
                             predicate, id, tag); 
 #ifdef DEBUG_HIGH_LEVEL
       log_task(LEVEL_DEBUG,"Registering new single task with unique id %d and task %s (ID %d) with high level runtime on processor %x",
@@ -3782,7 +3849,7 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_EXECUTE_TASK);
       IndexTask *task = get_available_index_task(ctx);
-      task->initialize_task(ctx, task_id, global_arg.get_ptr(), global_arg.get_size(),
+      task->initialize_task(ctx, task_id, global_arg.get_ptr(), global_arg.get_size(), true/*is index space*/,
                             predicate, id, tag);
 #ifdef DEBUG_HIGH_LEVEL
       log_task(LEVEL_DEBUG,"Registering new index space task with unique id %d and task %s (ID %d) with "
@@ -3818,7 +3885,7 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_EXECUTE_TASK);
       IndexTask *task = get_available_index_task(ctx);
-      task->initialize_task(ctx, task_id, global_arg.get_ptr(), global_arg.get_size(),
+      task->initialize_task(ctx, task_id, global_arg.get_ptr(), global_arg.get_size(), true/*is index space*/,
                             predicate, id, tag); 
 #ifdef DEBUG_HIGH_LEVEL
       log_task(LEVEL_DEBUG,"Registering new index space task with unique id %d and task %s (ID %d) with "

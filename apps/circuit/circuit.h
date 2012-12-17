@@ -104,46 +104,27 @@ public:
   template <bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
 };
 
-typedef LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> GenericAccessor;
-typedef LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGPU> GPU_Accessor;
-typedef LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGPUReductionFold> GPU_Reducer;
-
 // CPU function variants
 
 void calc_new_currents_cpu(CircuitPiece *p,
-                           GenericAccessor wires,
-                           GenericAccessor pvt,
-                           GenericAccessor owned,
-                           GenericAccessor ghost);
+                           const std::vector<PhysicalRegion> &physical_regions);
 
 void distribute_charge_cpu(CircuitPiece *p,
-                           GenericAccessor wires,
-                           GenericAccessor pvt,
-                           GenericAccessor owned,
-                           GenericAccessor ghost);
+                           const std::vector<PhysicalRegion> &physical_regions);
 
 void update_voltages_cpu(CircuitPiece *p,
-                         GenericAccessor pvt,
-                         GenericAccessor owned);
+                         const std::vector<PhysicalRegion> &physical_regions);
 
 // Functions for linking against CUDA
 
 void calc_new_currents_gpu(CircuitPiece *p,
-                           GPU_Accessor wires,
-                           GPU_Accessor pvt,
-                           GPU_Accessor owned,
-                           GPU_Accessor ghost);
+                           const std::vector<PhysicalRegion> &physical_regions);
 
 void distribute_charge_gpu(CircuitPiece *p,
-                           GPU_Accessor wires,
-                           GPU_Accessor pvt,
-                           GPU_Reducer owned,
-                           GPU_Reducer ghost);
+                           const std::vector<PhysicalRegion> &physical_regions);
 
 void update_voltages_gpu(CircuitPiece *p,
-                         GPU_Accessor pvt,
-                         GPU_Accessor owned,
-                         GPU_Accessor locator);
+                         const std::vector<PhysicalRegion> &physical_regions);
 
 #endif // __CIRCUIT_H__
 

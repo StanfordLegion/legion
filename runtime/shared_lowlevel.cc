@@ -15,6 +15,9 @@
 
 
 #include "lowlevel.h"
+#include "accessor.h"
+
+using namespace LegionRuntime::Accessor;
 
 #include <cstdio>
 #include <cstring>
@@ -2383,11 +2386,11 @@ namespace LegionRuntime {
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
 
-   RegionAccessor<AccessorGeneric> RegionInstance::get_accessor(void) const
+    RegionAccessor<AccessorType::Generic> RegionInstance::get_accessor(void) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(*this);
-      return RegionAccessor<AccessorGeneric>((void *)impl);
+      return RegionAccessor<AccessorType::Generic>(AccessorType::Generic::Untyped(impl));
     }
 
     void RegionInstance::destroy(void) const
@@ -2787,26 +2790,7 @@ namespace LegionRuntime {
       }
     }
 
-    void RegionAccessor<AccessorGeneric>::get_untyped(int index, off_t byte_offset, void *dst, size_t size) const
-    {
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal_data;
-      const char *src = (const char *)(impl->get_base_ptr());
-      src += index * impl->get_elmt_size();
-      src += field_offset;
-      src += byte_offset;
-      memcpy(dst, src, size);
-    }
-
-    void RegionAccessor<AccessorGeneric>::put_untyped(int index, off_t byte_offset, const void *src, size_t size) const
-    {
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal_data;
-      char *dst = (char *)(impl->get_base_ptr());
-      dst += index * impl->get_elmt_size();
-      dst += field_offset;
-      dst += byte_offset;
-      memcpy(dst, src, size);
-    }
-
+#if 0
     RegionAccessor<AccessorGeneric> RegionAccessor<AccessorGeneric>::get_field_accessor(off_t offset, size_t size) const
     {
       return RegionAccessor<AccessorGeneric>(internal_data, field_offset + offset);
@@ -2966,7 +2950,7 @@ namespace LegionRuntime {
     }
 #endif
 #endif
-
+#endif
 
     ////////////////////////////////////////////////////////
     // IndexSpace 
@@ -4183,4 +4167,71 @@ namespace LegionRuntime {
     fflush(stdout);
     fputs(buffer, stderr);
   }
+};
+
+namespace LegionRuntime {
+  namespace Accessor {
+    using namespace LegionRuntime::LowLevel;
+
+    void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      const char *src = (const char *)(impl->get_base_ptr());
+      src += ptr.value * impl->get_elmt_size();
+      src += field_offset;
+      src += offset;
+      memcpy(dst, src, bytes);
+    }
+
+    void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      char *dst = (char *)(impl->get_base_ptr());
+      dst += ptr.value * impl->get_elmt_size();
+      dst += field_offset;
+      dst += offset;
+      memcpy(dst, src, bytes);
+    }
+
+    bool AccessorType::Generic::Untyped::get_aos_parameters(void *& base, size_t& stride) const
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      if(base != 0) return false;
+      base = ((char *)(impl->get_base_ptr())) + field_offset;
+
+      size_t elem_size = impl->get_elmt_size();
+      if((stride != 0) && (stride != elem_size)) return false;
+      stride = elem_size;
+
+      return true;
+    }
+
+    bool AccessorType::Generic::Untyped::get_soa_parameters(void *& base, size_t& stride) const
+    {
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *& base, size_t& stride,
+								   size_t& block_size, size_t& block_stride) const
+    {
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_redfold_parameters(void *& base) const
+    {
+      // TODO: actually check that we're a reduction?
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      if(base != 0) return false;
+      base = impl->get_base_ptr();
+
+      return true;
+    }
+
+    bool AccessorType::Generic::Untyped::get_redlist_parameters(void *& base, ptr_t *& next_ptr) const
+    {
+      return false;
+    }
+  };
 };

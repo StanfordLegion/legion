@@ -24,16 +24,12 @@
 
 using namespace LegionRuntime::HighLevel;
 
+using namespace LegionRuntime::Accessor;
+
 
 #define TEST_STEALING
 
 #define MAX_STEAL_COUNT 4
-
-static unsigned* get_num_blocks(void)
-{
-  static unsigned num_blocks = 64;
-  return &num_blocks;
-}
 
 enum {
   TOP_LEVEL_TASK_ID,
@@ -42,6 +38,7 @@ enum {
   TASKID_ADD_VECTORS,
 };
 
+#define DEFAULT_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
 
 struct Entry {
@@ -57,6 +54,7 @@ struct Block {
 
 // computes z = alpha * x + y
 struct MainArgs {
+  unsigned num_blocks;
   unsigned num_elems;
   float alpha;
   IndexSpace ispace;
@@ -72,8 +70,18 @@ void top_level_task(const void *args, size_t arglen,
 		    const std::vector<RegionRequirement> &reqs,
 		    const std::vector<PhysicalRegion> &regions,
 		    Context ctx, HighLevelRuntime *runtime) {
+  InputArgs *inputs = (InputArgs*)args;
   MainArgs main_args;
-  main_args.num_elems = *get_num_blocks() * BLOCK_SIZE;
+  main_args.num_blocks = DEFAULT_NUM_BLOCKS;
+  for (int i = 1; i < inputs->argc; i++) {
+    if (!strcmp(inputs->argv[i], "-blocks")) {
+      main_args.num_blocks = atoi(inputs->argv[++i]);
+      continue;
+    }
+  }
+
+  printf("saxpy: num elems = %d\n", main_args.num_blocks * BLOCK_SIZE);
+  main_args.num_elems = main_args.num_blocks * BLOCK_SIZE;
   main_args.ispace = runtime->create_index_space(ctx, main_args.num_elems);
   main_args.fspace = runtime->create_field_space(ctx);
   main_args.r_x = runtime->create_logical_region(ctx, main_args.ispace, main_args.fspace);
@@ -128,10 +136,10 @@ void main_task(const void *args, size_t arglen,
   FieldID field_id = field_alloc.allocate_field(sizeof(float));
 
   // Allocate space in the regions
-  std::vector<Block> blocks(*get_num_blocks());
+  std::vector<Block> blocks(main_args->num_blocks);
   ptr_t initial_index = alloc.alloc(main_args->num_elems);
   ptr_t next_index = initial_index;
-  for (unsigned i = 0; i < *get_num_blocks(); i++) {
+  for (unsigned i = 0; i < main_args->num_blocks; i++) {
     blocks[i].alpha = main_args->alpha;
     blocks[i].id = i;
     for (unsigned j = 0; j < BLOCK_SIZE; j++) {
@@ -145,17 +153,17 @@ void main_task(const void *args, size_t arglen,
 
   // Partition the regions
   printf("Paritioning...");
-  IndexSpace colors = runtime->create_index_space(ctx, *get_num_blocks());
-  runtime->create_index_allocator(ctx, colors).alloc(*get_num_blocks());
+  IndexSpace colors = runtime->create_index_space(ctx, main_args->num_blocks);
+  runtime->create_index_allocator(ctx, colors).alloc(main_args->num_blocks);
   Coloring coloring;
-  for (unsigned i = 0; i < *get_num_blocks(); i++) {
+  for (unsigned i = 0; i < main_args->num_blocks; i++) {
     coloring[i].ranges.insert(std::pair<ptr_t, ptr_t>(BLOCK_SIZE*i, BLOCK_SIZE*(i + 1)-1));
   }
   IndexPartition partition = runtime->create_index_partition(ctx, main_args->ispace, coloring, true/*disjoint*/);
   LogicalPartition p_x = runtime->get_logical_partition(ctx, main_args->r_x, partition);
   LogicalPartition p_y = runtime->get_logical_partition(ctx, main_args->r_y, partition);
   LogicalPartition p_z = runtime->get_logical_partition(ctx, main_args->r_z, partition);
-  for (unsigned i = 0; i < *get_num_blocks(); i++) {
+  for (unsigned i = 0; i < main_args->num_blocks; i++) {
     blocks[i].r_x = runtime->get_logical_subregion_by_color(ctx, p_x, i);
     blocks[i].r_y = runtime->get_logical_subregion_by_color(ctx, p_y, i);
     blocks[i].r_z = runtime->get_logical_subregion_by_color(ctx, p_z, i);
@@ -169,7 +177,7 @@ void main_task(const void *args, size_t arglen,
 
   // Argument map
   ArgumentMap arg_map = runtime->create_argument_map(ctx);
-  for (unsigned i = 0; i < *get_num_blocks(); i++) {
+  for (unsigned i = 0; i < main_args->num_blocks; i++) {
     unsigned point[1] = {i};
     arg_map.set_point_arg<unsigned, 1>(point, TaskArgument(&(blocks[i]), sizeof(Block)));
   }
@@ -235,13 +243,13 @@ void main_task(const void *args, size_t arglen,
     r_y.wait_until_valid();
     r_z.wait_until_valid();
 
-    LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_x = r_x.get_accessor<AccessorGeneric>();
-    LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_y = r_y.get_accessor<AccessorGeneric>();
-    LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_z = r_z.get_accessor<AccessorGeneric>();
+    RegionAccessor<AccessorType::Generic, Entry> a_x = r_x.get_accessor().typeify<Entry>();
+    RegionAccessor<AccessorType::Generic, Entry> a_y = r_y.get_accessor().typeify<Entry>();
+    RegionAccessor<AccessorType::Generic, Entry> a_z = r_z.get_accessor().typeify<Entry>();
 
 #if 0
     printf("z values: ");
-    for (unsigned i = 0; i < *get_num_blocks(); i++)
+    for (unsigned i = 0; i < main_args->num_blocks; i++)
     {
       for (unsigned j = 0; j < BLOCK_SIZE; j++)
       {
@@ -256,16 +264,17 @@ void main_task(const void *args, size_t arglen,
     // Print the first four numbers
     int count = 0;
     bool success = true;
-    for (unsigned i = 0; i < *get_num_blocks(); i++) {
+    for (unsigned i = 0; i < main_args->num_blocks; i++) {
       for (unsigned j = 0; j < BLOCK_SIZE; j++) {
         ptr_t entry_x = blocks[i].entry_x[j];
         ptr_t entry_y = blocks[i].entry_y[j];
         ptr_t entry_z = blocks[i].entry_z[j];
 
-        Entry x_val = a_x.read<Entry>((entry_x));
-        Entry y_val = a_y.read<Entry>((entry_y));
-        Entry z_val = a_z.read<Entry>((entry_z));
+        Entry x_val = a_x.read(entry_x);
+        Entry y_val = a_y.read(entry_y);
+        Entry z_val = a_z.read(entry_z);
         float compute = main_args->alpha * x_val.v + y_val.v;
+        //printf("%f * %f + %f should equal %f\n",main_args->alpha, x_val.v, y_val.v, z_val.v);
         if (z_val.v != compute)
         {
           printf("Failure at %d of block %d.  Expected %f but received %f\n",
@@ -304,8 +313,8 @@ void init_vectors_task(const void *global_args, size_t global_arglen,
   PhysicalRegion r_x = regions[0];
   PhysicalRegion r_y = regions[1];
 
-  LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_x = r_x.get_accessor<AccessorGeneric>();
-  LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_y = r_y.get_accessor<AccessorGeneric>();
+  RegionAccessor<AccessorType::Generic, Entry> a_x = r_x.get_accessor().typeify<Entry>();
+  RegionAccessor<AccessorType::Generic, Entry> a_y = r_y.get_accessor().typeify<Entry>();
 
   Block *block = (Block *)local_args;
   for (unsigned i = 0; i < BLOCK_SIZE; i++) {
@@ -330,17 +339,90 @@ void add_vectors_task(const void *global_args, size_t global_arglen,
   PhysicalRegion r_y = regions[1];
   PhysicalRegion r_z = regions[2];
 
-  LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_x = r_x.get_accessor<AccessorGeneric>();
-  LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_y = r_y.get_accessor<AccessorGeneric>();
-  LegionRuntime::LowLevel::RegionAccessor<LegionRuntime::LowLevel::AccessorGeneric> a_z = r_z.get_accessor<AccessorGeneric>();
+  RegionAccessor<AccessorType::Generic, Entry> a_x = r_x.get_accessor().typeify<Entry>();
+  RegionAccessor<AccessorType::Generic, Entry> a_y = r_y.get_accessor().typeify<Entry>();
+  RegionAccessor<AccessorType::Generic, Entry> a_z = r_z.get_accessor().typeify<Entry>();
 
   for (unsigned i = 0; i < BLOCK_SIZE; i++) {
-    float x = a_x.read<Entry>((block->entry_x[i])).v;
-    float y = a_y.read<Entry>((block->entry_y[i])).v;
+    float x = a_x.read(block->entry_x[i]).v;
+    float y = a_y.read(block->entry_y[i]).v;
     
     Entry entry_z;
     entry_z.v = block->alpha * x + y;
     a_z.write((block->entry_z[i]), entry_z);
+  }
+}
+
+void add_vectors_task_aos(const void *global_args, size_t global_arglen,
+			  const void *local_args, size_t local_arglen,
+			  const unsigned point[1],
+			  const std::vector<RegionRequirement> &reqs,
+			  const std::vector<PhysicalRegion> &regions,
+			  Context ctx, HighLevelRuntime *runtime) {
+  Block *block = (Block *)local_args;
+  PhysicalRegion r_x = regions[0];
+  PhysicalRegion r_y = regions[1];
+  PhysicalRegion r_z = regions[2];
+
+  // RegionAccessor<AccessorType::AOS<sizeof(Entry)>, float> 
+  //   a_x = r_x.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).get_aos_accessor();
+  RegionAccessor<AccessorType::AOS<sizeof(Entry)>, float> 
+    a_x = r_x.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AccessorType::AOS<sizeof(Entry)> >();
+  RegionAccessor<AccessorType::AOS<sizeof(Entry)>, float>
+    a_y = r_y.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AccessorType::AOS<sizeof(Entry)> >();
+  RegionAccessor<AccessorType::AOS<sizeof(Entry)>, float>
+    a_z = r_z.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AccessorType::AOS<sizeof(Entry)> >();
+
+  for (unsigned i = 0; i < BLOCK_SIZE; i++) {
+    float x = a_x.read(block->entry_x[i]);
+    float y = a_y.read(block->entry_y[i]);
+    
+    float z = block->alpha * x + y;
+    a_z.write((block->entry_z[i]), z);
+  }
+}
+
+struct Add {
+  typedef float LHS;
+  typedef float RHS;
+
+  template <bool EXCL> static void apply(float& lhs, float rhs) { lhs += rhs; }
+  template <bool EXCL> static void fold(float& rhs1, float rhs2) { rhs1 += rhs2; }
+  static const float identity = 0.0f;
+};
+
+template <typename AT>
+void add_vectors_task_gen(const void *global_args, size_t global_arglen,
+			  const void *local_args, size_t local_arglen,
+			  const unsigned point[1],
+			  const std::vector<RegionRequirement> &reqs,
+			  const std::vector<PhysicalRegion> &regions,
+			  Context ctx, HighLevelRuntime *runtime) {
+  Block *block = (Block *)local_args;
+  PhysicalRegion r_x = regions[0];
+  PhysicalRegion r_y = regions[1];
+  PhysicalRegion r_z = regions[2];
+
+  RegionAccessor<AT, float> 
+    a_x = r_x.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AT>();
+  RegionAccessor<AT, float>
+    a_y = r_y.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AT>();
+  RegionAccessor<AT, float>
+    a_z = r_z.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AT>();
+
+  RegionAccessor<AccessorType::ReductionFold<Add>, float> rf = r_x.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AccessorType::ReductionFold<Add> >();
+
+  //RegionAccessor<AccessorType::ReductionList<Add>, float> rl = r_x.get_accessor().typeify<Entry>().get_field_accessor(&Entry::v).convert<AccessorType::ReductionList<Add> >();
+
+  for (unsigned i = 0; i < BLOCK_SIZE; i++) {
+    float x = a_x.read(block->entry_x[i]);
+    float y = a_y.read(block->entry_y[i]);
+    
+    float z = block->alpha * x + y;
+    a_z.write((block->entry_z[i]), z);
+    //a_z.template reduce<Add>(block->entry_z[i], z);
+    rf.reduce(block->entry_z[i], z);
+    //rl.reduce(block->entry_z[i], z);
   }
 }
 
@@ -471,15 +553,8 @@ int main(int argc, char **argv) {
   HighLevelRuntime::register_single_task<main_task>(TASKID_MAIN, Processor::LOC_PROC, false, "main_task");
   HighLevelRuntime::register_index_task<unsigned,1,init_vectors_task>(TASKID_INIT_VECTORS, Processor::LOC_PROC, true, "init_vectors");
   HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task>(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
-
-  for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "-blocks")) {
-      *(get_num_blocks()) = atoi(argv[++i]);
-      continue;
-    }
-  }
-
-  printf("saxpy: num elems = %d\n", *get_num_blocks() * BLOCK_SIZE);
+  //HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task_gen<AccessorType::AOS<sizeof(float)> > >(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
+  //HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task_aos>(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
 
   return HighLevelRuntime::start(argc, argv);
 }

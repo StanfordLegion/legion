@@ -549,12 +549,12 @@ namespace LegionRuntime {
 // other (i.e. can't name an enum from one namespace as
 // an type in another namespace).  Hence we get to have
 // this for translating between them.
-#define AT_CONV_DOWN(at) ((at == AccessorGeneric) ? LowLevel::AccessorGeneric : \
-                          (at == AccessorArray) ? LowLevel::AccessorArray : \
-                          (at == AccessorArrayReductionFold) ? LowLevel::AccessorArrayReductionFold : \
-                          (at == AccessorGPU) ? LowLevel::AccessorGPU : \
-                          (at == AccessorGPUReductionFold) ? LowLevel::AccessorGPUReductionFold : \
-                          (at == AccessorReductionList) ? LowLevel::AccessorReductionList : LowLevel::AccessorGeneric)
+#define AT_CONV_DOWN(at) ((at == AccessorGeneric) ? LowLevel::Accessor::Generic : )) 
+                          /* (at == AccessorArray) ? LowLevel::AccessorArray : \ */
+                          /* (at == AccessorArrayReductionFold) ? LowLevel::AccessorArrayReductionFold : \ */
+                          /* (at == AccessorGPU) ? LowLevel::AccessorGPU : \ */
+                          /* (at == AccessorGPUReductionFold) ? LowLevel::AccessorGPUReductionFold : \ */
+                          /* (at == AccessorReductionList) ? LowLevel::AccessorReductionList : LowLevel::AccessorGeneric) */
 
     /////////////////////////////////////////////////////////////
     // PhysicalRegion 
@@ -577,11 +577,9 @@ namespace LegionRuntime {
       void wait_until_valid(void);
       bool is_valid(void) const;
       LogicalRegion get_logical_region(void) const;
-      bool has_accessor(AccessorType at) const;
-      template<AccessorType AT>
-      LowLevel::RegionAccessor<AT_CONV_DOWN(AT)> get_accessor(void) const;
-      template<AccessorType AT>
-      LowLevel::RegionAccessor<AT_CONV_DOWN(AT)> get_accessor(FieldID field) const;
+
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID field) const;
     protected:
       union Operation_t {
         PhysicalRegionImpl *impl;
@@ -1600,8 +1598,8 @@ namespace LegionRuntime {
     protected:
       LogicalRegion get_logical_region(void) const;
       PhysicalInstance get_physical_instance(void) const;
-      LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const;
-      LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
       void invalidate(void);
     protected:
       bool valid;

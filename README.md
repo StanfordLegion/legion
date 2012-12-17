@@ -33,7 +33,7 @@ Dependences
 We have only tested Legion running on Linux based systems.  An implementation of
 the POSIX threads library is required for running all Legion applications.  For
 running applications on clusters and GPUs, we require at least CUDA 4.2 and
-and installation of GASNET.  Verify that the correct locations of these installations
+and an installation of GASNET.  Verify that the correct locations of these installations
 are set in 'runtime/runtime.mk'.  At least Python 2.4 is required to run the
 'legion_spy' debugging tool.
 

@@ -29,6 +29,8 @@
 		}					\
 	}
 
+using namespace LegionRuntime::Accessor;
+
 class GPUAccumulateCharge {
 public:
   typedef CircuitNode LHS;
@@ -53,42 +55,47 @@ public:
 
 // Helper methods
 
+template<typename AT>
 __device__ __forceinline__
-CircuitNode& get_node(GPU_Accessor pvt, GPU_Accessor owned, GPU_Accessor ghost, 
+CircuitNode& get_node(const RegionAccessor<AT, CircuitNode> &pvt,
+                      const RegionAccessor<AT, CircuitNode> &owned,
+                      const RegionAccessor<AT, CircuitNode> &ghost,
                       PointerLocation loc, ptr_t ptr)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
       //assert((pvt.first_elmt <= ptr.value) && (ptr.value <= pvt.last_elmt));
-      return pvt.ref<CircuitNode>(ptr);
+      return pvt.ref(ptr);
     case SHARED_PTR:
       //assert((owned.first_elmt <= ptr.value) && (ptr.value <= owned.last_elmt));
-      return owned.ref<CircuitNode>(ptr);
+      return owned.ref(ptr);
     case GHOST_PTR:
       //assert((ghost.first_elmt <= ptr.value) && (ptr.value <= ghost.last_elmt));
-      return ghost.ref<CircuitNode>(ptr);
+      return ghost.ref(ptr);
     default:
       assert(false);
   }
-  return pvt.ref<CircuitNode>(ptr);
+  return pvt.ref(ptr);
 }
 
-template<typename REDOP>
+template<typename REDOP, typename AT1, typename AT2>
 __device__ __forceinline__
-void reduce_local(GPU_Accessor pvt, GPU_Reducer owned, GPU_Reducer ghost,
+void reduce_local(const RegionAccessor<AT1, CircuitNode> &pvt,
+                  const RegionAccessor<AT2, CircuitNode> &owned,
+                  const RegionAccessor<AT2, CircuitNode> &ghost,
                   PointerLocation loc, ptr_t ptr, typename REDOP::RHS value)
 {
   switch (loc)
   {
     case PRIVATE_PTR:
-      pvt.template reduce<REDOP,CircuitNode,typename REDOP::RHS>(ptr, value);
+      pvt.template reduce<REDOP>(ptr, value);
       break;
     case SHARED_PTR:
-      owned.template reduce<REDOP,CircuitNode,typename REDOP::RHS>(ptr, value);
+      owned.reduce(ptr, value);
       break;
     case GHOST_PTR:
-      ghost.template reduce<REDOP,CircuitNode,typename REDOP::RHS>(ptr, value);
+      ghost.reduce(ptr, value);
       break;
     default:
       assert(false);
@@ -97,20 +104,21 @@ void reduce_local(GPU_Accessor pvt, GPU_Reducer owned, GPU_Reducer ghost,
 
 // Actual kernels
 
+template<typename AT>
 __global__
 void calc_new_currents_kernel(ptr_t first,
                               int num_wires,
-                              GPU_Accessor wires,
-                              GPU_Accessor pvt,
-                              GPU_Accessor owned,
-                              GPU_Accessor ghost)
+                              RegionAccessor<AT,CircuitWire> wires,
+                              RegionAccessor<AT,CircuitNode> pvt,
+                              RegionAccessor<AT,CircuitNode> owned,
+                              RegionAccessor<AT,CircuitNode> ghost)
 {
   int tid = blockIdx.x * blockDim.x + threadIdx.x; 
 
   if (tid < num_wires)
   {
     ptr_t local_ptr = first + tid;
-    CircuitWire &wire = wires.ref<CircuitWire>(local_ptr);
+    CircuitWire &wire = wires.ref(local_ptr);
     CircuitNode &in_node = get_node(pvt, owned, ghost, wire.in_loc, wire.in_ptr);
     CircuitNode &out_node = get_node(pvt, owned, ghost, wire.out_loc, wire.out_ptr);
 
@@ -153,12 +161,18 @@ void calc_new_currents_kernel(ptr_t first,
 
 __host__
 void calc_new_currents_gpu(CircuitPiece *p,
-                           GPU_Accessor wires,
-                           GPU_Accessor pvt,
-                           GPU_Accessor owned,
-                           GPU_Accessor ghost)
+                           const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
+  RegionAccessor<AccessorType::SOA<0>, CircuitWire> wires = 
+    extract_accessor<AccessorType::SOA<0>,CircuitWire>(regions[0]);
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> pvt = 
+    extract_accessor<AccessorType::SOA<0>,CircuitNode>(regions[1]);
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> owned = 
+    extract_accessor<AccessorType::SOA<0>,CircuitNode>(regions[2]);
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> ghost =
+    extract_accessor<AccessorType::SOA<0>,CircuitNode>(regions[3]);
+
   int num_blocks = (p->num_wires+255) >> 8;
 
   calc_new_currents_kernel<<<num_blocks,256>>>(p->first_wire,
@@ -168,13 +182,14 @@ void calc_new_currents_gpu(CircuitPiece *p,
 #endif
 }
 
+template<typename AT1, typename AT2>
 __global__
 void distribute_charge_kernel(ptr_t first,
                               int num_wires,
-                              GPU_Accessor wires,
-                              GPU_Accessor pvt,
-                              GPU_Reducer owned,
-                              GPU_Reducer ghost)
+                              RegionAccessor<AT1, CircuitWire> wires,
+                              RegionAccessor<AT1, CircuitNode> pvt,
+                              RegionAccessor<AT2, CircuitNode> owned,
+                              RegionAccessor<AT2, CircuitNode> ghost)
 {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -182,7 +197,7 @@ void distribute_charge_kernel(ptr_t first,
   {
     ptr_t local_ptr = first + tid;
 
-    CircuitWire &wire = wires.ref<CircuitWire>(local_ptr);
+    CircuitWire &wire = wires.ref(local_ptr);
 
     const float dt = DELTAT;
 
@@ -193,12 +208,17 @@ void distribute_charge_kernel(ptr_t first,
 
 __host__
 void distribute_charge_gpu(CircuitPiece *p,
-                           GPU_Accessor wires,
-                           GPU_Accessor pvt,
-                           GPU_Reducer owned,
-                           GPU_Reducer ghost)
+                           const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
+  RegionAccessor<AccessorType::SOA<0>, CircuitWire> wires = 
+    extract_accessor<AccessorType::SOA<0>, CircuitWire>(regions[0]);
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> pvt =
+    extract_accessor<AccessorType::SOA<0>, CircuitNode>(regions[1]);
+  RegionAccessor<AccessorType::ReductionFold<GPUAccumulateCharge>, CircuitNode> owned =
+    extract_accessor<AccessorType::ReductionFold<GPUAccumulateCharge>, CircuitNode>(regions[2]);
+  RegionAccessor<AccessorType::ReductionFold<GPUAccumulateCharge>, CircuitNode> ghost = 
+    extract_accessor<AccessorType::ReductionFold<GPUAccumulateCharge>, CircuitNode>(regions[3]);
   int num_blocks = (p->num_wires+255) >> 8;
   distribute_charge_kernel<<<num_blocks,256>>>(p->first_wire,
                                                p->num_wires,
@@ -208,12 +228,13 @@ void distribute_charge_gpu(CircuitPiece *p,
 #endif
 }
 
+template<typename AT>
 __global__
 void update_voltages_kernel(ptr_t first,
                             int num_nodes,
-                            GPU_Accessor pvt,
-                            GPU_Accessor owned,
-                            GPU_Accessor locator)
+                            RegionAccessor<AT, CircuitNode> pvt,
+                            RegionAccessor<AT, CircuitNode> owned,
+                            RegionAccessor<AT, PointerLocation> locator)
 {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -223,10 +244,10 @@ void update_voltages_kernel(ptr_t first,
     ptr_t local_node = first + tid;;
     // Figure out if this node is pvt or not
     {
-      int is_pvt = locator.read<int>(locator_ptr);
+      int is_pvt = locator.read(locator_ptr);
       if (is_pvt)
       {
-        CircuitNode &cur_node = pvt.ref<CircuitNode>(local_node);
+        CircuitNode &cur_node = pvt.ref(local_node);
         // charge adds in, and then some leaks away
         cur_node.voltage += cur_node.charge / cur_node.capacitance;
         cur_node.voltage *= (1 - cur_node.leakage);
@@ -234,7 +255,7 @@ void update_voltages_kernel(ptr_t first,
       }
       else
       {
-        CircuitNode &cur_node = owned.ref<CircuitNode>(local_node);
+        CircuitNode &cur_node = owned.ref(local_node);
         // charge adds in, and then some leaks away
         cur_node.voltage += cur_node.charge / cur_node.capacitance;
         cur_node.voltage *= (1 - cur_node.leakage);
@@ -246,11 +267,15 @@ void update_voltages_kernel(ptr_t first,
 
 __host__
 void update_voltages_gpu(CircuitPiece *p,
-                         GPU_Accessor pvt,
-                         GPU_Accessor owned,
-                         GPU_Accessor locator)
+                         const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> pvt = 
+    extract_accessor<AccessorType::SOA<0>, CircuitNode>(regions[0]);
+  RegionAccessor<AccessorType::SOA<0>, CircuitNode> owned = 
+    extract_accessor<AccessorType::SOA<0>, CircuitNode>(regions[1]);
+  RegionAccessor<AccessorType::SOA<0>, PointerLocation> locator = 
+    extract_accessor<AccessorType::SOA<0>, PointerLocation>(regions[2]);
   int num_blocks = (p->num_nodes+255) >> 8;
 
   update_voltages_kernel<<<num_blocks,256>>>(p->first_node,

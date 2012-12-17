@@ -103,7 +103,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                                    RegionNode *node, ContextID ctx, bool pack, bool send)
+                                RegionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -134,7 +134,7 @@ namespace LegionRuntime {
                 idx, task_name, ctx);
         }
 
-        node->print_physical_context(ctx, logger);
+        node->print_physical_context(ctx, logger, capture_mask);
 
         logger->finish_block();
       }
@@ -143,7 +143,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                                    PartitionNode *node, ContextID ctx, bool pack, bool send)
+                                PartitionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_HIGH_LEVEL
@@ -174,7 +174,7 @@ namespace LegionRuntime {
                 idx, task_name, ctx);
         }
 
-        node->print_physical_context(ctx, logger);
+        node->print_physical_context(ctx, logger, capture_mask);
 
         logger->finish_block();
       }
@@ -183,7 +183,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, const RegionRequirement *req,
-      unsigned idx, const char *task_name, RegionNode *node, ContextID ctx, bool pre_map, bool sanitize, bool closing)
+      unsigned idx, const char *task_name, RegionNode *node, ContextID ctx, bool pre_map, bool sanitize, bool closing, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -244,7 +244,7 @@ namespace LegionRuntime {
           }
         }
 
-        node->print_physical_context(ctx, logger);
+        node->print_physical_context(ctx, logger, capture_mask);
 
         logger->finish_block();
       }
@@ -253,7 +253,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void TreeStateLogger::capture_state(HighLevelRuntime *rt, LogicalRegion handle, const char *task_name,
-                                        RegionNode *node, ContextID ctx, bool pack, unsigned shift)
+                                        RegionNode *node, ContextID ctx, bool pack, unsigned shift, FieldMask capture_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -269,7 +269,7 @@ namespace LegionRuntime {
           logger->start_block("UNPACK RETURN OF CREATED STATE for REGION (%x,%d,%d) of task %s in context %d with shift %d",
               handle.index_space.id, handle.field_space.id, handle.tree_id, task_name, ctx, shift);
 
-        node->print_physical_context(ctx, logger);
+        node->print_physical_context(ctx, logger, capture_mask);
 
         logger->finish_block();
       }

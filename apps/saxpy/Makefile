@@ -63,7 +63,7 @@ ifndef GCC
 GCC	:= g++
 endif
 ifndef NVCC
-NVCC	:= nvcc
+NVCC	:= $(CUDA)/bin/nvcc
 endif
 SSH	:= ssh
 SCP	:= scp

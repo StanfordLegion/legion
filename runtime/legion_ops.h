@@ -101,9 +101,9 @@ namespace LegionRuntime {
       void wait_until_valid(GenerationID gen_id);
       LogicalRegion get_logical_region(GenerationID gen_id) const; 
       PhysicalInstance get_physical_instance(GenerationID gen_id) const;
-      bool has_accessor(GenerationID gen_id, AccessorType at) const;
-      LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(GenerationID gen_id) const;
-      LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(GenerationID gen_id, FieldID fid) const;
+      //bool has_accessor(GenerationID gen_id, AccessorType at) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(GenerationID gen_id) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(GenerationID gen_id, FieldID fid) const;
       PhysicalRegion get_physical_region(void);
       Event get_map_event(void) const;
     public:
@@ -209,7 +209,7 @@ namespace LegionRuntime {
       void deactivate_task(void);
     public:
       void initialize_task(Context parent, Processor::TaskFuncID tid,
-                      void *args, size_t arglen, 
+                      void *args, size_t arglen, bool index_space,
                       const Predicate &predicate,
                       MapperID mid, MappingTagID tag);
       void set_requirements(const std::vector<IndexSpaceRequirement> &indexes,

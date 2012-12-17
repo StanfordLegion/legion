@@ -27,6 +27,7 @@
 #include "legion.h"
 
 using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::Accessor;
 
 LegionRuntime::Logger::Category log_circuit("circuit");
 
@@ -239,12 +240,7 @@ void calculate_currents_task_cpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GenericAccessor pvt_wires = physical_regions[0].get_accessor<AccessorGeneric>();
-  GenericAccessor pvt_nodes = physical_regions[1].get_accessor<AccessorGeneric>();
-  GenericAccessor shr_nodes = physical_regions[2].get_accessor<AccessorGeneric>();
-  GenericAccessor ghost_nodes = physical_regions[3].get_accessor<AccessorGeneric>();
-
-  calc_new_currents_cpu(p, pvt_wires, pvt_nodes, shr_nodes, ghost_nodes);
+  calc_new_currents_cpu(p, physical_regions);
 }
 
 void distribute_charge_task_cpu(const void *global_args, size_t global_arglen,
@@ -256,12 +252,7 @@ void distribute_charge_task_cpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GenericAccessor pvt_wires = physical_regions[0].get_accessor<AccessorGeneric>();
-  GenericAccessor pvt_nodes = physical_regions[1].get_accessor<AccessorGeneric>();
-  GenericAccessor shr_nodes = physical_regions[2].get_accessor<AccessorGeneric>();
-  GenericAccessor ghost_nodes = physical_regions[3].get_accessor<AccessorGeneric>();
-
-  distribute_charge_cpu(p, pvt_wires, pvt_nodes, shr_nodes, ghost_nodes);
+  distribute_charge_cpu(p, physical_regions);
 }
 
 void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
@@ -273,10 +264,7 @@ void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GenericAccessor pvt_nodes = physical_regions[0].get_accessor<AccessorGeneric>();
-  GenericAccessor shr_nodes = physical_regions[1].get_accessor<AccessorGeneric>();
-
-  update_voltages_cpu(p, pvt_nodes, shr_nodes);
+  update_voltages_cpu(p, physical_regions);
 }
 
 // GPU wrappers
@@ -290,12 +278,8 @@ void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GPU_Accessor pvt_wires = physical_regions[0].get_accessor<AccessorGPU>();
-  GPU_Accessor pvt_nodes = physical_regions[1].get_accessor<AccessorGPU>();
-  GPU_Accessor shr_nodes = physical_regions[2].get_accessor<AccessorGPU>();
-  GPU_Accessor ghost_nodes = physical_regions[3].get_accessor<AccessorGPU>();
   // Call the __host__ function in circuit_gpu.cc that launches the kernel
-  calc_new_currents_gpu(p, pvt_wires, pvt_nodes, shr_nodes, ghost_nodes);
+  calc_new_currents_gpu(p, physical_regions);
 }
 
 void distribute_charge_task_gpu(const void *global_args, size_t global_arglen,
@@ -307,12 +291,7 @@ void distribute_charge_task_gpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GPU_Accessor pvt_wires = physical_regions[0].get_accessor<AccessorGPU>();
-  GPU_Accessor pvt_nodes = physical_regions[1].get_accessor<AccessorGPU>();
-  GPU_Reducer  shr_nodes = physical_regions[2].get_accessor<AccessorGPUReductionFold>();
-  GPU_Reducer  ghost_nodes = physical_regions[3].get_accessor<AccessorGPUReductionFold>();
-
-  distribute_charge_gpu(p, pvt_wires, pvt_nodes, shr_nodes, ghost_nodes);
+  distribute_charge_gpu(p, physical_regions);
 }
 
 void update_voltages_task_gpu(const void *global_args, size_t global_arglen,
@@ -324,11 +303,7 @@ void update_voltages_task_gpu(const void *global_args, size_t global_arglen,
 {
   log_circuit(LEVEL_PRINT,"GPU update voltages for point %d",point[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
-  GPU_Accessor pvt_nodes = physical_regions[0].get_accessor<AccessorGPU>();
-  GPU_Accessor shr_nodes = physical_regions[1].get_accessor<AccessorGPU>();
-  GPU_Accessor locator = physical_regions[2].get_accessor<AccessorGPU>();
-
-  update_voltages_gpu(p, pvt_nodes, shr_nodes, locator);
+  update_voltages_gpu(p, physical_regions);
 }
 #endif
 
@@ -497,9 +472,9 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   srand48(random_seed);
 
   nodes.wait_until_valid();
-  GenericAccessor nodes_acc = nodes.get_accessor<AccessorGeneric>();
+  RegionAccessor<AccessorType::Generic, CircuitNode> nodes_acc = nodes.get_accessor().typeify<CircuitNode>(); 
   locator.wait_until_valid();
-  GenericAccessor locator_acc = locator.get_accessor<AccessorGeneric>();
+  RegionAccessor<AccessorType::Generic, PointerLocation> locator_acc = locator.get_accessor().typeify<PointerLocation>();
   ptr_t *first_nodes = new ptr_t[num_pieces];
   {
     IndexAllocator node_allocator = runtime->create_index_allocator(ctx, ckt.all_nodes.get_index_space());
@@ -534,7 +509,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   }
 
   wires.wait_until_valid();
-  GenericAccessor wires_acc = wires.get_accessor<AccessorGeneric>();
+  RegionAccessor<AccessorType::Generic, CircuitWire> wires_acc = wires.get_accessor().typeify<CircuitWire>();
   ptr_t *first_wires = new ptr_t[num_pieces];
   // Allocate all the wires
   {
@@ -601,11 +576,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
           private_node_map[n].points.erase(node_ptr);
           // node is now shared
           shared_node_map[n].points.insert(node_ptr);
-          locator_acc.write(node_ptr,(int)false); // node is shared 
+          locator_acc.write(node_ptr,SHARED_PTR); // node is shared 
         }
         else
         {
-          locator_acc.write(node_ptr,(int)true); // node is private 
+          locator_acc.write(node_ptr,PRIVATE_PTR); // node is private 
         }
       }
     }
@@ -619,7 +594,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
       {
         assert(itr.has_next());
         ptr_t wire_ptr = itr.next();
-        CircuitWire wire = wires_acc.read<CircuitWire>(wire_ptr);
+        CircuitWire wire = wires_acc.read(wire_ptr);
 
         wire.in_loc = find_location(wire.in_ptr, private_node_map[n].points, shared_node_map[n].points, ghost_node_map[n].points);     
         wire.out_loc = find_location(wire.out_ptr, private_node_map[n].points, shared_node_map[n].points, ghost_node_map[n].points);

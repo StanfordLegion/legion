@@ -516,6 +516,11 @@ namespace LegionRuntime {
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
       FieldMask get_field_mask(void) const;
       FieldMask get_created_field_mask(void) const;
+    public:
+      // For debugging return an allocated string for the given mask
+      char* to_string(const FieldMask &mask) const;
+      // Sanity check debugging
+      void sanity_check(void) const;
     private:
       const FieldSpace handle;
       RegionTreeForest *const context;
@@ -561,7 +566,7 @@ namespace LegionRuntime {
         void pack_physical_state(const FieldMask &pack_mask, Serializer &rez) const;
         void unpack_physical_state(Deserializer &derez, unsigned shift = 0);
       public:
-        void print_state(TreeStateLogger *logger) const;
+        void print_state(TreeStateLogger *logger, FieldMask capture_mask) const;
       public:
         FieldMask valid_fields;
         OpenState open_state;
@@ -733,7 +738,7 @@ namespace LegionRuntime {
       void pack_diff_state(ContextID ctx, const FieldMask &pack_mask, Serializer &rez);
       void unpack_diff_state(ContextID ctx, Deserializer &derez);
     public:
-      void print_physical_context(ContextID ctx, TreeStateLogger *logger);
+      void print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask);
     private:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -819,7 +824,7 @@ namespace LegionRuntime {
       void mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse);
       void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask);
     public:
-      void print_physical_context(ContextID ctx, TreeStateLogger *logger);
+      void print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask);
     private:
       const LogicalPartition handle;
       RegionNode *const parent;
@@ -898,8 +903,8 @@ namespace LegionRuntime {
       PhysicalManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, PhysicalInstance inst);
       virtual ~PhysicalManager(void);
     public:
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const = 0;
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const = 0;
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
@@ -946,21 +951,21 @@ namespace LegionRuntime {
       inline const FieldMask& get_allocated_fields(void) const { return allocated_fields; }
       inline Lock get_lock(void) const { return lock; }
       inline UniqueManagerID get_unique_id(void) const { return unique_id; }
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
         return instance.get_accessor();
       }
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const
       {
         std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator finder = field_infos.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
         assert(finder != field_infos.end());
 #endif
-        return instance.get_accessor().get_field_accessor(finder->second.offset, finder->second.size);
+        return instance.get_accessor().get_untyped_field_accessor(finder->second.offset, finder->second.size);
       }
       virtual bool is_reduction_manager(void) const { return false; }
       virtual InstanceManager* as_instance_manager(void) const { return const_cast<InstanceManager*>(this); }
@@ -1022,8 +1027,8 @@ namespace LegionRuntime {
                         PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op);
       virtual ~ReductionManager(void);
     public:
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const = 0;
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const { return true; }
       virtual InstanceManager* as_instance_manager(void) const { return NULL; }
       virtual ReductionManager* as_reduction_manager(void) const { return const_cast<ReductionManager*>(this); }
@@ -1032,6 +1037,7 @@ namespace LegionRuntime {
       virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
                                     const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
                                     IndexSpace space, Event precondition, bool reduction_fold) = 0;
+      virtual bool is_foldable(void) const = 0;
       virtual IndexSpace get_pointer_space(void) const = 0;
     public:
       void set_view(ReductionView *v);
@@ -1077,13 +1083,14 @@ namespace LegionRuntime {
                         PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, IndexSpace space);
       virtual ~ListReductionManager(void);
     public:
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const;
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
       virtual ReductionManager* clone_manager(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<IndexSpace::CopySrcDstField> &fields);
       virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
                                     const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
                                     IndexSpace space, Event precondition, bool reduction_fold);
+      virtual bool is_foldable(void) const { return false; }
       virtual IndexSpace get_pointer_space(void) const { return ptr_space; }
     public:
       const IndexSpace ptr_space;
@@ -1101,13 +1108,14 @@ namespace LegionRuntime {
                         PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op);
       virtual ~FoldReductionManager(void);
     public:
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_accessor(void) const;
-      virtual LowLevel::RegionAccessor<LowLevel::AccessorGeneric> get_field_accessor(FieldID fid) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
       virtual ReductionManager* clone_manager(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<IndexSpace::CopySrcDstField> &fields);
       virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
                                     const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
                                     IndexSpace space, Event precondition, bool reduction_fold);
+      virtual bool is_foldable(void) const { return true; }
       virtual IndexSpace get_pointer_space(void) const { return IndexSpace::NO_SPACE; }
     };
 
@@ -1313,6 +1321,10 @@ namespace LegionRuntime {
       static void pack_vector(const std::vector<T> &to_pack, Serializer &rez);
       template<typename T>
       static void unpack_vector(std::vector<T> &target, Deserializer &derez);
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      void sanity_check_state(void) const;
+#endif
     public:
       InstanceManager *const manager;
       InstanceView *const parent; 
