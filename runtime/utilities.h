@@ -30,6 +30,10 @@
 #include <vector>
 #include <pthread.h>
 #include <time.h>
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
 
 // outside of namespace because 50-letter-long enums are annoying
 enum {
@@ -314,6 +318,7 @@ namespace LegionRuntime {
   /**
    * Have a way of making timesteps for global timing
    */
+#ifndef __MACH__
   class TimeStamp {
   private:
     const char *print_message;
@@ -352,6 +357,50 @@ namespace LegionRuntime {
               1e-3 * (stop.tv_nsec - spec.tv_nsec));
     }
   };
+#else
+  class TimeStamp {
+  private:
+    const char *print_message;
+    mach_timespec_t spec;
+    bool diff;
+  public:
+    TimeStamp(const char *message, bool difference)
+      : print_message(message), diff(difference)
+    {
+      clock_serv_t cclock;
+      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+      if (difference)
+        clock_get_time(cclock, &spec);
+      else
+      {
+        clock_get_time(cclock, &spec);
+        // Give the time in s
+        double time = 1e6 * (spec.tv_sec) + 1e-3 * (spec.tv_nsec);
+        printf("%s %7.6f\n", message, time);
+      }
+      mach_port_deallocate(mach_task_self(), cclock);
+    }
+    ~TimeStamp(void)
+    {
+      if (diff)
+      {
+        mach_timespec_t stop;
+        clock_serv_t cclock;
+        host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+        clock_get_time(cclock, &stop);
+        mach_port_deallocate(mach_task_self(), cclock);
+        double time = get_diff_us(spec, stop);
+        printf("%s %7.3f us\n", print_message, time);
+      } 
+    }
+  private:
+    double get_diff_us(mach_timespec_t &start, mach_timespec_t &stop)
+    {
+      return (1e6 * (stop.tv_sec - spec.tv_sec) + 
+              1e-3 * (stop.tv_nsec - spec.tv_nsec));
+    }
+  };
+#endif
 
 #ifdef DEBUG_LOW_LEVEL
 #define PTHREAD_SAFE_CALL(cmd)			\
@@ -420,8 +469,16 @@ namespace LegionRuntime {
     public:
       static double abs_time(void)
       {
+#ifndef __MACH__
 	struct timespec tp;
 	clock_gettime(CLOCK_REALTIME, &tp);
+#else
+        mach_timespec_t tp;
+        clock_serv_t cclock;
+        host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+        clock_get_time(cclock, &tp);
+        mach_port_deallocate(mach_task_self(), cclock);
+#endif
 	return((1.0 * tp.tv_sec) + (1e-9 * tp.tv_nsec));
       }
       
@@ -487,6 +544,49 @@ namespace LegionRuntime {
         sprintf(result,"%d",level);
         return result;
       }
+    };
+
+    class UtilityBarrier {
+    public:
+      explicit UtilityBarrier(unsigned expected_arrivals)
+        : remaining_arrivals(expected_arrivals),
+          remaining_leaves(expected_arrivals)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_init(&inner_lock, NULL));
+        PTHREAD_SAFE_CALL(pthread_cond_init(&inner_cond, NULL));
+      }
+      ~UtilityBarrier(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_destroy(&inner_lock));
+        PTHREAD_SAFE_CALL(pthread_cond_destroy(&inner_cond));
+      }
+    public:
+      bool arrive(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&inner_lock));
+        assert(remaining_arrivals > 0); 
+        remaining_arrivals--;
+        if (remaining_arrivals == 0)
+        {
+          PTHREAD_SAFE_CALL(pthread_cond_broadcast(&inner_cond));
+        }
+        else
+        {
+          PTHREAD_SAFE_CALL(pthread_cond_wait(&inner_cond, &inner_lock));
+        }
+        assert(remaining_leaves > 0);
+        remaining_leaves--;
+        bool last_owner = false;
+        if (remaining_leaves == 0)
+          last_owner = true;
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&inner_lock));
+        return last_owner;
+      }
+    private:
+      unsigned remaining_arrivals;
+      unsigned remaining_leaves;
+      pthread_mutex_t inner_lock;
+      pthread_cond_t inner_cond;
     };
 
     template<typename ITEM>

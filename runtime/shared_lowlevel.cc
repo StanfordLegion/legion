@@ -29,7 +29,7 @@ using namespace LegionRuntime::Accessor;
 #include <list>
 #include <vector>
 
-#include <pthread.h>
+#include "pthread.h"
 #include <errno.h>
 
 #define BASE_EVENTS	1024	
@@ -103,6 +103,11 @@ __thread unsigned local_proc_id;
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+// MAC OSX doesn't support pthread barrier type
+#ifdef __MACH__
+    typedef UtilityBarrier pthread_barrier_t;
+#endif
     
     // Implementation for each of the runtime objects
     class EventImpl;
@@ -1207,7 +1212,7 @@ namespace LegionRuntime {
     {
 	holders--;	
 	// If the holders are zero, get the next request out of the queue and trigger it
-	if ((holders==0))
+	if (holders==0)
 	{
 #ifdef DEBUG_PRINT
 		DPRINT1("Unlocking lock %d\n",index);
@@ -1536,6 +1541,7 @@ namespace LegionRuntime {
           func(NULL, 0, proc);
         }
         // Wait for all the processors to be ready to go
+#ifndef __MACH__
         int bar_result = pthread_barrier_wait(init_bar);
         if (bar_result == PTHREAD_BARRIER_SERIAL_THREAD)
         {
@@ -1548,6 +1554,11 @@ namespace LegionRuntime {
         {
           PTHREAD_SAFE_CALL(bar_result);
         }
+#endif
+#else // MAC OSX case
+        bool delete_barrier = init_bar->arrive();
+        if (delete_barrier)
+          delete init_bar;
 #endif
         init_bar = NULL;
         //fprintf(stdout,"Processor %d is starting\n",proc.id);
@@ -3555,8 +3566,12 @@ namespace LegionRuntime {
         // Fill in the tables
         // find in proc 0 with NULL
         Runtime::runtime->processors.push_back(NULL);
+#ifndef __MACH__
         pthread_barrier_t *init_barrier = (pthread_barrier_t*)malloc(sizeof(pthread_barrier_t));
         PTHREAD_SAFE_CALL(pthread_barrier_init(init_barrier,NULL,(num_cpus+num_utility_cpus)));
+#else
+        pthread_barrier_t *init_barrier = new pthread_barrier_t(num_cpus+num_utility_cpus);
+#endif
         if (num_utility_cpus > 0)
         {
           // This is the case where we have actual utility processors  
@@ -4233,5 +4248,14 @@ namespace LegionRuntime {
     {
       return false;
     }
+
+#ifdef POINTER_CHECKS
+    void AccessorType::verify_access(void *impl_ptr, unsigned ptr) 
+    {
+      assert(impl_ptr != NULL);
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
+      impl->verify_access(ptr);
+    }
+#endif
   };
 };

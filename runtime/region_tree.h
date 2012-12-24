@@ -117,13 +117,13 @@ namespace LegionRuntime {
       void begin_pack_region_tree_state(Serializer &rez, unsigned long num_ways = 1);
       void pack_region_tree_state(const RegionRequirement &req, ContextID ctx, SendingMode mode, Serializer &rez
 #ifdef DEBUG_HIGH_LEVEL
-            , unsigned idx, const char *task_name
+            , unsigned idx, const char *task_name, unsigned uid
 #endif
           );
       void begin_unpack_region_tree_state(Deserializer &derez, unsigned long split_factor = 1);
       void unpack_region_tree_state(const RegionRequirement &req, ContextID ctx, SendingMode mode, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
-            , unsigned idx, const char *task_name
+            , unsigned idx, const char *task_name, unsigned uid
 #endif
           );
     public:
@@ -147,6 +147,7 @@ namespace LegionRuntime {
                                               ContextID ctx, bool overwrite, SendingMode mode 
 #ifdef DEBUG_HIGH_LEVEL
                                               , const char *task_name
+                                              , unsigned uid
 #endif
                                               );
       
@@ -163,6 +164,7 @@ namespace LegionRuntime {
                                             bool overwrite, SendingMode mode, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
                                             , unsigned idx, const char *task_name
+                                            , unsigned uid
 #endif
                                             );
       void end_unpack_region_tree_state_return(Deserializer &derez, bool created_only);
@@ -171,27 +173,27 @@ namespace LegionRuntime {
       size_t compute_created_field_state_return(LogicalRegion handle, const std::vector<FieldID> &fields, 
                                                 ContextID ctx
 #ifdef DEBUG_HIGH_LEVEL
-                                              , const char *task_name
+                                              , const char *task_name, unsigned uid
 #endif
                                               );
       void pack_created_field_state_return(LogicalRegion handle, const std::vector<FieldID> &fields, 
                                             ContextID ctx, Serializer &rez);
       void unpack_created_field_state_return(LogicalRegion handle, ContextID ctx, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name      
+                                            , const char *task_name, unsigned uid      
 #endif
                                             );
     public:
       // Packing and unpacking for returning created region trees
       size_t compute_created_state_return(LogicalRegion handle, ContextID ctx
 #ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name
+                                            , const char *task_name, unsigned uid
 #endif
                                             );
       void pack_created_state_return(LogicalRegion handle, ContextID ctx, Serializer &rez);
       void unpack_created_state_return(LogicalRegion handle, ContextID ctx, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name
+                                            , const char *task_name, unsigned uid
 #endif
                                           );
     public:
@@ -657,7 +659,7 @@ namespace LegionRuntime {
       friend class TreeStateLogger;
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
                  FieldSpaceNode *col_src, bool add, RegionTreeForest *ctx);
-      ~RegionNode(void);
+      virtual ~RegionNode(void);
       void mark_destroyed(void);
     public:
       void add_child(LogicalPartition handle, PartitionNode *child);
@@ -768,7 +770,7 @@ namespace LegionRuntime {
       friend class TreeStateLogger;
       PartitionNode(LogicalPartition p, RegionNode *par, IndexPartNode *row_src,
                     bool add, RegionTreeForest *ctx);
-      ~PartitionNode(void);
+      virtual ~PartitionNode(void);
       void mark_destroyed(void);
     public:
       void add_child(LogicalRegion handle, RegionNode *child);
@@ -956,7 +958,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
-        return instance.get_accessor();
+        Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = instance.get_accessor();
+        return result;
       }
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const
       {
@@ -965,7 +968,8 @@ namespace LegionRuntime {
         assert(instance.exists());
         assert(finder != field_infos.end());
 #endif
-        return instance.get_accessor().get_untyped_field_accessor(finder->second.offset, finder->second.size);
+        Accessor::RegionAccessor<Accessor::AccessorType::Generic> temp = instance.get_accessor();
+        return temp.get_untyped_field_accessor(finder->second.offset, finder->second.size);
       }
       virtual bool is_reduction_manager(void) const { return false; }
       virtual InstanceManager* as_instance_manager(void) const { return const_cast<InstanceManager*>(this); }

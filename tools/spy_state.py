@@ -288,6 +288,15 @@ class TaskInstance(object):
         self.managers = dict() # Managers for the mapped regions
         self.requirements = dict()
 
+    def print_instance(self):
+        if self.enclosing.index_space:
+            print "Point "+str(self.point)+" of task "+str(self.enclosing.name)+" UID "+str(self.enclosing.uid)
+        else:
+            print "Single task "+str(self.enclosing.name)+" UID "+str(self.enclosing.uid)
+        for idx,req in self.requirements.iteritems():
+            print "  Region Requirement "+str(idx)
+            req.print_requirement()
+
     def update_info(self, point, start_event, term_event):
         self.point = point
         self.start_event = start_event
@@ -400,11 +409,18 @@ class TaskInstance(object):
         assert idx not in self.managers
         self.managers[idx] = manager
 
+    def get_manager(self, idx):
+        assert idx in self.managers
+        return self.managers[idx]
+
     def event_graph_traverse(self, traverser):
         traverser.visit_task(self)
 
     def get_node_name(self):
         return self.node_name
+
+    def get_name(self):
+        return self.name
 
     def get_requirement(self, idx):
         if self.index_space:
@@ -415,8 +431,87 @@ class TaskInstance(object):
             return self.enclosing.get_requirement(idx)
 
     def check_data_flow(self):
-        # Check all the mapping dependences have been satisfied
-        pass
+        print "Performing data flow check for task "+self.get_name()
+        # Check that all the true mapping dependences
+        # have been satisfied
+        for dep in self.mdeps:
+            if dep.dtype == TRUE_DEPENDENCE:
+                # Handle cross product of instances
+                # in case we have multiple instances for an op
+                for handle,inst1 in dep.op1.get_instances().iteritems():
+                    for handle,inst2 in dep.op2.get_instances().iteritems():
+                        # Check to see if they are still aliased
+                        req1 = inst1.get_requirement(dep.idx1)
+                        req2 = inst2.get_requirement(dep.idx2)
+                        assert req1.tid == req2.tid
+                        index1 = self.state.get_index_node(True, req1.ispace)
+                        index2 = self.state.get_index_node(True, req2.ispace)
+                        if self.state.is_aliased(index1, index2):
+                            def traverse_event(node, traverser):
+                                if traverser.found:
+                                    return False
+                                return True
+                            def traverse_task(node, traverser):
+                                if node == traverser.target:
+                                    traverser.found = True
+                                if traverser.found:
+                                    return False
+                                return True
+                            def traverse_map(node, traverser):
+                                if node == traverser.target:
+                                    traverser.found = True
+                                if traverser.found:
+                                    return False
+                                return True
+                            def traverse_copy(node, traverser):
+                                if traverser.found:
+                                    return False
+                                # Check to see if we can have the matching
+                                # manager on the stack
+                                last_idx = len(traverser.manager_stack) - 1
+                                assert last_idx >= 0 
+                                last_man = traverser.manager_stack[last_idx]
+                                if (last_man == node.dst_manager) and (traverser.field in node.fields):
+                                    traverser.manager_stack.append(node.src_manager)
+                                    return True
+                                return False
+                            def traverse_reduce(node, traverser):
+                                if traverser.found:
+                                    return False
+                                last_idx = len(traverser.manager_stack) - 1
+                                assert last_idx >= 0
+                                last_man = traverser.manager_stack[last_idx]
+                                if (last_man == node.dst_manager) and (traverser.field in node.fields):
+                                    traverser.manager_stack.append(node.dst_manager)
+                                    return True
+                                return False
+                            def post_traverse_event(node, traverser):
+                                pass
+                            def post_traverse_task(node, traverser):
+                                pass
+                            def post_traverse_map(node, traverser):
+                                pass
+                            def post_traverse_copy(node, traverser):
+                                traverser.manager_stack.pop()
+                            def post_traverse_reduce(node, traverser):
+                                traverser.manager_stack.pop()
+                            # Do the traversal for each field of the shared fields
+                            fields = req1.fields & req2.fields
+                            for f in fields:
+                                traverser = EventGraphTraverser(False, traverse_event, traverse_task, traverse_map, traverse_copy, traverse_reduce, post_traverse_event, post_traverse_task, post_traverse_map, post_traverse_copy, post_traverse_reduce)
+                                traverser.found = False
+                                traverser.target = inst1
+                                traverser.field = f
+                                traverser.manager_stack = list()
+                                # TODO: support virtual mappings here where an instance manager doesn't necessarily exist
+                                traverser.manager_stack.append(inst2.get_manager(dep.idx2))
+                                # Traverse and see if we can find inst1
+                                inst2.event_graph_traverse(traverser)
+                                # Sanity check, only one thing on the stack
+                                assert len(traverser.manager_stack) == 1
+                                if not traverser.found:
+                                    print "   ERROR: Unable to find data flow path between requirement "+str(dep.idx1)+" of "+inst1.get_name()+" and requirement "+str(dep.idx2)+" of "+inst2.get_name()+" for field "+str(f)
+            
 
 
 class TaskOp(object):
@@ -503,6 +598,9 @@ class TaskOp(object):
         assert idx in self.reqs
         return self.reqs[idx]
 
+    def get_instances(self):
+        return self.instances
+
 
 class Mapping(object):
     def __init__(self, state, uid, enclosing):
@@ -518,6 +616,11 @@ class Mapping(object):
         self.node_name = 'mapping_node_'+str(uid)
         self.prev_event_deps = set()
         self.manager = None
+
+    def print_instance(self):
+        print "Inline Mapping UID "+str(self.uid)
+        print "  Requirement 0"
+        self.req.print_requirement()
 
     def add_requirement(self, index, is_reg, ispace, fspace, tid, priv, coher, redop):
         assert index == 0
@@ -592,11 +695,21 @@ class Mapping(object):
         assert self.manager == None
         self.manager = manager
 
+    def get_manager(self, idx):
+        assert idx == 0
+        assert self.manager <> None
+        return self.manager
+
     def event_graph_traverse(self, traverser):
         traverser.visit_mapping(self)
 
     def get_node_name(self):
         return self.node_name
+
+    def get_instances(self):
+        result = dict()
+        result[0] = self
+        return result
 
 
 class Deletion(object):
@@ -635,6 +748,17 @@ class Deletion(object):
     def get_name(self):
         return self.name
 
+    def get_instances(self):
+        # No instances for deletions since
+        # they don't have any true data dependences
+        result = dict()
+        return result
+
+    def get_manager(self, idx):
+        # Should never be called
+        assert False
+        return None
+
 
 class EventHandle(object):
     def __init__(self, uid, gen):
@@ -659,6 +783,23 @@ class Requirement(object):
         self.coher = coher
         self.redop = redop
         self.fields = set()
+
+    def print_requirement(self):
+        if self.is_reg:
+            print "    Logical Region Requirement ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
+        else:
+            print "    Logical Partition Requirement ("+str(self.ispace)+","+str(self.fsapce)+","+str(self.tid)+")"
+        field_str = "    Fields: "
+        first = True
+        for f in self.fields:
+            if first:
+                field_str = field_str+str(f)
+                first = False
+            else:
+                field_str = field_str+", "+str(f)
+        print field_str
+        print "    Privilege: "+self.get_privilege()
+        print "    Coherence: "+self.get_coherence()
 
     def add_field(self, fid):
         assert fid not in self.fields
@@ -693,9 +834,9 @@ class Requirement(object):
 
     def to_string(self):
         if self.is_reg:
-            print "Region Requirement for region ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
+            print "Region Requirement for ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
         else:
-            print "Region Requirement for partition ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
+            print "Partition Requirement for ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
         print "    Privilege: "+self.get_privilege()
         print "    Coherence: "+self.get_coherence()
         print "    Fields: "+self.get_fields()
@@ -704,12 +845,13 @@ class Requirement(object):
         if self.priv == NO_ACCESS:
             return "NO ACCESS"
         elif self.priv == READ_ONLY:
-            return "READ ONLY"
+            return "READ-ONLY"
         elif self.priv == READ_WRITE:
             return "READ-WRITE"
         elif self.priv == WRITE_ONLY:
-            return "WRITE ONLY"
+            return "WRITE-ONLY"
         else:
+            assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
 
     def get_coherence(self):
@@ -720,6 +862,7 @@ class Requirement(object):
         elif self.coher == SIMULTANEOUS:
             return "SIMULTANEOUS"
         else:
+            assert self.coher == RELAXED
             return "RELAXED"
 
     def get_fields(self):
@@ -1167,9 +1310,37 @@ class InstanceManager(object):
         print "    ERROR: Missing event dependence between "+one+" and "+two
 
     def find_transitive_dependences(self, user):
-        def traverse(node, traverser):
+        def traverse_event(node, traverser):
+            if node in traverser.visited_events:
+                return False
+            traverser.visited_events.add(node)
             return True
-        traverser = EventGraphTraverser(False, traverse, traverse, traverse, traverse, traverse)
+        def traverse_task(node, traverser):
+            if node in traverser.visited_tasks:
+                return False
+            traverser.visited_tasks.add(node)
+            return True
+        def traverse_map(node, traverser):
+            if node in traverser.visited_maps:
+                return False
+            traverser.visited_maps.add(node)
+            return True
+        def traverse_copy(node, traverser):
+            if node in traverser.visited_copies:
+                return False
+            traverser.visited_copies.add(node)
+            return True
+        def traverse_reduce(node, traverser):
+            if node in traverser.visited_reduces:
+                return False
+            traverser.visited_reduces.add(node)
+            return True
+        traverser = EventGraphTraverser(False, traverse_event, traverse_task, traverse_map, traverse_copy, traverse_reduce)
+        traverser.visited_events = set()
+        traverser.visited_tasks = set()
+        traverser.visited_maps = set()
+        traverser.visited_copies = set()
+        traverser.visited_reduces = set()
         user.event_graph_traverse(traverser)
         for t in traverser.visited_tasks:
             if t == user:
@@ -1225,26 +1396,41 @@ class InstanceManager(object):
 
     def find_dependences(self, user):
         def traverse_event(node, traverser):
+            if node in traverser.visited_events:
+                return False
+            traverser.visited_events.add(node)
             return True
         def traverse_task(node, traverser):
+            if node in traverser.visited_tasks:
+                return False
+            traverser.visited_tasks.add(node)
             if node == traverser.first:
                 return True
             if node.handle in traverser.manager.task_users:
                 return False
             return True
         def traverse_map(node, traverser):
+            if node in traverser.visited_maps:
+                return False
+            traverser.visited_maps.add(node)
             if node == traverser.first:
                 return True
             if node.uid in traverser.manager.map_users:
                 return False
             return True
         def traverse_copy(node, traverser):
+            if node in traverser.visited_copies:
+                return False
+            traverser.visited_copies.add(node)
             if node == traverser.first:
                 return True
             if node.uid in traverser.manager.copy_users:
                 return False
             return True
         def traverse_reduce(node, traverser):
+            if node in traverser.visited_reduces:
+                return False
+            traverser.visited_reduces.add(node)
             if node == traverser.first:
                 return True
             if node.uid in traverser.manager.reduce_users:
@@ -1254,6 +1440,11 @@ class InstanceManager(object):
         # It's unclear to me if python functions are thunks or whether they are stateless, so we'll just be safe
         traverser.manager = self
         traverser.first = user
+        traverser.visited_events = set()
+        traverser.visited_tasks = set()
+        traverser.visited_maps = set()
+        traverser.visited_copies = set()
+        traverser.visited_reduces = set()
         user.event_graph_traverse(traverser)
         for t in traverser.visited_tasks:
             if t == user:
@@ -1299,24 +1490,23 @@ class ReductionManager(object):
 
 
 class EventGraphTraverser(object):
-    def __init__(self, forwards, event_fn, task_fn, map_fn, copy_fn, reduce_fn):
+    def __init__(self, forwards, event_fn = None, task_fn = None, map_fn = None, copy_fn = None, reduce_fn = None, post_event_fn = None, post_task_fn = None, post_map_fn = None, post_copy_fn = None, post_reduce_fn = None):
         self.forwards = forwards
         self.event_fn = event_fn
         self.task_fn = task_fn
         self.map_fn = map_fn
         self.copy_fn = copy_fn
         self.reduce_fn = reduce_fn
-        self.visited_events = set()
-        self.visited_tasks = set()
-        self.visited_maps = set()
-        self.visited_copies = set()
-        self.visited_reduces = set()
+        self.post_event_fn = post_event_fn
+        self.post_task_fn = post_task_fn
+        self.post_map_fn = post_map_fn
+        self.post_copy_fn = post_copy_fn
+        self.post_reduce_fn = post_reduce_fn
 
     def visit_event(self, node):
-        if node in self.visited_events:
-            return
-        self.visited_events.add(node)
-        do_next = self.event_fn(node, self)
+        do_next = True
+        if self.event_fn <> None:
+            do_next = self.event_fn(node, self)
         if not do_next:
             return
         if self.forwards:
@@ -1325,54 +1515,60 @@ class EventGraphTraverser(object):
         else:
             for n in node.physical_incoming:
                 n.event_graph_traverse(self)
+        if self.post_event_fn <> None:
+            self.post_event_fn(node, self)
 
     def visit_task(self, node):
-        if node in self.visited_tasks:
-            return
-        self.visited_tasks.add(node)
-        do_next = self.task_fn(node, self)
+        do_next = True
+        if self.task_fn <> None:
+            do_next = self.task_fn(node, self)
         if not do_next:
             return
         if self.forwards:
             node.term_event.event_graph_traverse(self)
         else:
             node.start_event.event_graph_traverse(self)
+        if self.post_task_fn <> None:
+            self.post_task_fn(node, self)
 
     def visit_mapping(self, node):
-        if node in self.visited_maps:
-            return
-        self.visited_maps.add(node)
-        do_next = self.map_fn(node, self)
+        do_next = True
+        if self.map_fn <> None:
+            do_next = self.map_fn(node, self)
         if not do_next:
             return
         if self.forwards:
             node.term_event.event_graph_traverse(self)
         else:
             node.start_event.event_graph_traverse(self)
+        if self.post_map_fn <> None:
+            self.post_map_fn(node, self)
 
     def visit_copy(self, node):
-        if node in self.visited_copies:
-            return
-        self.visited_copies.add(node)
-        do_next = self.copy_fn(node, self)
+        do_next = True
+        if self.copy_fn <> None:
+            do_next = self.copy_fn(node, self)
         if not do_next:
             return
         if self.forwards:
             node.term_event.event_graph_traverse(self)
         else:
             node.start_event.event_graph_traverse(self)
+        if self.post_copy_fn <> None:
+            self.post_copy_fn(node, self)
 
     def visit_reduce(self, node):
-        if node in self.visited_reduces:
-            return
-        self.visited_reduces.add(node)
-        do_next = self.reduce_fn(node, self)
+        do_next = True
+        if self.reduce_fn <> None:
+            do_next = self.reduce_fn(node, self)
         if not do_next:
             return
         if self.forwards:
             node.term_event.event_graph_traverse(self)
         else:
             node.start_event.event_graph_traverse(self)
+        if self.post_reduce_fn <> None:
+            self.post_reduce_fn(node, self)
 
 
 class ConnectedComponent(object):
@@ -1843,6 +2039,13 @@ class State(object):
     def check_data_flow(self):
         for handle,task_inst in self.task_instances.iteritems():  
             task_inst.check_data_flow()
+
+    def print_instances(self):
+        for handle,inst in self.task_instances.iteritems():
+            inst.print_instance()
+        for handle,mapping in self.mappings.iteritems():
+            mapping.print_instance()
+
 
 # EOF
 

@@ -239,13 +239,21 @@ namespace LegionRuntime {
       unsigned get_depth(void) const { return depth; }
     public:
       static void capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name, 
-                                RegionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask);
+                                unsigned uid, RegionNode *node, ContextID ctx, bool pack, 
+                                bool send, FieldMask capture_mask, FieldMask working_mask);
       static void capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                PartitionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask);
-      static void capture_state(HighLevelRuntime *rt, const RegionRequirement *req, unsigned idx, const char *task_name,
-                                RegionNode *node, ContextID ctx, bool pre_map, bool sanitize, bool closing, FieldMask capture_mask);
-      static void capture_state(HighLevelRuntime *rt, LogicalRegion handle, const char *task_name,
-                                RegionNode *node, ContextID ctx, bool pack, unsigned shift, FieldMask capture_mask);
+                                unsigned uid, PartitionNode *node, ContextID ctx, 
+                                bool pack, bool send, FieldMask capture_mask, 
+                                FieldMask working_mask);
+      static void capture_state(HighLevelRuntime *rt, const RegionRequirement *req, 
+                                unsigned idx, const char *task_name, unsigned uid,
+                                RegionNode *node, ContextID ctx, bool pre_map, 
+                                bool sanitize, bool closing, 
+                                FieldMask capture_mask, FieldMask working_mask);
+      static void capture_state(HighLevelRuntime *rt, LogicalRegion handle, 
+                                const char *task_name, unsigned uid,
+                                RegionNode *node, ContextID ctx, bool pack, unsigned shift,
+                                FieldMask capture_mask, FieldMask working_mask);
     private:
       void println(const char *fmt, va_list args);
     private:

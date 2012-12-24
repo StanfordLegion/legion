@@ -23,6 +23,15 @@
 #endif
 
 namespace LegionRuntime {
+#ifdef PRIVILEGE_CHECKS
+  enum AccessorPrivilege {
+    ACCESSOR_NONE   = 0x00000000,
+    ACCESSOR_READ   = 0x00000001,
+    ACCESSOR_WRITE  = 0x00000002,
+    ACCESSOR_REDUCE = 0x00000004,
+    ACCESSOR_ALL    = 0x00000007,
+  };
+#endif
   namespace Accessor {
 
     namespace TemplateFu {
@@ -82,6 +91,11 @@ namespace LegionRuntime {
       template <typename REDOP> struct ReductionFold;
       template <typename REDOP> struct ReductionList;
 
+#ifdef POINTER_CHECKS
+      // TODO: Make this function work for GPUs
+      void verify_access(void *impl_ptr, unsigned ptr);
+#endif
+
       struct Generic {
 	struct Untyped {
 	  Untyped() : internal(0), field_offset(0) {}
@@ -89,7 +103,11 @@ namespace LegionRuntime {
 
 	  template <typename ET>
 	  RegionAccessor<Generic, ET, ET> typeify(void) const {
-	    return RegionAccessor<Generic, ET, ET>(Typed<ET, ET>(internal, field_offset));
+	    RegionAccessor<Generic, ET, ET> result(Typed<ET, ET>(internal, field_offset));
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 
 	  void read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset = 0) const;
@@ -102,7 +120,12 @@ namespace LegionRuntime {
 
 	  void *internal;
 	  off_t field_offset;
-
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_privileges_untyped(AccessorPrivilege p) { priv = p; }
+#endif
 	protected:
 	  bool get_aos_parameters(void *& base, size_t& stride) const;
 	  bool get_soa_parameters(void *& base, size_t& stride) const;
@@ -120,15 +143,40 @@ namespace LegionRuntime {
 	  Typed() : Untyped() {}
 	  Typed(void *_internal, off_t _field_offset = 0) : Untyped(_internal, _field_offset) {}
 
-	  inline T read(ptr_t ptr) const { T val; read_untyped(ptr, &val, sizeof(val)); return val; }
-	  inline void write(ptr_t ptr, const T& newval) const { write_untyped(ptr, &newval, sizeof(newval)); }
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privileges(AccessorPrivilege p) { priv = p; }
+#endif
+
+	  inline T read(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(priv & ACCESSOR_READ);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(internal, ptr.value);
+#endif
+            T val; read_untyped(ptr, &val, sizeof(val)); return val; 
+          }
+	  inline void write(ptr_t ptr, const T& newval) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(internal, ptr.value);
+#endif
+            write_untyped(ptr, &newval, sizeof(newval)); 
+          }
 	  // no way to get a direct element pointer
 
 	  template<typename REDOP>
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(internal, ptr.value);
 #endif
 	    T val = read(ptr);
 	    REDOP::template apply<true>(val, newval);
@@ -164,7 +212,14 @@ namespace LegionRuntime {
 	    bool ok = get_aos_parameters(aos_base, aos_stride);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(aos_base, aos_stride);
-	    return RegionAccessor<AT, T>(t);
+            RegionAccessor<AT, T> result(t);
+#ifdef POINTER_CHECKS
+            result.set_impl(internal);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 	      
 	  template <typename AT, size_t STRIDE>
@@ -184,7 +239,14 @@ namespace LegionRuntime {
 	    bool ok = get_soa_parameters(soa_base, soa_stride);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(soa_base, soa_stride);
-	    return RegionAccessor<AT, T>(t);
+            RegionAccessor<AT,T> result(t);
+#ifdef POINTER_CHECKS
+            result.set_impl(internal);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 	      
 	  template <typename AT, size_t STRIDE, size_t BLOCK_SIZE, size_t BLOCK_STRIDE>
@@ -211,7 +273,14 @@ namespace LegionRuntime {
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(hybrid_soa_base, hybrid_soa_stride,
 						hybrid_soa_block_size, hybrid_soa_block_stride);
-	    return RegionAccessor<AT, T>(t);
+            RegionAccessor<AT, T> result(t);
+#ifdef POINTER_CHECKS
+            result.set_impl(internal);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 
 	  template <typename AT, typename REDOP>
@@ -227,7 +296,14 @@ namespace LegionRuntime {
 	    bool ok = get_redfold_parameters(redfold_base);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redfold_base);
-	    return RegionAccessor<AT, T>(t);
+            RegionAccessor<AT, T> result(t);
+#ifdef POINTER_CHECKS
+            result.set_impl(internal);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 
 	  template <typename AT, typename REDOP>
@@ -245,7 +321,14 @@ namespace LegionRuntime {
 	    bool ok = get_redlist_parameters(redlist_base, redlist_next_ptr);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(redlist_base, redlist_next_ptr);
-	    return RegionAccessor<AT, T>(t);
+            RegionAccessor<AT, T> result(t);
+#ifdef POINTER_CHECKS
+            result.set_impl(internal);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            result.set_privileges(priv);
+#endif
+            return result;
 	  }
 	};
       };
@@ -289,10 +372,22 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
+#ifdef POINTER_CHECKS
+            verify_access(impl_ptr, ptr.value);
+#endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
 
 	  char *base;
+#ifdef POINTER_CHECKS
+          void *impl_ptr;
+#endif
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_privileges_untyped(AccessorPrivilege p) { priv = p; }
+#endif
 	};
 
 	template <typename T, typename PT>
@@ -302,23 +397,73 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
+#endif
+
           CUDAPREFIX
-	  inline T read(ptr_t ptr) const { return *(const T *)(Untyped::elem_ptr(ptr)); }
+	  inline T read(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_READ);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *(const T *)(Untyped::elem_ptr(ptr)); 
+          }
           CUDAPREFIX
-	  inline void write(ptr_t ptr, const T& newval) const { *(T *)(Untyped::elem_ptr(ptr)) = newval; }
+	  inline void write(ptr_t ptr, const T& newval) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            *(T *)(Untyped::elem_ptr(ptr)) = newval; 
+          }
           CUDAPREFIX
-	  inline T *ptr(ptr_t ptr) const { return (T *)Untyped::elem_ptr(ptr); }
+	  inline T *ptr(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return (T *)Untyped::elem_ptr(ptr); 
+          }
           CUDAPREFIX
-          inline T& ref(ptr_t ptr) const { return *((T*)Untyped::elem_ptr(ptr)); }
+          inline T& ref(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *((T*)Untyped::elem_ptr(ptr)); 
+          }
 
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(this->template impl_ptr, ptr.value);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
+
+#ifdef POINTER_CHECKS
+          inline void set_impl(void *impl)
+          {
+            this->impl_ptr = impl;
+          }
+#endif
 	};
       };
 
@@ -337,6 +482,16 @@ namespace LegionRuntime {
 	  }
 
 	  char *base;
+#ifdef POINTER_CHECKS
+          // TODO: Make pointer checks work on the GPU
+          void *impl_ptr;
+#endif
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_privileges_untyped(AccessorPrivilege p) { priv = p; }
+#endif
 	};
 
 	template <typename T, typename PT>
@@ -346,23 +501,73 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
+#endif
+
           CUDAPREFIX
-	  inline T read(ptr_t ptr) const { return *(const T *)(Untyped::elem_ptr(ptr)); }
+	  inline T read(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_READ);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *(const T *)(Untyped::elem_ptr(ptr)); 
+          }
           CUDAPREFIX
-	  inline void write(ptr_t ptr, const T& newval) const { *(T *)(Untyped::elem_ptr(ptr)) = newval; }
+	  inline void write(ptr_t ptr, const T& newval) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            *(T *)(Untyped::elem_ptr(ptr)) = newval; 
+          }
           CUDAPREFIX
-	  inline T *ptr(ptr_t ptr) const { return (T *)Untyped::elem_ptr(ptr); }
+	  inline T *ptr(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return (T *)Untyped::elem_ptr(ptr); 
+          }
           CUDAPREFIX
-          inline T& ref(ptr_t ptr) const { return *((T*)Untyped::elem_ptr(ptr)); }
+          inline T& ref(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *((T*)Untyped::elem_ptr(ptr)); 
+          }
 
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(this->template impl_ptr, ptr.value);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
+
+#ifdef POINTER_CHECKS
+          inline void set_impl(void *impl)
+          {
+            this->impl_ptr = impl;
+          }
+#endif
 	};
       };
 
@@ -379,10 +584,23 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
+#ifdef POINTER_CHECKS
+            verify_access(impl_ptr, ptr.value);
+#endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
 
 	  char *base;
+#ifdef POINTER_CHECKS
+          // TODO: Make this work for GPUs
+          void *impl_ptr;
+#endif
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_privileges_untyped(AccessorPrivilege p) { priv = p; }
+#endif
 	};
 
 	template <typename T, typename PT>
@@ -393,23 +611,73 @@ namespace LegionRuntime {
 	  Typed(void *_base, size_t _stride, size_t _block_size, size_t _block_stride)
 	    : Untyped(_base, _stride, _block_size, _block_stride) {}
 
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
+#endif
+
           CUDAPREFIX
-	  inline T read(ptr_t ptr) const { return *(const T *)(Untyped::elem_ptr(ptr)); }
+	  inline T read(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_READ);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *(const T *)(Untyped::elem_ptr(ptr)); 
+          }
           CUDAPREFIX
-	  inline void write(ptr_t ptr, const T& newval) const { *(T *)(Untyped::elem_ptr(ptr)) = newval; }
+	  inline void write(ptr_t ptr, const T& newval) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            *(T *)(Untyped::elem_ptr(ptr)) = newval; 
+          }
           CUDAPREFIX
-	  inline T *ptr(ptr_t ptr) const { return (T *)Untyped::elem_ptr(ptr); }
+	  inline T *ptr(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return (T *)Untyped::elem_ptr(ptr); 
+          }
           CUDAPREFIX
-          inline T& ref(ptr_t ptr) const { return *((T*)Untyped::elem_ptr(ptr)); }
+          inline T& ref(ptr_t ptr) const 
+          { 
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_WRITE);
+#endif
+#ifdef POINTER_CHECKS
+            verify_access(this->template impl_ptr, ptr.value);
+#endif
+            return *((T*)Untyped::elem_ptr(ptr)); 
+          }
 
 	  template<typename REDOP> CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(this->template priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(this->template impl_ptr, ptr.value);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
+
+#ifdef POINTER_CHECKS
+          inline void set_impl(void *impl)
+          {
+            this->impl_ptr = impl;
+          }
+#endif
 	};
       };
 
@@ -424,10 +692,26 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
+#ifdef POINTER_CHECKS
+            verify_access(impl_ptr, ptr.value);
+#endif
 	    return(base + (ptr.value * sizeof(typename REDOP::RHS)));
 	  }
 
 	  char *base;
+#ifdef POINTER_CHECKS
+          void *impl_ptr;
+#endif
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_privileges_untyped(AccessorPrivilege p) 
+          { 
+            assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
+            priv = p; 
+          }
+#endif
 	};
 
 	template <typename T, typename PT>
@@ -437,15 +721,33 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base) : Untyped(_base) {}
 
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privilege(AccessorPrivilege p) 
+          { 
+            assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
+            this->priv = p; 
+          }
+#endif
+
 	  // only allowed operation on a reduction fold instance is a reduce (fold)
           CUDAPREFIX
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(this->priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(this->impl_ptr, ptr.value);
 #endif
 	    REDOP::template fold<false>(*(typename REDOP::RHS *)Untyped::elem_ptr(ptr), newval);
 	  }
+
+#ifdef POINTER_CHECKS
+          inline void set_impl(void *impl)
+          {
+            this->impl_ptr = impl;
+          }
+#endif
 	};
       };
 
@@ -462,6 +764,9 @@ namespace LegionRuntime {
 	  
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
+#ifdef POINTER_CHECKS
+            verify_access(impl_ptr, ptr.value);
+#endif
 	    return(base + (ptr.value * sizeof(ReductionListEntry)));
 	  }
 
@@ -474,6 +779,19 @@ namespace LegionRuntime {
 
 	  char *base;
 	  ptr_t *next_entry;
+#ifdef POINTER_CHECKS
+          void *impl_ptr;
+#endif
+#ifdef PRIVILEGE_CHECKS
+        protected:
+          AccessorPrivilege priv;
+        public:
+          inline void set_untyped_privileges(AccessorPrivilege p) 
+          { 
+            assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
+            priv = p; 
+          }
+#endif
 	};
 
 	template <typename T, typename PT>
@@ -481,17 +799,35 @@ namespace LegionRuntime {
 	  Typed(void) : Untyped() {}
 	  Typed(void *_base, ptr_t *_next_entry) : Untyped(_base, _next_entry) {}
 
+#ifdef PRIVILEGE_CHECKS
+          inline void set_privileges(AccessorPrivilege p) 
+          { 
+            assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
+            this->priv = p; 
+          }
+#endif
+
 	  // only allowed operation on a reduction list instance is a reduce
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef PRIVILEGE_CHECKS
+            assert(this->priv & ACCESSOR_REDUCE);
+#endif
 #ifdef POINTER_CHECKS
-	    verify_access(ptr.value);
+	    verify_access(this->impl_ptr, ptr.value);
 #endif
 	    ptr_t listptr = Untyped::get_next();
 	    ReductionListEntry *entry = reinterpret_cast<ReductionListEntry *>(Untyped::elem_ptr(listptr));
 	    entry->ptr = ptr;
 	    entry->rhs = newval;
 	  }
+
+#ifdef POINTER_CHECKS
+          inline void set_impl(void *impl)
+          {
+            this->impl_ptr = impl;
+          }
+#endif
 	};
       };
     };

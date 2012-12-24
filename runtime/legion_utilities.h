@@ -794,11 +794,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%4.4lx",bit_vector[idx]);
+          sprintf(result,"%4.4llx",bit_vector[idx]);
         else
         {
           char temp[8*sizeof(T)+1];
-          sprintf(temp,"%4.4lx",bit_vector[idx]);
+          sprintf(temp,"%4.4llx",bit_vector[idx]);
           strcat(result,temp);
         }
       }

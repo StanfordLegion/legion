@@ -102,37 +102,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                RegionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask)
+    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, 
+                                const char *task_name, unsigned uid,
+                                RegionNode *node, ContextID ctx, bool pack, bool send, 
+                                FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       if (HighLevelRuntime::logging_region_tree_state)
       {
+        char *field_mask = working_mask.to_string();
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
         if (pack)
         {
           if (send)
-            logger->start_block("PACK SEND of REGION (%x,%d,%d) index %d of task %s in context %d",
+            logger->start_block("PACK SEND of REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_space.id, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, field_mask);
           else
-            logger->start_block("PACK RETURN of REGION (%x,%d,%d) index %d of task %s in context %d",
+            logger->start_block("PACK RETURN of REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_space.id, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, field_mask);
         }
         else
         {
           if (send)
-            logger->start_block("UNPACK SEND of REGION (%x,%d,%d) index %d of task %s in context %d",
+            logger->start_block("UNPACK SEND of REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_space.id, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, field_mask);
           else
-            logger->start_block("UNPACK RETURN of REGION (%x,%d,%d) index %d of task %s in context %d",
+            logger->start_block("UNPACK RETURN of REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_space.id, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, field_mask);
         }
+        free(field_mask);
 
         node->print_physical_context(ctx, logger, capture_mask);
 
@@ -142,8 +146,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                PartitionNode *node, ContextID ctx, bool pack, bool send, FieldMask capture_mask)
+    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, unsigned idx, 
+                                const char *task_name, unsigned uid,
+                                PartitionNode *node, ContextID ctx, bool pack, bool send, 
+                                FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_HIGH_LEVEL
@@ -151,28 +157,30 @@ namespace LegionRuntime {
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
+        char *mask_string = working_mask.to_string();
         if (pack)
         {
           if (send)
-            logger->start_block("PACK SEND of PARTITION (%d,%d,%d) index %d of task %s in context %d",
+            logger->start_block("PACK SEND of PARTITION (%d,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_partition, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, mask_string);
           else
-            logger->start_block("PACK RETURN of PARTITION (%d,%d,%d) index %d of task %s in context %d",
+            logger->start_block("PACK RETURN of PARTITION (%d,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_partition, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, mask_string);
         }
         else
         {
           if (send)
-            logger->start_block("UNPACK SEND of PARTITION (%d,%d,%d) index %d of task %s in context %d",
+            logger->start_block("UNPACK SEND of PARTITION (%d,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                 node->handle.index_partition, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, mask_string);
           else
-            logger->start_block("UNPACK RETURN of PARTITION (%d,%d,%d) index %d of task %s in context %d",
+            logger->start_block("UNPACK RETURN of PARTITION (%d,%d,%d) index %d of task %s  (UID %d) in context %d mask %s",
                 node->handle.index_partition, node->handle.field_space.id, node->handle.tree_id,
-                idx, task_name, ctx);
+                idx, task_name, uid, ctx, mask_string);
         }
+        free(mask_string);
 
         node->print_physical_context(ctx, logger, capture_mask);
 
@@ -182,8 +190,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, const RegionRequirement *req,
-      unsigned idx, const char *task_name, RegionNode *node, ContextID ctx, bool pre_map, bool sanitize, bool closing, FieldMask capture_mask)
+    /*static*/ void TreeStateLogger::capture_state(HighLevelRuntime *rt, 
+                  const RegionRequirement *req, unsigned idx, const char *task_name, 
+                  unsigned uid, RegionNode *node, ContextID ctx, bool pre_map, 
+                  bool sanitize, bool closing, 
+                  FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -191,30 +202,31 @@ namespace LegionRuntime {
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
+        char *mask_string = working_mask.to_string();
         if (pre_map)
         {
           if (sanitize)
           {
             if (req->handle_type == SINGULAR)
-              logger->start_block("BEFORE SANITIZING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("BEFORE SANITIZING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("BEFORE SANITIZING PARTITION (%d,%d,%d) index %d of task %s in context %d",
+              logger->start_block("BEFORE SANITIZING PARTITION (%d,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->partition.index_partition, req->partition.field_space.id, req->partition.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
           }
           else
           {
             assert(req->handle_type == SINGULAR);
             if (closing)
-              logger->start_block("BEFORE CLOSING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("BEFORE CLOSING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("BEFORE MAPPING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("BEFORE MAPPING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
           }
         }
         else
@@ -222,27 +234,28 @@ namespace LegionRuntime {
           if (sanitize)
           {
             if (req->handle_type == SINGULAR)
-              logger->start_block("AFTER SANITIZING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("AFTER SANITIZING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("AFTER SANITIZING PARTITION (%d,%d,%d) index %d of task %s in context %d",
+              logger->start_block("AFTER SANITIZING PARTITION (%d,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->partition.index_partition, req->partition.field_space.id, req->partition.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
           }
           else
           {
             assert(req->handle_type == SINGULAR);
             if (closing)
-              logger->start_block("AFTER CLOSING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("AFTER CLOSING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("AFTER MAPPING REGION (%x,%d,%d) index %d of task %s in context %d",
+              logger->start_block("AFTER MAPPING REGION (%x,%d,%d) index %d of task %s (UID %d) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, req->region.tree_id,
-                  idx, task_name, ctx);
+                  idx, task_name, uid, ctx, mask_string);
           }
         }
+        free(mask_string);
 
         node->print_physical_context(ctx, logger, capture_mask);
 
@@ -252,8 +265,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TreeStateLogger::capture_state(HighLevelRuntime *rt, LogicalRegion handle, const char *task_name,
-                                        RegionNode *node, ContextID ctx, bool pack, unsigned shift, FieldMask capture_mask)
+    void TreeStateLogger::capture_state(HighLevelRuntime *rt, LogicalRegion handle, 
+                                        const char *task_name, unsigned uid,
+                                        RegionNode *node, ContextID ctx, bool pack, 
+                                        unsigned shift, FieldMask capture_mask, 
+                                        FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -261,14 +277,14 @@ namespace LegionRuntime {
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
-
+        char *mask_string = working_mask.to_string();
         if (pack)
-          logger->start_block("PACK RETURN OF CREATED STATE for REGION (%x,%d,%d) of task %s in context %d",
-              handle.index_space.id, handle.field_space.id, handle.tree_id, task_name, ctx);
+          logger->start_block("PACK RETURN OF CREATED STATE for REGION (%x,%d,%d) of task %s (UID %d) in context %d mask %s",
+              handle.index_space.id, handle.field_space.id, handle.tree_id, task_name, uid, ctx, mask_string);
         else
-          logger->start_block("UNPACK RETURN OF CREATED STATE for REGION (%x,%d,%d) of task %s in context %d with shift %d",
-              handle.index_space.id, handle.field_space.id, handle.tree_id, task_name, ctx, shift);
-
+          logger->start_block("UNPACK RETURN OF CREATED STATE for REGION (%x,%d,%d) of task %s (UID %d) in context %d with shift %d mask %s",
+              handle.index_space.id, handle.field_space.id, handle.tree_id, task_name, uid, ctx, shift, mask_string);
+        free(mask_string);
         node->print_physical_context(ctx, logger, capture_mask);
 
         logger->finish_block();

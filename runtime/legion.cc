@@ -1092,6 +1092,30 @@ namespace LegionRuntime {
       derez.deserialize(this->inst_type);
     }
 
+#ifdef CHECK_PRIVILEGES
+    //--------------------------------------------------------------------------
+    AccessorPrivilege RegionRequirement::get_accessor_privilege(void) const
+    //--------------------------------------------------------------------------
+    {
+      switch (privilege)
+      {
+        case NO_ACCESS:
+          return ACCESSOR_NONE;
+        case READ_ONLY:
+          return ACCESSOR_READ;
+        case READ_WRITE:
+          return ACCESSOR_ALL;
+        case WRITE_ONLY:
+          return ACCESSOR_WRITE;
+        case REDUCE:
+          return ACCESSOR_REDUCE;
+        default:
+          assert(false);
+      }
+      return ACCESSOR_NONE;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Physical Region 
     /////////////////////////////////////////////////////////////
@@ -1566,15 +1590,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(void)
       : valid(false), idx(0), handle(LogicalRegion::NO_REGION), 
-        manager(NULL)
+        manager(NULL), req(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(unsigned id, LogicalRegion h,
-                                            PhysicalManager *man)
-      : valid(true), idx(id), handle(h), manager(man)
+                                            PhysicalManager *man,
+                                            const RegionRequirement *r)
+      : valid(true), idx(id), handle(h), manager(man), req(r)
     //--------------------------------------------------------------------------
     {
     }
@@ -1627,14 +1652,22 @@ namespace LegionRuntime {
     Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegionImpl::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-      return manager->get_accessor(); 
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = manager->get_accessor();
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(req->get_accessor_privilege());
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
     Accessor::RegionAccessor<Accessor::AccessorType::Generic> PhysicalRegionImpl::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      return manager->get_field_accessor(fid);
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = manager->get_field_accessor(fid);
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(req->get_accessor_privilege());
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2751,6 +2784,7 @@ namespace LegionRuntime {
       PredicateCustom(PredicateFnptr func, const std::vector<Future> &futures,
                       const TaskArgument &arg, Processor local_proc, 
                       MappingTagID tag);
+      virtual ~PredicateCustom(void) { } // Make the warnings go away
     public:
       virtual bool notify(bool value);
       virtual void wait_for_evaluation(void);

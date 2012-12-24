@@ -501,6 +501,10 @@ namespace LegionRuntime {
       bool operator==(const RegionRequirement &req) const;
       bool operator<(const RegionRequirement &req) const;
       RegionRequirement& operator=(const RegionRequirement &rhs);
+#ifdef CHECK_PRIVILEGES
+    public:
+      AccessorPrivilege get_accessor_privilege(void) const;
+#endif
     protected:
       friend class Task;
       friend class TaskContext;
@@ -1512,6 +1516,8 @@ namespace LegionRuntime {
      */
     class Notifiable {
     public:
+      virtual ~Notifiable(void) { } // Make the warnings go away
+    public:
       virtual bool notify(bool value) = 0;
     };
 
@@ -1544,6 +1550,7 @@ namespace LegionRuntime {
     class PredicateImpl : public Collectable, public Notifiable, public Mappable {
     public:
       PredicateImpl(MappingTagID tag);
+      virtual ~PredicateImpl(void) { } // Make the warnings go away
     public:
       /**
        * Determine whether or not make a guess on the value or not.
@@ -1590,7 +1597,8 @@ namespace LegionRuntime {
       friend class HighLevelRuntime;
       friend class PhysicalRegion;
       friend class SingleTask;
-      PhysicalRegionImpl(unsigned id, LogicalRegion h, PhysicalManager *manager);
+      PhysicalRegionImpl(unsigned id, LogicalRegion h, PhysicalManager *manager,
+                          const RegionRequirement *r);
     public:
       PhysicalRegionImpl(void);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
@@ -1606,6 +1614,7 @@ namespace LegionRuntime {
       unsigned idx;
       LogicalRegion handle;
       PhysicalManager *manager;
+      const RegionRequirement *req;
     };
 
     class IndexAllocatorImpl : public Collectable {
@@ -2622,7 +2631,7 @@ namespace LegionRuntime {
           }
           if (!has_parent)
           {
-            fprintf(stderr,"ERROR: Parent Type Structure %s does not have a field type %d\n",
+            fprintf(stderr,"ERROR: Parent Type Structure %d does not have a field type %s\n",
                       field_ids[idx],type_table[parent].name);
             exit(ERROR_MISSING_PARENT_FIELD_ID);
           }

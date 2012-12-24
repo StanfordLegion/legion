@@ -452,7 +452,12 @@ namespace LegionRuntime {
       }
       assert(mapped_event.has_triggered());
 #endif
-      return physical_instance.get_manager()->get_accessor();
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = 
+        physical_instance.get_manager()->get_accessor();
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(requirement.get_accessor_privilege());
+#endif
+      return result;
     }
     
     //--------------------------------------------------------------------------
@@ -468,7 +473,12 @@ namespace LegionRuntime {
       }
       assert(mapped_event.has_triggered());
 #endif
-      return physical_instance.get_manager()->get_field_accessor(fid);
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = 
+        physical_instance.get_manager()->get_field_accessor(fid);
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(requirement.get_accessor_privilege());
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2801,7 +2811,7 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
         physical_region_impls[idx] = new PhysicalRegionImpl(idx, regions[idx].region, 
-            (physical_instances[idx].is_virtual_ref() ? NULL : physical_instances[idx].get_manager()));
+            (physical_instances[idx].is_virtual_ref() ? NULL : physical_instances[idx].get_manager()), &(regions[idx]));
         physical_regions[idx] = PhysicalRegion(physical_region_impls[idx]);
 #ifdef LEGION_SPY
         if (!physical_instances[idx].is_virtual_ref())
@@ -3096,7 +3106,7 @@ namespace LegionRuntime {
           result += forest_ctx->compute_created_field_state_return(regions[idx].region,
                                new_fields, ctx_id/*should always be our context*/ 
 #ifdef DEBUG_HIGH_LEVEL
-                                , this->variants->name
+                                , this->variants->name, this->get_unique_id()
 #endif
                                 );
         }
@@ -3108,7 +3118,7 @@ namespace LegionRuntime {
         result += sizeof(*it); 
         result += forest_ctx->compute_created_state_return(*it, ctx_id
 #ifdef DEBUG_HIGH_LEVEL
-                                    , this->variants->name
+                                    , this->variants->name, this->get_unique_id()
 #endif
                                     );
       }
@@ -3170,6 +3180,7 @@ namespace LegionRuntime {
               forest_ctx->unpack_created_field_state_return(handle, phy_ctx, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                             , this->variants->name
+                                                            , this->get_unique_id()
 #endif
                                                             );
               break;
@@ -3187,6 +3198,7 @@ namespace LegionRuntime {
               forest_ctx->unpack_created_field_state_return(handle, outermost_ctx, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                             , this->variants->name
+                                                            , this->get_unique_id()
 #endif
                                                             );
               break;
@@ -3202,6 +3214,7 @@ namespace LegionRuntime {
           forest_ctx->unpack_created_state_return(handle, outermost_ctx, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                   , this->variants->name
+                                                  , this->get_unique_id()
 #endif
                                                   );
         }
@@ -4236,6 +4249,7 @@ namespace LegionRuntime {
                                               IS_WRITE(regions[idx]), RegionTreeForest::PHYSICAL 
 #ifdef DEBUG_HIGH_LEVEL
                                               , variants->name
+                                              , this->get_unique_id()
 #endif
                                               );
             }
@@ -4499,6 +4513,7 @@ namespace LegionRuntime {
                               get_enclosing_physical_context(idx), RegionTreeForest::PRIVILEGE, rez
 #ifdef DEBUG_HIGH_LEVEL
                               , idx, variants->name
+                              , this->get_unique_id()
 #endif
                               );
               }
@@ -4508,6 +4523,7 @@ namespace LegionRuntime {
                               get_enclosing_physical_context(idx), RegionTreeForest::DIFF, rez
 #ifdef DEBUG_HIGH_LEVEL
                               , idx, variants->name
+                              , this->get_unique_id()
 #endif
                               );
                 forest_ctx->pack_reference(physical_instances[idx], rez);
@@ -4525,6 +4541,7 @@ namespace LegionRuntime {
                             get_enclosing_physical_context(idx), RegionTreeForest::PRIVILEGE, rez
 #ifdef DEBUG_HIGH_LEVEL
                             , idx, variants->name
+                            , this->get_unique_id()
 #endif
                             );
           }
@@ -4587,7 +4604,7 @@ namespace LegionRuntime {
               // Unpack the state in our context
               forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::PRIVILEGE, derez
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, variants->name 
+                  , idx, variants->name, this->get_unique_id()
 #endif
                   ); 
               physical_instances.push_back(InstanceRef()); // virtual instance
@@ -4596,7 +4613,7 @@ namespace LegionRuntime {
             {
               forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::DIFF, derez
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, variants->name
+                  , idx, variants->name, this->get_unique_id()
 #endif
                   );
               physical_instances.push_back(forest_ctx->unpack_reference(derez)); 
@@ -4613,7 +4630,7 @@ namespace LegionRuntime {
           // Unpack the state in our context
           forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::PRIVILEGE, derez
 #ifdef DEBUG_HIGH_LEVEL
-              , idx, variants->name
+              , idx, variants->name, this->get_unique_id()
 #endif
               );
         }
@@ -4679,7 +4696,7 @@ namespace LegionRuntime {
               buffer_size += forest_ctx->compute_region_tree_state_return(regions[idx], idx, ctx_id, 
                                                 IS_WRITE(regions[idx]), RegionTreeForest::PRIVILEGE
 #ifdef DEBUG_HIGH_LEVEL
-                                                , variants->name
+                                                , variants->name, this->get_unique_id()
 #endif
                                                 );
             }
@@ -4689,7 +4706,7 @@ namespace LegionRuntime {
               buffer_size += forest_ctx->compute_region_tree_state_return(regions[idx], idx, ctx_id, 
                                                 IS_WRITE(regions[idx]), RegionTreeForest::DIFF
 #ifdef DEBUG_HIGH_LEVEL
-                                                , variants->name
+                                                , variants->name, this->get_unique_id()
 #endif
                                                 );
             }
@@ -4955,6 +4972,7 @@ namespace LegionRuntime {
                                                                   RegionTreeForest::PHYSICAL, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                                   , idx, variants->name
+                                                                  , this->get_unique_id()
 #endif
                                                                   ); 
         }
@@ -4989,6 +5007,7 @@ namespace LegionRuntime {
                                                                   RegionTreeForest::PRIVILEGE, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                                   , idx, variants->name
+                                                                  , this->get_unique_id()
 #endif
                                                                   );
         }
@@ -4998,6 +5017,7 @@ namespace LegionRuntime {
                                                                         RegionTreeForest::DIFF, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                                         , idx, variants->name
+                                                                        , this->get_unique_id()
 #endif
                                                                         );
         }
@@ -6640,7 +6660,7 @@ namespace LegionRuntime {
 #endif
         forest_ctx->unpack_region_tree_state_return(regions[idx], ctx, false/*overwrite*/, mode, derez
 #ifdef DEBUG_HIGH_LEVEL
-            , idx, variants->name
+            , idx, variants->name, this->get_unique_id()
 #endif
             );
       }
@@ -6663,6 +6683,7 @@ namespace LegionRuntime {
                                                         mode, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                         , idx, variants->name
+                                                        , this->get_unique_id()
 #endif
                                                         );
           }
@@ -6684,6 +6705,7 @@ namespace LegionRuntime {
                                                       mode, derez
 #ifdef DEBUG_HIGH_LEVEL
                                                       , idx, variants->name
+                                                      , this->get_unique_id()
 #endif
                                                       );
         }
@@ -7262,7 +7284,7 @@ namespace LegionRuntime {
                 forest_ctx->pack_region_tree_state(regions[idx],
                                 get_enclosing_physical_context(idx), RegionTreeForest::PRIVILEGE, rez
 #ifdef DEBUG_HIGH_LEVEL
-                                , idx, variants->name
+                                , idx, variants->name, this->get_unique_id()
 #endif
                                 );
               }
@@ -7271,7 +7293,7 @@ namespace LegionRuntime {
                 forest_ctx->pack_region_tree_state(regions[idx],
                                 get_enclosing_physical_context(idx), RegionTreeForest::DIFF, rez
 #ifdef DEBUG_HIGH_LEVEL
-                                , idx, variants->name
+                                , idx, variants->name, this->get_unique_id()
 #endif
                                 );
               }
@@ -7302,7 +7324,7 @@ namespace LegionRuntime {
               forest_ctx->pack_region_tree_state(regions[idx],
                               get_enclosing_physical_context(idx), RegionTreeForest::DIFF, rez
 #ifdef DEBUG_HIGH_LEVEL
-                              , idx, variants->name
+                              , idx, variants->name, this->get_unique_id()
 #endif
                               );
             }
@@ -7311,7 +7333,7 @@ namespace LegionRuntime {
               forest_ctx->pack_region_tree_state(regions[idx],
                               get_enclosing_physical_context(idx), RegionTreeForest::PRIVILEGE, rez
 #ifdef DEBUG_HIGH_LEVEL
-                              , idx, variants->name
+                              , idx, variants->name, this->get_unique_id()
 #endif
                               );
             }
@@ -7378,7 +7400,7 @@ namespace LegionRuntime {
               // Unpack the physical state in our context
               forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::PRIVILEGE, derez
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, variants->name
+                  , idx, variants->name, this->get_unique_id()
 #endif
                   );
             }
@@ -7386,7 +7408,7 @@ namespace LegionRuntime {
             {
               forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::DIFF, derez
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, variants->name
+                  , idx, variants->name, this->get_unique_id()
 #endif
                   );
             }
@@ -7409,9 +7431,9 @@ namespace LegionRuntime {
         derez.deserialize(num_premapped);
         for (unsigned idx = 0; idx < num_premapped; idx++)
         {
-          unsigned idx;
-          derez.deserialize(idx);
-          premapped_regions[idx] = forest_ctx->unpack_reference(derez);
+          unsigned region_idx;
+          derez.deserialize(region_idx);
+          premapped_regions[region_idx] = forest_ctx->unpack_reference(derez);
         }
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -7419,7 +7441,7 @@ namespace LegionRuntime {
           {
             forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::DIFF, derez
 #ifdef DEBUG_HIGH_LEVEL
-                , idx, variants->name
+                , idx, variants->name, this->get_unique_id()
 #endif
                 );
           }
@@ -7427,7 +7449,7 @@ namespace LegionRuntime {
           {
             forest_ctx->unpack_region_tree_state(regions[idx], ctx_id, RegionTreeForest::PRIVILEGE, derez
 #ifdef DEBUG_HIGH_LEVEL
-                , idx, variants->name
+                , idx, variants->name, this->get_unique_id()
 #endif
                 );
           }
@@ -7991,6 +8013,7 @@ namespace LegionRuntime {
                                                     false/*overwrite*/, mode
 #ifdef DEBUG_HIGH_LEVEL
                                                     , variants->name
+                                                    , this->get_unique_id()
 #endif
                                                     );
       }
@@ -8014,6 +8037,7 @@ namespace LegionRuntime {
                                                       true/*overwrite*/, mode
 #ifdef DEBUG_HIGH_LEVEL
                                                       , variants->name
+                                                      , this->get_unique_id()
 #endif
                                                       );
             }
@@ -8029,6 +8053,7 @@ namespace LegionRuntime {
                                                       false/*overwrite*/, mode
 #ifdef DEBUG_HIGH_LEVEL
                                                       , variants->name
+                                                      , this->get_unique_id()
 #endif
                                                       );
         }

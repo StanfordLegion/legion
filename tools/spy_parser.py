@@ -17,7 +17,7 @@
 
 #!/usr/bin/python
 
-from cent_state import *
+from spy_state import *
 import sys, re
 
 # All of these calls are based on the print statements in legion_logging.h

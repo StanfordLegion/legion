@@ -1054,11 +1054,11 @@ namespace LegionRuntime {
       PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term);
       RegionNode *top_node = get_node(start_region);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, true/*premap*/, rm.sanitizing, false/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), top_node, rm.ctx, true/*premap*/, rm.sanitizing, false/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
       top_node->register_physical_region(user, rm);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, top_node, rm.ctx, false/*premap*/, rm.sanitizing, false/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), top_node, rm.ctx, false/*premap*/, rm.sanitizing, false/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
     }
 
@@ -1077,12 +1077,12 @@ namespace LegionRuntime {
       closer.add_upper_target(ref.view->as_instance_view());
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.upper_targets.back()->logical_region == close_node);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
       close_node->issue_final_close_operation(rm.ctx, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
       // Now get the event for when the close is done
       return ref.view->as_instance_view()->get_valid_event(field_mask);
@@ -1103,12 +1103,12 @@ namespace LegionRuntime {
       ReductionCloser closer(user, rm, close_node, ref.view->as_reduction_view());
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.target->logical_region == close_node);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
       close_node->issue_final_close_operation(rm.ctx, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
-      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, field_mask);
+      TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
       return ref.view->as_reduction_view()->get_valid_event(field_mask);
     }
@@ -1533,6 +1533,7 @@ namespace LegionRuntime {
                                                   SendingMode mode, Serializer &rez
 #ifdef DEBUG_HIGH_LEVEL
                                                   , unsigned idx, const char *task_name
+                                                  , unsigned uid
 #endif
                                                   )
     //--------------------------------------------------------------------------
@@ -1550,7 +1551,7 @@ namespace LegionRuntime {
       {
         RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/, packing_mask);
+        TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, true/*pack*/, true/*send*/, packing_mask, packing_mask);
 #endif
         top_node->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, true/*recurse*/);
       }
@@ -1558,7 +1559,7 @@ namespace LegionRuntime {
       {
         PartitionNode *top_node = get_node(req.partition);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, true/*send*/, packing_mask);
+        TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, true/*pack*/, true/*send*/, packing_mask, packing_mask);
 #endif
         top_node->parent->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, false/*recurse*/);
         top_node->pack_physical_state(ctx, packing_mask, rez, false/*invalidate views*/, true/*recurse*/);
@@ -1596,6 +1597,7 @@ namespace LegionRuntime {
     void RegionTreeForest::unpack_region_tree_state(const RegionRequirement &req, ContextID ctx, SendingMode mode, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
                                                     , unsigned idx, const char *task_name
+                                                    , unsigned uid
 #endif
         )
     //--------------------------------------------------------------------------
@@ -1613,7 +1615,7 @@ namespace LegionRuntime {
         top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, true/*top*/);
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, false/*pack*/, true/*send*/, unpacking_mask);
+        TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, false/*pack*/, true/*send*/, unpacking_mask, unpacking_mask);
 #endif
       }
       else
@@ -1623,7 +1625,7 @@ namespace LegionRuntime {
         top_node->parent->unpack_physical_state(ctx, derez, false/*recurse*/);
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node->parent, ctx, false/*pack*/, true/*send*/, unpacking_mask);
+        TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node->parent, ctx, false/*pack*/, true/*send*/, unpacking_mask, unpacking_mask);
 #endif
       }
     }
@@ -2005,6 +2007,7 @@ namespace LegionRuntime {
                                                               ContextID ctx, bool overwrite, SendingMode mode
 #ifdef DEBUG_HIGH_LEVEL
                                                               , const char *task_name
+                                                              , unsigned uid
 #endif
                                                               )
     //--------------------------------------------------------------------------
@@ -2035,7 +2038,7 @@ namespace LegionRuntime {
           (*it)->find_views_from(req.region, unique_views, ordered_views, packing_mask);
         }
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/, packing_mask);
+        TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, true/*pack*/, false/*send*/, packing_mask, packing_mask);
 #endif
       }
       else
@@ -2051,7 +2054,7 @@ namespace LegionRuntime {
         {
           RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
-          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*send*/, packing_mask);
+          TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, true/*pack*/, false/*send*/, packing_mask, packing_mask);
 #endif
           std::set<InstanceManager*> needed_managers;
           result += top_node->compute_diff_state_size(ctx, packing_mask,
@@ -2068,7 +2071,7 @@ namespace LegionRuntime {
         {
           PartitionNode *top_node = get_node(req.partition);
 #ifdef DEBUG_HIGH_LEVEL
-          TreeStateLogger::capture_state(runtime, idx, task_name, top_node, ctx, true/*pack*/, false/*return*/, packing_mask);
+          TreeStateLogger::capture_state(runtime, idx, task_name, uid, top_node, ctx, true/*pack*/, false/*return*/, packing_mask, packing_mask);
 #endif
           std::set<InstanceManager*> needed_managers;
           result += top_node->compute_diff_state_size(ctx, packing_mask,
@@ -2501,7 +2504,7 @@ namespace LegionRuntime {
     void RegionTreeForest::unpack_region_tree_state_return(const RegionRequirement &req, ContextID ctx,
                                                             bool overwrite, SendingMode mode, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
-                                                            , unsigned ridx, const char *task_name
+                                                            , unsigned ridx, const char *task_name, unsigned uid
 #endif
                                                             )
     //--------------------------------------------------------------------------
@@ -2523,7 +2526,7 @@ namespace LegionRuntime {
         top_node->initialize_physical_context(ctx, true/*clear*/, unpacking_mask, top_node->is_top_of_context(ctx));
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/); 
 #ifdef DEBUG_HIGH_LEVEL
-        TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
+        TreeStateLogger::capture_state(runtime, ridx, task_name, uid, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask, unpacking_mask);
 #endif
         // We also need to update the field states of the parent
         // partition so that it knows that this region is open
@@ -2558,12 +2561,12 @@ namespace LegionRuntime {
         if (req.handle_type == SINGULAR)
         {
           RegionNode *top_node = get_node(req.region);
-          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
+          TreeStateLogger::capture_state(runtime, ridx, task_name, uid, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask, unpacking_mask);
         }
         else
         {
           PartitionNode *top_node = get_node(req.partition);
-          TreeStateLogger::capture_state(runtime, ridx, task_name, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask);
+          TreeStateLogger::capture_state(runtime, ridx, task_name, uid, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask, unpacking_mask);
         }
 #endif
       }
@@ -2614,7 +2617,7 @@ namespace LegionRuntime {
     size_t RegionTreeForest::compute_created_field_state_return(LogicalRegion handle,
               const std::vector<FieldID> &packing_fields, ContextID ctx
 #ifdef DEBUG_HIGH_LEVEL
-              , const char *task_name
+              , const char *task_name, unsigned uid
 #endif
               )
     //--------------------------------------------------------------------------
@@ -2640,7 +2643,7 @@ namespace LegionRuntime {
         (*it)->find_views_from(handle, unique_views, ordered_views, packing_mask);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask);
+      TreeStateLogger::capture_state(runtime, handle, task_name, uid, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask, packing_mask);
 #endif
       return result;
     }
@@ -2666,7 +2669,7 @@ namespace LegionRuntime {
     void RegionTreeForest::unpack_created_field_state_return(LogicalRegion handle,
                       ContextID ctx, Deserializer &derez 
 #ifdef DEBUG_HIGH_LEVEL
-                      , const char *task_name
+                      , const char *task_name, unsigned uid
 #endif
                       )
     //--------------------------------------------------------------------------
@@ -2697,7 +2700,7 @@ namespace LegionRuntime {
       // Finally we can do the unpack operation
       top_node->unpack_physical_state(ctx, derez, true/*recurse*/, shift);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, shift, unpacking_mask);
+      TreeStateLogger::capture_state(runtime, handle, task_name, uid, top_node, ctx, false/*pack*/, shift, unpacking_mask, unpacking_mask);
 #endif
     }
     
@@ -2705,6 +2708,7 @@ namespace LegionRuntime {
     size_t RegionTreeForest::compute_created_state_return(LogicalRegion handle, ContextID ctx
 #ifdef DEBUG_HIGH_LEVEL
                                                           , const char *task_name
+                                                          , unsigned uid
 #endif
                                                           )
     //--------------------------------------------------------------------------
@@ -2728,7 +2732,7 @@ namespace LegionRuntime {
                                         field_node->created_fields.end());
         result += compute_created_field_state_return(handle, new_fields, ctx
 #ifdef DEBUG_HIGH_LEVEL
-                                                      , task_name
+                                                      , task_name, uid
 #endif
                                                     );
         packing_mask -= field_node->get_created_field_mask();
@@ -2749,7 +2753,7 @@ namespace LegionRuntime {
         (*it)->find_views_from(handle, unique_views, ordered_views, packing_mask);
       }
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask);
+      TreeStateLogger::capture_state(runtime, handle, task_name, uid, top_node, ctx, true/*pack*/, 0/*shift*/, packing_mask, packing_mask);
 #endif
       return result;
     }
@@ -2787,6 +2791,7 @@ namespace LegionRuntime {
     void RegionTreeForest::unpack_created_state_return(LogicalRegion handle, ContextID ctx, Deserializer &derez
 #ifdef DEBUG_HIGH_LEVEL
                                                       , const char *task_name
+                                                      , unsigned uid
 #endif
                                                       )
     //--------------------------------------------------------------------------
@@ -2807,7 +2812,7 @@ namespace LegionRuntime {
       {
         unpack_created_field_state_return(handle, ctx, derez
 #ifdef DEBUG_HIGH_LEVEL
-                                          , task_name
+                                          , task_name, uid
 #endif
                                           );
         // Unpack the mask for the remaining fields
@@ -2817,7 +2822,7 @@ namespace LegionRuntime {
         return;
       top_node->unpack_physical_state(ctx, derez, true/*recurse*/);
 #ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, handle, task_name, top_node, ctx, false/*pack*/, 0/*shift*/, unpacking_mask);
+      TreeStateLogger::capture_state(runtime, handle, task_name, uid, top_node, ctx, false/*pack*/, 0/*shift*/, unpacking_mask, unpacking_mask);
 #endif
     }
 
@@ -4927,7 +4932,6 @@ namespace LegionRuntime {
           it++;
           continue;
         }
-        FieldMask overlap = it->valid_fields & current_mask;
         // Now check the state 
         switch (it->open_state)
         {
@@ -7505,7 +7509,15 @@ namespace LegionRuntime {
         }
         // Valid Views
         {
-          logger->log("Valid Instances (%ld)", state.valid_views.size());
+          unsigned num_valid = 0;
+          for (std::map<InstanceView*,FieldMask>::const_iterator it = state.valid_views.begin(); 
+                it != state.valid_views.end(); it++)
+          {
+            if (it->second * capture_mask)
+              continue;
+            num_valid++;
+          }
+          logger->log("Valid Instances (%d)", num_valid);
           logger->down();
           for (std::map<InstanceView*,FieldMask>::const_iterator it = state.valid_views.begin();
                 it != state.valid_views.end(); it++)
@@ -7522,7 +7534,15 @@ namespace LegionRuntime {
         }
         // Valid Reduction Views
         {
-          logger->log("Valid Reduction Instances (%ld)", state.reduction_views.size());
+          unsigned num_valid = 0;
+          for (std::map<ReductionView*,FieldMask>::const_iterator it = state.reduction_views.begin();
+                it != state.reduction_views.end(); it++)
+          {
+            if (it->second * capture_mask)
+              continue;
+            num_valid++;
+          }
+          logger->log("Valid Reduction Instances (%d)", num_valid);
           logger->down();
           for (std::map<ReductionView*,FieldMask>::const_iterator it = state.reduction_views.begin();
                 it != state.reduction_views.end(); it++)

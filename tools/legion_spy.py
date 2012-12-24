@@ -21,8 +21,8 @@ import subprocess
 import sys, os, shutil
 import string
 from getopt import getopt
-from cent_parse import parse_log_file
-from cent_state import *
+from spy_parser import parse_log_file
+from spy_state import *
 
 temp_dir = ".cent/"
 
@@ -81,6 +81,8 @@ def main():
     if print_instances:
         print "Printing instance graphs..."
         state.print_instance_graphs(temp_dir)
+    if verbose:
+        state.print_instances()
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
