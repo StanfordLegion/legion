@@ -1992,9 +1992,8 @@ class State(object):
                 while inode2.depth > inode1.depth:
                     inode2 = inode2.parent
         assert inode1.depth == inode2.depth
-        # Handle the easy cases
-        # If one was a subregion of the other, they are definitely aliased
-        if (inode1 is orig1) or (inode1 is orig2):
+        # Handle the case where one is a subset of the other
+        if (inode1 is orig2) or (inode2 is orig1):
             return True
         # Now walk backwards up the tree in sync until either we either
         # find a common ancestor or we run out of parents in which case
@@ -2005,10 +2004,10 @@ class State(object):
             if inode2.parent == None:
                 return False
             inode1 = inode1.parent
-            inode2 = indoe2.parent
+            inode2 = inode2.parent
         assert inode1 is inode2
         # Least common ancestor is a region, so they came from different
-        # partitions and are therefore disjoint
+        # partitions and are therefore not disjoint
         # TODO: handle when partitions are computed to be disjoint
         if inode1.is_region():
             return True

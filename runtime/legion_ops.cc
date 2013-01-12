@@ -476,6 +476,7 @@ namespace LegionRuntime {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = 
         physical_instance.get_manager()->get_field_accessor(fid);
 #ifdef PRIVILEGE_CHECKS
+      assert(requirement.has_field_privilege(fid));
       result.set_privileges_untyped(requirement.get_accessor_privilege());
 #endif
       return result;

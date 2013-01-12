@@ -2536,7 +2536,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(top_node->parent->physical_states.find(ctx) != top_node->parent->physical_states.end());
 #endif
-          top_node->merge_new_field_state(top_node->parent->physical_states[ctx], new_state, true/*add state*/);
+          top_node->parent->upgrade_new_field_state(top_node->parent->physical_states[ctx], new_state, true/*add state*/);
         }
       }
       else
@@ -4810,6 +4810,9 @@ namespace LegionRuntime {
 
       if (add_state)
         gstate.added_states.push_back(new_state);
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_field_states(gstate);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4822,35 +4825,101 @@ namespace LegionRuntime {
         const FieldState &next = new_states[idx];
         merge_new_field_state(gstate, next, add_states);        
       }
-#if 0
-      // Actually this is no longer a valid check since children can be
-      // open in different modes if they are disjoint even if they're
-      // both using the same field.
 #ifdef DEBUG_HIGH_LEVEL
-      if (gstate.field_states.size() > 1)
-      {
-        // Each field should appear in at most one of these states
-        // at any point in time
-        FieldMask previous;
-        for (std::list<FieldState>::const_iterator it = gstate.field_states.begin();
-              it != gstate.field_states.end(); it++)
-        {
-          assert(!(previous & it->valid_fields));
-          previous |= it->valid_fields;
-        }
-      }
-#endif
+      sanity_check_field_states(gstate);
 #endif
     }
 
     //--------------------------------------------------------------------------
-    FieldMask RegionTreeNode::perform_close_operations(TreeCloser &closer,
-        const FieldMask &closing_mask, FieldState &state, 
-        bool allow_same_child, bool upgrade, bool &close_successful, int next_child/*= -1*/)
+    void RegionTreeNode::upgrade_new_field_state(GenericState &gstate,
+                                                 const FieldState &new_state, bool add_state)
+    //--------------------------------------------------------------------------
+    {
+      // First go through and remove any FieldStates that are being upgraded  
+      for (std::list<FieldState>::iterator it = gstate.field_states.begin();
+            it != gstate.field_states.end(); /*nothing*/)
+      {
+        // See if the new_state overlaps or is still valid after upgrading
+        if (it->overlap(new_state) || it->upgrade(new_state))
+          it++; // still valid
+        else
+          it = gstate.field_states.erase(it); // otherwise remove it
+      }
+      // now do the merge 
+      merge_new_field_state(gstate, new_state, add_state);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::sanity_check_field_states(const GenericState &gstate) 
+    //--------------------------------------------------------------------------
+    {
+      // For every child and every field, it should only be open one in one mode
+      std::map<Color,FieldMask> previous_children;
+      for (std::list<FieldState>::const_iterator fit = gstate.field_states.begin();
+            fit != gstate.field_states.end(); fit++)
+      {
+        FieldMask actually_valid;
+        for (std::map<Color,FieldMask>::const_iterator it = fit->open_children.begin();
+              it != fit->open_children.end(); it++)
+        {
+          actually_valid |= it->second;
+          if (previous_children.find(it->first) == previous_children.end())
+          {
+            previous_children[it->first] = it->second;
+          }
+          else
+          {
+            FieldMask &previous = previous_children[it->first];
+            assert(!(previous& it->second));
+            previous |= it->second;
+          }
+        }
+        // Valid fields should line up
+        assert(actually_valid == fit->valid_fields);
+      }
+      // Also check that for each field it is either only open in one mode
+      // or two children in different modes are disjoint
+      for (std::list<FieldState>::const_iterator it1 = gstate.field_states.begin();
+            it1 != gstate.field_states.end(); it1++)
+      {
+        for (std::list<FieldState>::const_iterator it2 = gstate.field_states.begin();
+              it2 != gstate.field_states.end(); it2++)
+        {
+          if (it1 == it2) // No need to do comparisons if they are the same field state
+            continue;
+          const FieldState &f1 = *it1;
+          const FieldState &f2 = *it2;
+          for (std::map<Color,FieldMask>::const_iterator cit1 = f1.open_children.begin();
+                cit1 != f1.open_children.end(); cit1++)
+          {
+            for (std::map<Color,FieldMask>::const_iterator cit2 = f2.open_children.begin();
+                  cit2 != f2.open_children.end(); cit2++)
+            {
+              
+              // Disjointness check on fields
+              if (cit1->second * cit2->second)
+                continue;
+              Color c1 = cit1->first;
+              Color c2 = cit2->first;
+              // Some aliasing in the fields, so do the check for child disjointness
+              assert(c1 != c2);
+              assert(are_children_disjoint(c1, c2));
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeNode::perform_close_operations(TreeCloser &closer,
+        const GenericUser &user, const FieldMask &closing_mask, FieldState &state,
+        int next_child, bool allow_next_child, bool upgrade_next_child, bool permit_leave_open,
+        std::vector<FieldState> &new_states, FieldMask &already_open)
     //--------------------------------------------------------------------------
     {
       std::vector<Color> to_delete;
-      FieldMask already_open;
+      bool success = true;
+      bool leave_open = permit_leave_open ? closer.leave_children_open() : false;
       // Go through and close all the children which we overlap with
       // and aren't the next child that we're going to use
       for (std::map<Color,FieldMask>::iterator it = state.open_children.begin();
@@ -4862,11 +4931,11 @@ namespace LegionRuntime {
         // Check for same child, only allow upgrades in some cases
         // such as read-only -> exclusive.  This is calling context
         // sensitive hence the parameter.
-        if (allow_same_child && (next_child >= 0) && (next_child == int(it->first)))
+        if (allow_next_child && (next_child >= 0) && (next_child == int(it->first)))
         {
           FieldMask open_users = it->second & closing_mask;
           already_open |= open_users;
-          if (upgrade)
+          if (upgrade_next_child)
           {
             it->second -= open_users;
             if (!it->second)
@@ -4883,7 +4952,7 @@ namespace LegionRuntime {
         // Check to see if the closer is ready to do the close
         if (!closer.closing_state(state))
         {
-          close_successful = false;
+          success = false;
           break;
         }
         closer.close_tree_node(child_node, close_mask);
@@ -4891,6 +4960,14 @@ namespace LegionRuntime {
         it->second -= close_mask;
         if (!it->second)
           to_delete.push_back(it->first);
+        // If we're allowed to leave this open, add a new state for the current user
+        if (leave_open)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(IS_READ_ONLY(user.usage)); // user should be read-only if we're leaving open
+#endif
+          new_states.push_back(FieldState(user, close_mask, it->first));
+        }
       }
       // Remove the children that can be deleted
       for (std::vector<Color>::const_iterator it = to_delete.begin();
@@ -4907,9 +4984,8 @@ namespace LegionRuntime {
       }
       state.valid_fields = next_valid;
 
-      // Return a FieldState with the new children and its field mask
-      close_successful = true;
-      return already_open;
+      // Return if the close operation was a success
+      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -4956,12 +5032,12 @@ namespace LegionRuntime {
                 // Close up all the open partitions except the one
                 // we want to go down, make a new state to be added
                 // containing the fields that are still open
-                bool success = true;
                 // We need an upgrade if we're transitioning from read-only to some kind of write
                 bool needs_upgrade = HAS_WRITE(user.usage);
-                FieldMask already_open = perform_close_operations(closer, 
-                                                  current_mask, *it, true/*allow same child*/,
-                                                  needs_upgrade, success, next_child);
+                FieldMask already_open;
+                bool success = perform_close_operations(closer, user, current_mask, *it,
+                                                        next_child, true/*allow next child*/, needs_upgrade, 
+                                                        false/*permit leave open*/, new_states, already_open);
                 if (!success) // make sure the close worked
                   return false;
                 // Update the open mask
@@ -4979,10 +5055,10 @@ namespace LegionRuntime {
           case OPEN_READ_WRITE:
             {
               // Close up any open partitions that conflict with ours
-              bool success = true;
-              FieldMask already_open = perform_close_operations(closer,
-                                                current_mask, *it, true/*allow same child*/,
-                                                false/*needs upgrade*/, success, next_child);
+              FieldMask already_open;
+              bool success = perform_close_operations(closer, user, current_mask, *it,
+                                                      next_child, true/*allow same child*/, false/*needs upgrade*/, 
+                                                      IS_READ_ONLY(user.usage)/*permit leave open*/, new_states, already_open);
               if (!success)
                 return false;
               // Update the open mask
@@ -5051,10 +5127,10 @@ namespace LegionRuntime {
                 }
                 else
                 {
-                  bool success = true; 
-                  FieldMask already_open = perform_close_operations(closer,
-                                                current_mask, *it, true/*allow same child*/,
-                                                true/*needs upgrade*/, success, next_child);
+                  FieldMask already_open;
+                  bool success = perform_close_operations(closer, user, current_mask, *it,
+                                                          next_child, true/*allow same child*/, true/*needs upgrade*/,
+                                                          false/*permit leave open*/, new_states, already_open);
                   if (!success)
                     return false;
                   open_mask -= already_open;
@@ -5074,10 +5150,10 @@ namespace LegionRuntime {
               else
               {
                 // Close up all the open children
-                bool success = true; 
-                FieldMask already_open = perform_close_operations(closer, 
-                                                current_mask, *it, true/*allow same child*/,
-                                                false/*needs upgrade*/, success, next_child);
+                FieldMask already_open;
+                bool success = perform_close_operations(closer, user, current_mask, *it,
+                                                        next_child, true/*allow same child*/, false/*needs upgrade*/,
+                                                        false/*permit leave open*/, new_states, already_open);
                 if (!success)
                   return false;
                 open_mask -= already_open;
@@ -5108,9 +5184,13 @@ namespace LegionRuntime {
               {
                 // Need to close up the open fields since we're going to have to do
                 // an open anyway
-                bool success = true;
-                perform_close_operations(closer, current_mask, *it, 
-                      false/*allow same child*/, false/*needs upgrade*/, success, next_child);
+                FieldMask already_open;
+                bool success = perform_close_operations(closer, user, current_mask, *it, 
+                                                        next_child, false/*allow same child*/, false/*needs upgrade*/,
+                                                        false/*permit leave open*/, new_states, already_open);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(!already_open); // should never have any fields that are already open
+#endif
                 if (!success)
                   return false;
                 if (!(it->still_valid()))
@@ -5207,6 +5287,22 @@ namespace LegionRuntime {
           open_children[it->first] |= it->second;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeNode::FieldState::upgrade(const FieldState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Quick disjointness test to see if we even need to do anything
+      if (valid_fields * rhs.valid_fields)
+        return true;
+#ifdef DEBUG_HIGH_LEVEL
+      // This is the only kind of upgrade that we currently support
+      assert((this->open_state == OPEN_READ_ONLY) && (rhs.open_state == OPEN_READ_WRITE));
+#endif
+      // Clean out the fields for which rhs is valid
+      clear(rhs.valid_fields);
+      return (!!valid_fields); // return whether we still have valid fields
     }
 
     //--------------------------------------------------------------------------
@@ -5926,6 +6022,8 @@ namespace LegionRuntime {
 
       if (!closer.leave_open)
         invalidate_instance_views(closer.rm.ctx, closing_mask, true/*clean*/);
+      else // Still clean out the dirty bits since we copied everything back
+        state.dirty_mask -= closing_mask; 
 
       closer.post_region();
     }
@@ -7213,7 +7311,9 @@ namespace LegionRuntime {
         physical_states[ctx] = PhysicalState();
       PhysicalState &state = physical_states[ctx];
       // Unpack the dirty mask and the valid instances
-      derez.deserialize(state.dirty_mask);
+      FieldMask update_dirty_mask;
+      derez.deserialize(update_dirty_mask);
+      state.dirty_mask |= update_dirty_mask;
       size_t num_valid_views;
       derez.deserialize(num_valid_views);
       for (unsigned idx = 0; idx < num_valid_views; idx++)
@@ -7591,7 +7691,8 @@ namespace LegionRuntime {
       for (std::map<Color,FieldMask>::const_iterator it = to_traverse.begin();
             it != to_traverse.end(); it++)
       {
-        color_map[it->first]->print_physical_context(ctx, logger, it->second);
+        if (color_map.find(it->first) != color_map.end())
+          color_map[it->first]->print_physical_context(ctx, logger, it->second);
       }
 
       logger->up();
@@ -8385,7 +8486,8 @@ namespace LegionRuntime {
       for (std::map<Color,FieldMask>::const_iterator it = to_traverse.begin();
             it != to_traverse.end(); it++)
       {
-        color_map[it->first]->print_physical_context(ctx, logger, it->second);
+        if (color_map.find(it->first) != color_map.end())
+          color_map[it->first]->print_physical_context(ctx, logger, it->second);
       }
 
       logger->up();
@@ -12437,6 +12539,14 @@ namespace LegionRuntime {
       node->close_logical_tree(*this, closing_mask);
     }
 
+    //--------------------------------------------------------------------------
+    bool LogicalCloser::leave_children_open(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Never leave anything open when doing a logical close
+      return false;
+    }
+
     /////////////////////////////////////////////////////////////
     // Physical Closer 
     /////////////////////////////////////////////////////////////
@@ -12611,6 +12721,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalCloser::leave_children_open(void) const
+    //--------------------------------------------------------------------------
+    {
+      return leave_open;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalCloser::pre_region(Color region_color)
     //--------------------------------------------------------------------------
     {
@@ -12715,6 +12832,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       node->close_reduction_tree(*this, closing_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReductionCloser::leave_children_open(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Never leave children open when doing a reduction close
+      return false;
     }
 
     /////////////////////////////////////////////////////////////

@@ -501,9 +501,10 @@ namespace LegionRuntime {
       bool operator==(const RegionRequirement &req) const;
       bool operator<(const RegionRequirement &req) const;
       RegionRequirement& operator=(const RegionRequirement &rhs);
-#ifdef CHECK_PRIVILEGES
+#ifdef PRIVILEGE_CHECKS 
     public:
       AccessorPrivilege get_accessor_privilege(void) const;
+      bool has_field_privilege(FieldID fid) const;
 #endif
     protected:
       friend class Task;

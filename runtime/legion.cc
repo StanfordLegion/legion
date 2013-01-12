@@ -1092,7 +1092,7 @@ namespace LegionRuntime {
       derez.deserialize(this->inst_type);
     }
 
-#ifdef CHECK_PRIVILEGES
+#ifdef PRIVILEGE_CHECKS 
     //--------------------------------------------------------------------------
     AccessorPrivilege RegionRequirement::get_accessor_privilege(void) const
     //--------------------------------------------------------------------------
@@ -1113,6 +1113,13 @@ namespace LegionRuntime {
           assert(false);
       }
       return ACCESSOR_NONE;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRequirement::has_field_privilege(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return (privilege_fields.find(fid) != privilege_fields.end());
     }
 #endif
 
@@ -1665,6 +1672,7 @@ namespace LegionRuntime {
     {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = manager->get_field_accessor(fid);
 #ifdef PRIVILEGE_CHECKS
+      assert(req->has_field_privilege(fid));
       result.set_privileges_untyped(req->get_accessor_privilege());
 #endif
       return result;

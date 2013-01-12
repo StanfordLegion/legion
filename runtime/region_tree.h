@@ -562,6 +562,7 @@ namespace LegionRuntime {
         bool still_valid(void) const;
         bool overlap(const FieldState &rhs) const;
         void merge(const FieldState &rhs);
+        bool upgrade(const FieldState &rhs);
         void clear(const FieldMask &init_mask);
       public:
         size_t compute_state_size(const FieldMask &pack_mask) const;
@@ -613,17 +614,41 @@ namespace LegionRuntime {
       virtual void close_reduction_tree(ReductionCloser &closer, const FieldMask &closing_mask) = 0;
     protected:
       // Generic operations on the region tree
-      bool siphon_open_children(TreeCloser &closer, GenericState &state, 
-            const GenericUser &user, const FieldMask &current_mask, int next_child = -1);
-      FieldMask perform_close_operations(TreeCloser &closer,  
-                    const FieldMask &closing_mask, FieldState &state, 
-                    bool allow_same_child, bool upgrade, bool &close_successful, int next_child=-1);
+      //**********************************************************************//
+      // HEY YOU! (out there in the cold) YES YOU!
+      // PAY ATTENTION RIGHT HERE!!!!!!!!!!!!!!!!!
+      // These are the two most important functions in all of Legion!
+      // During both logical and physical traversals, for every node that is visited
+      // siphon_open_children is invoked to close up any open children that must be
+      // closed before the traversal can continue.  To perform the close operation
+      // on a FieldState, perform_close_operations is invoked.
+      //**********************************************************************//
+      bool siphon_open_children(TreeCloser &closer, // Closer that will perform any close operations
+                                GenericState &state, // The state of the RegionTreeNode
+                                const GenericUser &user, // The user for which we are traversing
+                                const FieldMask &current_mask, // The local field mask for which we are traversing
+                                int next_child = -1); // The next child we are going to traverse (if any)
+      bool perform_close_operations(TreeCloser &closer, // Closer for performing close operations
+                                    const GenericUser &user, // The user for which we are performing the close
+                                    const FieldMask &closing_mask, // The field mask for the close operation
+                                    FieldState &state, // The field state we are closing
+                                    int next_child, // The next child we are traversing (or -1 if none)
+                                    bool allow_next_child, // Are we allowed to keep the state open if it is the same child
+                                    bool upgrade_next_child, // Whether or not the same child will need to upgrade its state
+                                    bool permit_leave_open, // Whether or not we are allowed to leave this state open
+                                    std::vector<FieldState> &new_states, // Append downgraded states to the set of new states
+                                    FieldMask &already_open); // return set of fields which are already open for the next_child
     protected:
       // Logical region helper functions
       FieldMask perform_dependence_checks(const LogicalUser &user, 
                     const std::list<LogicalUser> &users, const FieldMask &user_mask, bool closing_partition = false);
+      // This will merge the new state in with existing states 
       void merge_new_field_state(GenericState &gstate, const FieldState &new_state, bool add_state);
       void merge_new_field_states(GenericState &gstate, std::vector<FieldState> &new_states, bool add_states);
+      // This will upgrade all the fields to the new state, checking that upgrades are safe
+      void upgrade_new_field_state(GenericState &gstate, const FieldState &new_state, bool add_state);
+      void sanity_check_field_states(const GenericState &gstate);
+    protected:
       virtual bool are_children_disjoint(Color c1, Color c2) = 0;
       virtual bool are_closing_partition(void) const = 0;
       virtual RegionTreeNode* get_tree_child(Color c) = 0;
@@ -1548,6 +1573,7 @@ namespace LegionRuntime {
       virtual void post_siphon(void) = 0; 
       virtual bool closing_state(const RegionTreeNode::FieldState &state) = 0;
       virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask) = 0;
+      virtual bool leave_children_open(void) const = 0;
     };
 
     /////////////////////////////////////////////////////////////
@@ -1561,6 +1587,7 @@ namespace LegionRuntime {
       virtual void post_siphon(void);
       virtual bool closing_state(const RegionTreeNode::FieldState &state);
       virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
+      virtual bool leave_children_open(void) const;
     public:
       const LogicalUser &user;
       ContextID ctx;
@@ -1587,6 +1614,7 @@ namespace LegionRuntime {
       virtual void post_siphon(void);
       virtual bool closing_state(const RegionTreeNode::FieldState &state);
       virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
+      virtual bool leave_children_open(void) const;
     public:
       void pre_region(Color region_color);
       void post_region(void);
@@ -1625,6 +1653,7 @@ namespace LegionRuntime {
       virtual void post_siphon(void);
       virtual bool closing_state(const RegionTreeNode::FieldState &state);
       virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
+      virtual bool leave_children_open(void) const;
     public:
       const PhysicalUser &user;
       RegionMapper &rm;
