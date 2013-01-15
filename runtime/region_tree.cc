@@ -4870,7 +4870,7 @@ namespace LegionRuntime {
           else
           {
             FieldMask &previous = previous_children[it->first];
-            assert(!(previous& it->second));
+            assert(!(previous & it->second));
             previous |= it->second;
           }
         }
@@ -5267,7 +5267,19 @@ namespace LegionRuntime {
     bool RegionTreeNode::FieldState::overlap(const FieldState &rhs) const
     //--------------------------------------------------------------------------
     {
-      return ((open_state == rhs.open_state) && (redop == rhs.redop));
+      if (redop != rhs.redop)
+        return false;
+      if (redop == 0)
+        return (open_state == rhs.open_state);
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert((open_state == OPEN_SINGLE_REDUCE) || (open_state == OPEN_MULTI_REDUCE));
+        assert((rhs.open_state == OPEN_SINGLE_REDUCE) || (rhs.open_state == OPEN_MULTI_REDUCE));
+#endif
+        // Handle the case where we need to merge reduction modes
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5286,6 +5298,20 @@ namespace LegionRuntime {
         {
           open_children[it->first] |= it->second;
         }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(redop == rhs.redop);
+#endif
+      if (redop > 0)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!open_children.empty());
+#endif
+        // For reductions, handle the case where we need to merge reduction modes
+        if (open_children.size() == 1)
+          open_state = OPEN_SINGLE_REDUCE;
+        else
+          open_state = OPEN_MULTI_REDUCE;
       }
     }
 
@@ -7334,7 +7360,9 @@ namespace LegionRuntime {
           state.valid_views[new_view] |= valid_mask;
       }
       // Unpack the reduction mask and the valid reduction instances
-      derez.deserialize(state.reduction_mask);
+      FieldMask update_reduction_mask;
+      derez.deserialize(update_reduction_mask);
+      state.reduction_mask |= update_reduction_mask;
       size_t num_reduc_views;
       derez.deserialize(num_reduc_views);
       for (unsigned idx = 0; idx < num_reduc_views; idx++)

@@ -722,7 +722,7 @@ namespace LegionRuntime {
 	  Typed(void *_base) : Untyped(_base) {}
 
 #ifdef PRIVILEGE_CHECKS
-          inline void set_privilege(AccessorPrivilege p) 
+          inline void set_privileges(AccessorPrivilege p) 
           { 
             assert((p == ACCESSOR_NONE) || (p == ACCESSOR_REDUCE));
             this->priv = p; 

@@ -224,6 +224,22 @@ namespace LegionRuntime {
       {
         log_spy(LEVEL_INFO, "Mapping Instance User %d %d", uid, manager_id);
       }
+
+      // Logger calls for timing information
+      static inline void log_task_execution_information(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned proc_id)
+      {
+        log_spy(LEVEL_INFO, "Execution Information %d %d %d %d %d", uid, ctx, gen, hid, proc_id); 
+      }
+
+      static inline void log_task_begin_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long start_time)
+      {
+        log_spy(LEVEL_INFO, "Begin Task Timing %d %d %d %d %ld", uid, ctx, gen, hid, start_time);
+      }
+
+      static inline void log_task_end_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long end_time)
+      {
+        log_spy(LEVEL_INFO, "End Task Timing %d %d %d %d %ld", uid, ctx, gen, hid, end_time);
+      }
     };
 
     class TreeStateLogger {

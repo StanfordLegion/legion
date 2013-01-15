@@ -20,6 +20,7 @@
 import subprocess
 import string
 import sys
+from spy_timeline import TimeLine
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
@@ -97,6 +98,7 @@ class Processor(object):
         self.kind = kind
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
+        self.executed_tasks = list()
         util.add_constituent(self)
 
     def add_memory(self, mem, bandwidth, latency):
@@ -105,6 +107,46 @@ class Processor(object):
         self.mem_latency[mem] = latency
         self.mem_bandwidth[mem] = bandwidth
 
+    def append_task_instance(self, task):
+        self.executed_tasks.append(task)
+
+    def print_timeline(self):
+        if len(self.executed_tasks) == 0:
+            return
+        # Find the first and last points in time 
+        first = self.executed_tasks[0].start_time 
+        assert first <> None
+        last = self.executed_tasks[0].end_time
+        assert last <> None
+        for t in self.executed_tasks:
+            if t.start_time < first:
+                first = t.start_time
+            if t.end_time > last:
+                last = t.end_time
+        assert first < last
+        name = "processor_"+str(self.uid)+"_timeline" 
+        timeline = TimeLine(name, first, last) 
+        # Map from enclosing contexts to lines in the processor printout
+        contexts = dict()
+        for t in self.executed_tasks:
+            # Find the enclosing context, first check if it is the top level task
+            enclosing = None
+            assert t.enclosing <> None
+            if t.enclosing.enclosing <> None:
+                enclosing = t.enclosing.enclosing
+                assert enclosing <> None
+            if enclosing not in contexts:
+                # We need to make the line
+                if enclosing == None:
+                    # Handle the case where the task is the top level task
+                    contexts[enclosing] = timeline.add_line("Top Level Task")
+                else:
+                    contexts[enclosing] = timeline.add_line(enclosing.get_name())
+            assert enclosing in contexts
+            line = contexts[enclosing]
+            timeline.add_instance(line, t.get_name(), t.start_time, t.end_time, "black")
+        timeline.write_pdf(1000)
+            
 
 class UtilityProcessor(object):
     def __init__(self, state, uid):
@@ -150,6 +192,10 @@ class Memory(object):
     def add_reduction_instance(self, inst):
         assert inst.uid not in self.reduction_instances
         self.reduction_instances[inst.uid] = inst
+
+    def print_timeline(self):
+        name = "memory_"+str(self.uid)+"_timeline"
+        return
 
 
 class IndexSpaceNode(object):
@@ -287,6 +333,9 @@ class TaskInstance(object):
         self.prev_event_deps = set()
         self.managers = dict() # Managers for the mapped regions
         self.requirements = dict()
+        self.executing_processor = None
+        self.start_time = None
+        self.end_time = None
 
     def print_instance(self):
         if self.enclosing.index_space:
@@ -326,6 +375,19 @@ class TaskInstance(object):
         for f in req.fields:
             new_req.add_field(f)
         self.requirements[idx] = new_req
+
+    def set_processor(self, proc):
+        assert self.executing_processor == None
+        self.executing_processor = proc
+        proc.append_task_instance(self)
+
+    def set_start_time(self, start):
+        assert self.start_time == None
+        self.start_time = start
+
+    def set_end_time(self, end):
+        assert self.end_time == None
+        self.end_time = end
 
     def compute_dependence_diff(self, verbose):
         if (len(self.ops) == 0) or (len(self.ops) == 1):
@@ -443,6 +505,10 @@ class TaskInstance(object):
                         # Check to see if they are still aliased
                         req1 = inst1.get_requirement(dep.idx1)
                         req2 = inst2.get_requirement(dep.idx2)
+                        # If the second requirement is a reduction, there is no need to
+                        # have a dataflow dependence since we can make a separate reduction instance
+                        if req2.priv == REDUCE:
+                            continue
                         assert req1.tid == req2.tid
                         index1 = self.state.get_index_node(True, req1.ispace)
                         index2 = self.state.get_index_node(True, req2.ispace)
@@ -612,7 +678,7 @@ class Mapping(object):
         self.logical_outgoing = set()
         self.logical_marked = False
         self.physical_marked = False
-        self.name = "Mapping"
+        self.name = "Mapping "+str(uid)
         self.node_name = 'mapping_node_'+str(uid)
         self.prev_event_deps = set()
         self.manager = None
@@ -684,7 +750,7 @@ class Mapping(object):
 
     def print_prev_event_dependences(self, printer, later_name):
         if later_name not in self.prev_event_deps:
-            printer.println(self.name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
+            printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
 
     def print_physical_node(self, printer):
@@ -705,6 +771,11 @@ class Mapping(object):
 
     def get_node_name(self):
         return self.node_name
+
+    def get_requirement(self, idx):
+        assert idx == 0
+        assert self.req <> None
+        return self.req
 
     def get_instances(self):
         result = dict()
@@ -1183,7 +1254,7 @@ class InstanceManager(object):
             for h2,c2 in self.copy_users.iteritems():
                 if (m1.task_inst,c2.op) in self.dependences:
                     continue
-                if (c2.op,m1.task_inst) in self.depednences:
+                if (c2.op,m1.task_inst) in self.dependences:
                     continue
                 self.map_copy_analysis(m1,c2)
             for h2,r2 in self.reduce_users.iteritems():
@@ -1866,7 +1937,7 @@ class State(object):
         src_manager.add_copy_user(copy_op, False)
         dst_manager.add_copy_user(copy_op, True)
 
-    def add_reduce_instance(self, srcman, dstman, index, field, tree, startid, startgen, termid, termgen, mask):
+    def add_reduce_instance(self, srcman, dstman, index, field, tree, startid, startgen, termid, termgen, redop, mask):
         assert srcman in self.reduction_managers
         src_manager = self.reduction_managers[srcman]
         dst_manager = None
@@ -1877,7 +1948,7 @@ class State(object):
             dst_manager = self.physical_managers[dstman]
         start_event = self.get_event(EventHandle(startid,startgen))
         term_event = self.get_event(EventHandle(termid,termgen))
-        reduce_op = ReduceInstance(self, self.next_reduce, src_manager, dst_manager, index, field, tree, start_event, term_event, mask)
+        reduce_op = ReduceInstance(self, self.next_reduce, src_manager, dst_manager, index, field, tree, start_event, term_event, redop, mask)
         self.next_reduce = self.next_reduce + 1
         start_event.add_physical_outgoing(reduce_op)
         term_event.add_physical_incoming(reduce_op)
@@ -1937,7 +2008,23 @@ class State(object):
         else:
             assert manager_id in self.reduction_managers
             manager = self.reduction_managers[manager_id]
-        manager.add_mapping_user(uid, mapping)
+        manager.add_map_user(uid, mapping)
+
+    def set_exec_info(self, uid, ctx, gen, hid, proc):
+        handle = TaskHandle(uid, ctx, hid, gen)
+        assert handle in self.task_instances
+        assert proc in self.processors
+        self.task_instances[handle].set_processor(self.processors[proc])
+
+    def set_task_start(self, uid, ctx, gen, hid, start):
+        handle = TaskHandle(uid, ctx, hid, gen)
+        assert handle in self.task_instances
+        self.task_instances[handle].set_start_time(start)
+
+    def set_task_end(self, uid, ctx, gen, hid, end):
+        handle = TaskHandle(uid, ctx, hid, gen)
+        assert handle in self.task_instances
+        self.task_instances[handle].set_end_time(end)
 
     def get_op(self, uid):
         if uid in self.mappings:
@@ -2044,6 +2131,14 @@ class State(object):
             inst.print_instance()
         for handle,mapping in self.mappings.iteritems():
             mapping.print_instance()
+
+    def print_processor_timelines(self):
+        for uid,p in self.processors.iteritems():
+            p.print_timeline()
+
+    def print_memory_timelines(self):
+        for uid,m in self.memories.iteritems():
+            m.print_timeline()
 
 
 # EOF

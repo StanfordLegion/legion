@@ -69,6 +69,11 @@ reduc_manager_pat       = re.compile(prefix+"Reduction Manager (?P<iid>[0-9]+) (
 task_user_pat           = re.compile(prefix+"Task Instance User (?P<uid>[0-9]+) (?P<ctx>[0-9]+) (?P<gen>[0-9]+) (?P<hid>[0-9]+) (?P<idx>[0-9]+) (?P<manager>[0-9]+)")
 mapping_user_pat            = re.compile(prefix+"Mapping Instance User (?P<uid>[0-9]+) (?P<manager>[0-9]+)")
 
+# Logger calls for timing analysis
+exec_info_pat           = re.compile(prefix+"Execution Information (?P<uid>[0-9]+) (?P<ctx>[0-9]+) (?P<gen>[0-9]+) (?P<hid>[0-9]+) (?P<proc>[0-9]+)")
+begin_info_pat          = re.compile(prefix+"Begin Task Timing (?P<uid>[0-9]+) (?P<ctx>[0-9]+) (?P<gen>[0-9]+) (?P<hid>[0-9]+) (?P<start>[0-9]+)")
+end_info_pat            = re.compile(prefix+"End Task Timing (?P<uid>[0-9]+) (?P<ctx>[0-9]+) (?P<gen>[0-9]+) (?P<hid>[0-9]+) (?P<end>[0-9]+)")
+
 def parse_log_file(file_name, state):
     log = open(file_name, 'r')
     matches = 0
@@ -208,6 +213,19 @@ def parse_log_file(file_name, state):
         m = mapping_user_pat.match(line)
         if m <> None:
             state.add_mapping_user(int(m.group('uid')), int(m.group('manager')))
+            continue
+        # Timing Analysis
+        m = exec_info_pat.match(line)
+        if m <> None:
+            state.set_exec_info(int(m.group('uid')), int(m.group('ctx')), int(m.group('gen')), int(m.group('hid')), int(m.group('proc')))
+            continue
+        m = begin_info_pat.match(line)
+        if m <> None:
+            state.set_task_start(int(m.group('uid')), int(m.group('ctx')), int(m.group('gen')), int(m.group('hid')), long(m.group('start')))
+            continue
+        m = end_info_pat.match(line)
+        if m <> None:
+            state.set_task_end(int(m.group('uid')), int(m.group('ctx')), int(m.group('gen')), int(m.group('hid')), long(m.group('end')))
             continue
 
         # If we made it here then we failed to match

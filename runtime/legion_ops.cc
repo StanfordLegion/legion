@@ -622,7 +622,6 @@ namespace LegionRuntime {
       {
         Event start_event = physical_instance.get_ready_event();
 #ifdef LEGION_SPY
-        LegionSpy::log_mapping_user(this->get_unique_id(), physical_instance.get_manager()->get_unique_id());
         if (!start_event.exists())
         {
           UserEvent new_start = UserEvent::create_user_event();
@@ -2804,6 +2803,9 @@ namespace LegionRuntime {
                 this->variants->name, get_unique_id(), executing_processor.id);
       assert(regions.size() == physical_instances.size());
 #endif
+#ifdef LEGION_SPY
+      LegionSpy::log_task_execution_information(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, this->executing_processor.id);
+#endif
       physical_regions.resize(regions.size());
       physical_region_impls.resize(regions.size());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2827,12 +2829,18 @@ namespace LegionRuntime {
         release_source_copy_instances();
         unlock_context();
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_task_begin_timing(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, TimeStamp::get_current_time_in_micros());
+#endif
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::complete_task(const void *result, size_t result_size, std::vector<PhysicalRegion> &physical_regions)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_task_end_timing(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, TimeStamp::get_current_time_in_micros());
+#endif
       // Clean up some of our stuff from the task execution
       for (unsigned idx = 0; idx < physical_region_impls.size(); idx++)
       {
@@ -2841,7 +2849,7 @@ namespace LegionRuntime {
       physical_region_impls.clear();
       // Handle the future result
       handle_future(result, result_size, get_termination_event());
-      
+
       if (is_leaf())
       {
         // Invoke the function for when we're done 

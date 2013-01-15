@@ -34,7 +34,7 @@ def main():
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lipckv')
+    opts, args = getopt(sys.argv[1:],'lipcktmv')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -45,6 +45,8 @@ def main():
     make_pictures = False
     keep_temp_files = False
     print_instances = False
+    print_processor_timelines = False
+    print_memory_timelines = False
     verbose = False
     if '-l' in opts:
         logical_checks = True
@@ -56,6 +58,10 @@ def main():
         keep_temp_files = True
     if '-i' in opts:
         print_instances = True
+    if '-t' in opts:
+        print_processor_timelines = True
+    if '-m' in opts:
+        print_memory_timelines = True
     if '-v' in opts:
         verbose = True
 
@@ -81,6 +87,12 @@ def main():
     if print_instances:
         print "Printing instance graphs..."
         state.print_instance_graphs(temp_dir)
+    if print_processor_timelines:
+        print "Printing processor timelines..."
+        state.print_processor_timelines()
+    if print_memory_timelines:
+        print "Printing memory timelines..."
+        state.print_memory_timelines()
     if verbose:
         state.print_instances()
 

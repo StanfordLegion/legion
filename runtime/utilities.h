@@ -350,6 +350,14 @@ namespace LegionRuntime {
         printf("%s %7.3f us\n", print_message, time);
       }
     }
+  public:
+    static inline unsigned long get_current_time_in_micros(void)
+    {
+      struct timespec spec;
+      clock_gettime(CLOCK_MONOTONIC, &spec);
+      unsigned long result = (((unsigned long)spec.tv_sec) << 20) + (((unsigned long)spec.tv_nsec) >> 10);
+      return result;
+    }
   private:
     double get_diff_us(struct timespec &start, struct timespec &stop)
     {
@@ -392,6 +400,17 @@ namespace LegionRuntime {
         double time = get_diff_us(spec, stop);
         printf("%s %7.3f us\n", print_message, time);
       } 
+    }
+  public:
+    static inline unsigned long get_current_time_in_micros(void)
+    {
+      mach_timespec_t spec;
+      clock_serv_t cclock;
+      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+      clock_get_time(cclock, &spec);
+      mach_port_deallocate(mach_task_self(), cclock);
+      unsigned long result = (((unsigned long) spec.tv_sec) << 20) + (((unsigned long)spec.tv_nsec) >> 10);
+      return result;
     }
   private:
     double get_diff_us(mach_timespec_t &start, mach_timespec_t &stop)

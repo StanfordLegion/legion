@@ -15,7 +15,7 @@
 
 
 #ifndef __DEFAULT_MAPPER_H__
-#define __DEFUALT_MAPPER_H__
+#define __DEFAULT_MAPPER_H__
 
 #include "legion.h"
 
