@@ -23,7 +23,8 @@
 #define STATIC_MAX_PERMITTED_STEALS   4
 #define STATIC_MAX_STEAL_COUNT        2
 #define STATIC_SPLIT_FACTOR           2
-#define STATIC_WAR_ENABLED            true
+#define STATIC_BREADTH_FIRST          false
+#define STATIC_WAR_ENABLED            false 
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
 
@@ -40,6 +41,7 @@ namespace LegionRuntime {
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         splitting_factor(STATIC_SPLIT_FACTOR),
+        breadth_first_traversal(STATIC_BREADTH_FIRST),
         war_enabled(STATIC_WAR_ENABLED),
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT)
@@ -75,6 +77,7 @@ namespace LegionRuntime {
           INT_ARG("-dm:split", splitting_factor);
           BOOL_ARG("-dm:war", war_enabled);
           BOOL_ARG("-dm:steal", stealing_enabled);
+          BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
 #undef BOOL_ARG
 #undef INT_ARG
@@ -113,12 +116,41 @@ namespace LegionRuntime {
     {
       log_mapper(LEVEL_SPEW,"Select tasks to schedule in default mapper for processor %x",
                  local_proc.id);
-      // TODO: something with some feedback pressure based on profiling
-      unsigned count = 0;
-      for (std::vector<bool>::iterator it = ready_mask.begin();
-            (count < max_schedule_count) && (it != ready_mask.end()); it++)
+      if (breadth_first_traversal)
       {
-        *it = true; 
+        // TODO: something with some feedback pressure based on profiling
+        unsigned count = 0;
+        for (std::vector<bool>::iterator it = ready_mask.begin();
+              (count < max_schedule_count) && (it != ready_mask.end()); it++)
+        {
+          *it = true; 
+          count++;
+        }
+      }
+      else
+      {
+        // Find the deepest task, and mark valid until tasks at that depth
+        // until we're done or need to go to the next depth
+        unsigned max_depth = 0;
+        for (std::list<Task*>::const_iterator it = ready_tasks.begin();
+              it != ready_tasks.end(); it++)
+        {
+          if ((*it)->depth > max_depth)
+            max_depth = (*it)->depth;
+        }
+        unsigned count = 0;
+        // Only schedule tasks from the max_depth in any pass
+        unsigned idx = 0;
+        for (std::list<Task*>::const_iterator it = ready_tasks.begin();
+            (count < max_schedule_count) && (it != ready_tasks.end()); it++, idx++)
+        {
+          if ((*it)->depth == max_depth)
+          {
+            //printf("Scheduling task %s\n",(*it)->variants->name);
+            ready_mask[idx] = true;
+            count++;
+          }
+        }
       }
     }
 

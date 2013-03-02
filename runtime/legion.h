@@ -43,6 +43,7 @@ namespace LegionRuntime {
       inline FieldSpace& operator=(const FieldSpace &rhs);
       inline bool operator==(const FieldSpace &rhs) const;
       inline bool operator<(const FieldSpace &rhs) const;
+      inline FieldSpaceID get_id(void) const { return id; }
     private:
       FieldSpaceID id;
     public:
@@ -124,6 +125,7 @@ namespace LegionRuntime {
       MappingTagID tag;
       Processor orig_proc;
       unsigned steal_count;
+      unsigned depth; // depth in the task tree
       bool must_parallelism; // if index space, must tasks be run concurrently
       bool is_index_space; // is this task an index space
       IndexSpace index_space;
@@ -554,7 +556,7 @@ namespace LegionRuntime {
 // other (i.e. can't name an enum from one namespace as
 // an type in another namespace).  Hence we get to have
 // this for translating between them.
-#define AT_CONV_DOWN(at) ((at == AccessorGeneric) ? LowLevel::Accessor::Generic : )) 
+//#define AT_CONV_DOWN(at) ((at == AccessorGeneric) ? LowLevel::Accessor::Generic : )) 
                           /* (at == AccessorArray) ? LowLevel::AccessorArray : \ */
                           /* (at == AccessorArrayReductionFold) ? LowLevel::AccessorArrayReductionFold : \ */
                           /* (at == AccessorGPU) ? LowLevel::AccessorGPU : \ */
@@ -989,7 +991,7 @@ namespace LegionRuntime {
       const std::vector<RegionRequirement>& begin_task(Context ctx, 
             std::vector<PhysicalRegion> &physical_regions, const void *&arg_ptr, size_t &arglen);
       void end_task(Context ctx, const void *result, size_t result_size,
-                    std::vector<PhysicalRegion> &physical_regions);
+                    std::vector<PhysicalRegion> &physical_regions, bool owned = false);
       const void* get_local_args(Context ctx, void *point, size_t point_size, size_t &local_size); 
     protected:
       friend class Task;
@@ -1003,6 +1005,8 @@ namespace LegionRuntime {
       friend class MappingOperation;
       friend class DeletionOperation;
       friend class RegionTreeForest;
+      friend class FutureImpl;
+      friend class FutureMapImpl;
       IndividualTask*    get_available_individual_task(Context parent);
       IndexTask*         get_available_index_task(Context parent); // can never be resource owner
       SliceTask*         get_available_slice_task(TaskContext *parent);
@@ -1131,6 +1135,10 @@ namespace LegionRuntime {
         void add_to_dependence_queue(GeneralizedOperation *op);
         void add_to_ready_queue(TaskContext *task);
         void add_to_other_queue(GeneralizedOperation *op);
+      public:
+        // Keep track of the number of tasks in the low-level queue
+        void increment_outstanding(void);
+        void decrement_outstanding(void);
       private:
         // Should always be holding the queue lock when we call this
         void enable_scheduler(void);
@@ -1178,6 +1186,8 @@ namespace LegionRuntime {
     protected:
       // Operations for getting managers and mapper information from managers
       ProcessorManager* find_manager(Processor proc) const;
+      void increment_processor_executing(Processor proc);
+      void decrement_processor_executing(Processor proc);
       void initialize_mappable(Mappable *mappable, Processor target, MapperID map_id);
     private:
       // Member variables
@@ -1738,14 +1748,14 @@ namespace LegionRuntime {
       friend class PredicateCustom;
       friend class IndividualTask;
       friend class IndexTask;
-      FutureImpl(Event set_e = Event::NO_EVENT);
+      FutureImpl(HighLevelRuntime *rt, Processor proc, Event set_e = Event::NO_EVENT);
       ~FutureImpl(void);
       // Make sure this can't be copied/moved
       FutureImpl(const FutureImpl &impl);
       FutureImpl& operator=(const FutureImpl &impl);
     protected:
-      void set_result(const void *res, size_t result_size);
-      void set_result(const void *res, size_t result_size, Event ready_event);
+      void set_result(const void *res, size_t result_size, bool owner = false);
+      void set_result(const void *res, size_t result_size, Event ready_event, bool owner = false);
       void set_result(Deserializer &derez);
     protected:
       /**
@@ -1764,6 +1774,8 @@ namespace LegionRuntime {
       Event set_event;
       void *result;
       bool is_set;
+      HighLevelRuntime *runtime;
+      Processor owner_proc;
       std::vector<Notifiable*> waiters;
     };
 
@@ -1775,13 +1787,13 @@ namespace LegionRuntime {
       friend class MultiTask;
       friend class IndexTask;
       friend class SliceTask;
-      FutureMapImpl(Event set_e = Event::NO_EVENT);
+      FutureMapImpl(HighLevelRuntime *rt, Processor proc, Event set_e = Event::NO_EVENT);
       ~FutureMapImpl(void);
       // Make sure these can't be copied around or moved
       FutureMapImpl(const FutureMapImpl &impl);
       FutureMapImpl& operator=(const FutureMapImpl &impl);
     protected:
-      void set_result(AnyPoint p, const void *res, size_t result_size, Event point_finish);
+      void set_result(AnyPoint p, const void *res, size_t result_size, Event point_finish, bool owner = false);
       void set_result(Deserializer &derez);
     protected:
       template<typename T, typename PT, unsigned DIM>
@@ -1793,8 +1805,121 @@ namespace LegionRuntime {
       inline void wait_all_results(void);
     private:
       Event all_set_event;
+      HighLevelRuntime *runtime;
+      Processor owner_proc;
       std::map<AnyPoint,FutureImpl*> futures;
       std::map<FutureImpl*,UserEvent> waiter_events;
+    };
+
+    namespace LegionSerialization {
+      // WARNING: There are two levels of SFINAE (substitution failure is not an error)
+      // here.  Proceed at your own risk. First we have to check to see if the type is
+      // a struct.  If it is then we check to see if it has a 'legion_serialize' method.
+      // We assume if there is a 'legion_serialize' method there are also 'legion_buffer_size'
+      // and 'legion_deserialize' methods.
+      
+      template<typename T, bool HAS_SERIALIZE>
+      struct NonPODSerializer {
+        static inline void end_task(HighLevelRuntime *rt, Context ctx, T *result,
+                                    std::vector<PhysicalRegion> &regions)
+        {
+          size_t buffer_size = result->legion_buffer_size();
+          void *buffer = malloc(buffer_size);
+          result->legion_serialize(buffer);
+          rt->end_task(ctx, buffer, buffer_size, regions, true/*owned*/);
+          // No need to free the buffer, the Legion runtime owns it now
+        }
+        static inline T unpack(const void *result)
+        {
+          T derez;
+          derez.legion_deserialize(result);
+          return derez;
+        }
+      };
+
+      template<typename T>
+      struct NonPODSerializer<T,false> {
+        static inline void end_task(HighLevelRuntime *rt, Context ctx, T *result,
+                                    std::vector<PhysicalRegion> &regions)
+        {
+          rt->end_task(ctx, (void*)result, sizeof(T), regions);
+        }
+        static inline T unpack(const void *result)
+        {
+          return (*((const T*)result));
+        }
+      };
+
+      template<typename T>
+      struct HasSerialize {
+        typedef char no[1];
+        typedef char yes[2];
+
+        struct Fallback { void legion_serialize(void *); };
+        struct Derived : T, Fallback { };
+
+        template<typename U, U> struct Check;
+
+        template<typename U>
+        static no& test_for_serialize(Check<void (Fallback::*)(void*), &U::legion_serialize> *);
+
+        template<typename U>
+        static yes& test_for_serialize(...);
+
+        static const bool value = (sizeof(test_for_serialize<Derived>(0)) == sizeof(yes));
+      };
+
+      template<typename T, bool IS_STRUCT>
+      struct StructHandler {
+        static inline void end_task(HighLevelRuntime *rt, Context ctx, T *result,
+                                    std::vector<PhysicalRegion> &regions)
+        {
+          // Otherwise this is a struct, so see if it has serialization methods 
+          NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result, regions);
+        }
+        static inline T unpack(const void *result)
+        {
+          return NonPODSerializer<T,HasSerialize<T>::value>::unpack(result); 
+        }
+      };
+      // False case of template specialization
+      template<typename T>
+      struct StructHandler<T,false> {
+        static inline void end_task(HighLevelRuntime *rt, Context ctx, T *result,
+                                    std::vector<PhysicalRegion> &regions)
+        {
+          rt->end_task(ctx, (void*)result, sizeof(T), regions); 
+        }
+        static inline T unpack(const void *result)
+        {
+          return (*((const T*)result));
+        }
+      };
+
+      template<typename T>
+      struct IsAStruct {
+        typedef char no[1];
+        typedef char yes[2];
+        
+        template <typename U> static yes& test_for_struct(int U:: *x);
+        template <typename U> static no& test_for_struct(...);
+
+        static const bool value = (sizeof(test_for_struct<T>(0)) == sizeof(yes));
+      };
+
+      // Figure out whether this is a struct or not and call the appropriate Finsiher
+      template<typename T>
+      inline void end_task(HighLevelRuntime *rt, Context ctx, T *result,
+                           std::vector<PhysicalRegion> &regions)
+      {
+        StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, result, regions); 
+      }
+
+      template<typename T>
+      inline T unpack(const void *result)
+      {
+        return StructHandler<T,IsAStruct<T>::value>::unpack(result);
+      }
     };
 
     ////////////////////////////////////////////////////////////////////
@@ -2201,9 +2326,12 @@ namespace LegionRuntime {
     {
       if (!set_event.has_triggered())
       {
+        // Tell the runtime this task is waiting
+        runtime->decrement_processor_executing(owner_proc);
         set_event.wait();
+        runtime->increment_processor_executing(owner_proc);
       }
-      return (*((const T*)result));
+      return LegionSerialization::unpack<T>(result);
     }
 
     //--------------------------------------------------------------------------
@@ -2212,7 +2340,10 @@ namespace LegionRuntime {
     {
       if (!set_event.has_triggered())
       {
+        // Tell the runtime this task is waiting
+        runtime->decrement_processor_executing(owner_proc);
         set_event.wait();
+        runtime->increment_processor_executing(owner_proc);
       }
     }
 
@@ -2280,7 +2411,7 @@ namespace LegionRuntime {
       }
       // Otherwise, the future doesn't exist yet, so make it
       UserEvent ready_event = UserEvent::create_user_event();
-      FutureImpl *impl = new FutureImpl(ready_event);
+      FutureImpl *impl = new FutureImpl(runtime, owner_proc, ready_event);
       // Add a reference since we're touching the FutureImpl
       impl->add_reference();
       // Put it in the maps
@@ -2317,7 +2448,7 @@ namespace LegionRuntime {
       }
       // Otherwise, the future doesn't exist yet, so make it
       UserEvent ready_event = UserEvent::create_user_event();
-      FutureImpl *impl = new FutureImpl(ready_event);
+      FutureImpl *impl = new FutureImpl(runtime, owner_proc, ready_event);
       // Add a reference since we're touching the FutureImpl
       impl->add_reference();
       // Put it in the maps
@@ -2354,7 +2485,7 @@ namespace LegionRuntime {
       }
       // Otherwise, the future doesn't exist yet, so make it
       UserEvent ready_event = UserEvent::create_user_event();
-      FutureImpl *impl = new FutureImpl(ready_event);
+      FutureImpl *impl = new FutureImpl(runtime, owner_proc, ready_event);
       // Add a reference since we're touching the FutureImpl
       impl->add_reference();
       // Put it in the maps
@@ -2377,7 +2508,10 @@ namespace LegionRuntime {
       // Just check for the all set event
       if (!all_set_event.has_triggered())
       {
+        // Tell the runtime that this task is waiting
+        runtime->decrement_processor_executing(owner_proc);
         all_set_event.wait();
+        runtime->increment_processor_executing(owner_proc);
       }
     }
 
@@ -2696,7 +2830,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////////////////////////
     //  Wrapper functions for high level tasks                                     //
     /////////////////////////////////////////////////////////////////////////////////
-
+ 
     //--------------------------------------------------------------------------
     template<typename T,
       T (*TASK_PTR)(const void*,size_t,const std::vector<RegionRequirement>&,
@@ -2731,7 +2865,8 @@ namespace LegionRuntime {
       }
 
       // Send the return value back
-      runtime->end_task(ctx, (void*)(&return_value), sizeof(T), regions);
+      //runtime->end_task(ctx, (void*)(&return_value), sizeof(T), regions);
+      LegionSerialization::end_task<T>(runtime, ctx, &return_value, regions);
     }
 
     //--------------------------------------------------------------------------
@@ -2810,7 +2945,8 @@ namespace LegionRuntime {
       }
 
       // Send the return value back
-      runtime->end_task(ctx, (void*)(&return_value), sizeof(RT), regions);
+      //runtime->end_task(ctx, (void*)(&return_value), sizeof(RT), regions);
+      LegionSerialization::end_task<RT>(runtime, ctx, &return_value, regions); 
     }
 
     //--------------------------------------------------------------------------
@@ -2933,7 +3069,7 @@ namespace LegionRuntime {
                                                        true/*index_space*/, proc_kind, leaf);
     }
 
-#undef AT_CONV_DOWN
+//#undef AT_CONV_DOWN
   };
 };
 

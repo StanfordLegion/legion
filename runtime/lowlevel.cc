@@ -15,6 +15,9 @@
 
 #include "lowlevel.h"
 #include "lowlevel_impl.h"
+#include "accessor.h"
+
+using namespace LegionRuntime::Accessor;
 
 #define USE_GPU
 #ifdef USE_GPU
@@ -4595,6 +4598,26 @@ namespace LegionRuntime {
       }
     }
 
+    size_t ElementMask::pop_count(bool enabled) const
+    {
+      size_t count = 0;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        int max_full = (num_elements >> 5);
+        bool remainder = (num_elements % 32) != 0;
+        for (int index = 0; index < max_full; index++)
+          count += __builtin_popcount(impl->bits[index]);
+        if (remainder)
+          count += __builtin_popcount(impl->bits[max_full]);
+        if (!enabled)
+          count = num_elements - count;
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return count;
+    }
+
     ElementMask::Enumerator *ElementMask::enumerate_enabled(int start /*= 0*/) const
     {
       return new ElementMask::Enumerator(*this, start, 1);
@@ -4816,9 +4839,9 @@ namespace LegionRuntime {
 
     // a generic accessor just holds a pointer to the impl and passes all 
     //  requests through
-    RegionAccessor<AccessorGeneric> RegionInstance::get_accessor(void) const
+    RegionAccessor<AccessorType::Generic> RegionInstance::get_accessor(void) const
     {
-      return RegionAccessor<AccessorGeneric>((void *)impl());
+      return RegionAccessor<AccessorType::Generic>(AccessorType::Generic::Untyped((void *)impl()));
     }
 
     class DeferredCopy : public Event::Impl::EventWaiter {
@@ -5369,6 +5392,7 @@ namespace LegionRuntime {
     }
 #endif
 
+#if 0
 #ifdef POINTER_CHECKS
     void RegionAccessor<AccessorGeneric>::verify_access(unsigned ptr) const
     {
@@ -5428,6 +5452,7 @@ namespace LegionRuntime {
       if(m_impl->kind == Memory::Impl::MKIND_ZEROCOPY) return true;
       return false;
     }
+#endif
 
 #ifdef OLD_ACCESSORS
     template<>
@@ -6475,4 +6500,59 @@ namespace LegionRuntime {
   }
 }; // namespace LegionRuntime
 
+// Implementation of accessor methods
+namespace LegionRuntime {
+  namespace Accessor {
+    using namespace LegionRuntime::LowLevel;
 
+    void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      impl->get_bytes(ptr, offset, dst, bytes);
+    }
+
+    void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      impl->put_bytes(ptr, offset, src, bytes);
+    }
+
+    bool AccessorType::Generic::Untyped::get_aos_parameters(void *&base, size_t &stride) const
+    {
+      // TODO: implement this
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_soa_parameters(void *&base, size_t &stride) const
+    {
+      // TODO: implement this
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *&base, size_t &stride, 
+                                                                   size_t &block_size, size_t &block_stride) const
+    {
+      // TODO: implement this
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_redfold_parameters(void *&base) const
+    {
+      // TODO: implement this
+      return false;
+    }
+
+    bool AccessorType::Generic::Untyped::get_redlist_parameters(void *&base, ptr_t *&next_ptr) const
+    {
+      // TODO: implement this
+      return false;
+    }
+#ifdef POINTER_CHECKS
+    void AccessorType::verify_access(void *impl_ptr, unsigned ptr)
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
+      internal->verify_access(ptr);
+    }
+#endif
+  };
+};

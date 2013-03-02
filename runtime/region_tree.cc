@@ -429,6 +429,17 @@ namespace LegionRuntime {
           break;
         }
       }
+#ifdef DYNAMIC_TESTS
+      // Filter out any dynamic tests that we might have asked for
+      for (std::list<DynamicSpaceTest>::iterator it = dynamic_space_tests.begin();
+            it != dynamic_space_tests.end(); /*nothing*/)
+      {
+        if ((it->left == space) || (it->right == space))
+          it = dynamic_space_tests.erase(it);
+        else
+          it++;
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -479,8 +490,8 @@ namespace LegionRuntime {
       }
 #ifdef DYNAMIC_TESTS
       bool notify_runtime = false;
-      for (std::map<Color,IndexPartNode*>::const_iterator it = parent_node->color_map.begin();
-            it != parent_node->color_map.end(); it++)
+      for (std::map<Color,IndexPartNode*>::const_iterator it = parent_node->valid_map.begin();
+            it != parent_node->valid_map.end(); it++)
       {
         if (it->first == part_color)
           continue;
@@ -495,8 +506,8 @@ namespace LegionRuntime {
           test.add_child_space(true/*left*/,(*lit)->handle);
         }
         // Add the right children
-        for (std::map<Color,IndexSpaceNode*>::const_iterator rit = it->second->color_map.begin();
-              rit != it->second->color_map.end(); rit++)
+        for (std::map<Color,IndexSpaceNode*>::const_iterator rit = it->second->valid_map.begin();
+              rit != it->second->valid_map.end(); rit++)
         {
           test.add_child_space(false/*left*/,rit->second->handle);
         }
@@ -508,9 +519,13 @@ namespace LegionRuntime {
         for (std::vector<IndexSpaceNode*>::const_iterator it1 = children.begin();
               it1 != children.end(); it1++)
         {
+          if ((*it1)->node_destroyed)
+            continue;
           for (std::vector<IndexSpaceNode*>::const_iterator it2 = children.begin();
                 it2 != it1; it2++)
           {
+            if ((*it2)->node_destroyed)
+              continue;
             dynamic_space_tests.push_back(DynamicSpaceTest(new_part, (*it1)->color, (*it1)->handle, (*it2)->color, (*it2)->handle));
           }
         }
@@ -540,6 +555,18 @@ namespace LegionRuntime {
       // Now we delete the index partition
       deleted_index_parts.push_back(target_node->handle);
       destroy_node(target_node, true/*top*/);
+#ifdef DYNAMIC_TESTS
+      Color target_color = target_node->color;
+      // Go through and remove any dynamic tests involving this partition
+      for (std::list<DynamicPartTest>::iterator it = dynamic_part_tests.begin();
+            it != dynamic_part_tests.end(); /*nothing*/)
+      {
+        if ((it->c1 == target_color) || (it->c2 == target_color))
+          it = dynamic_part_tests.erase(it);
+        else
+          it++;
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1132,7 +1159,7 @@ namespace LegionRuntime {
         return;
       // Otherwise get the region node and do the invalidation
       RegionNode *top_node = get_node(req.region);
-      top_node->recursive_invalidate_views(ctx, invalidate_mask);
+      top_node->recursive_invalidate_views(ctx, invalidate_mask, !new_only/*last use*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1146,7 +1173,7 @@ namespace LegionRuntime {
       if (has_node(handle))
       {
         RegionNode *top_node = get_node(handle);
-        top_node->recursive_invalidate_views(ctx, FieldMask(FIELD_ALL_ONES));
+        top_node->recursive_invalidate_views(ctx, FieldMask(FIELD_ALL_ONES), true/*last use*/);
       }
     }
 
@@ -1161,12 +1188,13 @@ namespace LegionRuntime {
       if (has_node(handle))
       {
         PartitionNode *top_node = get_node(handle);
-        top_node->recursive_invalidate_views(ctx, FieldMask(FIELD_ALL_ONES));
+        top_node->recursive_invalidate_views(ctx, FieldMask(FIELD_ALL_ONES), true/*last use*/);
       }
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_physical_context(LogicalRegion handle, ContextID ctx, const std::vector<FieldID> &fields)
+    void RegionTreeForest::invalidate_physical_context(LogicalRegion handle, ContextID ctx, 
+                                        const std::vector<FieldID> &fields, bool last_use)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1177,7 +1205,7 @@ namespace LegionRuntime {
         FieldSpaceNode *field_node = get_node(handle.field_space);
         FieldMask invalidate_mask = field_node->get_field_mask(fields);
         RegionNode *top_node = get_node(handle);
-        top_node->recursive_invalidate_views(ctx, invalidate_mask);
+        top_node->recursive_invalidate_views(ctx, invalidate_mask, last_use);
       }
     }
 
@@ -2388,7 +2416,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(top_node->parent != NULL);
 #endif
-          top_node->parent->invalidate_instance_views(ctx, packing_mask, false/*clean*/);
+          std::map<ContextID,RegionTreeNode::PhysicalState>::iterator finder = 
+            top_node->parent->physical_states.find(ctx);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != top_node->parent->physical_states.end());
+#endif
+          top_node->parent->invalidate_instance_views(finder->second, packing_mask, false/*clean*/);
         }
       }
     }
@@ -2412,7 +2445,7 @@ namespace LegionRuntime {
       // first invalidate the parent views
       top_node->parent->mark_invalid_instance_views(ctx, packing_mask, false/*clean*/);
       // Now recursively do the rest
-      top_node->recursive_invalidate_views(ctx, packing_mask);
+      top_node->recursive_invalidate_views(ctx, packing_mask, false/*last use*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3013,7 +3046,9 @@ namespace LegionRuntime {
           const LowLevel::ElementMask &right_mask = rit->get_valid_mask();
           LowLevel::ElementMask::OverlapResult result = 
             left_mask.overlaps_with(right_mask);
-          if (result != LowLevel::ElementMask::OVERLAP_MAYBE)
+          // If it's anything other than overlap-no, then we don't know
+          // that it is disjoint
+          if (result != LowLevel::ElementMask::OVERLAP_NO)
             return false;
         }
       }
@@ -3138,12 +3173,16 @@ namespace LegionRuntime {
     void RegionTreeForest::destroy_node(IndexSpaceNode *node, bool top)
     //--------------------------------------------------------------------------
     {
-      // destroy any child nodes, then do ourselves
-      for (std::map<Color,IndexPartNode*>::const_iterator it = node->color_map.begin();
-            it != node->color_map.end(); it++)
+      if (top && (node->parent != NULL))
+        node->parent->remove_child(node->color);
+      // destroy any child nodes that haven't already been destroyed, then do ourselves
+      for (std::map<Color,IndexPartNode*>::const_iterator it = node->valid_map.begin();
+            it != node->valid_map.end(); it++)
       {
         destroy_node(it->second, false/*top*/);
       }
+      // Now clear our valid map since all the children are gone
+      node->valid_map.clear();
       // Don't actually destroy anything, just mark destroyed, when the
       // destructor is called we'll decide if we want to do anything
       node->mark_destroyed();
@@ -3153,12 +3192,15 @@ namespace LegionRuntime {
     void RegionTreeForest::destroy_node(IndexPartNode *node, bool top)
     //--------------------------------------------------------------------------
     {
+      if (top && (node->parent != NULL))
+        node->parent->remove_child(node->color);
       // destroy any child nodes, then do ourselves
-      for (std::map<Color,IndexSpaceNode*>::const_iterator it = node->color_map.begin();
-            it != node->color_map.end(); it++)
+      for (std::map<Color,IndexSpaceNode*>::const_iterator it = node->valid_map.begin();
+            it != node->valid_map.end(); it++)
       {
         destroy_node(it->second, false/*top*/);
       }
+      node->valid_map.clear();
       node->mark_destroyed();
     }
 
@@ -3176,15 +3218,18 @@ namespace LegionRuntime {
     void RegionTreeForest::destroy_node(RegionNode *node, bool top)
     //--------------------------------------------------------------------------
     {
+      if (top && (node->parent != NULL))
+        node->parent->remove_child(node->row_source->color);
       // Now destroy our children
-      for (std::map<Color,PartitionNode*>::const_iterator it = node->color_map.begin();
-            it != node->color_map.end(); it++)
+      for (std::map<Color,PartitionNode*>::const_iterator it = node->valid_map.begin();
+            it != node->valid_map.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(has_node(it->second->handle));
 #endif
         destroy_node(it->second, false/*top*/);
       }
+      node->valid_map.clear();
       node->mark_destroyed();
     }
 
@@ -3192,14 +3237,17 @@ namespace LegionRuntime {
     void RegionTreeForest::destroy_node(PartitionNode *node, bool top)
     //--------------------------------------------------------------------------
     {
-      for (std::map<Color,RegionNode*>::const_iterator it = node->color_map.begin();
-            it != node->color_map.end(); it++)
+      if (top && (node->parent != NULL))
+        node->parent->remove_child(node->row_source->color);
+      for (std::map<Color,RegionNode*>::const_iterator it = node->valid_map.begin();
+            it != node->valid_map.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(has_node(it->second->handle));
 #endif
         destroy_node(it->second, false/*top*/);
       }
+      node->valid_map.clear();
       node->mark_destroyed();
     }
 
@@ -3466,12 +3514,14 @@ namespace LegionRuntime {
     Color RegionTreeForest::generate_unique_color(const std::map<Color,T> &current_map)
     //--------------------------------------------------------------------------
     {
-      Color result = runtime->get_start_color();
+      if (current_map.empty())
+        return runtime->get_start_color();
       unsigned stride = runtime->get_color_modulus();
-      while (current_map.find(result) != current_map.end())
-      {
-        result += stride;
-      }
+      typename std::map<Color,T>::const_reverse_iterator rlast = current_map.rbegin();
+      Color result = rlast->first + stride;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_map.find(result) == current_map.end());
+#endif
       return result;
     }
 
@@ -3540,7 +3590,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(IndexSpace sp, IndexPartNode *par, Color c, bool add, RegionTreeForest *ctx)
       : handle(sp), depth((par == NULL) ? 0 : par->depth+1),
-        color(c), parent(par), context(ctx), added(add), marked(false), destroy_index_space(false)
+        color(c), parent(par), context(ctx), added(add), marked(false), 
+        destroy_index_space(false), node_destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3560,6 +3611,9 @@ namespace LegionRuntime {
     void IndexSpaceNode::mark_destroyed(void)
     //--------------------------------------------------------------------------
     {
+      // Note this can be called twice, once when the deletion is first
+      // performed and again when deletions are flushed
+      node_destroyed = true;
       // If we were the owners of this index space mark that we can free
       // the index space when our destructor is called
       if (added)
@@ -3578,16 +3632,18 @@ namespace LegionRuntime {
       assert(context->has_node(node->handle));
 #endif
       color_map[node->color] = node;
+      valid_map[node->color] = node;
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::remove_child(Color c)
     //--------------------------------------------------------------------------
     {
+      // only ever remove things from the valid map
 #ifdef DEBUG_HIGH_LEVEL
-      assert(color_map.find(c) != color_map.end());
+      assert(valid_map.find(c) != valid_map.end());
 #endif
-      color_map.erase(c);
+      valid_map.erase(c);
     }
 
     //--------------------------------------------------------------------------
@@ -3702,7 +3758,7 @@ namespace LegionRuntime {
         result += (disjoint_subsets.size() * 2 * sizeof(Color));
         // Do all the children
         for (std::map<Color,IndexPartNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
           result += it->second->compute_tree_size(returning);
       }
       return result;
@@ -3717,9 +3773,9 @@ namespace LegionRuntime {
         rez.serialize(true);
         rez.serialize(handle);
         rez.serialize(color);
-        rez.serialize(color_map.size());
+        rez.serialize(valid_map.size());
         for (std::map<Color,IndexPartNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
         {
           it->second->serialize_tree(rez, returning);
         }
@@ -3790,8 +3846,8 @@ namespace LegionRuntime {
       marked = true;
       if (recurse)
       {
-        for (std::map<Color,IndexPartNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,IndexPartNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->mark_node(true/*recurse*/);
         }
@@ -3817,8 +3873,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!added);
 #endif
-      for (std::map<Color,IndexPartNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,IndexPartNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->find_new_partitions(new_parts);
       }
@@ -3832,7 +3888,8 @@ namespace LegionRuntime {
     IndexPartNode::IndexPartNode(IndexPartition p, IndexSpaceNode *par, Color c, 
                                   bool dis, bool add, RegionTreeForest *ctx)
       : handle(p), depth((par == NULL) ? 0 : par->depth+1),
-        color(c), parent(par), context(ctx), disjoint(dis), added(add), marked(false)
+        color(c), parent(par), context(ctx), disjoint(dis), added(add), 
+        marked(false), node_destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3848,6 +3905,9 @@ namespace LegionRuntime {
     void IndexPartNode::mark_destroyed(void)
     //--------------------------------------------------------------------------
     {
+      // Note this can be called twice, once when the deletion is first
+      // performed and again when deletions are flushed
+      node_destroyed = true;
       added = false;
     }
 
@@ -3860,16 +3920,18 @@ namespace LegionRuntime {
       assert(context->has_node(node->handle));
 #endif
       color_map[node->color] = node;
+      valid_map[node->color] = node;
     }
 
     //--------------------------------------------------------------------------
     void IndexPartNode::remove_child(Color c)
     //--------------------------------------------------------------------------
     {
+      // only remove things from valid map
 #ifdef DEBUG_HIGH_LEVEL
-      assert(color_map.find(c) != color_map.end());
+      assert(valid_map.find(c) != valid_map.end());
 #endif
-      color_map.erase(c);
+      valid_map.erase(c);
     }
 
     //--------------------------------------------------------------------------
@@ -3976,7 +4038,7 @@ namespace LegionRuntime {
         result += sizeof(disjoint);
         result += sizeof(size_t); // number of children
         for (std::map<Color,IndexSpaceNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
           result += it->second->compute_tree_size(returning);
         result += sizeof(size_t); // number of disjoint children
         result += (disjoint_subspaces.size() * 2 * sizeof(Color));
@@ -3997,9 +4059,9 @@ namespace LegionRuntime {
         rez.serialize(handle);
         rez.serialize(color);
         rez.serialize(disjoint);
-        rez.serialize(color_map.size());
+        rez.serialize(valid_map.size());
         for (std::map<Color,IndexSpaceNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
           it->second->serialize_tree(rez, returning);
         rez.serialize(disjoint_subspaces.size());
         for (std::set<std::pair<Color,Color> >::const_iterator it =
@@ -4067,8 +4129,8 @@ namespace LegionRuntime {
       marked = true;
       if (recurse)
       {
-        for (std::map<Color,IndexSpaceNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,IndexSpaceNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->mark_node(true/*recurse*/);
         }
@@ -4098,8 +4160,8 @@ namespace LegionRuntime {
         return;
       }
       // Otherwise continue
-      for (std::map<Color,IndexSpaceNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,IndexSpaceNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->find_new_partitions(new_parts);
       }
@@ -5573,6 +5635,7 @@ namespace LegionRuntime {
       assert(context->has_node(node->handle));
 #endif
       color_map[node->row_source->color] = node;
+      valid_map[node->row_source->color] = node;
     }
 
     //--------------------------------------------------------------------------
@@ -5601,31 +5664,31 @@ namespace LegionRuntime {
     void RegionNode::remove_child(Color c)
     //--------------------------------------------------------------------------
     {
+      // only ever remove things from the valid map
 #ifdef DEBUG_HIGH_LEVEL
-      assert(color_map.find(c) != color_map.end());
+      assert(valid_map.find(c) != valid_map.end());
 #endif
-      color_map.erase(c);
+      valid_map.erase(c);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_logical_context(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      if (logical_states.find(ctx) == logical_states.end())
-        logical_states[ctx] = LogicalState();
-      else
+      std::map<ContextID,LogicalState>::iterator finder = logical_states.find(ctx);
+      if (finder != logical_states.end())
       {
-        LogicalState &state = logical_states[ctx];
+        LogicalState &state = finder->second;
         state.field_states.clear();
         state.added_states.clear();
         state.curr_epoch_users.clear();
         state.prev_epoch_users.clear();
-      }
-      // Now initialize any children
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
-      {
-        it->second->initialize_logical_context(ctx);
+        // Now do any valid children
+        for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
+        {
+          it->second->initialize_logical_context(ctx);
+        }
       }
     }
 
@@ -5656,8 +5719,8 @@ namespace LegionRuntime {
         op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
       }
       // Do any children
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->register_deletion_operation(ctx, op, deletion_mask);
       }
@@ -5667,25 +5730,27 @@ namespace LegionRuntime {
     void RegionNode::initialize_physical_context(ContextID ctx, bool clear, const FieldMask &init_mask, bool top)
     //--------------------------------------------------------------------------
     {
-      if (physical_states.find(ctx) == physical_states.end())
+      std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
+      if (finder != physical_states.end())
       {
-        physical_states[ctx] = PhysicalState(top);
-      }
-      else
-      {
-        PhysicalState &state = physical_states[ctx];
+        PhysicalState &state = finder->second;
 #ifdef DEBUG_HIGH_LEVEL
         // If this ever fails we have aliasing between physical contexts which will be unresolvable
         assert(state.context_top == top); 
 #endif
         if (clear)
-          state.clear_state(init_mask);  
+          state.clear_state(init_mask);
+
+        // Only do children if we ourselves had a state
+        for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
+        {
+          it->second->initialize_physical_context(ctx, clear, init_mask);
+        }
       }
-      // Now do all our children
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      else if (top)
       {
-        it->second->initialize_physical_context(ctx, clear, init_mask);
+        physical_states[ctx] = PhysicalState(top);
       }
     }
 
@@ -5761,8 +5826,8 @@ namespace LegionRuntime {
         merge_new_field_state(outer_state, copy, true/*add states*/);
       }
       // finally continue the traversal
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->merge_physical_context(outer_ctx, inner_ctx, merge_mask);
       }
@@ -6040,14 +6105,14 @@ namespace LegionRuntime {
           issue_update_reductions(*it, reduc_fields, closer.rm);
         }
         // Invalidate the reduction views we just reduced back
-        invalidate_reduction_views(closer.rm.ctx, reduc_fields);
+        invalidate_reduction_views(state, reduc_fields);
       }
 
       // Need to update was dirty with whether any of our sub-children were dirty
       closer.dirty_mask |= (dirty_fields | reduc_fields | next_closer.dirty_mask);
 
       if (!closer.leave_open)
-        invalidate_instance_views(closer.rm.ctx, closing_mask, true/*clean*/);
+        invalidate_instance_views(state, closing_mask, true/*clean*/);
       else // Still clean out the dirty bits since we copied everything back
         state.dirty_mask -= closing_mask; 
 
@@ -6123,7 +6188,7 @@ namespace LegionRuntime {
       new_view->add_valid_reference();
       if (dirty)
       {
-        invalidate_instance_views(ctx, valid_mask, false/*clean*/);
+        invalidate_instance_views(state, valid_mask, false/*clean*/);
         state.dirty_mask |= valid_mask;
       }
       FieldMask new_fields;
@@ -6173,7 +6238,7 @@ namespace LegionRuntime {
       }
       if (!!dirty_mask)
       {
-        invalidate_instance_views(ctx, dirty_mask, false/*clean*/);
+        invalidate_instance_views(state, dirty_mask, false/*clean*/);
         state.dirty_mask |= dirty_mask;
       }
       for (std::vector<InstanceView*>::const_iterator it = new_views.begin();
@@ -6308,7 +6373,7 @@ namespace LegionRuntime {
               {
                 // Check to see if have any WAR dependences
                 // in which case we'll skip it for a something better
-                if (enable_WAR && HAS_WRITE(rm.req) && it->first->has_war_dependence(user.field_mask))
+                if (enable_WAR && HAS_WRITE(rm.req) && it->first->has_war_dependence(user))
                   continue;
                 // No WAR problems, so it it is good
                 result = it->first;
@@ -6344,7 +6409,7 @@ namespace LegionRuntime {
               if (cf > covered_fields)
               {
                 // Check to see if we have any WAR dependences which might disqualify us
-                if (enable_WAR && HAS_WRITE(rm.req) && it->first->has_war_dependence(user.field_mask))
+                if (enable_WAR && HAS_WRITE(rm.req) && it->first->has_war_dependence(user))
                   continue;
                 covered_fields = cf;
                 result = it->first;
@@ -6664,53 +6729,56 @@ namespace LegionRuntime {
     void RegionNode::mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
-#endif
-      PhysicalState &state = physical_states[ctx];
-      for (std::map<InstanceView*,FieldMask>::const_iterator it = state.valid_views.begin();
-            it != state.valid_views.end(); it++)
+      std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
+      if (finder != physical_states.end())
       {
-        FieldMask diff = it->second - invalid_mask;
-        // only mark it as to be invalidated if all the fields will no longer be valid
-        if (!diff)
-          it->first->mark_to_be_invalidated();
-      }
-
-      if (recurse)
-      {
-        for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        PhysicalState &state = finder->second;
+        for (std::map<InstanceView*,FieldMask>::const_iterator it = state.valid_views.begin();
+              it != state.valid_views.end(); it++)
         {
-          it->second->mark_invalid_instance_views(ctx, invalid_mask, recurse);
+          FieldMask diff = it->second - invalid_mask;
+          // only mark it as to be invalidated if all the fields will no longer be valid
+          if (!diff)
+            it->first->mark_to_be_invalidated();
+        }
+
+        if (recurse)
+        {
+          for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+                it != valid_map.end(); it++)
+          {
+            it->second->mark_invalid_instance_views(ctx, invalid_mask, recurse);
+          }
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask)
+    void RegionNode::recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask, bool last_use)
     //--------------------------------------------------------------------------
     {
-      if (physical_states.find(ctx) != physical_states.end())
+      std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
+      if (finder != physical_states.end())
       {
-        invalidate_instance_views(ctx, invalid_mask, false/*clean*/);
-        invalidate_reduction_views(ctx, invalid_mask);
-        for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        if (!last_use)
         {
-          it->second->recursive_invalidate_views(ctx, invalid_mask);
+          invalidate_instance_views(finder->second, invalid_mask, false/*clean*/);
+          invalidate_reduction_views(finder->second, invalid_mask);
+        }
+        else
+          physical_states.erase(finder);
+        for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
+        {
+          it->second->recursive_invalidate_views(ctx, invalid_mask, last_use);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::invalidate_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool clean)
+    void RegionNode::invalidate_instance_views(PhysicalState &state, const FieldMask &invalid_mask, bool clean)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
-#endif
-      PhysicalState &state = physical_states[ctx];
       std::vector<InstanceView*> to_delete;
       for (std::map<InstanceView*,FieldMask>::iterator it = state.valid_views.begin();
             it != state.valid_views.end(); it++)
@@ -6734,13 +6802,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::invalidate_reduction_views(ContextID ctx, const FieldMask &invalid_mask)
+    void RegionNode::invalidate_reduction_views(PhysicalState &state, const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
-#endif
-      PhysicalState &state = physical_states[ctx];
       std::vector<ReductionView*> to_delete;
       for (std::map<ReductionView*,FieldMask>::iterator it = state.reduction_views.begin();
             it != state.reduction_views.end(); it++)
@@ -7029,7 +7093,7 @@ namespace LegionRuntime {
         // performed reductions to the flush fields
         update_valid_views(rm.ctx, flush_mask, flush_mask, update_views);
         // Now we also have to invalidate the reduction views that we just flushed
-        invalidate_reduction_views(rm.ctx, flush_mask);
+        invalidate_reduction_views(state, flush_mask);
       }
     } 
 
@@ -7055,7 +7119,7 @@ namespace LegionRuntime {
       {
         result += sizeof(size_t); // number of children
         for (std::map<Color,PartitionNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
         {
           result += it->second->compute_tree_size(returning);
         }
@@ -7071,9 +7135,9 @@ namespace LegionRuntime {
       {
         rez.serialize(true);
         rez.serialize(handle);
-        rez.serialize(color_map.size());
+        rez.serialize(valid_map.size());
         for (std::map<Color,PartitionNode*>::const_iterator it =
-              color_map.begin(); it != color_map.end(); it++)
+              valid_map.begin(); it != valid_map.end(); it++)
         {
           it->second->serialize_tree(rez, returning);
         }
@@ -7126,8 +7190,8 @@ namespace LegionRuntime {
       marked = true;
       if (recurse)
       {
-        for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->mark_node(true/*recurse*/);
         }
@@ -7153,8 +7217,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!added); // shouldn't be here if this is true
 #endif
-      for (std::map<Color,PartitionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->find_new_partitions(new_parts);
       }
@@ -7263,7 +7327,7 @@ namespace LegionRuntime {
         }
         if (invalidate_views)
         {
-          invalidate_instance_views(ctx, pack_mask, false/*clean*/);
+          invalidate_instance_views(state, pack_mask, false/*clean*/);
         }
       }
       // count the number of reduction views
@@ -7292,7 +7356,7 @@ namespace LegionRuntime {
         }
         if (invalidate_views)
         {
-          invalidate_reduction_views(ctx, pack_mask);
+          invalidate_reduction_views(state, pack_mask);
         }
       }
       // count the number of open partitions
@@ -7465,8 +7529,8 @@ namespace LegionRuntime {
       }
       if (invalidate_views)
       {
-        invalidate_instance_views(ctx, pack_mask, false/*clean*/);
-        invalidate_reduction_views(ctx, pack_mask);
+        invalidate_instance_views(state, pack_mask, false/*clean*/);
+        invalidate_reduction_views(state, pack_mask);
       }
       // Now do any open children
       if (recurse)
@@ -7761,6 +7825,7 @@ namespace LegionRuntime {
       assert(context->has_node(node->handle));
 #endif
       color_map[node->row_source->color] = node;
+      valid_map[node->row_source->color] = node;
     }
 
     //--------------------------------------------------------------------------
@@ -7789,31 +7854,31 @@ namespace LegionRuntime {
     void PartitionNode::remove_child(Color c)
     //--------------------------------------------------------------------------
     {
+      // only ever remove things from the valid map
 #ifdef DEBUG_HIGH_LEVEL
-      assert(color_map.find(c) != color_map.end());
+      assert(valid_map.find(c) != valid_map.end());
 #endif
-      color_map.erase(c);
+      valid_map.erase(c);
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::initialize_logical_context(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      if (logical_states.find(ctx) == logical_states.end())
-        logical_states[ctx] = LogicalState();
-      else
+      std::map<ContextID,LogicalState>::iterator finder = logical_states.find(ctx);
+      if (finder != logical_states.end())
       {
-        LogicalState &state = logical_states[ctx];
+        LogicalState &state = finder->second;
         state.field_states.clear();
         state.added_states.clear();
         state.curr_epoch_users.clear();
         state.prev_epoch_users.clear();
-      }
-      // Now do any children
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
-      {
-        it->second->initialize_logical_context(ctx);
+        // Now do any children
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
+        {
+          it->second->initialize_logical_context(ctx);
+        }
       }
     }
 
@@ -7844,8 +7909,8 @@ namespace LegionRuntime {
         op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
       }
       // Do any children
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->register_deletion_operation(ctx, op, deletion_mask);
       }
@@ -7855,25 +7920,22 @@ namespace LegionRuntime {
     void PartitionNode::initialize_physical_context(ContextID ctx, bool clear, const FieldMask &init_mask)
     //--------------------------------------------------------------------------
     {
-      if (physical_states.find(ctx) == physical_states.end())
+      std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
+      if (finder != physical_states.end())
       {
-        physical_states[ctx] = PhysicalState();
-      }
-      else
-      {
-        PhysicalState &state = physical_states[ctx];
+        PhysicalState &state = finder->second;
 #ifdef DEBUG_HIGH_LEVEL
         assert(state.valid_views.empty());
         assert(state.added_views.empty());
 #endif
         if (clear)
           state.clear_state(init_mask);
-      }
-      // Handle all our children
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
-      {
-        it->second->initialize_physical_context(ctx, clear, init_mask, false/*top*/);
+        // Only handle children if we ourselves already had a state
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
+        {
+          it->second->initialize_physical_context(ctx, clear, init_mask, false/*top*/); 
+        }
       }
     }
 
@@ -7938,8 +8000,8 @@ namespace LegionRuntime {
         merge_new_field_state(outer_state, copy, true/*add states*/);
       }
       // finally continue the traversal
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->merge_physical_context(outer_ctx, inner_ctx, merge_mask);
       }
@@ -7972,8 +8034,8 @@ namespace LegionRuntime {
           // otherwise, we only need to do this one time
           if (disjoint)
           {
-            for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-                  it != color_map.end(); it++)
+            for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+                  it != valid_map.end(); it++)
             {
               PhysicalCloser closer(user, rm, parent, IS_READ_ONLY(user.usage));
               siphon_open_children(closer, state, user, user.field_mask, it->first);
@@ -8141,8 +8203,8 @@ namespace LegionRuntime {
       {
         result += sizeof(handle);
         result += sizeof(size_t); // number of children
-        for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           result += it->second->compute_tree_size(returning);
         }
@@ -8158,9 +8220,9 @@ namespace LegionRuntime {
       {
         rez.serialize(true);
         rez.serialize(handle);
-        rez.serialize(color_map.size());
-        for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        rez.serialize(valid_map.size());
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->serialize_tree(rez, returning);
         }
@@ -8207,8 +8269,8 @@ namespace LegionRuntime {
       marked = true;
       if (recurse)
       {
-        for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->mark_node(true/*recurse*/);
         }
@@ -8237,8 +8299,8 @@ namespace LegionRuntime {
         new_parts.push_back(copy);
         return;
       }
-      for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-            it != color_map.end(); it++)
+      for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+            it != valid_map.end(); it++)
       {
         it->second->find_new_partitions(new_parts);
       }
@@ -8443,10 +8505,10 @@ namespace LegionRuntime {
     void PartitionNode::mark_invalid_instance_views(ContextID ctx, const FieldMask &mask, bool recurse)
     //--------------------------------------------------------------------------
     {
-      if (recurse)
+      if (recurse && (physical_states.find(ctx) != physical_states.end()))
       {
-        for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
           it->second->mark_invalid_instance_views(ctx, mask, recurse);
         }
@@ -8454,15 +8516,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::recursive_invalidate_views(ContextID ctx, const FieldMask &mask)
+    void PartitionNode::recursive_invalidate_views(ContextID ctx, const FieldMask &mask, bool last_use)
     //--------------------------------------------------------------------------
     {
-      if (physical_states.find(ctx) != physical_states.end())
+      std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
+      if (finder != physical_states.end())
       {
-        for (std::map<Color,RegionNode*>::const_iterator it = color_map.begin();
-              it != color_map.end(); it++)
+        if (last_use)
+          physical_states.erase(finder);
+        for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
+              it != valid_map.end(); it++)
         {
-          it->second->recursive_invalidate_views(ctx, mask);
+          it->second->recursive_invalidate_views(ctx, mask, last_use);
         }
       }
     }
@@ -9718,15 +9783,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceView::has_war_dependence(const FieldMask &mask) const
+    bool InstanceView::has_war_dependence(const PhysicalUser &user) const
     //--------------------------------------------------------------------------
     {
       // Right now we'll just look for anything which might be reading this
       // instance that might cause a dependence.  A future optimization is
       // to check for things like simultaneous reductions which should be ok.
-      if ((parent != NULL) && parent->has_war_dependence_above(mask))
+      if ((parent != NULL) && parent->has_war_dependence_above(user))
         return true;
-      return has_war_dependence_below(mask);
+      return has_war_dependence_below(user);
     }
 
     //--------------------------------------------------------------------------
@@ -9900,7 +9965,10 @@ namespace LegionRuntime {
     bool InstanceView::find_local_dependences(std::set<Event> &wait_on, const PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
-      bool all_dominated = true;
+      // Can only dominate everyone if user is exclusive coherence, otherwise
+      // we don't want to dominate everyone so somebody after us with the same 
+      // coherence can com in later and run at the same time as us
+      bool all_dominated = IS_EXCLUSIVE(user.usage);
       // Find any valid events we need to wait on
       for (std::map<Event,FieldMask>::const_iterator it = valid_events.begin();
             it != valid_events.end(); it++)
@@ -10363,47 +10431,106 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceView::has_war_dependence_above(const FieldMask &mask) const
+    bool InstanceView::has_war_dependence_above(const PhysicalUser &user) const
     //--------------------------------------------------------------------------
     {
-      if (has_local_war_dependence(mask))
+      if (has_local_war_dependence(user))
         return true;
       else if (parent != NULL)
-        return parent->has_war_dependence_above(mask);
+        return parent->has_war_dependence_above(user);
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceView::has_war_dependence_below(const FieldMask &mask) const
+    bool InstanceView::has_war_dependence_below(const PhysicalUser &user) const
     //--------------------------------------------------------------------------
     {
-      if (has_local_war_dependence(mask))
+      if (has_local_war_dependence(user))
         return true;
       for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
-        if (it->second->has_war_dependence_below(mask))
+        if (it->second->has_war_dependence_below(user))
           return true;
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceView::has_local_war_dependence(const FieldMask &mask) const
+    bool InstanceView::has_local_war_dependence(const PhysicalUser &user) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(HAS_WRITE(user.usage));
+#endif
       // If there is anyone who matches on this mask, then there is
       // a WAR dependence
       for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        if (!(it->second * mask))
-          return true;
+        // Check for field disjointness 
+        if (!(it->second * user.field_mask))
+        {
+          std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
+          if (finder == users.end())
+          {
+            finder = added_users.find(it->first);
+#ifndef LEGION_SPY
+#ifdef DEBUG_HIGH_LEVEL
+            assert(finder != added_users.end());
+#endif
+#else
+            if (finder == added_users.end())
+            {
+              finder = deleted_users.find(it->first);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(finder != deleted_users.end());
+#endif
+            }
+#endif
+          }
+          DependenceType dtype = check_dependence_type(finder->second.user.usage, user.usage);
+          switch (dtype)
+          {
+            case ANTI_DEPENDENCE:
+              return true;
+            case NO_DEPENDENCE:
+            case ATOMIC_DEPENDENCE:
+            case SIMULTANEOUS_DEPENDENCE:
+            case TRUE_DEPENDENCE:
+              continue;
+            default:
+              assert(false); // should never get here
+          }
+        }
       }
+      // Check the aliased users too
+      for (std::vector<AliasedUser>::const_iterator it = aliased_users.begin();
+            it != aliased_users.end(); it++)
+      {
+        if (!(it->valid_mask * user.field_mask))
+        {
+          DependenceType dtype = check_dependence_type(it->task_user.user.usage, user.usage);
+          switch (dtype)
+          {
+            case ANTI_DEPENDENCE:
+              return true;
+            case NO_DEPENDENCE:
+            case ATOMIC_DEPENDENCE:
+            case SIMULTANEOUS_DEPENDENCE:
+            case TRUE_DEPENDENCE:
+              continue;
+            default:
+              assert(false); // should never get here
+          }
+        }
+      }
+      // Only need to check masks here since we know the user is already
+      // a writer of the instance
       for (std::map<Event,FieldMask>::const_iterator it = epoch_copy_users.begin();
             it != epoch_copy_users.end(); it++)
       {
-        if (!(it->second * mask))
+        if (!(it->second * user.field_mask))
           return true;
       }
       return false;

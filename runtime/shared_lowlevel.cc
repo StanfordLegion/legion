@@ -1648,21 +1648,24 @@ namespace LegionRuntime {
         {
           // If we return true then we've release the lock so we
           // have to go back around the loop when we're done
-          if (is_utility_proc)
-          {
-            // Note we don't need the lock to read these
-            // since they don't change after the constructor is called
-            for (std::vector<ProcessorImpl*>::const_iterator it = constituents.begin();
-                  it != constituents.end(); it++)
-            {
-              // We should never be in our own list of constituents
-#ifdef DEBUG_LOW_LEVEL
-              assert((*it) != this);
-#endif
-              (*it)->perform_scheduling(true/*need lock*/);
-            }
-          }
           // Now we need to return since we no longer hold the lock
+          return;
+        }
+        else if (is_utility_proc && !shutdown && ready_queue.empty())
+        {
+          PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+          // Note we don't need the lock to read these
+          // since they don't change after the constructor is called
+          for (std::vector<ProcessorImpl*>::const_iterator it = constituents.begin();
+                it != constituents.end(); it++)
+          {
+            // We should never be in our own list of constituents
+#ifdef DEBUG_LOW_LEVEL
+            assert((*it) != this);
+#endif
+            (*it)->perform_scheduling(true/*need lock*/);
+          }
+          // Return since we no longer hold the lock
           return;
         }
 	if (ready_queue.empty())
@@ -1998,6 +2001,25 @@ namespace LegionRuntime {
         return (bit == 1);
     }
 
+    size_t ElementMask::pop_count(bool enabled) const
+    {
+      size_t count = 0;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        int max_full = (num_elements >> 5);
+        bool remainder = (num_elements % 32) != 0;
+        for (int index = 0; index < max_full; index++)
+          count += __builtin_popcount(impl->bits[index]);
+        if (remainder)
+          count += __builtin_popcount(impl->bits[max_full]);
+        if (!enabled)
+          count = num_elements - count;
+      } else {
+        assert(0);
+      }
+      return count;
+    }
+
     size_t ElementMask::raw_size(void) const
     {
       return ElementMaskImpl::bytes_needed(offset,num_elements);
@@ -2011,6 +2033,33 @@ namespace LegionRuntime {
     void ElementMask::set_raw(const void *data)
     {
       assert(0);
+    }
+
+    ElementMask::OverlapResult ElementMask::overlaps_with(const ElementMask &other,
+                                             off_t max_effort) const
+    {
+#ifdef DEBUG_LOW_LEVEL
+      assert(raw_size() == other.raw_size());
+#endif
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *) raw_data;
+        const void *other_raw = other.get_raw();
+        if (other_raw == 0)
+          assert(false);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *) other_raw;
+        int max_full = (num_elements >> 5); 
+        for (int index = 0; index < max_full; index++)
+        {
+          if (impl->bits[index] & other_impl->bits[index])
+            return OVERLAP_YES;
+        }
+        if (((num_elements % 32) != 0) &&
+            (impl->bits[max_full] & other_impl->bits[max_full]))
+          return OVERLAP_YES;
+      } else {
+        assert(false);
+      }
+      return OVERLAP_NO;
     }
 
     ElementMask::Enumerator *ElementMask::enumerate_enabled(int start /*= 0*/) const
@@ -4224,12 +4273,14 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_soa_parameters(void *& base, size_t& stride) const
     {
+      // TODO: implement this
       return false;
     }
 
     bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *& base, size_t& stride,
 								   size_t& block_size, size_t& block_stride) const
     {
+      // TODO: implement this
       return false;
     }
 
@@ -4246,6 +4297,7 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_redlist_parameters(void *& base, ptr_t *& next_ptr) const
     {
+      // TODO: implement this
       return false;
     }
 

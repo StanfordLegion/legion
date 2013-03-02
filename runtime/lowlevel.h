@@ -210,6 +210,7 @@ namespace LegionRuntime {
       int find_disabled(int count = 1);
       
       bool is_set(int ptr) const;
+      size_t pop_count(bool enabled = true) const;
       // union/intersect/subtract?
 
       int first_enabled(void) const { return first_enabled_elmt; }

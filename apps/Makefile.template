@@ -43,6 +43,14 @@ LD_FLAGS	:=
 #   
 ###########################################################################
 
+# All these variables will be filled in by the runtime makefile
+LOW_RUNTIME_SRC	:=
+HIGH_RUNTIME_SRC:=
+GPU_RUNTIME_SRC	:=
+MAPPER_SRC	:=
+
+include $(LG_RT_DIR)/runtime.mk
+
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh
@@ -59,7 +67,7 @@ ifndef GCC
 GCC	:= g++
 endif
 ifndef NVCC
-NVCC	:= nvcc
+NVCC	:= $(CUDA)/bin/nvcc
 endif
 SSH	:= ssh
 SCP	:= scp
@@ -67,14 +75,6 @@ SCP	:= scp
 common_all : all
 
 .PHONY	: common_all
-
-# All these variables will be filled in by the runtime makefile
-LOW_RUNTIME_SRC	:=
-HIGH_RUNTIME_SRC:=
-GPU_RUNTIME_SRC	:=
-MAPPER_SRC	:=
-
-include $(LG_RT_DIR)/runtime.mk
 
 GEN_OBJS	:= $(GEN_SRC:.cc=.o)
 LOW_RUNTIME_OBJS:= $(LOW_RUNTIME_SRC:.cc=.o)

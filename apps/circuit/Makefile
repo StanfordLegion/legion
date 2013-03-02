@@ -32,7 +32,7 @@ GEN_GPU_SRC	:= circuit_gpu.cu		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:=
-CC_FLAGS	:= #-DLEGION_SPY
+CC_FLAGS	:= -DLEGION_SPY
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:=
@@ -63,7 +63,7 @@ ifndef GCC
 GCC	:= g++
 endif
 ifndef NVCC
-NVCC	:= nvcc
+NVCC	:= $(CUDA)/bin/nvcc
 endif
 SSH	:= ssh
 SCP	:= scp

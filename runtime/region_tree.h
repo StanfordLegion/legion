@@ -96,10 +96,12 @@ namespace LegionRuntime {
       void map_region(RegionMapper &rm, LogicalRegion start_region);
       Event close_to_instance(const InstanceRef &ref, RegionMapper &rm);
       Event close_to_reduction(const InstanceRef &ref, RegionMapper &rm);
-      void invalidate_physical_context(const RegionRequirement &req, const std::vector<FieldID> &new_fields, ContextID ctx, bool new_only);
+      void invalidate_physical_context(const RegionRequirement &req, const std::vector<FieldID> &new_fields, 
+                                       ContextID ctx, bool new_only);
       void invalidate_physical_context(LogicalRegion handle, ContextID ctx);
       void invalidate_physical_context(LogicalPartition handle, ContextID ctx);
-      void invalidate_physical_context(LogicalRegion handle, ContextID ctx, const std::vector<FieldID> &fields);
+      void invalidate_physical_context(LogicalRegion handle, ContextID ctx, const std::vector<FieldID> &fields,
+                                       bool last_use);
       void merge_field_context(LogicalRegion handle, ContextID outer_ctx, ContextID inner_ctx, const std::vector<FieldID> &fields);
     public:
       // Packing and unpacking send
@@ -348,8 +350,8 @@ namespace LegionRuntime {
         std::vector<IndexSpace> left, right;
       };
     private:
-      std::vector<DynamicSpaceTest> dynamic_space_tests;
-      std::vector<DynamicPartTest>  dynamic_part_tests;
+      std::list<DynamicSpaceTest> dynamic_space_tests;
+      std::list<DynamicPartTest>  dynamic_part_tests;
       std::list<DynamicSpaceTest> ghost_space_tests;
       std::list<DynamicPartTest>  ghost_part_tests;
 #endif
@@ -404,12 +406,14 @@ namespace LegionRuntime {
       const Color color;
       IndexPartNode *const parent;
       RegionTreeForest *const context;
-      std::map<Color,IndexPartNode*> color_map;
+      std::map<Color,IndexPartNode*> color_map; // all children seen locally ever
+      std::map<Color,IndexPartNode*> valid_map; // valid children
       std::list<RegionNode*> logical_nodes; // corresponding region nodes
       std::set<std::pair<Color,Color> > disjoint_subsets; // pairs of disjoint subsets
-      bool added;
+      bool added; // added locally
       bool marked;
-      bool destroy_index_space;
+      bool destroy_index_space; // destroy index space when deleting node
+      bool node_destroyed; // node has been destroyed
     };
 
     /////////////////////////////////////////////////////////////
@@ -457,12 +461,14 @@ namespace LegionRuntime {
       const Color color;
       IndexSpaceNode *const parent;
       RegionTreeForest *const context;
-      std::map<Color,IndexSpaceNode*> color_map;
+      std::map<Color,IndexSpaceNode*> color_map; // all children seen locally ever
+      std::map<Color,IndexSpaceNode*> valid_map; // valid children
       std::list<PartitionNode*> logical_nodes; // corresponding partition nodes
       std::set<std::pair<Color,Color> > disjoint_subspaces; // for non-disjoint partitions
       const bool disjoint;
-      bool added;
+      bool added; // was the node added locally
       bool marked;
+      bool node_destroyed; // has this node been destroyed
     };
 
     /////////////////////////////////////////////////////////////
@@ -726,9 +732,9 @@ namespace LegionRuntime {
       // Issue reductions from the current reduction instances to the target instance to make it valid
       void issue_update_reductions(PhysicalView *target, const FieldMask &mask, RegionMapper &rm);
       void mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse);
-      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask);
-      void invalidate_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool clean);
-      void invalidate_reduction_views(ContextID ctx, const FieldMask &invalid_mask);
+      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask, bool last_use);
+      void invalidate_instance_views(PhysicalState &state, const FieldMask &invalid_mask, bool clean);
+      void invalidate_reduction_views(PhysicalState &state, const FieldMask &invalid_mask);
       void find_valid_instance_views(ContextID ctx, 
                                      std::list<std::pair<InstanceView*,FieldMask> > &valid_views, 
                                      const FieldMask &valid_mask, const FieldMask &field_mask, bool needs_space);
@@ -771,7 +777,8 @@ namespace LegionRuntime {
       PartitionNode *const parent;
       IndexSpaceNode *const row_source;
       FieldSpaceNode *const column_source; // only valid for top of region trees
-      std::map<Color,PartitionNode*> color_map;
+      std::map<Color,PartitionNode*> color_map; // all children seen locally ever
+      std::map<Color,PartitionNode*> valid_map; // only valid children
       bool added;
       bool marked;
     };
@@ -849,7 +856,7 @@ namespace LegionRuntime {
       void unpack_diff_state(ContextID ctx, Deserializer &derez);
     public:
       void mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse);
-      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask);
+      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask, bool last_use);
     public:
       void print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask);
     private:
@@ -857,7 +864,8 @@ namespace LegionRuntime {
       RegionNode *const parent;
       IndexPartNode *const row_source;
       // No column source here
-      std::map<Color,RegionNode*> color_map;
+      std::map<Color,RegionNode*> color_map; // all children seen locally ever
+      std::map<Color,RegionNode*> valid_map; // only valid children
       const bool disjoint;
       bool added;
       bool marked;
@@ -1275,7 +1283,7 @@ namespace LegionRuntime {
       virtual void remove_valid_reference(void);
       void mark_to_be_invalidated(void);
       bool is_valid_view(void) const;
-      bool has_war_dependence(const FieldMask &mask) const;
+      bool has_war_dependence(const PhysicalUser &user) const;
     public:
       inline PhysicalInstance get_instance(void) const { return manager->get_instance(); }
       inline Memory get_location(void) const { return manager->get_location(); }
@@ -1302,9 +1310,9 @@ namespace LegionRuntime {
       bool find_dependences_below(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
       bool find_local_dependences(std::set<Event> &wait_on, const PhysicalUser &user);
       bool find_local_dependences(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
-      bool has_war_dependence_above(const FieldMask &mask) const;
-      bool has_war_dependence_below(const FieldMask &mask) const;
-      bool has_local_war_dependence(const FieldMask &mask) const;
+      bool has_war_dependence_above(const PhysicalUser &user) const;
+      bool has_war_dependence_below(const PhysicalUser &user) const;
+      bool has_local_war_dependence(const PhysicalUser &user) const;
       template<typename T>
       void remove_invalid_elements(std::map<T,FieldMask> &elements, const FieldMask &new_mask);
     public:

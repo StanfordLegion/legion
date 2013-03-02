@@ -133,10 +133,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Task::Task(void)
       : task_id(0), args(NULL), arglen(0), map_id(0), tag(0),
-        orig_proc(Processor::NO_PROC), steal_count(0), must_parallelism(false),
-        is_index_space(false), index_space(IndexSpace::NO_SPACE),
-        index_point(NULL), index_element_size(0), 
-        index_dimensions(0), variants(NULL)
+        orig_proc(Processor::NO_PROC), steal_count(0), depth(0), 
+        must_parallelism(false), is_index_space(false), 
+        index_space(IndexSpace::NO_SPACE), index_point(NULL), 
+        index_element_size(0), index_dimensions(0), variants(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -173,6 +173,7 @@ namespace LegionRuntime {
       this->tag = rhs->tag;
       this->orig_proc = rhs->orig_proc;
       this->steal_count = rhs->steal_count;
+      this->depth = rhs->depth;
       this->must_parallelism = rhs->must_parallelism;
       this->is_index_space = rhs->is_index_space;
       this->index_space = rhs->index_space;
@@ -206,6 +207,7 @@ namespace LegionRuntime {
       result += sizeof(tag);
       result += sizeof(orig_proc);
       result += sizeof(steal_count);
+      result += sizeof(depth);
       result += sizeof(is_index_space);
       if (is_index_space)
       {
@@ -248,6 +250,7 @@ namespace LegionRuntime {
       rez.serialize<MappingTagID>(tag);
       rez.serialize<Processor>(orig_proc);
       rez.serialize<unsigned>(steal_count);
+      rez.serialize<unsigned>(depth);
       rez.serialize<bool>(is_index_space);
       if (is_index_space)
       {
@@ -298,6 +301,7 @@ namespace LegionRuntime {
       derez.deserialize<MappingTagID>(tag);
       derez.deserialize<Processor>(orig_proc);
       derez.deserialize<unsigned>(steal_count);
+      derez.deserialize<unsigned>(depth);
       derez.deserialize<bool>(is_index_space);
       if (is_index_space)
       {
@@ -1962,8 +1966,10 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureImpl::FutureImpl(Event set_e /*= Event::NO_EVENT*/)
-      : Collectable(), set_event(set_e), result(NULL), is_set(false)
+    FutureImpl::FutureImpl(HighLevelRuntime *rt, Processor owner,
+                           Event set_e /*= Event::NO_EVENT*/)
+      : Collectable(), set_event(set_e), result(NULL), is_set(false),
+        runtime(rt), owner_proc(owner)
     //--------------------------------------------------------------------------
     {
     }
@@ -1982,30 +1988,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(const void *res, size_t result_size)
+    void FutureImpl::set_result(const void *res, size_t result_size, bool owner)
     //--------------------------------------------------------------------------
     {
       lock();
-      result = malloc(result_size); 
-#ifdef DEBUG_HIGH_LEVEL
-      if (result_size > 0)
+      if (!owner)
       {
-        assert(res != NULL);
-        assert(result != NULL);
-      }
+        result = malloc(result_size); 
+#ifdef DEBUG_HIGH_LEVEL
+        if (result_size > 0)
+        {
+          assert(res != NULL);
+          assert(result != NULL);
+        }
 #endif
-      memcpy(result, res, result_size);
+        memcpy(result, res, result_size);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        if (result_size > 0)
+          assert(res != NULL);
+#endif
+        result = const_cast<void*>(res);
+      }
       is_set = true;
       unlock();
       notify_all_waiters();
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(const void *res, size_t result_size, Event ready_event)
+    void FutureImpl::set_result(const void *res, size_t result_size, Event ready_event, bool owner)
     //--------------------------------------------------------------------------
     {
       set_event = ready_event;
-      set_result(res, result_size);
+      set_result(res, result_size, owner);
     }
 
     //--------------------------------------------------------------------------
@@ -2071,8 +2088,9 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(Event set_e)
-      : all_set_event(set_e)
+    FutureMapImpl::FutureMapImpl(HighLevelRuntime *rt, Processor owner, 
+                                 Event set_e /*= Event::NO_EVENT*/)
+      : all_set_event(set_e), runtime(rt), owner_proc(owner)
     //--------------------------------------------------------------------------
     {
     }
@@ -2099,7 +2117,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::set_result(AnyPoint point, const void *res, size_t result_size, Event point_finish)
+    void FutureMapImpl::set_result(AnyPoint point, const void *res, size_t result_size, 
+                                   Event point_finish, bool owner)
     //--------------------------------------------------------------------------
     {
       // Go through and see if we can find the future
@@ -2120,7 +2139,7 @@ namespace LegionRuntime {
           waiter_events.erase(impl);
           // Don't need to be holding the lock when doing this
           unlock();
-          impl->set_result(res, result_size, point_finish);
+          impl->set_result(res, result_size, point_finish, owner);
           // Then trigger the waiting event 
           ready_event.trigger();
           // Now we're done
@@ -2133,9 +2152,9 @@ namespace LegionRuntime {
       void * point_buffer = malloc(point.elmt_size * point.dim);
       memcpy(point_buffer,point.buffer,point.elmt_size * point.dim);
       AnyPoint p(point_buffer,point.elmt_size,point.dim);
-      FutureImpl *impl = new FutureImpl(point_finish);
+      FutureImpl *impl = new FutureImpl(runtime, owner_proc, point_finish);
       impl->add_reference();
-      impl->set_result(res, result_size, point_finish);
+      impl->set_result(res, result_size, point_finish, owner);
       futures[p] = impl;
       // Unlock since we're done now
       unlock();
@@ -2182,7 +2201,7 @@ namespace LegionRuntime {
         }
       }
       // Otherwise it didn't exist yet, so make it
-      FutureImpl *impl = new FutureImpl();
+      FutureImpl *impl = new FutureImpl(runtime, owner_proc);
       impl->add_reference();
       impl->set_result(point_buffer,elmt_size*dim,ready_event);
       futures[point] = impl;
@@ -2523,6 +2542,8 @@ namespace LegionRuntime {
     void PredicateAnd::wait_for_evaluation(void) 
     //--------------------------------------------------------------------------
     {
+      // TODO: tell the runtime about waiting here
+      assert(false);
       set_event.wait();
     }
 
@@ -2651,6 +2672,8 @@ namespace LegionRuntime {
     void PredicateOr::wait_for_evaluation(void) 
     //--------------------------------------------------------------------------
     {
+      // TODO: tell the runtime about waiting here
+      assert(false);
       set_event.wait();
     }
     
@@ -2716,6 +2739,8 @@ namespace LegionRuntime {
     void PredicateNot::wait_for_evaluation(void)
     //--------------------------------------------------------------------------
     {
+      // TODO: tell the runtime about waiting here
+      assert(false);
       set_event.wait();
     }
     
@@ -2779,6 +2804,8 @@ namespace LegionRuntime {
     void PredicateFuture::wait_for_evaluation(void)
     //--------------------------------------------------------------------------
     {
+      // TODO: tell the runtime about waiting here
+      assert(false);
       set_event.wait(); 
     }
 
@@ -2849,6 +2876,8 @@ namespace LegionRuntime {
     void PredicateCustom::wait_for_evaluation(void)
     //--------------------------------------------------------------------------
     {
+      // TODO: tell the runtime about waiting here
+      assert(false);
       set_event.wait();
     }
 
@@ -3327,6 +3356,9 @@ namespace LegionRuntime {
         Future f = top->get_future();
         Serializer rez(sizeof(FutureImpl*));
         rez.serialize<FutureImpl*>(f.impl);
+        // Mark that this task is executing, it will be decremented immediately
+        // as soon as the termination task runs
+        increment_processor_executing(*first_cpu);
         first_cpu->spawn(TERMINATION_ID,rez.get_buffer(),sizeof(Future));
         // Now we can launch the task on the actual processor that we're running on
         top->perform_mapping();
@@ -4470,6 +4502,8 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG,"Beginning task %s (ID %d) with unique id %d on processor %x",
         ctx->variants->name,ctx->task_id,ctx->get_unique_id(),utility_proc.id);
 #endif
+      // Tell the processor manager that this task has started on the low-level runtime
+      increment_processor_executing(ctx->get_executing_processor());
       ctx->start_task(physical_regions);
       // Set the argument length and return the pointer to the arguments buffer for the task
       arglen = ctx->arglen;
@@ -4479,14 +4513,16 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------------------------
     void HighLevelRuntime::end_task(Context ctx, const void *result, size_t result_size,
-                                    std::vector<PhysicalRegion> &physical_regions)
+                                    std::vector<PhysicalRegion> &physical_regions, bool owned)
     //--------------------------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       log_task(LEVEL_DEBUG,"Ending task %s (ID %d) with unique id %d on processor %x",
         ctx->variants->name, ctx->task_id,ctx->get_unique_id(),utility_proc.id);
 #endif
-      ctx->complete_task(result,result_size,physical_regions);
+      // Tell the processor manager that this task has finished running on the low-level runtime
+      decrement_processor_executing(ctx->get_executing_processor());
+      ctx->complete_task(result,result_size,physical_regions, owned);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4522,7 +4558,14 @@ namespace LegionRuntime {
       }
       // Now that we've released the lock, check to see if we need to wait
       if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        // Tell the runtime that this task is now waiting to run
+        decrement_processor_executing(executing_proc);
         window_wait.wait();
+        // Once we return, tell the runtime that this task is running again
+        increment_processor_executing(executing_proc);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
       bool activated = 
@@ -4560,7 +4603,12 @@ namespace LegionRuntime {
       }
       // Now that we've released the lock, check to see if we need to wait
       if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
         window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
       bool activated = 
@@ -4653,7 +4701,12 @@ namespace LegionRuntime {
         window_wait = increment_task_window(parent);
       }
       if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
         window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
       bool activated = 
@@ -4688,7 +4741,12 @@ namespace LegionRuntime {
         window_wait = increment_task_window(parent);
       }
       if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
         window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
       bool activated = 
@@ -4818,6 +4876,22 @@ namespace LegionRuntime {
       assert(finder != proc_managers.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::increment_processor_executing(Processor proc)
+    //--------------------------------------------------------------------------------------------
+    {
+      ProcessorManager *manager = find_manager(proc);
+      manager->increment_outstanding();
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::decrement_processor_executing(Processor proc)
+    //--------------------------------------------------------------------------------------------
+    {
+      ProcessorManager *manager = find_manager(proc);
+      manager->decrement_outstanding();
     }
 
     //--------------------------------------------------------------------------------------------
@@ -5549,6 +5623,9 @@ namespace LegionRuntime {
       std::vector<TaskContext*> tasks_to_map;
       // Also get the list of any steals the mappers want to perform
       std::multimap<Processor,MapperID> targets;
+      // Whether or not any of the mappers are still actively trying to
+      // steal (e.g. guess a processor not on the blacklist)
+      bool still_stealing = false; 
       {
         AutoLock q_lock(queue_lock);
         AutoLock m_lock(mapping_lock);
@@ -5584,6 +5661,7 @@ namespace LegionRuntime {
                 // Update the list of outstanding steal requests, add in all the processors for
                 // the utility processor of the target processor
                 blacklist.insert(p);
+                still_stealing = true;
               }
             }
           }
@@ -5609,9 +5687,7 @@ namespace LegionRuntime {
       {
         bool mapped = tasks_to_map[idx]->perform_operation();
         if (!mapped)
-        {
           failed_mappings.push_back(tasks_to_map[idx]);
-        }
       }
 
       // Also send out any steal requests that might have been made
@@ -5634,16 +5710,16 @@ namespace LegionRuntime {
       {
         // Need to hold the lock while doing this
         AutoLock q_lock(queue_lock);
-        bool disable = dependence_queue.empty() && other_ready_queue.empty();
+        // Update the number of current outstanding tasks
+        bool disable = dependence_queue.empty() && other_ready_queue.empty() && !still_stealing;
+        // Only need to check to see if we have tasks to map if we're below the threshold
         if (current_outstanding < min_outstanding)
         {
           for (unsigned map_id = 0; disable && (map_id < ready_queues.size()); map_id++)
           {
             if (mapper_objects[map_id] == NULL)
               continue;
-            // Only need to check to see if we have tasks to map if we're below the threshold
-            if (current_outstanding < min_outstanding)
-              disable = disable && ready_queues[map_id].empty();
+            disable = disable && ready_queues[map_id].empty();
             if (!ready_queues[map_id].empty())
               mappers_with_work.push_back(map_id);
           }
@@ -5691,8 +5767,6 @@ namespace LegionRuntime {
 
           // Go through the ready queue and construct the list of tasks
           // that this mapper has access to
-          // Iterate in reverse order so the latest tasks put in the
-          // ready queue appear first
           std::vector<const Task*> mapper_tasks;
           for (std::list<TaskContext*>::iterator it = ready_queues[stealer].begin();
                 it != ready_queues[stealer].end(); it++)
@@ -5757,7 +5831,7 @@ namespace LegionRuntime {
       // Send the tasks back
       if (!stolen.empty())
       {
-        
+
         // Send the tasks back  
         bool still_local = runtime->send_tasks(thief, stolen);
 
@@ -5841,6 +5915,27 @@ namespace LegionRuntime {
         Processor copy = local_proc;
         copy.enable_idle_task(); 
       }
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::ProcessorManager::increment_outstanding(void)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock q_lock(queue_lock);
+      current_outstanding++;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::ProcessorManager::decrement_outstanding(void)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock q_lock(queue_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_outstanding > 0);
+#endif
+      current_outstanding--;
+      if (current_outstanding < min_outstanding)
+        enable_scheduler();
     }
 
     //--------------------------------------------------------------------------------------------

@@ -594,6 +594,7 @@ namespace LegionRuntime {
 
     GPUZCMemory::~GPUZCMemory(void) {}
 
+#if 0
     template <>
     bool RegionAccessor<AccessorGeneric>::can_convert<AccessorGPU>(void) const
     {
@@ -609,6 +610,7 @@ namespace LegionRuntime {
       if(m_impl->kind == Memory::Impl::MKIND_ZEROCOPY) return true;
       return false;
     }
+#endif
 
 #ifdef POINTER_CHECKS
     static unsigned *get_gpu_valid_mask(RegionMetaDataUntyped region)

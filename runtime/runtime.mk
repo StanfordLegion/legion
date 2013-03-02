@@ -64,6 +64,7 @@ LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_gpu.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc $(LG_RT_DIR)/lowlevel_dma.cc
 GPU_RUNTIME_SRC += 
 else
+CC_FLAGS	+= -DSHARED_LOWLEVEL
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc 
 endif
 

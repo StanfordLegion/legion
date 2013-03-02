@@ -95,6 +95,9 @@ namespace LegionRuntime {
       // difference pieces
       // Controlled by -dm:split
       unsigned splitting_factor;
+      // Do a breadth-first traversal of the task tree, by default we do
+      // a depth-first traversal to improve locality
+      bool breadth_first_traversal;
       // Whether or not copies can be made to avoid Write-After-Read dependences
       // Controlled by -dm:war
       bool war_enabled;

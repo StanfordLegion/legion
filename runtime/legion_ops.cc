@@ -396,11 +396,26 @@ namespace LegionRuntime {
         log_region(LEVEL_ERROR,"Accessing stale inline mapping operation that has been invalided");
         exit(ERROR_STALE_INLINE_MAPPING_ACCESS);
       }
+      assert(parent_ctx != NULL);
 #endif
-      // Make sure to wait until we've mapped
-      mapped_event.wait();
-      // Then wait until we're ready
-      ready_event.wait();
+      // Wait until we've mapped, then wait until we're ready
+      if (!mapped_event.has_triggered())
+      {
+        Processor owner_proc = parent_ctx->get_executing_processor();
+        runtime->decrement_processor_executing(owner_proc);
+        mapped_event.wait();
+        // See if we need to wait for the ready event
+        ready_event.wait();
+        // Tell the runtime that we're running again
+        runtime->increment_processor_executing(owner_proc);
+      }
+      else if (!ready_event.has_triggered())
+      {
+        Processor owner_proc = parent_ctx->get_executing_processor();
+        runtime->decrement_processor_executing(owner_proc);
+        ready_event.wait();
+        runtime->increment_processor_executing(owner_proc);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1184,6 +1199,7 @@ namespace LegionRuntime {
         tag = 0;
         orig_proc = Processor::NO_PROC;
         steal_count = 0;
+        depth = 0;
         must_parallelism = false;
         is_index_space = false;
         index_space = IndexSpace::NO_SPACE;
@@ -1209,6 +1225,8 @@ namespace LegionRuntime {
       deleted_regions.clear();
       deleted_partitions.clear();
       deleted_fields.clear();
+      needed_region_invalidations.clear();
+      needed_partition_invalidations.clear();
       launch_preconditions.clear();
       mapped_preconditions.clear();
       map_dependent_waiters.clear();
@@ -1251,6 +1269,7 @@ namespace LegionRuntime {
 #endif
       variants = HighLevelRuntime::find_collection(task_id);
       parent_ctx = parent;
+      depth = (parent == NULL) ? 0 : parent->depth + 1;
       task_pred = predicate;
       map_id = mid;
       tag = t;
@@ -1879,6 +1898,7 @@ namespace LegionRuntime {
           created_regions.erase(finder);
         else
           deleted_regions.push_back(handle);
+        needed_region_invalidations.push_back(handle);
       }
       size_t num_partitions;
       derez.deserialize(num_partitions);
@@ -1887,6 +1907,7 @@ namespace LegionRuntime {
         LogicalPartition handle;
         derez.deserialize(handle);
         deleted_partitions.push_back(handle);
+        needed_partition_invalidations.push_back(handle);
       }
       size_t num_fields;
       derez.deserialize(num_fields);
@@ -2141,7 +2162,7 @@ namespace LegionRuntime {
 #endif
         // Check this on the cloned_instances since this will be where
         // we unmap regions that the task has previously mapped
-        if (!clone_instances[idx].is_virtual_ref())
+        if (!clone_instances[idx].first.is_virtual_ref())
         {
           log_task(LEVEL_ERROR,"Illegal inline mapping for originally mapped region at index %d."
                                 " Region is still mapped!",idx);
@@ -2583,11 +2604,15 @@ namespace LegionRuntime {
         // If it wasn't then this is still ok since we want to allow mapping
         // agnostic code, which means programs should still work regardless
         // of whether regions were virtually mapped or not
-        if (!clone_instances[idx].is_virtual_ref())
+        if (!clone_instances[idx].first.is_virtual_ref())
         {
           physical_region_impls[idx]->invalidate();
-          clone_instances[idx].remove_reference(unique_id, false/*strict*/);
-          clone_instances[idx] = InstanceRef(); // make it a virtual ref now
+          InstanceRef to_remove = clone_instances[idx].first;
+          to_remove.remove_reference(unique_id, false/*strict*/);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(clone_instances[idx].second);
+#endif
+          clone_instances[idx].second = false;
         }
         unlock();
       }
@@ -2835,7 +2860,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::complete_task(const void *result, size_t result_size, std::vector<PhysicalRegion> &physical_regions)
+    void SingleTask::complete_task(const void *result, size_t result_size, 
+                      std::vector<PhysicalRegion> &physical_regions, bool owner)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -2848,7 +2874,7 @@ namespace LegionRuntime {
       }
       physical_region_impls.clear();
       // Handle the future result
-      handle_future(result, result_size, get_termination_event());
+      handle_future(result, result_size, get_termination_event(), owner);
 
       if (is_leaf())
       {
@@ -2922,7 +2948,11 @@ namespace LegionRuntime {
       // Invalidate the state in the this context.  Note if we were virtually
       // mapped then this won't matter, but it would take too much to figure
       // out whether we should have done it or not, so just do it.
-      forest_ctx->invalidate_physical_context(handle, ctx_id);
+      // 
+      // Actually, the plan now is to deffer the invalidation of the context so we 
+      // can lazily pull data back up when it is needed
+      //forest_ctx->invalidate_physical_context(handle, ctx_id);
+      needed_region_invalidations.push_back(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2937,7 +2967,11 @@ namespace LegionRuntime {
       // Invalidate the state in the this context.  Note if we were virtually
       // mapped then this won't matter, but it would take too much to figure
       // out whether we should have done it or not, so just do it.
-      forest_ctx->invalidate_physical_context(handle, ctx_id);
+      //
+      // Actually, the plan now is to deffer the invalidation of the context so we 
+      // can lazily pull data back up when it is needed
+      //forest_ctx->invalidate_physical_context(handle, ctx_id);
+      needed_partition_invalidations.push_back(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -3016,7 +3050,7 @@ namespace LegionRuntime {
       if (!matched_fields.empty())
       {
         lock_context();
-        forest_ctx->invalidate_physical_context(handle, ctx_id, matched_fields);
+        forest_ctx->invalidate_physical_context(handle, ctx_id, matched_fields, false/*last use*/);
         unlock_context();
       }
     }
@@ -3478,45 +3512,11 @@ namespace LegionRuntime {
           Event precondition = physical_instances[idx].get_ready_event();
           // Do we need to acquire a lock for this region
           if (physical_instances[idx].has_required_lock())
-          {
             needed_locks[physical_instances[idx].get_manager()->get_unique_id()] = idx;
-            Lock atomic_lock = physical_instances[idx].get_required_lock();
-            Event atomic_pre = atomic_lock.lock(0,true/*exclusive*/,precondition);
-            wait_on_events.insert(atomic_pre);
-          }
-          else
-          {
-            // No need for a lock here
-            wait_on_events.insert(precondition);
-          }
+          // Get the event that we need for this event launch
+          wait_on_events.insert(precondition);
         }
       }
-
-      if (needed_locks.empty())
-      {
-        for (std::map<UniqueManagerID,unsigned>::const_iterator it = needed_locks.begin();
-              it != needed_locks.end(); it++)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!physical_instances[it->second].is_virtual_ref());
-          assert(physical_instances[it->second].has_required_lock());
-#endif
-          Lock atomic_lock = physical_instances[it->second].get_required_lock();
-#ifdef DEBUG_HIGH_LEVEL
-          assert(atomic_lock.exists());
-#endif
-          Event precondition = physical_instances[it->second].get_ready_event();
-          Event atomic_pre = atomic_lock.lock(0,true/*exclusive*/,precondition);
-          wait_on_events.insert(atomic_pre);
-#ifdef LEGION_SPY
-          if (precondition.exists() && atomic_pre.exists())
-          {
-            LegionSpy::log_event_dependence(precondition, atomic_pre);
-          }
-#endif
-        }
-      }
-
       Event start_condition = Event::merge_events(wait_on_events);
 #ifdef LEGION_SPY
       LegionSpy::log_task_name(this->get_unique_id(), this->variants->name);
@@ -3528,6 +3528,44 @@ namespace LegionRuntime {
       }
       // Record the dependences
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
+#endif
+      // Now if we have any locks that need to acquired, acquire them contingent on
+      // all the of regions being ready and then update the start condition 
+      if (!needed_locks.empty())
+      {
+        std::set<Event> lock_wait_events;
+        for (std::map<UniqueManagerID,unsigned>::const_iterator it = needed_locks.begin();
+              it != needed_locks.end(); it++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!physical_instances[it->second].is_virtual_ref());
+          assert(physical_instances[it->second].has_required_lock());
+#endif
+          Lock atomic_lock = physical_instances[it->second].get_required_lock();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(atomic_lock.exists());
+#endif
+          Event atomic_pre;
+          // If we're read-only, we can take the lock in non-exclusive mode
+          if (IS_READ_ONLY(regions[it->second]))
+            atomic_pre = atomic_lock.lock(1,false/*exclusive*/,start_condition);
+          else if (IS_REDUCE(regions[it->second])) // need +1 since read-only is 1 and zero is never valid redop 
+            atomic_pre = atomic_lock.lock(regions[it->second].redop+1,false/*exclusive*/,start_condition);            
+          else
+            atomic_pre = atomic_lock.lock(0,true/*exclusive*/,start_condition);
+#ifdef LEGION_SPY
+          if (start_condition.exists() && atomic_pre.exists())
+          {
+            LegionSpy::log_event_dependence(start_condition, atomic_pre);
+          }
+#endif
+          // Update the start condition if neceessary
+          if (atomic_pre.exists())
+            start_condition = atomic_pre;
+        }
+      }
+
+#ifdef LEGION_SPY
       LegionSpy::log_task_events(runtime->utility_proc.id, this->get_gen(), this->ctx_id, get_unique_id(), is_index_space, 
                                   (is_index_space ? *((unsigned*)index_point) : 0), 
                                   start_condition, get_termination_event());
@@ -3573,8 +3611,9 @@ namespace LegionRuntime {
       // with a specified reference, otherwise make them a virtual reference
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        clone_instances.push_back(forest_ctx->initialize_physical_context(regions[idx],
-                                                    physical_instances[idx], unique_id, ctx_id));
+        clone_instances.push_back(std::pair<InstanceRef,bool>(
+          forest_ctx->initialize_physical_context(regions[idx],physical_instances[idx], unique_id, ctx_id),
+          true/*valid reference*/));
       }
       unlock_context();
     }
@@ -3619,8 +3658,9 @@ namespace LegionRuntime {
                             Processor::NO_PROC, single_event, multi_event,
                             tag, false/*sanitizing*/, false/*inline mapping*/, source_copy_instances);
             // First remove our reference so we don't accidentally end up waiting on ourself
-            InstanceRef clone_ref = clone_instances[idx];
-            clone_instances[idx].remove_reference(unique_id, true/*strict*/);
+            InstanceRef clone_ref = clone_instances[idx].first;
+            if (clone_instances[idx].second)
+              clone_instances[idx].first.remove_reference(unique_id, true/*strict*/);
             Event close_event = forest_ctx->close_to_instance(clone_ref, rm);
 #ifdef DEBUG_HIGH_LEVEL
             assert(close_event != single_event);
@@ -3634,8 +3674,9 @@ namespace LegionRuntime {
                             Processor::NO_PROC, single_event, multi_event,
                             tag, false/*sanitizing*/, false/*inline mapping*/, source_copy_instances);
             // First remove our reference so we don't accidentally end up waiting on ourself
-            InstanceRef clone_ref = clone_instances[idx];
-            clone_instances[idx].remove_reference(unique_id, true/*strict*/);
+            InstanceRef clone_ref = clone_instances[idx].first;
+            if (clone_instances[idx].second)
+              clone_instances[idx].first.remove_reference(unique_id, true/*strict*/);
             // Close to the reduction instance
             Event close_event = forest_ctx->close_to_reduction(clone_ref, rm);
 #ifdef DEBUG_HIGH_LEVEL
@@ -3833,6 +3874,10 @@ namespace LegionRuntime {
       deleted_regions.insert(deleted_regions.end(),region_handles.begin(),region_handles.end());
       deleted_partitions.insert(deleted_partitions.end(),partition_handles.begin(),partition_handles.end());
       deleted_fields.insert(fields.begin(),fields.end());
+      needed_region_invalidations.insert(needed_region_invalidations.end(),
+                                         region_handles.begin(),region_handles.end());
+      needed_partition_invalidations.insert(needed_partition_invalidations.end(),
+                                            partition_handles.begin(), partition_handles.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4218,7 +4263,8 @@ namespace LegionRuntime {
       {
         // Update the current proc and send it
         current_proc = target_proc;
-        return runtime->send_task(target_proc, this);
+        runtime->send_task(target_proc, this);
+        return false;
       }
       // Definitely still local
       return true;
@@ -4874,6 +4920,17 @@ namespace LegionRuntime {
         {
           close_copy_instances[idx].remove_reference(unique_id, false/*strict*/);
         }
+        // Invalidate any contexts that were deleted
+        for (std::vector<LogicalRegion>::const_iterator it = needed_region_invalidations.begin();
+              it != needed_region_invalidations.end(); it++)
+        {
+          forest_ctx->invalidate_physical_context(*it, ctx_id); 
+        }
+        for (std::vector<LogicalPartition>::const_iterator it = needed_partition_invalidations.begin();
+              it != needed_partition_invalidations.end(); it++)
+        {
+          forest_ctx->invalidate_physical_context(*it, ctx_id);
+        }
         unlock_context();
         physical_instances.clear();
         close_copy_instances.clear();
@@ -5129,7 +5186,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_future(const void *result, size_t result_size, Event ready_event)
+    void IndividualTask::handle_future(const void *result, size_t result_size, Event ready_event, bool owner)
     //--------------------------------------------------------------------------
     {
       if (remote)
@@ -5142,15 +5199,22 @@ namespace LegionRuntime {
         if (result_size > 0)
         {
           remote_future_len = result_size;
-          remote_future = malloc(result_size);
-          memcpy(remote_future, result, result_size); 
+          if (!owner)
+          {
+            remote_future = malloc(result_size);
+            memcpy(remote_future, result, result_size); 
+          }
+          else
+          {
+            remote_future = const_cast<void*>(result);
+          }
         }
       }
       else
       {
         // Otherwise we can set the future result and remove our reference
         // which will allow the future to be garbage collected naturally.
-        future->set_result(result, result_size);
+        future->set_result(result, result_size, owner);
         if (future->remove_reference())
         {
           delete future;
@@ -5166,7 +5230,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(future == NULL); // better be NULL before this
 #endif
-      future = new FutureImpl(this->termination_event);
+      future = new FutureImpl(runtime, (top_level_task ? current_proc : parent_ctx->get_executing_processor()), 
+                              this->termination_event);
       // Reference from this task context
       future->add_reference();
       return Future(future);
@@ -5586,11 +5651,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_future(const void *result, size_t result_size, Event ready_event)
+    void PointTask::handle_future(const void *result, size_t result_size, Event ready_event, bool owner)
     //--------------------------------------------------------------------------
     {
       AnyPoint local_point(index_point,index_element_size,index_dimensions);
-      slice_owner->handle_future(local_point,result, result_size, ready_event); 
+      slice_owner->handle_future(local_point,result, result_size, ready_event, owner); 
     }
 
     //--------------------------------------------------------------------------
@@ -6168,7 +6233,7 @@ namespace LegionRuntime {
         const void *ptr = derez.get_pointer();
         derez.advance_pointer(redop->sizeof_rhs);
         handle_future(no_point, const_cast<void*>(ptr), redop->sizeof_rhs, 
-                        get_termination_event()/*won't matter*/);
+                        get_termination_event()/*won't matter*/, false/*owner*/);
       }
       else
       {
@@ -6185,7 +6250,7 @@ namespace LegionRuntime {
           derez.advance_pointer(result_size);
           Event ready_event;
           derez.deserialize(ready_event);
-          handle_future(point, ptr, result_size, ready_event);
+          handle_future(point, ptr, result_size, ready_event, false/*owner*/);
         }
       }
       
@@ -6276,7 +6341,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event)
+    void IndexTask::handle_future(const AnyPoint &point, const void *result, size_t result_size, 
+                                  Event ready_event, bool owner)
     //--------------------------------------------------------------------------
     {
       if (has_reduction)
@@ -6290,6 +6356,8 @@ namespace LegionRuntime {
         lock();
         redop->apply(reduction_state, result, 1/*num elements*/);
         unlock();
+        if (owner)
+          free(const_cast<void*>(result));
       }
       else
       {
@@ -6298,7 +6366,7 @@ namespace LegionRuntime {
         assert(future_map != NULL);
 #endif
         // No need to hold the lock, the future map has its own lock
-        future_map->set_result(point, result, result_size, ready_event);
+        future_map->set_result(point, result, result_size, ready_event, owner);
       }
     }
 
@@ -6349,8 +6417,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(reduction_future == NULL); // better be NULL before this
+      assert(parent_ctx != NULL);
 #endif
-      reduction_future = new FutureImpl(termination_event);
+      reduction_future = new FutureImpl(runtime, parent_ctx->get_executing_processor(), termination_event);
       // Add a reference so it doesn't get deleted
       reduction_future->add_reference(); 
       return Future(reduction_future);
@@ -6362,8 +6431,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(future_map == NULL); // better be NULL before this
+      assert(parent_ctx != NULL);
 #endif
-      future_map = new FutureMapImpl(termination_event);
+      future_map = new FutureMapImpl(runtime, parent_ctx->get_executing_processor(), termination_event);
       // Add a reference so it doesn't get deleted
       future_map->add_reference();
       return FutureMap(future_map);
@@ -7559,7 +7629,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event)
+    void SliceTask::handle_future(const AnyPoint &point, const void *result, size_t result_size, 
+                                  Event ready_event, bool owner)
     //--------------------------------------------------------------------------
     {
       if (remote)
@@ -7577,24 +7648,38 @@ namespace LegionRuntime {
           // Fold the value
           redop->fold(reduction_state, result, 1/*num elements*/);
           unlock();
+          if (owner)
+            free(const_cast<void*>(result));
         }
         else
         {
           // We need to store the value locally
           // Copy the value over
-          void *future_copy = malloc(result_size);
-          memcpy(future_copy, result, result_size);
-          lock();
+          if (!owner)
+          {
+            void *future_copy = malloc(result_size);
+            memcpy(future_copy, result, result_size);
+            lock();
 #ifdef DEBUG_HIGH_LEVEL
-          assert(future_results.find(point) == future_results.end());
+            assert(future_results.find(point) == future_results.end());
 #endif
-          future_results[point] = FutureResult(future_copy,result_size,ready_event); 
-          unlock();
+            future_results[point] = FutureResult(future_copy,result_size,ready_event); 
+            unlock();
+          }
+          else
+          {
+            lock();
+#ifdef DEBUG_HIGH_LEVEL
+            assert(future_results.find(point) == future_results.end());
+#endif
+            future_results[point] = FutureResult(const_cast<void*>(result),result_size,ready_event); 
+            unlock();
+          }
         }
       }
       else
       {
-        index_owner->handle_future(point,result,result_size,ready_event);
+        index_owner->handle_future(point,result,result_size,ready_event, owner);
       }
     }
 

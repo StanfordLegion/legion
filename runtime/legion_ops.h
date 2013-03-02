@@ -306,6 +306,9 @@ namespace LegionRuntime {
       std::vector<LogicalRegion>      deleted_regions; 
       std::vector<LogicalPartition>   deleted_partitions;
       std::map<FieldID,FieldSpace>    deleted_fields;
+      // Which deleted regions and partitions need invalidations
+      std::vector<LogicalRegion>      needed_region_invalidations;
+      std::vector<LogicalPartition>   needed_partition_invalidations;
     protected:
       // Any other conditions needed for launching the task
       std::set<Event> launch_preconditions;
@@ -408,9 +411,9 @@ namespace LegionRuntime {
       LegionErrorType check_privilege(const RegionRequirement &req, FieldID &bad_field) const;
     public:
       void start_task(std::vector<PhysicalRegion> &physical_regions);
-      void complete_task(const void *result, size_t result_size, std::vector<PhysicalRegion> &physical_regions);
+      void complete_task(const void *result, size_t result_size, std::vector<PhysicalRegion> &physical_regions, bool owned);
       virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size) = 0;
-      virtual void handle_future(const void *result, size_t result_size, Event ready_event) = 0;
+      virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner) = 0;
     public:
       virtual void children_mapped(void) = 0;
       virtual void finish_task(void) = 0;
@@ -463,7 +466,7 @@ namespace LegionRuntime {
       // This vector is filled in by perform_operation which does the mapping
       std::vector<InstanceRef> physical_instances;
       // This vector contains references to clone references in the task's context
-      std::vector<InstanceRef> clone_instances;
+      std::vector<std::pair<InstanceRef,bool/*still hold reference*/> > clone_instances;
       // A vector for capturing the copies required to launch the task
       std::vector<InstanceRef> source_copy_instances;
       // A vector for capturing the close copies required to finish the task
@@ -549,7 +552,8 @@ namespace LegionRuntime {
       virtual bool post_slice(void) = 0; // What to do after slicing
       virtual SliceTask *clone_as_slice_task(IndexSpace new_space, Processor target_proc, 
                                              bool recurse, bool stealable) = 0;
-      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event) = 0;
+      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, 
+                                 Event ready_event, bool owner) = 0;
       void clone_multi_from(MultiTask *rhs, IndexSpace new_space, bool recurse);
     protected:
       size_t compute_multi_task_size(void);
@@ -621,7 +625,7 @@ namespace LegionRuntime {
       virtual void remote_children_mapped(const void *args, size_t arglen);
       virtual void remote_finish(const void *args, size_t arglen);
       virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size);
-      virtual void handle_future(const void *result, size_t result_size, Event ready_event);
+      virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner);
     public:
       Future get_future(void);
     private:
@@ -700,7 +704,7 @@ namespace LegionRuntime {
       virtual void remote_children_mapped(const void *args, size_t arglen);
       virtual void remote_finish(const void *args, size_t arglen);
       virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size);
-      virtual void handle_future(const void *result, size_t result_size, Event ready_event);
+      virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner);
     public:
       void unmap_all_regions(void);
       void update_requirements(const std::vector<RegionRequirement> &reqs);
@@ -765,7 +769,7 @@ namespace LegionRuntime {
                                              bool recurse, bool stealable);
       virtual bool pre_slice(void);
       virtual bool post_slice(void);
-      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event);
+      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event, bool owner);
     public:
       void set_index_space(IndexSpace space, const ArgumentMap &map, size_t num_regions, bool must);
       void set_reduction_args(ReductionOpID redop, const TaskArgument &initial_value);
@@ -869,7 +873,8 @@ namespace LegionRuntime {
                                              bool recurse, bool stealable);
       virtual bool pre_slice(void);
       virtual bool post_slice(void);
-      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event);
+      virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, 
+                                 Event ready_event, bool owner);
     protected:
       PointTask* clone_as_point_task(bool new_point);
     public:
