@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright 2012 Stanford University
+# Copyright 2013 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ def main():
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lipcktmv')
+    opts, args = getopt(sys.argv[1:],'lipckrmv')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -45,25 +45,34 @@ def main():
     make_pictures = False
     keep_temp_files = False
     print_instances = False
-    print_processor_timelines = False
-    print_memory_timelines = False
+    print_processor_graphs = False 
+    print_memory_graphs = False 
     verbose = False
-    if '-l' in opts:
-        logical_checks = True
-    if '-c' in opts:
-        physical_checks = True
-    if '-p' in opts:
-        make_pictures = True
-    if '-k' in opts:
-        keep_temp_files = True
-    if '-i' in opts:
-        print_instances = True
-    if '-t' in opts:
-        print_processor_timelines = True
-    if '-m' in opts:
-        print_memory_timelines = True
-    if '-v' in opts:
-        verbose = True
+    for opt in opts:
+        if opt == '-l':
+            logical_checks = True
+            continue
+        if opt == '-c':
+            physical_checks = True
+            continue
+        if opt == '-p':
+            make_pictures = True
+            continue
+        if opt == '-k':
+            keep_temp_files = True
+            continue
+        if opt == '-i':
+            print_instances = True
+            continue
+        if opt == '-r':
+            print_processor_graphs = True
+            continue
+        if opt == '-m':
+            print_memory_graphs = True
+            continue
+        if opt == '-v':
+            verbose = True
+            continue
 
     state = State(verbose)
 
@@ -87,12 +96,12 @@ def main():
     if print_instances:
         print "Printing instance graphs..."
         state.print_instance_graphs(temp_dir)
-    if print_processor_timelines:
-        print "Printing processor timelines..."
-        state.print_processor_timelines()
-    if print_memory_timelines:
-        print "Printing memory timelines..."
-        state.print_memory_timelines()
+    if print_processor_graphs:
+        print "Making processor graphs..."
+        state.print_processor_graphs(temp_dir)
+    if print_memory_graphs:
+        print "Making memory graphs..."
+        state.print_memory_graphs(temp_dir)
     if verbose:
         state.print_instances()
 
@@ -106,6 +115,7 @@ def main():
 if __name__ == "__main__":
     try:
         os.mkdir(temp_dir)
+        sys.setrecursionlimit(5000)
         main()
         shutil.rmtree(temp_dir)
     except:

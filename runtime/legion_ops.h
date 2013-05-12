@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,20 +47,32 @@ namespace LegionRuntime {
       void assert_context_locked(void) const; // Assert that the lock has been taken
       void assert_context_not_locked(void) const; // Assert that the lock has not been taken
 #endif
+#ifdef LEGION_SPY
+      UniqueID get_unique_id(int gen = -1) const;
+#else
       UniqueID get_unique_id(void) const;
+#endif
     public:
       // Mapping dependence operations
       bool is_ready();
       void notify(void);
-      GenerationID get_gen(void) const { return generation; }
+      // These prevent race conditions when doing dependence analysis
+      // by increasing the outstanding dependence count by 1 during analysis
+      // so we can't trigger prematurely.  This also ensure we catch the case
+      // where there are no dependences.
+      inline void start_analysis(void) { outstanding_dependences++; }
+      inline void finish_analysis(void) { notify(); }
+      inline GenerationID get_gen(void) const { return generation; }
       virtual void add_mapping_dependence(unsigned idx, const LogicalUser &prev, DependenceType dtype) = 0;
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen) = 0;
     public:
       virtual bool activate(GeneralizedOperation *parent = NULL) = 0;
       virtual void deactivate(void) = 0; 
-      virtual void perform_dependence_analysis(void) = 0;
-      virtual bool perform_operation(void) = 0;
+      virtual bool perform_dependence_analysis(void) = 0; // return true if op can be deactivated
+      virtual bool perform_operation(void) = 0; // return true if operation succeeded
       virtual MapperID get_mapper_id(void) const = 0;
+      virtual bool has_mapped(GenerationID gen) = 0; // not precise
+      virtual Event get_termination_event(void) const = 0;
     protected:
       // Called once the task is ready to map
       virtual void trigger(void) = 0;
@@ -81,6 +93,76 @@ namespace LegionRuntime {
       GenerationID generation;
       unsigned outstanding_dependences;
       HighLevelRuntime *const runtime;
+#ifdef LEGION_SPY
+      std::vector<UniqueID> previous_ids;
+#endif
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Epoch Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * This is a dummy operation that acts as a summary of a bunch
+     * of other operations in a logical state.  As soon as it
+     * triggers it automatically marks itself as mapped so that
+     * anyone else that was waiting on it can map.  The idea
+     * is that it delineates the boundaries between epochs.
+     */
+    class EpochOperation : public GeneralizedOperation {
+    public:
+      EpochOperation(HighLevelRuntime *rt);
+      ~EpochOperation(void);
+    public:
+      virtual void add_mapping_dependence(unsigned idx, const LogicalUser &prev, DependenceType dtype);
+      virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+    public:
+      virtual bool activate(GeneralizedOperation *parent = NULL);
+      virtual void deactivate(void);
+      virtual bool perform_dependence_analysis(void);
+      virtual bool perform_operation(void);
+      virtual MapperID get_mapper_id(void) const;
+      virtual bool has_mapped(GenerationID gen);
+      virtual Event get_termination_event(void) const;
+    protected:
+      virtual void trigger(void);
+    public:
+      inline void increment_dependence_count(void) { outstanding_dependences++; }
+      inline void start_down_sample(void) { lock(); }
+      inline void end_down_sample(void) { unlock(); }
+    protected:
+      Context parent_ctx; 
+      std::set<GeneralizedOperation*> map_dependent_waiters;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Deferred Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * This is an intermediate class that will be the base
+     * of any operations which are just deferrals of operations
+     * that are going to be done at mapping dependence time.
+     */
+    class DeferredOperation : public GeneralizedOperation {
+    public:
+      DeferredOperation(HighLevelRuntime *rt);
+      virtual ~DeferredOperation(void);
+    public:
+      // Methods which are left virtual to be filled in
+      virtual bool activate(GeneralizedOperation *parent = NULL) = 0;
+      virtual void deactivate(void) = 0;
+    public:
+      // Methods which should never be called
+      virtual void add_mapping_dependence(unsigned idx, const LogicalUser &prev, DependenceType dtype);
+      virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+      virtual bool perform_dependence_analysis(void);
+      virtual bool perform_operation(void);
+      virtual void trigger(void);
+      virtual MapperID get_mapper_id(void) const;
+      virtual bool has_mapped(GenerationID gen);
+      virtual Event get_termination_event(void) const;
+    public:
+      // Method to be implemented by base class
+      virtual void perform_deferred(void) = 0;
     };
 
     /////////////////////////////////////////////////////////////
@@ -94,8 +176,8 @@ namespace LegionRuntime {
       MappingOperation(HighLevelRuntime *rt);
       virtual ~MappingOperation(void);
     public:
-      void initialize(Context ctx, const RegionRequirement &req, MapperID id, MappingTagID tag);
-      void initialize(Context ctx, unsigned idx, MapperID id, MappingTagID tag);
+      void initialize(Context ctx, const RegionRequirement &req, MapperID id, MappingTagID tag, bool check_priv);
+      void initialize(Context ctx, unsigned idx, MapperID id, MappingTagID tag, bool check_priv);
     public:
       bool is_valid(GenerationID gen_id) const;
       void wait_until_valid(GenerationID gen_id);
@@ -106,16 +188,21 @@ namespace LegionRuntime {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(GenerationID gen_id, FieldID fid) const;
       PhysicalRegion get_physical_region(void);
       Event get_map_event(void) const;
+      Event get_unmap_event(void) const;
+      bool has_region_idx(void) const;
+      unsigned get_region_idx(void) const;
     public:
       // Functions from GenerlizedOperation
       virtual bool activate(GeneralizedOperation *parent = NULL);
       virtual void deactivate(void);
       virtual void add_mapping_dependence(unsigned idx, const LogicalUser &prev, DependenceType dtype);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
-      virtual void perform_dependence_analysis(void);
+      virtual bool perform_dependence_analysis(void);
       virtual bool perform_operation(void);
       virtual void trigger(void);
       virtual MapperID get_mapper_id(void) const;
+      virtual bool has_mapped(GenerationID gen);
+      virtual Event get_termination_event(void) const;
     private:
       void check_privilege(void);
     private:
@@ -125,10 +212,34 @@ namespace LegionRuntime {
       Event ready_event;
       InstanceRef physical_instance;
       UserEvent unmapped_event;
+      int region_idx; // for tracking the region in the original task arguments that we're mapping
     private:
       std::set<GeneralizedOperation*> map_dependent_waiters;
       std::vector<InstanceRef> source_copy_instances;
       MappingTagID tag;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Unmap Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * A class for defferring the unmapping of regions.
+     */
+    class UnmapOperation : public DeferredOperation {
+    public:
+      UnmapOperation(HighLevelRuntime *rt);
+      virtual ~UnmapOperation(void);
+    public:
+      void initialize(Context parent, const PhysicalRegion &reg);
+    public:
+      // Functions from GenerlizedOperation
+      virtual bool activate(GeneralizedOperation *parent = NULL);
+      virtual void deactivate(void);
+    protected:
+      virtual void perform_deferred(void);
+    private:
+      Context parent_ctx;
+      PhysicalRegion region;
     };
 
     /////////////////////////////////////////////////////////////
@@ -137,13 +248,23 @@ namespace LegionRuntime {
     /**
      * A class for deferrring deletions until all mapping tasks
      * that require the given resources have finished using them.
-     * One weird quirk of deletion operations is that since there
-     * is no mapping event, tasks that contain deletions can finish
-     * before the runtime actually executes them.  To handle this
-     * case every deletion will have perform_operation called twice:
-     * once by its enclosing task and once by the runtime. The deletion
-     * is performed on the first invokation, and deactivated on the
-     * second call.
+     * Deletions are performed in two steps: the first step frees
+     * up the contexts in the calling task and all enclosing contexts;
+     * the second step actually changes the structure of the region
+     * tree to prune out branches that have been deleted.  The second
+     * step can only occur after any tasks that may be using the deleted
+     * resource in the calling context have terminated.
+     *
+     * Deferring both of these steps makes for an interesting state
+     * machine for the deletion operation.  Deletions will be notified
+     * at two points which may occur in arbitrary order:
+     *
+     *   a) when all mapping dependences are satisified, stage 1 can be done
+     *   b) when all dependent tasks in the enclosing space have terminated,
+     *      stage 1 and stage 2 can both be done
+     *
+     * We do stage 1 and stage 2 as soon as possible, but wait to reclaim
+     * the deletion operation until all both calls have been performed.
      */
     class DeletionOperation : public GeneralizedOperation {
     public:
@@ -162,14 +283,18 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual void add_mapping_dependence(unsigned idx, const LogicalUser &prev, DependenceType dtype);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
-      virtual void perform_dependence_analysis(void);
+      virtual bool perform_dependence_analysis(void);
       virtual bool perform_operation(void);
       virtual void trigger(void);
       virtual MapperID get_mapper_id(void) const;
+      virtual bool has_mapped(GenerationID gen);
     public:
-      Event flush(void);
+      Event get_map_event(void) const { return mapping_event; }
+      Event get_termination_event(void) const { return termination_event; }
+      void finalize(void);
     private:
-      void perform_internal(void);
+      void launch_finalize(Event precondition);
+      void perform_internal(bool finalize);
     private:
       enum DeletionKind {
         DESTROY_INDEX_SPACE,
@@ -181,7 +306,7 @@ namespace LegionRuntime {
       };
     private:
       Context parent_ctx;
-      union Deletion_t {
+      union {
         IndexSpace space;
         IndexPartition partition;
       } index;
@@ -190,8 +315,128 @@ namespace LegionRuntime {
       std::set<FieldID> free_fields;
       LogicalRegion region;
       LogicalPartition partition;
-      bool performed;
-      UserEvent termination_event;
+      bool stage1_done;
+      bool stage2_done;
+      UserEvent mapping_event; // stage 1 done
+      UserEvent termination_event; // stage 2 done
+      std::set<Event> finalize_events;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Creation Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * A class for deferring creation operations so that we don't
+     * need to update the RegionTreeForest right away.  Note that
+     * unlike deletions these operations aren't truly deferred
+     * and never have any mapping dependences so we actually 
+     * perform the operations when we normally would do dependence
+     * analysis.
+     */
+    class CreationOperation : public DeferredOperation {
+    public:
+      CreationOperation(HighLevelRuntime *rt);
+      virtual ~CreationOperation(void); 
+    public:
+      virtual bool activate(GeneralizedOperation *parent = NULL);
+      virtual void deactivate(void);
+    public:
+      void initialize_index_space_creation(Context parent, Domain domain);
+      void initialize_index_partition_creation(Context parent, IndexPartition pid,
+            IndexSpace space, bool disjoint, int part_color, const std::map<Color,Domain> &new_spaces,
+            Domain color_space = Domain::NO_DOMAIN);
+      void initialize_field_space_creation(Context parent, FieldSpace space);
+      void initialize_field_creation(Context parent, FieldSpace space, FieldID fid, size_t field_size);
+      void initialize_field_creation(Context parent, FieldSpace space, const std::map<FieldID,size_t> &fids);
+      void initialize_region_creation(Context parent, LogicalRegion handle);
+    public:
+      void initialize_get_logical_partition(Context parent, LogicalRegion reg_handle, IndexPartition index_handle);
+      void initialize_get_logical_partition_by_color(Context parent, LogicalRegion handle, Color c);
+      void initialize_get_logical_partition_by_tree(Context parent, IndexPartition handle, FieldSpace space, RegionTreeID tid);
+      void initialize_get_logical_subregion(Context parent, LogicalPartition handle, IndexSpace index_handle);
+      void initialize_get_logical_subregion_by_color(Context parent, LogicalPartition handle, Color c);
+      void initialize_get_logical_subregion_by_tree(Context parent, IndexSpace handle, FieldSpace space, RegionTreeID tid);
+    public:
+      bool get_index_partition(Context ctx, IndexSpace parent, Color color, IndexPartition &result);
+      bool get_index_subspace(Context ctx, IndexPartition parent, Color color, IndexSpace &result);
+      bool get_index_space_domain(Context ctx, IndexSpace handle, Domain &result);
+      bool get_index_partition_color_space(Context ctx, IndexPartition p, Domain &result);
+      bool get_logical_partition_by_color(Context ctx, LogicalRegion parent, Color c, LogicalPartition &result);
+      bool get_logical_subregion_by_color(Context ctx, LogicalPartition parent, Color c, LogicalRegion &result);
+    protected:
+      virtual void perform_deferred(void);
+    private:
+      enum CreationKind {
+        CREATE_INDEX_SPACE,
+        CREATE_INDEX_PARTITION,
+        CREATE_FIELD_SPACE,
+        CREATE_FIELD,
+        CREATE_LOGICAL_REGION,
+        TOUCH_LOGICAL_PARTITION,
+        TOUCH_LOGICAL_PARTITION_BY_COLOR,
+        TOUCH_LOGICAL_PARTITION_BY_TREE,
+        TOUCH_LOGICAL_SUBREGION,
+        TOUCH_LOGICAL_SUBREGION_BY_COLOR,
+        TOUCH_LOGICAL_SUBREGION_BY_TREE,
+        CREATION_KIND_NONE,
+      };
+    private:
+      Context parent_ctx;
+      CreationKind creation_kind;
+      Domain domain;
+      IndexSpace index_space;
+      FieldSpace field_space;
+      IndexPartition index_part;
+      bool disjoint;
+      int part_color;
+      Color color;
+      RegionTreeID tree_id;
+      LogicalRegion new_region;
+      LogicalPartition new_partition;
+      std::map<Color,Domain> new_subspaces;
+      std::map<FieldID,size_t> new_fields;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Start Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * A class for deferring operations associated with
+     * starting a task.
+     */
+    class StartOperation : public DeferredOperation {
+    public:
+      StartOperation(HighLevelRuntime *rt);
+      virtual ~StartOperation(void);
+    public:
+      virtual bool activate(GeneralizedOperation *parent = NULL);
+      virtual void deactivate(void);
+      virtual void perform_deferred(void);
+    public:
+      void initialize(Context ctx);
+    protected:
+      Context task_ctx;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Complete Operation 
+    /////////////////////////////////////////////////////////////
+    /**
+     * A class for deferring operations associate with
+     * completing a task.
+     */
+    class CompleteOperation : public DeferredOperation {
+    public:
+      CompleteOperation(HighLevelRuntime *rt);
+      virtual ~CompleteOperation(void);
+    public:
+      virtual bool activate(GeneralizedOperation *parent = NULL);
+      virtual void deactivate(void);
+      virtual void perform_deferred(void);
+    public:
+      void initialize(Context ctx);
+    protected:
+      Context task_ctx;
     };
 
     /////////////////////////////////////////////////////////////
@@ -221,10 +466,11 @@ namespace LegionRuntime {
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen) = 0;
       virtual bool activate(GeneralizedOperation *parent = NULL) = 0;
       virtual void deactivate(void) = 0;
-      virtual void perform_dependence_analysis(void);
+      virtual bool perform_dependence_analysis(void);
       virtual bool perform_operation(void) = 0;
       virtual void trigger(void) = 0;
       virtual MapperID get_mapper_id(void) const;
+      virtual bool has_mapped(GenerationID gen) = 0;
     public:
       virtual bool is_single(void) const = 0;
       virtual bool is_distributed(void) = 0;
@@ -288,6 +534,9 @@ namespace LegionRuntime {
     protected:
       void clone_task_context_from(TaskContext *rhs);
     protected:
+      // Compute the enclosing contexts for this task
+      void find_enclosing_contexts(std::vector<ContextID> &contexts);
+    protected:
       const ContextID ctx_id;
       // Remember some fields are here already from the Task class
       Context parent_ctx;
@@ -341,6 +590,7 @@ namespace LegionRuntime {
       virtual void trigger(void) = 0;
       virtual bool activate(GeneralizedOperation *parent = NULL) = 0;
       virtual void deactivate(void) = 0;
+      virtual bool has_mapped(GenerationID gen) = 0;
     public:
       // Functions from TaskContext
       virtual bool is_single(void) const { return true; }
@@ -374,29 +624,35 @@ namespace LegionRuntime {
       void register_child_map(MappingOperation *op, int idx = -1);
       void register_child_deletion(DeletionOperation *op);
     public:
+      void unregister_child_task(TaskContext *child);
+      void unregister_child_map(MappingOperation *op);
+      void unregister_child_deletion(DeletionOperation *op);
+    public:
       // Operations on index space trees
-      void create_index_space(IndexSpace space);
-      void destroy_index_space(IndexSpace space); 
+      void create_index_space(Domain domain);
+      void destroy_index_space(IndexSpace space, bool finalize); 
       Color create_index_partition(IndexPartition pid, IndexSpace parent, bool disjoint, int color,
-                                  const std::map<Color,IndexSpace> &coloring); 
-      void destroy_index_partition(IndexPartition pid);
-      IndexPartition get_index_partition(IndexSpace parent, Color color);
-      IndexSpace get_index_subspace(IndexPartition p, Color color);
+                                  const std::map<Color,Domain> &coloring, Domain color_space = Domain::NO_DOMAIN);
+      void destroy_index_partition(IndexPartition pid, bool finalize);
+      IndexPartition get_index_partition(IndexSpace parent, Color color, bool can_create);
+      IndexSpace get_index_subspace(IndexPartition p, Color color, bool can_create);
+      Domain get_index_space_domain(IndexSpace handle, bool can_create);
+      Domain get_index_partition_color_space(IndexPartition p, bool can_create);
     public:
       // Operations on field spaces
       void create_field_space(FieldSpace space);
-      void destroy_field_space(FieldSpace space);
+      void destroy_field_space(FieldSpace space, bool finalize);
       void allocate_fields(FieldSpace space, const std::map<FieldID,size_t> &field_allocations);
       void free_fields(FieldSpace space, const std::set<FieldID> &to_free);
     public:
       // Operations on region trees
       void create_region(LogicalRegion handle);  
-      void destroy_region(LogicalRegion handle);
-      void destroy_partition(LogicalPartition handle);
+      void destroy_region(LogicalRegion handle, bool finalize);
+      void destroy_partition(LogicalPartition handle, bool finalize);
       LogicalPartition get_region_partition(LogicalRegion parent, IndexPartition handle);
       LogicalRegion get_partition_subregion(LogicalPartition parent, IndexSpace handle);
-      LogicalPartition get_region_subcolor(LogicalRegion parent, Color c);
-      LogicalRegion get_partition_subcolor(LogicalPartition parent, Color c);
+      LogicalPartition get_region_subcolor(LogicalRegion parent, Color c, bool can_create);
+      LogicalRegion get_partition_subcolor(LogicalPartition parent, Color c, bool can_create);
       LogicalPartition get_partition_subtree(IndexPartition handle, FieldSpace space, RegionTreeID tid);
       LogicalRegion get_region_subtree(IndexSpace handle, FieldSpace space, RegionTreeID tid);
     public:
@@ -411,8 +667,12 @@ namespace LegionRuntime {
       LegionErrorType check_privilege(const RegionRequirement &req, FieldID &bad_field) const;
     public:
       void start_task(std::vector<PhysicalRegion> &physical_regions);
+      inline bool needs_pre_start(void) { return !is_remote(); }
+      void pre_start(void);
+    public:
       void complete_task(const void *result, size_t result_size, std::vector<PhysicalRegion> &physical_regions, bool owned);
-      virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size) = 0;
+      void post_complete_task(void);
+      virtual const void* get_local_args(DomainPoint &point, size_t &local_size) = 0;
       virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner) = 0;
     public:
       virtual void children_mapped(void) = 0;
@@ -454,7 +714,6 @@ namespace LegionRuntime {
       void initialize_region_tree_contexts(void);
     protected:
       void release_source_copy_instances(void);
-      void flush_deletions(std::set<Event> &cleanup_events);
       void issue_restoring_copies(std::set<Event> &wait_on_events, Event single, Event multi);
       void invalidate_owned_contexts(void);
     protected:
@@ -462,6 +721,7 @@ namespace LegionRuntime {
       Processor executing_processor;
       Processor::TaskFuncID low_id; 
       unsigned unmapped; // number of regions still unmapped
+      bool notify_runtime;
       std::vector<bool> non_virtual_mapped_region;
       // This vector is filled in by perform_operation which does the mapping
       std::vector<InstanceRef> physical_instances;
@@ -476,9 +736,15 @@ namespace LegionRuntime {
       // This vector just stores the physical region implementations for the task's duration
       std::vector<PhysicalRegionImpl*> physical_region_impls;
       // The set of child task's created when running this task
-      std::list<TaskContext*> child_tasks;
-      std::list<MappingOperation*> child_maps;
-      std::list<DeletionOperation*> child_deletions;
+      std::set<TaskContext*> child_tasks;
+      std::set<MappingOperation*> child_maps;
+      std::set<DeletionOperation*> child_deletions;
+      // The lock for managing the above queues
+#ifdef LOW_LEVEL_LOCKS
+      Lock child_lock;
+#else
+      ImmovableLock child_lock;
+#endif
       // For packing up return created fields
       std::map<unsigned,std::vector<FieldID> > need_pack_created_fields;
     };
@@ -504,6 +770,7 @@ namespace LegionRuntime {
       virtual bool activate(GeneralizedOperation *parent = NULL) = 0;
       virtual void deactivate(void) = 0;
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen) = 0;
+      virtual bool has_mapped(GenerationID gen) = 0;
     public:
       // Functions from TaskContext
       virtual bool is_single(void) const { return false; }
@@ -550,11 +817,11 @@ namespace LegionRuntime {
       bool slice_index_space(void);
       virtual bool pre_slice(void) = 0;
       virtual bool post_slice(void) = 0; // What to do after slicing
-      virtual SliceTask *clone_as_slice_task(IndexSpace new_space, Processor target_proc, 
+      virtual SliceTask *clone_as_slice_task(Domain new_domain, Processor target_proc, 
                                              bool recurse, bool stealable) = 0;
       virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, 
                                  Event ready_event, bool owner) = 0;
-      void clone_multi_from(MultiTask *rhs, IndexSpace new_space, bool recurse);
+      void clone_multi_from(MultiTask *rhs, Domain new_domain, bool recurse);
     protected:
       size_t compute_multi_task_size(void);
       void pack_multi_task(Serializer &derez);
@@ -594,6 +861,7 @@ namespace LegionRuntime {
       virtual bool activate(GeneralizedOperation *parent = NULL);
       virtual void deactivate(void);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+      virtual bool has_mapped(GenerationID gen);
     public:
       // Functions from TaskContext
       virtual bool is_distributed(void);
@@ -624,7 +892,7 @@ namespace LegionRuntime {
       virtual void remote_start(const void *args, size_t arglen);
       virtual void remote_children_mapped(const void *args, size_t arglen);
       virtual void remote_finish(const void *args, size_t arglen);
-      virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size);
+      virtual const void* get_local_args(DomainPoint &point, size_t &local_size);
       virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner);
     public:
       Future get_future(void);
@@ -673,6 +941,7 @@ namespace LegionRuntime {
       virtual bool activate(GeneralizedOperation *parent = NULL);
       virtual void deactivate(void);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+      virtual bool has_mapped(GenerationID gen);
     public:
       // Functions from TaskContext
       virtual bool is_distributed(void);
@@ -703,7 +972,7 @@ namespace LegionRuntime {
       virtual void remote_start(const void *args, size_t arglen);
       virtual void remote_children_mapped(const void *args, size_t arglen);
       virtual void remote_finish(const void *args, size_t arglen);
-      virtual const void* get_local_args(void *point, size_t point_size, size_t &local_size);
+      virtual const void* get_local_args(DomainPoint &point, size_t &local_size);
       virtual void handle_future(const void *result, size_t result_size, Event ready_event, bool owner);
     public:
       void unmap_all_regions(void);
@@ -734,6 +1003,7 @@ namespace LegionRuntime {
       virtual bool activate(GeneralizedOperation *parent = NULL);
       virtual void deactivate(void);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+      virtual bool has_mapped(GenerationID gen);
     public:
       // Functions from TaskContext
       virtual bool is_distributed(void);
@@ -765,13 +1035,13 @@ namespace LegionRuntime {
     public:
       // Function from MultiTask
       virtual bool map_and_launch(void);
-      virtual SliceTask *clone_as_slice_task(IndexSpace new_space, Processor target_proc, 
+      virtual SliceTask *clone_as_slice_task(Domain new_domain, Processor target_proc, 
                                              bool recurse, bool stealable);
       virtual bool pre_slice(void);
       virtual bool post_slice(void);
       virtual void handle_future(const AnyPoint &point, const void *result, size_t result_size, Event ready_event, bool owner);
     public:
-      void set_index_space(IndexSpace space, const ArgumentMap &map, size_t num_regions, bool must);
+      void set_index_domain(Domain space, const ArgumentMap &map, size_t num_regions, bool must);
       void set_reduction_args(ReductionOpID redop, const TaskArgument &initial_value);
       Future get_future(void);
       FutureMap get_future_map(void);
@@ -838,6 +1108,7 @@ namespace LegionRuntime {
       virtual bool activate(GeneralizedOperation *parent = NULL);
       virtual void deactivate(void);
       virtual bool add_waiting_dependence(GeneralizedOperation *waiter, unsigned idx, GenerationID gen);
+      virtual bool has_mapped(GenerationID gen);
     public:
       // Functions from TaskContext
       virtual bool is_distributed(void);
@@ -869,7 +1140,7 @@ namespace LegionRuntime {
     public:
       // Functions from MultiTask
       virtual bool map_and_launch(void);
-      virtual SliceTask *clone_as_slice_task(IndexSpace new_space, Processor target_proc, 
+      virtual SliceTask *clone_as_slice_task(Domain new_domain, Processor target_proc, 
                                              bool recurse, bool stealable);
       virtual bool pre_slice(void);
       virtual bool post_slice(void);
@@ -921,8 +1192,9 @@ namespace LegionRuntime {
       // of tasks may have been split up many times since they were packed.
       unsigned long split_factor; // Set explicitly, no need to copy
       bool enumerating; // Set to true when we're enumerating the slice
-      LowLevel::ElementMask::Enumerator *enumerator;
-      int remaining_enumerated;
+      //LowLevel::ElementMask::Enumerator *enumerator;
+      //int remaining_enumerated;
+      Domain::DomainPointIterator *domain_iterator;
       unsigned num_unmapped_points;
       unsigned num_unfinished_points;
       // Keep track of the number of non-virtual mappings for point tasks

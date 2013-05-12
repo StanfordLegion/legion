@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -685,7 +685,7 @@ int main(int argc, char **argv)
   HighLevelRuntime::register_single_task<Cavity,compute_cavity>
     (COMPUTE_CAVITY, Processor::LOC_PROC, false/*leaf*/, "compute_cavity");
   HighLevelRuntime::register_single_task<SerializableVector<BadTriangle>,process_cavity>
-    (PROCESS_CAVITY, Processor::LOC_PROC, false/*leaf*/, "process_cavity");
+    (PROCESS_CAVITY, Processor::LOC_PROC, true/*leaf*/, "process_cavity");
 
   HighLevelRuntime::set_top_level_task_id(LEGION_MAIN);
 

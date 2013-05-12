@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,6 +121,11 @@ public:
   __host__ __device__ 
 #endif
   inline operator int(void) const { return int(value); }
+
+#ifdef __CUDACC__
+  __host__ __device__
+#endif
+  inline bool is_null(void) const { return (value == ((unsigned)-1)); }
 
 #ifdef __CUDACC__
   __host__ __device__ 

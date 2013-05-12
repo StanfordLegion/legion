@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,11 +63,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    void DebugMapper::map_task_region(const Task *task, Processor target, 
+    bool DebugMapper::map_task_region(const Task *task, Processor target, 
                                       MappingTagID tag, bool inline_mapping,
                                       const RegionRequirement &req, unsigned index,
                                       const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                       std::vector<Memory> &target_ranking,
+                                      std::set<FieldID> &additional_fields,
                                       bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
@@ -78,6 +79,7 @@ namespace LegionRuntime {
       // Always move things into the last memory in our stack
       target_ranking.push_back(memory_stacks[local_proc].back());
       enable_WAR_optimization = false;
+      return true;
     }
 
     //--------------------------------------------------------------------------------------------
@@ -143,16 +145,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    void SharedMapper::map_task_region(const Task *task, Processor target, 
+    bool SharedMapper::map_task_region(const Task *task, Processor target, 
                                        MappingTagID tag, bool inline_mapping,
                                        const RegionRequirement &req, unsigned index,
                                        const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                        std::vector<Memory> &target_ranking,
+                                       std::set<FieldID> &additional_fields,
                                        bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
       target_ranking.push_back(shared_memory);
       enable_WAR_optimization = war_enabled;
+      return true;
     }
 
     //--------------------------------------------------------------------------------------------
@@ -198,11 +202,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    void SequoiaMapper::map_task_region(const Task *task, Processor target, 
+    bool SequoiaMapper::map_task_region(const Task *task, Processor target, 
                                         MappingTagID tag, bool inline_mapping,
                                         const RegionRequirement &req, unsigned index,
                                         const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                         std::vector<Memory> &target_ranking,
+                                        std::set<FieldID> &additional_fields,
                                         bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
@@ -247,6 +252,7 @@ namespace LegionRuntime {
         }
       }
       enable_WAR_optimization = war_enabled;
+      return true;
     }
 
     //--------------------------------------------------------------------------------------------

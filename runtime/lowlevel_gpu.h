@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,6 +85,9 @@ namespace LegionRuntime {
 				Event start_event, Event finish_event);
 
     public:
+      // Helper method for getting a thread's processor value
+      static Processor get_processor(void);
+    public:
       class Internal;
 
       GPUProcessor::Internal *internal;
@@ -97,21 +100,17 @@ namespace LegionRuntime {
       virtual ~GPUFBMemory(void);
 
       virtual RegionInstance create_instance(IndexSpace is,
+					     const int *linearization_bits,
 					     size_t bytes_needed,
-					     off_t adjust,
-					     ReductionOpID redopid)
-      {
-	return create_instance_local(is, bytes_needed, adjust, redopid);
-      }
-
-      virtual RegionInstance create_instance(IndexSpace is,
-					     size_t bytes_needed,
-					     off_t adjust,
+					     size_t block_size,
+					     size_t element_size,
+					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
 					     RegionInstance parent_inst)
       {
-	return create_instance_local(is, bytes_needed, adjust, redopid,
+	return create_instance_local(is, linearization_bits, bytes_needed,
+				     block_size, element_size, field_sizes, redopid,
 				     list_size, parent_inst);
       }
 
@@ -165,21 +164,17 @@ namespace LegionRuntime {
       virtual ~GPUZCMemory(void);
 
       virtual RegionInstance create_instance(IndexSpace is,
+					     const int *linearization_bits,
 					     size_t bytes_needed,
-					     off_t adjust,
-					     ReductionOpID redopid)
-      {
-	return create_instance_local(is, bytes_needed, adjust, redopid);
-      }
-
-      virtual RegionInstance create_instance(IndexSpace is,
-					     size_t bytes_needed,
-					     off_t adjust,
+					     size_t block_size,
+					     size_t element_size,
+					     const std::vector<size_t>& field_sizes,
 					     ReductionOpID redopid,
 					     off_t list_size,
 					     RegionInstance parent_inst)
       {
-	return create_instance_local(is, bytes_needed, adjust, redopid,
+	return create_instance_local(is, linearization_bits, bytes_needed,
+				     block_size, element_size, field_sizes, redopid,
 				     list_size, parent_inst);
       }
 

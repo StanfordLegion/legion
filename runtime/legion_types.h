@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@
 
 #define AUTO_GENERATE_ID   UINT_MAX
 
-#define MAX_FIELDS         128
+#define MAX_FIELDS         2048
 // The folowing fields are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
 #define FIELD_TYPE          uint64_t 
@@ -116,6 +116,12 @@ namespace LegionRuntime {
       ERROR_INVALID_VARIANT_SELECTION = 66,
       ERROR_INVALID_MAPPER_OUTPUT = 67,
       ERROR_UNINITIALIZED_REDUCTION = 68,
+      ERROR_INVALID_INDEX_DOMAIN = 69,
+      ERROR_INVALID_INDEX_PART_DOMAIN = 70,
+      ERROR_DISJOINTNESS_TEST_FAILURE = 71,
+      ERROR_NON_DISJOINT_TASK_REGIONS = 72,
+      ERROR_INVALID_FIELD_ACCESSOR_PRIVILEGES = 73,
+      ERROR_INVALID_PREMAPPED_REGION_LOCATION = 74,
     };
 
     // enum and namepsaces don't really get along well
@@ -170,9 +176,10 @@ namespace LegionRuntime {
       NOTIFY_MAPPED_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
       NOTIFY_FINISH_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
       ADVERTISEMENT_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
-      TERMINATION_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
-      CUSTOM_PREDICATE_ID= (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+9),
-      TASK_ID_AVAILABLE  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+10),
+      FINALIZE_DEL_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
+      TERMINATION_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+9),
+      CUSTOM_PREDICATE_ID= (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+10),
+      TASK_ID_AVAILABLE  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+11),
     };
 
     // Forward declarations for user level objects
@@ -226,9 +233,15 @@ namespace LegionRuntime {
 
     // legion_ops.h
     class GeneralizedOperation;
+    class EpochOperation;
+    class DeferredOperation;
     class TaskContext;
     class MappingOperation;
+    class UnmapOperation;
     class DeletionOperation;
+    class CreationOperation;
+    class StartOperation;
+    class CompleteOperation;
     class SingleTask;
     class MultiTask;
     class IndexTask;
@@ -278,6 +291,8 @@ namespace LegionRuntime {
     class TreeStateLogger;
 
     typedef LowLevel::Machine Machine;
+    typedef LowLevel::Domain Domain;
+    typedef LowLevel::DomainPoint DomainPoint;
     typedef LowLevel::IndexSpace IndexSpace;
     typedef LowLevel::IndexSpaceAllocator IndexSpaceAllocator;
     typedef LowLevel::RegionInstance PhysicalInstance;
@@ -295,6 +310,7 @@ namespace LegionRuntime {
     typedef unsigned int Color;
     typedef unsigned int IndexPartition;
     typedef unsigned int FieldID;
+    static const FieldID FIELDID_DYNAMIC = UINT_MAX;
     typedef unsigned int MapperID;
     typedef unsigned int UniqueID;
     typedef unsigned int ContextID;
@@ -310,8 +326,9 @@ namespace LegionRuntime {
     typedef Processor::TaskFuncID TaskID;
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
+    typedef std::map<Color,Domain> DomainColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine *machine, HighLevelRuntime *rt, const std::set<Processor> &local_procs);
-    typedef Color (*ProjectionFnptr)(const void*,size_t,unsigned);
+    typedef Color (*ProjectionFnptr)(const DomainPoint&);
     typedef bool (*PredicateFnptr)(const void*, size_t, const std::vector<Future> futures);
     typedef std::map<TypeHandle,Structure> TypeTable;
     typedef std::map<ProjectionID,ProjectionFnptr> ProjectionTable;
@@ -321,8 +338,14 @@ namespace LegionRuntime {
 #define FRIEND_ALL_RUNTIME_CLASSES                \
     friend class HighLevelRuntime;                \
     friend class GeneralizedOperation;            \
+    friend class EpochOperation;                  \
+    friend class DeferredOperation;               \
     friend class MappingOperation;                \
+    friend class UnmapOperation;                  \
     friend class DeletionOperation;               \
+    friend class CreationOperation;               \
+    friend class StartOperation;                  \
+    friend class CompleteOperation;               \
     friend class TaskContext;                     \
     friend class SingleTask;                      \
     friend class MultiTask;                       \

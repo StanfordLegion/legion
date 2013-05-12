@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,6 +92,11 @@ namespace LegionRuntime {
 	gasnet_hsl_init(&mutex);
 	gasnett_cond_init(&parent_condvar);
 	gasnett_cond_init(&worker_condvar);
+      }
+
+      Processor get_processor(void) const
+      {
+        return gpu->me;
       }
 
       void thread_main(void)
@@ -413,6 +418,15 @@ namespace LegionRuntime {
       delete internal;
     }
 
+    /*static*/ Processor GPUProcessor::get_processor(void)
+    {
+      void *tls_val = gasnett_threadkey_get(gpu_thread);
+      // If this happens there is a case we're not handling
+      assert(tls_val != NULL);
+      Internal *me = (Internal*)tls_val;
+      return me->get_processor();
+    }
+
     void GPUProcessor::start_worker_thread(void)
     {
       AutoHSLLock a(internal->mutex);
@@ -574,7 +588,7 @@ namespace LegionRuntime {
     // framebuffer memory
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPUProcessor *_gpu)
-      : Memory::Impl(_me, _gpu->internal->fbmem_size, MKIND_GPUFB, 512),
+      : Memory::Impl(_me, _gpu->internal->fbmem_size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM),
 	gpu(_gpu)
     {
       free_blocks[0] = size;
@@ -585,7 +599,7 @@ namespace LegionRuntime {
     // zerocopy memory
 
     GPUZCMemory::GPUZCMemory(Memory _me, GPUProcessor *_gpu)
-      : Memory::Impl(_me, _gpu->internal->zcmem_size, MKIND_ZEROCOPY, 256),
+      : Memory::Impl(_me, _gpu->internal->zcmem_size, MKIND_ZEROCOPY, 256, Memory::Z_COPY_MEM),
 	gpu(_gpu)
     {
       cpu_base = (char *)(gpu->get_zcmem_cpu_base());

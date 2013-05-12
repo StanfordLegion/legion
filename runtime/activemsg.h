@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,7 +93,9 @@ template <class MSGTYPE, int MSGID,
 struct MessageRawArgs;
 
 template <class REQTYPE, int REQID, class RPLTYPE, int RPLID,
-          RPLTYPE (*FNPTR)(REQTYPE), int RPL_N, int REQ_N> struct RequestRawArgs;
+          RPLTYPE (*SHORT_HNDL_PTR)(REQTYPE),
+          RPLTYPE (*MEDIUM_HNDL_PTR)(REQTYPE, const void *, size_t), int RPL_N, int REQ_N>
+  struct RequestRawArgs;
 
 template <class RPLTYPE, int RPLID, int RPL_N> struct ReplyRawArgs;
 
@@ -204,8 +206,9 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
 }; \
 \
 template <class REQTYPE, int REQID, class RPLTYPE, int RPLID, \
-          RPLTYPE (*FNPTR)(REQTYPE), int RPL_N> \
-struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, FNPTR, RPL_N, n> { \
+          RPLTYPE (*SHORT_HNDL_PTR)(REQTYPE), \
+          RPLTYPE (*MEDIUM_HNDL_PTR)(REQTYPE, const void *, size_t), int RPL_N>	\
+struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HNDL_PTR, RPL_N, n> { \
   HANDLERARG_DECL_ ## n ; \
 \
   static void handler_short(gasnet_token_t token, HANDLERARG_PARAMS_ ## n ) \
@@ -214,7 +217,7 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, FNPTR, RPL_N, n> { \
     gasnet_AMGetMsgSource(token, &src); \
     /*printf("handling request from node %d\n", src);*/	\
     union { \
-      RequestRawArgs<REQTYPE,REQID,RPLTYPE,RPLID,FNPTR,RPL_N,n> raw; \
+      RequestRawArgs<REQTYPE,REQID,RPLTYPE,RPLID,SHORT_HNDL_PTR,MEDIUM_HNDL_PTR,RPL_N,n> raw; \
       ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
@@ -224,7 +227,29 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, FNPTR, RPL_N, n> { \
       ArgsWithReplyInfo<RPLTYPE,RPLTYPE> typed; \
     } rpl_u; \
 \
-    rpl_u.typed.args = (*FNPTR)(u.typed.args); \
+    rpl_u.typed.args = (*SHORT_HNDL_PTR)(u.typed.args); \
+    rpl_u.typed.fptr = u.typed.fptr; \
+    rpl_u.raw.reply_short(token); \
+  } \
+\
+  static void handler_medium(gasnet_token_t token, void *buf, size_t nbytes, \
+                             HANDLERARG_PARAMS_ ## n ) \
+  { \
+    gasnet_node_t src; \
+    gasnet_AMGetMsgSource(token, &src); \
+    /*printf("handling request from node %d\n", src);*/	\
+    union { \
+      RequestRawArgs<REQTYPE,REQID,RPLTYPE,RPLID,SHORT_HNDL_PTR,MEDIUM_HNDL_PTR,RPL_N,n> raw; \
+      ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed; \
+    } u; \
+    HANDLERARG_COPY_ ## n ; \
+\
+    union { \
+      ReplyRawArgs<RPLTYPE,RPLID,RPL_N> raw; \
+      ArgsWithReplyInfo<RPLTYPE,RPLTYPE> typed; \
+    } rpl_u; \
+\
+    rpl_u.typed.args = (*MEDIUM_HNDL_PTR)(u.typed.args, buf, nbytes);	\
     rpl_u.typed.fptr = u.typed.fptr; \
     rpl_u.raw.reply_short(token); \
   } \
@@ -275,6 +300,12 @@ void dummy_short_handler(MSGTYPE dummy) {}
 
 template <class MSGTYPE>
 void dummy_medium_handler(MSGTYPE dummy, const void *data, size_t datalen) {}
+
+template <class MSGTYPE, class RPLTYPE>
+RPLTYPE dummy_short_w_reply_handler(MSGTYPE dummy) { RPLTYPE dummyret; return dummyret; }
+
+template <class MSGTYPE, class RPLTYPE>
+RPLTYPE dummy_medium_w_reply_handler(MSGTYPE dummy, const void *data, size_t datalen) { RPLTYPE dummyret; return dummyret; }
 
 template <int MSGID, class MSGTYPE, void (*FNPTR)(MSGTYPE)>
 class ActiveMessageShortNoReply {
@@ -361,7 +392,7 @@ template <int REQID, int RPLID, class REQTYPE, class RPLTYPE,
           RPLTYPE (*FNPTR)(REQTYPE)>
 class ActiveMessageShortReply {
  public:
-  typedef RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, FNPTR,
+  typedef RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, FNPTR, dummy_medium_w_reply_handler<REQTYPE, RPLTYPE>,
                          (sizeof(void*)+sizeof(RPLTYPE)+3)/4,
                          (sizeof(void*)+sizeof(REQTYPE)+3)/4> ReqRawArgsType;
   typedef ReplyRawArgs<RPLTYPE, RPLID, (sizeof(void*)+sizeof(RPLTYPE)+3)/4> RplRawArgsType;
@@ -403,6 +434,60 @@ class ActiveMessageShortReply {
   {
     entries[0].index = REQID;
     entries[0].fnptr = (void (*)()) (ReqRawArgsType::handler_short);
+    entries[1].index = RPLID;
+    entries[1].fnptr = (void (*)()) (RplRawArgsType::handler_short);
+    return 2;
+  }
+};
+
+template <int REQID, int RPLID, class REQTYPE, class RPLTYPE,
+  RPLTYPE (*FNPTR)(REQTYPE, const void *, size_t)>
+class ActiveMessageMediumReply {
+ public:
+  typedef RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, dummy_short_w_reply_handler<REQTYPE, RPLTYPE>, FNPTR,
+                         (sizeof(void*)+sizeof(RPLTYPE)+3)/4,
+                         (sizeof(void*)+sizeof(REQTYPE)+3)/4> ReqRawArgsType;
+  typedef ReplyRawArgs<RPLTYPE, RPLID, (sizeof(void*)+sizeof(RPLTYPE)+3)/4> RplRawArgsType;
+
+  static RPLTYPE request(gasnet_node_t dest, REQTYPE args,
+			 const void *data, size_t datalen,
+			 int payload_mode)
+  {
+    HandlerReplyFuture<RPLTYPE> future;
+    ArgsWithReplyInfo<REQTYPE,RPLTYPE> args_with_reply;
+    args_with_reply.fptr = &future;
+    args_with_reply.args = args;
+    enqueue_message(dest, REQID, &args_with_reply, sizeof(args_with_reply),
+		    data, datalen, payload_mode);
+#ifdef OLD_AM_STUFF
+    union {
+      ReqRawArgsType raw;
+      ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed;
+    } u;
+      
+    u.typed.fptr = &future;
+    u.typed.args = args;
+
+#ifdef CHECK_REENTRANT_MESSAGES
+    if(gasnett_threadkey_get(in_handler)) {
+      printf("Help!  Message send inside handler!\n");
+    } else {
+#else
+    {
+#endif
+      u.raw.request_short(dest);
+    }
+#endif
+
+    //printf("request sent - waiting for response\n");
+    future.wait();
+    return future.value;
+  }
+
+  static int add_handler_entries(gasnet_handlerentry_t *entries)
+  {
+    entries[0].index = REQID;
+    entries[0].fnptr = (void (*)()) (ReqRawArgsType::handler_medium);
     entries[1].index = RPLID;
     entries[1].fnptr = (void (*)()) (RplRawArgsType::handler_short);
     return 2;

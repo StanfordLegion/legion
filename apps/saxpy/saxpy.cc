@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -306,7 +306,7 @@ void main_task(const void *args, size_t arglen,
 
 void init_vectors_task(const void *global_args, size_t global_arglen,
                        const void *local_args, size_t local_arglen,
-                       const unsigned point[1],
+                       const DomainPoint &point,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<PhysicalRegion> &regions,
                        Context ctx, HighLevelRuntime *runtime) {
@@ -330,7 +330,7 @@ void init_vectors_task(const void *global_args, size_t global_arglen,
 
 void add_vectors_task(const void *global_args, size_t global_arglen,
                       const void *local_args, size_t local_arglen,
-                      const unsigned point[1],
+                      const DomainPoint &point,
                       const std::vector<RegionRequirement> &reqs,
                       const std::vector<PhysicalRegion> &regions,
                       Context ctx, HighLevelRuntime *runtime) {
@@ -469,10 +469,10 @@ public:
     last_memory = *it;
   }
 public:
-  virtual void map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping,
+  virtual bool map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping,
                                 const RegionRequirement &req, unsigned index,
                                 const std::map<Memory,bool> &current_instances, std::vector<Memory> &target_ranking,
-                                bool &enable_WAR_optimization)
+                                std::set<FieldID> &additional_fields, bool &enable_WAR_optimization)
   {
     enable_WAR_optimization = false;
 #if 0
@@ -516,6 +516,7 @@ public:
       default:
         assert(false);
     }
+    return true;
   }
 
   virtual void notify_failed_mapping(const Task *task, const RegionRequirement &req, unsigned index, bool inline_mapping)
@@ -551,8 +552,8 @@ int main(int argc, char **argv) {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_single_task<top_level_task>(TOP_LEVEL_TASK_ID, Processor::LOC_PROC, false, "top_level_task");
   HighLevelRuntime::register_single_task<main_task>(TASKID_MAIN, Processor::LOC_PROC, false, "main_task");
-  HighLevelRuntime::register_index_task<unsigned,1,init_vectors_task>(TASKID_INIT_VECTORS, Processor::LOC_PROC, true, "init_vectors");
-  HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task>(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
+  HighLevelRuntime::register_index_task<init_vectors_task>(TASKID_INIT_VECTORS, Processor::LOC_PROC, true, "init_vectors");
+  HighLevelRuntime::register_index_task<add_vectors_task>(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
   //HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task_gen<AccessorType::AOS<sizeof(float)> > >(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
   //HighLevelRuntime::register_index_task<unsigned,1,add_vectors_task_aos>(TASKID_ADD_VECTORS, Processor::LOC_PROC, true, "add_vectors");
 

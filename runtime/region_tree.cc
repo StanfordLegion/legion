@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 #include "region_tree.h"
 #include "legion_utilities.h"
 #include "legion_logging.h"
+#include "legion_profiling.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -171,9 +172,11 @@ namespace LegionRuntime {
     RegionTreeForest::RegionTreeForest(HighLevelRuntime *rt)
       : runtime(rt),
 #ifdef LOW_LEVEL_LOCKS
-        context_lock(Lock::create_lock())
+        context_lock(Lock::create_lock()),
+        creation_lock(Lock::create_lock())
 #else
-        context_lock(ImmovableLock(true/*initialize*/))
+        context_lock(ImmovableLock(true/*initialize*/)),
+        creation_lock(ImmovableLock(true/*initialize*/))
 #endif
     //--------------------------------------------------------------------------
     {
@@ -188,8 +191,10 @@ namespace LegionRuntime {
     {
 #ifdef LOW_LEVEL_LOCKS
       context_lock.destroy_lock();
+      creation_lock.destroy_lock();
 #else
       context_lock.destroy();
+      creation_lock.destroy();
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       if (!escaped_users.empty())
@@ -373,19 +378,39 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_space(IndexSpace space)
+    bool RegionTreeForest::are_overlapping(LogicalRegion h1, LogicalRegion h2)
+    //--------------------------------------------------------------------------
+    {
+      // If the tree ids are different or the field spaces are different
+      // then we are done easily
+      if (h1.get_field_space() != h2.get_field_space())
+        return false;
+      if (h1.get_tree_id() != h2.get_tree_id())
+        return false;
+      std::vector<Color> path;
+      if (compute_index_path(h1.get_index_space(), h2.get_index_space(), path))
+        return true;
+      path.clear();
+      if (compute_index_path(h2.get_index_space(), h1.get_index_space(), path))
+        return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_index_space(Domain domain)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(lock_held);
 #endif
       // Create a new index space node and put it on the list
-      create_node(space, NULL/*parent*/, 0/*color*/, true/*add*/);
-      created_index_trees.push_back(space);
+      create_node(domain, NULL/*parent*/, 0/*color*/, true/*add*/);
+      created_index_trees.push_back(domain.get_index_space());
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_index_space(IndexSpace space)
+    void RegionTreeForest::destroy_index_space(IndexSpace space, bool finalize, 
+                               const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -398,7 +423,7 @@ namespace LegionRuntime {
       {
         // Mark that this region has been destroyed
         deleted_regions.push_back((*it)->handle);
-        destroy_node(*it, true/*top*/);
+        destroy_node(*it, true/*top*/, finalize, deletion_contexts);
         // Also check to see if the handle was in the created list
         for (std::list<LogicalRegion>::iterator cit = created_region_trees.begin();
               cit != created_region_trees.end(); cit++)
@@ -415,7 +440,7 @@ namespace LegionRuntime {
       target_node->logical_nodes.clear();
       // Now we delete the index space and its subtree
       deleted_index_spaces.push_back(target_node->handle);
-      destroy_node(target_node, true/*top*/);
+      destroy_node(target_node, true/*top*/, finalize);
       // Also check to see if this is one of our created regions in which case
       // we need to remove it from that list
       for (std::list<IndexSpace>::iterator it = created_index_trees.begin();
@@ -460,7 +485,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Color RegionTreeForest::create_index_partition(IndexPartition pid, IndexSpace parent, bool disjoint,
-                                int color, const std::map<Color,IndexSpace> &coloring)
+                                int color, const std::map<Color,Domain> &coloring, Domain color_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -472,20 +497,28 @@ namespace LegionRuntime {
         part_color = parent_node->generate_color();
       else
         part_color = unsigned(color);
-      IndexPartNode *new_part = create_node(pid, parent_node, part_color, disjoint, true/*add*/);
+      IndexPartNode *new_part = create_node(pid, parent_node, part_color, color_space, disjoint, true/*add*/);
+#ifdef LEGION_SPY
+      LegionSpy::log_index_partition(parent.id, pid, disjoint, part_color);
+#endif
 #ifdef DYNAMIC_TESTS
       std::vector<IndexSpaceNode*> children; 
 #endif
       // Now do all of the child nodes
-      for (std::map<Color,IndexSpace>::const_iterator it = coloring.begin();
+      for (std::map<Color,Domain>::const_iterator it = coloring.begin();
             it != coloring.end(); it++)
       {
+        Domain domain = it->second;
+        domain.get_index_space(true/*create if necessary*/);
 #ifdef DYNAMIC_TESTS
         IndexSpaceNode *child = 
 #endif
-        create_node(it->second, new_part, it->first, true/*add*/);
+        create_node(domain, new_part, it->first, true/*add*/);
 #ifdef DYNAMIC_TESTS
         children.push_back(child);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_index_subspace(pid, domain.get_index_space().id, it->first);
 #endif
       }
 #ifdef DYNAMIC_TESTS
@@ -537,7 +570,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_index_partition(IndexPartition pid)
+    void RegionTreeForest::destroy_index_partition(IndexPartition pid, bool finalize, 
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -549,12 +583,12 @@ namespace LegionRuntime {
             it != target_node->logical_nodes.end(); it++)
       {
         deleted_partitions.push_back((*it)->handle);
-        destroy_node(*it, true/*top*/);
+        destroy_node(*it, true/*top*/, finalize, deletion_contexts);
       }
       target_node->logical_nodes.clear();
       // Now we delete the index partition
       deleted_index_parts.push_back(target_node->handle);
-      destroy_node(target_node, true/*top*/);
+      destroy_node(target_node, true/*top*/, finalize);
 #ifdef DYNAMIC_TESTS
       Color target_color = target_node->color;
       // Go through and remove any dynamic tests involving this partition
@@ -585,39 +619,82 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent, Color color)
+    IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent, Color color, bool can_create)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(lock_held);
+      if (can_create)
+        assert(lock_held);
 #endif
+      if (!has_node(parent))
+        return 0;
       IndexSpaceNode *parent_node = get_node(parent);
-#ifdef DEBUG_HIGH_LEVEL
-      if (parent_node->color_map.find(color) == parent_node->color_map.end())
+      if (can_create)
       {
-        log_index(LEVEL_ERROR, "Invalid color %d for get index partitions", color);
-        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+        // No need to grab anymore locks
+        if (!parent_node->has_child(color))
+          return 0;
+        IndexPartNode *index_node = parent_node->get_child(color);
+        return index_node->handle;
       }
-#endif
-      return parent_node->color_map[color]->handle;
+      else
+      {
+        // Need to hold the creation lock to read this
+        AutoLock c_lock(creation_lock);
+        if (!parent_node->has_child(color))
+          return 0;
+        IndexPartNode *index_node = parent_node->get_child(color);
+        return index_node->handle;
+      }
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::get_index_subspace(IndexPartition p, Color color)
+    IndexSpace RegionTreeForest::get_index_subspace(IndexPartition p, Color color, bool can_create)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(lock_held);
+      if (can_create)
+        assert(lock_held);
 #endif
+      if (!has_node(p))
+        return IndexSpace::NO_SPACE;
       IndexPartNode *parent_node = get_node(p);
-#ifdef DEBUG_HIGH_LEVEL
-      if (parent_node->color_map.find(color) == parent_node->color_map.end())
+      if (can_create)
       {
-        log_index(LEVEL_ERROR, "Invalid color %d for get index subspace", color);
-        exit(ERROR_INVALID_INDEX_PART_COLOR);
+        if (!parent_node->has_child(color))
+          return IndexSpace::NO_SPACE;
+        IndexSpaceNode *index_node = parent_node->get_child(color);
+        return index_node->handle;
       }
-#endif
-      return parent_node->color_map[color]->handle;
+      else
+      {
+        // Need to hold the creation lock to read this
+        AutoLock c_lock(creation_lock);
+        if (!parent_node->has_child(color))
+          return IndexSpace::NO_SPACE;
+        IndexSpaceNode *index_node = parent_node->get_child(color);
+        return index_node->handle;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    Domain RegionTreeForest::get_index_space_domain(IndexSpace handle, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_node(handle))
+        return Domain::NO_DOMAIN;
+      IndexSpaceNode *node = get_node(handle);
+      return node->domain;
+    }
+
+    //--------------------------------------------------------------------------
+    Domain RegionTreeForest::get_index_partition_color_space(IndexPartition p, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_node(p))
+        return Domain::NO_DOMAIN;
+      IndexPartNode *node = get_node(p);
+      return node->color_space;
     }
 
     //--------------------------------------------------------------------------
@@ -634,7 +711,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_field_space(FieldSpace space)
+    void RegionTreeForest::destroy_field_space(FieldSpace space, bool finalize,
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -647,7 +725,7 @@ namespace LegionRuntime {
       {
         // Mark that this region has been destroyed
         deleted_regions.push_back((*it)->handle);
-        destroy_node(*it, true/*top*/);
+        destroy_node(*it, true/*top*/, finalize, deletion_contexts);
         // Also check to see if the handle was in the created list
         for (std::list<LogicalRegion>::iterator cit = created_region_trees.begin();
               cit != created_region_trees.end(); cit++)
@@ -740,11 +818,12 @@ namespace LegionRuntime {
 #endif
       RegionNode *top_node = create_node(handle, NULL/*parent*/, true/*add*/);
       created_region_trees.push_back(handle);
-      top_node->initialize_physical_context(ctx, false/*clear*/, FieldMask(), true/*top*/);
+      top_node->initialize_physical_context(ctx, false/*clear*/, FieldMask(FIELD_ALL_ONES), true/*top*/);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_region(LogicalRegion handle)
+    void RegionTreeForest::destroy_region(LogicalRegion handle, bool finalize, 
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -755,7 +834,7 @@ namespace LegionRuntime {
       // Check to see if the region node has been made if, it hasn't been
       // made, then we don't need to worry about deleting anything
       if (has_node(handle))
-        destroy_node(get_node(handle), true/*top*/);
+        destroy_node(get_node(handle), true/*top*/, finalize, deletion_contexts);
       for (std::list<LogicalRegion>::iterator it = created_region_trees.begin();
             it != created_region_trees.end(); it++)
       {
@@ -770,7 +849,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_partition(LogicalPartition handle)
+    void RegionTreeForest::destroy_partition(LogicalPartition handle, bool finalize, 
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -780,7 +860,7 @@ namespace LegionRuntime {
       // Check to see if it even exists, if it doesn't then
       // we don't need to worry about deleting it
       if (has_node(handle))
-        destroy_node(get_node(handle), true/*top*/);
+        destroy_node(get_node(handle), true/*top*/, finalize, deletion_contexts);
     }
 
     //--------------------------------------------------------------------------
@@ -820,41 +900,75 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition RegionTreeForest::get_region_subcolor(LogicalRegion parent, Color c)
+    LogicalPartition RegionTreeForest::get_region_subcolor(LogicalRegion parent, Color c, bool can_create)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(lock_held);
+      if (can_create)
+        assert(lock_held);
 #endif
-      // Check to see if has already been instantiated, if it has
-      // then we can just return it, otherwise we need to make the new node
-      RegionNode *parent_node = get_node(parent);
-      IndexPartNode *index_node = parent_node->row_source->get_child(c);
-      LogicalPartition result(parent.tree_id, index_node->handle, parent.field_space);
-      if (!has_node(result))
+      if (can_create)
       {
-        create_node(result, parent_node, true/*add*/);
+        // Check to see if has already been instantiated, if it has
+        // then we can just return it, otherwise we need to make the new node
+        RegionNode *parent_node = get_node(parent);
+        IndexPartNode *index_node = parent_node->row_source->get_child(c);
+        LogicalPartition result(parent.tree_id, index_node->handle, parent.field_space);
+        if (!has_node(result))
+        {
+          create_node(result, parent_node, true/*add*/);
+        }
+        return result;
       }
-      return result;
+      else
+      {
+        const IndexSpace &space = parent.get_index_space();
+        if (!has_node(space))
+          return LogicalPartition::NO_PART;
+        IndexSpaceNode *parent_node = get_node(space);
+        // Need to hold the creation lock to read this
+        AutoLock c_lock(creation_lock);
+        if (!parent_node->has_child(c))
+          return LogicalPartition::NO_PART;
+        IndexPartNode *index_node = parent_node->get_child(c);
+        return LogicalPartition(parent.tree_id, index_node->handle, parent.field_space);
+      }
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion RegionTreeForest::get_partition_subcolor(LogicalPartition parent, Color c)
+    LogicalRegion RegionTreeForest::get_partition_subcolor(LogicalPartition parent, Color c, bool can_create)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(lock_held);
+      if (can_create)
+        assert(lock_held);
 #endif
-      // Check to see if has already been instantiated, if it has
-      // then we can just return it, otherwise we need to make the new node
-      PartitionNode *parent_node = get_node(parent);
-      IndexSpaceNode *index_node = parent_node->row_source->get_child(c);
-      LogicalRegion result(parent.tree_id, index_node->handle, parent.field_space);
-      if (!has_node(result))
+      if (can_create)
       {
-        create_node(result, parent_node, true/*add*/);
+        // Check to see if has already been instantiated, if it has
+        // then we can just return it, otherwise we need to make the new node
+        PartitionNode *parent_node = get_node(parent);
+        IndexSpaceNode *index_node = parent_node->row_source->get_child(c);
+        LogicalRegion result(parent.tree_id, index_node->handle, parent.field_space);
+        if (!has_node(result))
+        {
+          create_node(result, parent_node, true/*add*/);
+        }
+        return result;
       }
-      return result;
+      else
+      {
+        const IndexPartition &part = parent.get_index_partition(); 
+        if (!has_node(part))
+          return LogicalRegion::NO_REGION;
+        IndexPartNode *parent_node = get_node(part);
+        // Need the creation lock to read the color maps
+        AutoLock c_lock(creation_lock);
+        if (!parent_node->has_child(c))
+          return LogicalRegion::NO_REGION;
+        IndexSpaceNode *index_node = parent_node->get_child(c);
+        return LogicalRegion(parent.tree_id, index_node->handle, parent.field_space);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1019,30 +1133,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::initialize_physical_context(const RegionRequirement &req, InstanceRef ref, 
-                                                              UniqueID uid, ContextID ctx)
+    InstanceRef RegionTreeForest::initialize_physical_context(const RegionRequirement &req, unsigned idx, InstanceRef ref, 
+                                                              UniqueID uid, ContextID ctx, Event term_event, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(lock_held);
       assert(req.handle_type == SINGULAR);
 #endif
-      // Initialize the physical context
-      RegionNode *top_node = get_node(req.region);
-      FieldSpaceNode *field_node = get_node(req.region.field_space);
-      FieldMask init_mask = field_node->get_field_mask(req.instance_fields);
-      top_node->initialize_physical_context(ctx, false/*clear*/, init_mask, true/*top*/);
+      
       if (!ref.is_virtual_ref())
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(ref.view != NULL);
-#endif
-        // Find the field mask for which this task has privileges
-        const PhysicalUser &user = ref.view->find_user(uid);
+        // Initialize the physical context
+        RegionNode *top_node = get_node(req.region);
+        FieldSpaceNode *field_node = get_node(req.region.field_space);
+        FieldMask priv_mask = field_node->get_field_mask(req.privilege_fields);
+        FieldMask init_mask = field_node->get_field_mask(req.instance_fields);
+        top_node->initialize_physical_context(ctx, true/*clear*/, init_mask, true/*top*/);
+        // Make a physical user for this task
+        PhysicalUser user(priv_mask, RegionUsage(req), term_event, term_event, idx);
         // Do different things depending on whether this a normal instance or a reduction instance
-        if (ref.view->is_reduction_view())
+        if (ref.is_reduction_ref())
         {
-          ReductionManager *clone_manager = ref.view->get_manager()->as_reduction_manager()->clone_manager();
+          ReductionManager *clone_manager = ref.get_manager()->as_reduction_manager()->clone_manager();
           ReductionView *clone_view = create_reduction_view(clone_manager, top_node, true/*make local*/);
           clone_view->add_valid_reference();
           RegionTreeNode::PhysicalState &state = top_node->physical_states[ctx];
@@ -1053,13 +1166,13 @@ namespace LegionRuntime {
         {
           // Now go through and make a new InstanceManager and InstanceView for the
           // top level region and put them at the top of the tree
-          InstanceManager *clone_manager = ref.view->get_manager()->as_instance_manager()->clone_manager(user.field_mask, field_node);
+          InstanceManager *clone_manager = ref.get_manager()->as_instance_manager()->clone_manager(user.field_mask, field_node);
           InstanceView *clone_view = create_instance_view(clone_manager, NULL/*no parent*/, top_node, true/*make local*/);
           clone_view->add_valid_reference();
           // Update the state of the top level node 
           RegionTreeNode::PhysicalState &state = top_node->physical_states[ctx];
           state.valid_views[clone_view] = user.field_mask;
-          return clone_view->add_init_user(uid, user);  
+          return clone_view->add_init_user(uid, user, point);  
         }
       }
       else
@@ -1078,7 +1191,7 @@ namespace LegionRuntime {
 #endif
       FieldSpaceNode *field_node = get_node(rm.req.handle_type == SINGULAR ? rm.req.region.field_space : rm.req.partition.field_space);
       FieldMask field_mask = field_node->get_field_mask(rm.req.instance_fields);
-      PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term);
+      PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term, rm.idx);
       RegionNode *top_node = get_node(start_region);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), top_node, rm.ctx, true/*premap*/, rm.sanitizing, false/*closing*/, FIELD_ALL_ONES, field_mask);
@@ -1098,7 +1211,7 @@ namespace LegionRuntime {
 #endif
       FieldSpaceNode *field_node = get_node(rm.req.region.field_space);
       FieldMask field_mask = field_node->get_field_mask(rm.req.instance_fields);
-      PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term);
+      PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term, rm.idx);
       RegionNode *close_node = get_node(rm.req.region);
       PhysicalCloser closer(user, rm, close_node, false/*leave open*/); 
       closer.add_upper_target(ref.view->as_instance_view());
@@ -1125,7 +1238,7 @@ namespace LegionRuntime {
       FieldSpaceNode *field_node = get_node(rm.req.region.field_space);
       FieldMask field_mask = field_node->get_field_mask(rm.req.instance_fields);
       // Make the region usage Read-Write-Exclusive to guarantee we close everything up
-      PhysicalUser user(field_mask, RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), rm.single_term, rm.multi_term);
+      PhysicalUser user(field_mask, RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), rm.single_term, rm.multi_term, rm.idx);
       RegionNode *close_node = get_node(rm.req.region);
       ReductionCloser closer(user, rm, close_node, ref.view->as_reduction_view());
 #ifdef DEBUG_HIGH_LEVEL
@@ -1225,7 +1338,7 @@ namespace LegionRuntime {
       // No need to initialize things on the way down since that's already
       // been handled by the outer context
       // Check to see if we need to fill exclusive up from this node
-      if (!pivot_node->is_top_of_context(outer_ctx))
+      if (pivot_node->parent != NULL)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(pivot_node->parent != NULL);
@@ -1595,7 +1708,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::begin_unpack_region_tree_state(Deserializer &derez, unsigned long split_factor /*= -1*/)
+    void RegionTreeForest::begin_unpack_region_tree_state(Deserializer &derez, unsigned long split_factor /*= 1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1673,6 +1786,17 @@ namespace LegionRuntime {
       result += sizeof(ref.location);
       result += sizeof(ref.instance);
       result += sizeof(ref.copy);
+      // Don't need to send the view since we should never need it remotely
+      // It certainly can't be removed remotely
+      result += sizeof(UniqueManagerID);
+      // Check to see if we need to add this manager to the set of managers to be sent
+      if (ref.get_manager() != NULL)
+      {
+        if (ref.is_reduction_ref())
+          unique_reductions.insert(ref.get_manager()->as_reduction_manager());
+        else
+          unique_managers.insert(ref.get_manager()->as_instance_manager());
+      }
       return result;
     }
 
@@ -1682,12 +1806,17 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(lock_held);
+      assert(!ref.is_virtual_ref());
 #endif
       rez.serialize(ref.ready_event);
       rez.serialize(ref.required_lock);
       rez.serialize(ref.location);
       rez.serialize(ref.instance);
       rez.serialize(ref.copy);
+      if (ref.get_manager() != NULL)
+        rez.serialize(ref.get_manager()->get_unique_id());
+      else
+        rez.serialize<UniqueManagerID>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -1703,11 +1832,25 @@ namespace LegionRuntime {
       derez.deserialize(req_lock);
       Memory location;
       derez.deserialize(location);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(location.exists());
+#endif
       PhysicalInstance inst;
       derez.deserialize(inst);
       bool copy;
       derez.deserialize(copy);
-      return InstanceRef(ready_event, location, inst, NULL, copy, req_lock);
+      UniqueManagerID uid;
+      derez.deserialize(uid);
+      if (uid == 0)
+        return InstanceRef(ready_event, location, inst, NULL, copy, req_lock);
+      else
+      {
+        PhysicalManager *manager = find_manager(uid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(manager != NULL);
+#endif
+        return InstanceRef(manager, ready_event, location, inst, copy, req_lock);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1937,7 +2080,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::unpack_region_tree_updates_return(Deserializer &derez)
+    void RegionTreeForest::unpack_region_tree_updates_return(Deserializer &derez,
+                                const std::vector<ContextID> &enclosing_contexts)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1994,7 +2138,7 @@ namespace LegionRuntime {
       {
         IndexSpace handle;
         derez.deserialize(handle);
-        destroy_index_space(handle);
+        destroy_index_space(handle, true/*finalize*/, enclosing_contexts);
       }
       size_t num_deleted_index_parts;
       derez.deserialize(num_deleted_index_parts);
@@ -2002,7 +2146,7 @@ namespace LegionRuntime {
       {
         IndexPartition handle;
         derez.deserialize(handle);
-        destroy_index_partition(handle);
+        destroy_index_partition(handle, true/*finalize*/, enclosing_contexts);
       }
       size_t num_deleted_field_nodes;
       derez.deserialize(num_deleted_field_nodes);
@@ -2010,7 +2154,7 @@ namespace LegionRuntime {
       {
         FieldSpace handle;
         derez.deserialize(handle);
-        destroy_field_space(handle);
+        destroy_field_space(handle, true/*finalize*/, enclosing_contexts);
       }
       size_t num_deleted_regions;
       derez.deserialize(num_deleted_regions);
@@ -2018,7 +2162,7 @@ namespace LegionRuntime {
       {
         LogicalRegion handle;
         derez.deserialize(handle);
-        destroy_region(handle);
+        destroy_region(handle, true/*finalize*/, enclosing_contexts);
       }
       size_t num_deleted_partitions;
       derez.deserialize(num_deleted_partitions);
@@ -2026,7 +2170,7 @@ namespace LegionRuntime {
       {
         LogicalPartition handle;
         derez.deserialize(handle);
-        destroy_partition(handle);
+        destroy_partition(handle, true/*finalize*/, enclosing_contexts);
       }
     }
 
@@ -2556,7 +2700,7 @@ namespace LegionRuntime {
 #endif
         // Re-initialize the state and then unpack the state
         RegionNode *top_node = get_node(req.region);
-        top_node->initialize_physical_context(ctx, true/*clear*/, unpacking_mask, top_node->is_top_of_context(ctx));
+        top_node->initialize_physical_context(ctx, true/*clear*/, unpacking_mask, false/*top is already set*/);
         top_node->unpack_physical_state(ctx, derez, true/*recurse*/); 
 #ifdef DEBUG_HIGH_LEVEL
         TreeStateLogger::capture_state(runtime, ridx, task_name, uid, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask, unpacking_mask);
@@ -2720,10 +2864,10 @@ namespace LegionRuntime {
       unpacking_mask.shift_left(shift);
       // Re-initialize the state, note we have to go up the tree if there is no parent
       RegionNode *top_node = get_node(handle);
-      top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, top_node->is_top_of_context(ctx));
+      top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, true/*top for these fields*/);
       // If this is not the top of the context, we need to fill in the rest of the
       // context marking that this is open in EXCLUSIVE mode
-      if (!top_node->is_top_of_context(ctx))
+      if (top_node->parent != NULL)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(top_node->parent != NULL);
@@ -2838,7 +2982,7 @@ namespace LegionRuntime {
         return;
       // Initialize the state before unpacking anything
       RegionNode *top_node = get_node(handle);
-      top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, top_node->is_top_of_context(ctx));
+      top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, true/*top*/);
       bool has_created_fields;
       derez.deserialize(has_created_fields);
       if (has_created_fields)
@@ -3064,16 +3208,16 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp, IndexPartNode *parent,
+    IndexSpaceNode* RegionTreeForest::create_node(Domain d, IndexPartNode *parent,
                                         Color c, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(index_nodes.find(sp) == index_nodes.end());
-#endif
-      IndexSpaceNode *result = new IndexSpaceNode(sp, parent, c, add, this);
+      IndexSpaceNode *result = new IndexSpaceNode(d, parent, c, add, this);
+      IndexSpace sp = d.get_index_space();
+      AutoLock c_lock(creation_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
+      assert(index_nodes.find(sp) == index_nodes.end());
 #endif
       index_nodes[sp] = result;
       if (parent != NULL)
@@ -3083,15 +3227,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::create_node(IndexPartition p, IndexSpaceNode *parent,
-                                        Color c, bool dis, bool add)
+                                        Color c, Domain color_space, bool dis, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(index_parts.find(p) == index_parts.end());
-#endif
-      IndexPartNode *result = new IndexPartNode(p, parent, c, dis, add, this);
+      IndexPartNode *result = new IndexPartNode(p, parent, c, color_space, dis, add, this);
+      AutoLock c_lock(creation_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
+      assert(index_parts.find(p) == index_parts.end());
 #endif
       index_parts[p] = result;
       if (parent != NULL)
@@ -3103,12 +3246,11 @@ namespace LegionRuntime {
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace sp)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(field_nodes.find(sp) == field_nodes.end());
-#endif
       FieldSpaceNode *result = new FieldSpaceNode(sp, this);
+      AutoLock c_lock(creation_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
+      assert(field_nodes.find(sp) == field_nodes.end());
 #endif
       field_nodes[sp] = result;
       return result;
@@ -3133,6 +3275,7 @@ namespace LegionRuntime {
         col_src = get_node(r.field_space);
 
       RegionNode *result = new RegionNode(r, par, row_src, col_src, add, this);
+      AutoLock c_lock(creation_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -3159,6 +3302,7 @@ namespace LegionRuntime {
 #endif
       IndexPartNode *row_src = get_node(p.index_partition);
       PartitionNode *result = new PartitionNode(p, par, row_src, add, this);
+      AutoLock c_lock(creation_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -3170,37 +3314,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_node(IndexSpaceNode *node, bool top)
+    void RegionTreeForest::destroy_node(IndexSpaceNode *node, bool top, bool finalize)
     //--------------------------------------------------------------------------
     {
-      if (top && (node->parent != NULL))
+      // We can only do this if we're finalizing
+      if (top && finalize && (node->parent != NULL))
         node->parent->remove_child(node->color);
       // destroy any child nodes that haven't already been destroyed, then do ourselves
       for (std::map<Color,IndexPartNode*>::const_iterator it = node->valid_map.begin();
             it != node->valid_map.end(); it++)
       {
-        destroy_node(it->second, false/*top*/);
+        destroy_node(it->second, false/*top*/, finalize);
       }
-      // Now clear our valid map since all the children are gone
-      node->valid_map.clear();
+      // Can only clear the valid map if we're finalizing this deletion
+      if (finalize)
+        node->valid_map.clear();
       // Don't actually destroy anything, just mark destroyed, when the
       // destructor is called we'll decide if we want to do anything
       node->mark_destroyed();
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_node(IndexPartNode *node, bool top)
+    void RegionTreeForest::destroy_node(IndexPartNode *node, bool top, bool finalize)
     //--------------------------------------------------------------------------
     {
-      if (top && (node->parent != NULL))
+      // We can only do this if we're finalizing
+      if (top && finalize && (node->parent != NULL))
         node->parent->remove_child(node->color);
       // destroy any child nodes, then do ourselves
       for (std::map<Color,IndexSpaceNode*>::const_iterator it = node->valid_map.begin();
             it != node->valid_map.end(); it++)
       {
-        destroy_node(it->second, false/*top*/);
+        destroy_node(it->second, false/*top*/, finalize);
       }
-      node->valid_map.clear();
+      // Can only clear the map if we're finalizing this deletion
+      if (finalize)
+        node->valid_map.clear();
       node->mark_destroyed();
     }
 
@@ -3215,10 +3364,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_node(RegionNode *node, bool top)
+    void RegionTreeForest::destroy_node(RegionNode *node, bool top, bool finalize,
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
-      if (top && (node->parent != NULL))
+      // Can only do this if we're finalizing the deletion
+      if (top && finalize && (node->parent != NULL))
         node->parent->remove_child(node->row_source->color);
       // Now destroy our children
       for (std::map<Color,PartitionNode*>::const_iterator it = node->valid_map.begin();
@@ -3227,17 +3378,49 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(has_node(it->second->handle));
 #endif
-        destroy_node(it->second, false/*top*/);
+        destroy_node(it->second, false/*top*/, finalize, deletion_contexts);
       }
-      node->valid_map.clear();
+      // Clear our valid map since we no longer have any valid chlidren
+      if (finalize)
+      {
+        node->valid_map.clear();
+        // If we're finalizing then we can just free up all 
+        // the valid instances and delete the contexts
+        for (std::map<ContextID,RegionTreeNode::PhysicalState>::iterator it = 
+              node->physical_states.begin(); it != node->physical_states.end(); it++)
+        {
+          node->invalidate_instance_views(it->second,FieldMask(FIELD_ALL_ONES), false/*clean*/);
+          node->invalidate_reduction_views(it->second,FieldMask(FIELD_ALL_ONES));
+        }
+        node->physical_states.clear();
+      }
+      else
+      {
+        // Remove any references to valid views that we have in
+        // the deletion contexts
+        for (std::vector<ContextID>::const_iterator it = deletion_contexts.begin();
+              it != deletion_contexts.end(); it++)
+        {
+          std::map<ContextID,RegionTreeNode::PhysicalState>::iterator finder = 
+            node->physical_states.find(*it);
+          if (finder != node->physical_states.end())
+          {
+            node->invalidate_instance_views(finder->second,FieldMask(FIELD_ALL_ONES), false/*clean*/);
+            node->invalidate_reduction_views(finder->second,FieldMask(FIELD_ALL_ONES));
+            node->physical_states.erase(finder);
+          }
+        }
+      }
       node->mark_destroyed();
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::destroy_node(PartitionNode *node, bool top)
+    void RegionTreeForest::destroy_node(PartitionNode *node, bool top, bool finalize,
+                                const std::vector<ContextID> &deletion_contexts)
     //--------------------------------------------------------------------------
     {
-      if (top && (node->parent != NULL))
+      // Can only do this if we're finalizing the deletion
+      if (top && finalize && (node->parent != NULL))
         node->parent->remove_child(node->row_source->color);
       for (std::map<Color,RegionNode*>::const_iterator it = node->valid_map.begin();
             it != node->valid_map.end(); it++)
@@ -3245,9 +3428,29 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(has_node(it->second->handle));
 #endif
-        destroy_node(it->second, false/*top*/);
+        destroy_node(it->second, false/*top*/, finalize, deletion_contexts);
       }
-      node->valid_map.clear();
+      if (finalize)
+      {
+        node->valid_map.clear();
+        // Since we're finalizing, we can remove all the contexts that
+        // we no longer need, which is all of them.
+        node->physical_states.clear();
+      }
+      else
+      {
+        // No valid views here, so we can just clear out our deletion states
+        for (std::vector<ContextID>::const_iterator it = deletion_contexts.begin();
+              it != deletion_contexts.end(); it++)
+        {
+          std::map<ContextID,RegionTreeNode::PhysicalState>::iterator finder = 
+            node->physical_states.find(*it);
+          if (finder != node->physical_states.end())
+          {
+            node->physical_states.erase(finder);
+          }
+        }
+      }
       node->mark_destroyed();
     }
 
@@ -3255,6 +3458,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::has_node(IndexSpace space) const
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       return (index_nodes.find(space) != index_nodes.end());
     }
 
@@ -3262,6 +3466,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::has_node(IndexPartition part) const
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       return (index_parts.find(part) != index_parts.end());
     }
 
@@ -3269,6 +3474,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::has_node(FieldSpace space) const
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       return (field_nodes.find(space) != field_nodes.end());
     }
 
@@ -3276,6 +3482,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::has_node(LogicalRegion handle, bool strict /*= true*/) const
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       if (region_nodes.find(handle) != region_nodes.end())
         return true;
       else if (!strict)
@@ -3294,6 +3501,7 @@ namespace LegionRuntime {
     bool RegionTreeForest::has_node(LogicalPartition handle, bool strict /*= true*/) const
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       if (part_nodes.find(handle) != part_nodes.end())
         return true;
       else if (!strict)
@@ -3312,11 +3520,15 @@ namespace LegionRuntime {
     IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = index_nodes.find(space);
       if (it == index_nodes.end())
       {
         log_index(LEVEL_ERROR,"Unable to find entry for index space %x.  This means it has either been "
                               "deleted or the appropriate privileges are not being requested.", space.id);
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
         exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
       }
       return it->second;
@@ -3326,11 +3538,15 @@ namespace LegionRuntime {
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
+      AutoLock c_lock(creation_lock);
       std::map<IndexPartition,IndexPartNode*>::const_iterator it = index_parts.find(part);
       if (it == index_parts.end())
       {
         log_index(LEVEL_ERROR,"Unable to find entry for index partition %d.  This means it has either been "
                               "deleted or the appropriate privileges are not being requested.", part);
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
         exit(ERROR_INVALID_INDEX_PART_ENTRY);
       }
       return it->second;
@@ -3345,6 +3561,9 @@ namespace LegionRuntime {
       {
         log_field(LEVEL_ERROR,"Unable to find entry for field space %x.  This means it has either been "
                               "deleted or the appropriate privileges are not being requested.", space.id); 
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
         exit(ERROR_INVALID_FIELD_SPACE_ENTRY);
       }
       return it->second;
@@ -3363,6 +3582,9 @@ namespace LegionRuntime {
           log_region(LEVEL_ERROR,"Unable to find entry for logical region (%x,%x,%x).  This means it has either been "
                                 "deleted or the appropriate privileges are not being requested.", 
                                 handle.tree_id,handle.index_space.id,handle.field_space.id);
+#ifdef DEBUG_HIGH_LEVEl
+          assert(false);
+#endif
           exit(ERROR_INVALID_REGION_ENTRY);
         }
         return index_node->instantiate_region(handle.tree_id, handle.field_space);
@@ -3383,6 +3605,9 @@ namespace LegionRuntime {
           log_region(LEVEL_ERROR,"Unable to find entry for logical partition (%x,%x,%x).  This means it has either been "
                                 "deleted or the appropriate privileges are not being requested.", 
                                 handle.tree_id,handle.index_partition,handle.field_space.id);
+#ifdef DEBUG_HIGH_LEVEl
+          assert(false);
+#endif
           exit(ERROR_INVALID_PARTITION_ENTRY);
         }
         return index_node->instantiate_partition(handle.tree_id, handle.field_space);
@@ -3396,12 +3621,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       InstanceKey key(manager->get_unique_id(), reg->handle);
+      std::map<InstanceKey,InstanceView*>::const_iterator finder = views.find(key);
+      InstanceView *result = NULL;
+      if (finder == views.end())
+      {
+        result = new InstanceView(manager, parent, reg, this, making_local);
+        views[key] = result;
+        manager->add_view(result);
+      }
+      else
+      {
+        // This case only occurs when a child view has removed itself
+        // from the parent because it no longer had any valid information
+        // so add it back to the parent and return it
+        result = finder->second;
+      }
 #ifdef DEBUG_HIGH_LEVEL
-      assert(views.find(key) == views.end());
+      assert(result != NULL);
 #endif
-      InstanceView *result = new InstanceView(manager, parent, reg, this, making_local);
-      views[key] = result;
-      manager->add_view(result);
+      
       // If there is a parent, tell the parent that it has a child
       if (parent != NULL)
       {
@@ -3416,7 +3654,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     InstanceManager* RegionTreeForest::create_instance_manager(Memory location, PhysicalInstance inst,
-                      const std::map<FieldID,IndexSpace::CopySrcDstField> &infos,
+                      const std::map<FieldID,Domain::CopySrcDstField> &infos,
                       FieldSpace fsp, const FieldMask &field_mask, bool remote, bool clone,
                       UniqueManagerID mid /*= 0*/)
     //--------------------------------------------------------------------------
@@ -3450,7 +3688,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionManager* RegionTreeForest::create_reduction_manager(Memory location, PhysicalInstance inst,
                         ReductionOpID redop, const ReductionOp *op, bool remote, bool clone,
-                        IndexSpace sparse_space /*= IndexSpace::NO_SPACE*/, UniqueManagerID mid /*= 0*/)
+                        Domain sparse_domain /*= Domain::NO_DOMAIN*/, UniqueManagerID mid /*= 0*/)
     //--------------------------------------------------------------------------
     {
       if (mid == 0)
@@ -3458,10 +3696,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(reduc_managers.find(mid) == reduc_managers.end());
 #endif
-      if (sparse_space.exists())
+      if (sparse_domain.exists())
       {
         ReductionManager *result = new ListReductionManager(this, mid, remote, clone, location,
-                                                            inst, redop, op, sparse_space);
+                                                            inst, redop, op, sparse_domain);
         reduc_managers[mid] = result;
         return result;
       }
@@ -3588,8 +3826,8 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode::IndexSpaceNode(IndexSpace sp, IndexPartNode *par, Color c, bool add, RegionTreeForest *ctx)
-      : handle(sp), depth((par == NULL) ? 0 : par->depth+1),
+    IndexSpaceNode::IndexSpaceNode(Domain d, IndexPartNode *par, Color c, bool add, RegionTreeForest *ctx)
+      : domain(d), handle(d.get_index_space()), depth((par == NULL) ? 0 : par->depth+1),
         color(c), parent(par), context(ctx), added(add), marked(false), 
         destroy_index_space(false), node_destroyed(false)
     //--------------------------------------------------------------------------
@@ -3629,7 +3867,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(color_map.find(node->color) == color_map.end());
-      assert(context->has_node(node->handle));
 #endif
       color_map[node->color] = node;
       valid_map[node->color] = node;
@@ -3644,6 +3881,14 @@ namespace LegionRuntime {
       assert(valid_map.find(c) != valid_map.end());
 #endif
       valid_map.erase(c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::has_child(Color c) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<Color,IndexPartNode*>::const_iterator finder = color_map.find(c);
+      return (finder != color_map.end());
     }
 
     //--------------------------------------------------------------------------
@@ -3749,7 +3994,7 @@ namespace LegionRuntime {
     {
       size_t result = 0; 
       result += sizeof(bool);
-      result += sizeof(handle);
+      result += sizeof(domain);
       if (returning || marked)
       {
         result += sizeof(color);
@@ -3771,7 +4016,7 @@ namespace LegionRuntime {
       if (returning || marked)
       {
         rez.serialize(true);
-        rez.serialize(handle);
+        rez.serialize(domain);
         rez.serialize(color);
         rez.serialize(valid_map.size());
         for (std::map<Color,IndexPartNode*>::const_iterator it = 
@@ -3791,7 +4036,7 @@ namespace LegionRuntime {
       else
       {
         rez.serialize(false);
-        rez.serialize(handle);
+        rez.serialize(domain);
       }
       if (returning)
       {
@@ -3809,13 +4054,13 @@ namespace LegionRuntime {
     {
       bool need_unpack;
       derez.deserialize(need_unpack);
-      IndexSpace handle;
-      derez.deserialize(handle);
+      Domain domain;
+      derez.deserialize(domain);
       if (need_unpack)
       {
         Color color;
         derez.deserialize(color);
-        IndexSpaceNode *result_node = context->create_node(handle, parent, color, returning);
+        IndexSpaceNode *result_node = context->create_node(domain, parent, color, returning);
         size_t num_children;
         derez.deserialize(num_children);
         for (unsigned idx = 0; idx < num_children; idx++)
@@ -3835,7 +4080,7 @@ namespace LegionRuntime {
       }
       else
       {
-        return context->get_node(handle);
+        return context->get_node(domain.get_index_space());
       }
     }
 
@@ -3886,10 +4131,10 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(IndexPartition p, IndexSpaceNode *par, Color c, 
-                                  bool dis, bool add, RegionTreeForest *ctx)
+                                  Domain cspace, bool dis, bool add, RegionTreeForest *ctx)
       : handle(p), depth((par == NULL) ? 0 : par->depth+1),
-        color(c), parent(par), context(ctx), disjoint(dis), added(add), 
-        marked(false), node_destroyed(false)
+        color(c), color_space(cspace), parent(par), context(ctx), 
+        disjoint(dis), added(add), marked(false), node_destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3917,7 +4162,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(color_map.find(node->color) == color_map.end());
-      assert(context->has_node(node->handle));
 #endif
       color_map[node->color] = node;
       valid_map[node->color] = node;
@@ -3932,6 +4176,14 @@ namespace LegionRuntime {
       assert(valid_map.find(c) != valid_map.end());
 #endif
       valid_map.erase(c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::has_child(Color c) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<Color,IndexSpaceNode*>::const_iterator finder = color_map.find(c);
+      return (finder != color_map.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4035,6 +4287,7 @@ namespace LegionRuntime {
       {
         result += sizeof(handle);
         result += sizeof(color);
+        result += sizeof(color_space);
         result += sizeof(disjoint);
         result += sizeof(size_t); // number of children
         for (std::map<Color,IndexSpaceNode*>::const_iterator it = 
@@ -4058,6 +4311,7 @@ namespace LegionRuntime {
         rez.serialize(true);
         rez.serialize(handle);
         rez.serialize(color);
+        rez.serialize(color_space);
         rez.serialize(disjoint);
         rez.serialize(valid_map.size());
         for (std::map<Color,IndexSpaceNode*>::const_iterator it = 
@@ -4101,9 +4355,11 @@ namespace LegionRuntime {
 #endif
         Color color;
         derez.deserialize(color);
+        Domain domain;
+        derez.deserialize(domain);
         bool disjoint;
         derez.deserialize(disjoint);
-        IndexPartNode *result = context->create_node(handle, parent, color, disjoint, returning);
+        IndexPartNode *result = context->create_node(handle, parent, color, domain, disjoint, returning);
         size_t num_children;
         derez.deserialize(num_children);
         for (unsigned idx = 0; idx < num_children; idx++)
@@ -4196,22 +4452,31 @@ namespace LegionRuntime {
     void FieldSpaceNode::allocate_fields(const std::map<FieldID,size_t> &field_allocations)
     //--------------------------------------------------------------------------
     {
+      FieldMask update_mask;
       for (std::map<FieldID,size_t>::const_iterator it = field_allocations.begin();
             it != field_allocations.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
+        if (total_index_fields >= MAX_FIELDS)
+        {
+          log_field(LEVEL_ERROR,"Exceeded maximum number of allocated fields for a field space %d. "  
+                                "Change 'MAX_FIELDS' at the top of legion_types.h and recompile.", MAX_FIELDS);
+          assert(false);
+          exit(ERROR_MAX_FIELD_OVERFLOW);
+        }
         assert(fields.find(it->first) == fields.end());
 #endif
+        update_mask.set_bit<FIELD_SHIFT,FIELD_MASK>(total_index_fields);
         fields[it->first] = FieldInfo(it->second,total_index_fields++);
         created_fields.push_back(it->first);
       }
-#ifdef DEBUG_HIGH_LEVEL
-      if (total_index_fields >= MAX_FIELDS)
+      // Tell the top of each region tree to update the top mask for each of its contexts
+      for (std::list<RegionNode*>::const_iterator it = logical_nodes.begin();
+            it != logical_nodes.end(); it++)
       {
-        log_field(LEVEL_ERROR,"Exceeded maximum number of allocated fields for a field space %d. "  
-                              "Change 'MAX_FIELDS' at the top of legion_types.h and recompile.", MAX_FIELDS);
-        exit(ERROR_MAX_FIELD_OVERFLOW);
+        (*it)->update_top_mask(update_mask);
       }
+#ifdef DEBUG_HIGH_LEVEL
       sanity_check();
 #endif
     }
@@ -4302,7 +4567,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* FieldSpaceNode::create_instance(Memory location, IndexSpace space,
+    InstanceManager* FieldSpaceNode::create_instance(Memory location, Domain domain,
                         const std::vector<FieldID> &new_fields, size_t blocking_factor)
     //--------------------------------------------------------------------------
     {
@@ -4314,13 +4579,21 @@ namespace LegionRuntime {
         assert(finder != fields.end());
 #endif
 
-        PhysicalInstance inst = space.create_instance(location, finder->second.field_size);
+        PhysicalInstance inst = domain.create_instance(location, finder->second.field_size);
         if (inst.exists())
         {
-          std::map<FieldID,IndexSpace::CopySrcDstField> field_infos;
-          field_infos[new_fields.back()] = IndexSpace::CopySrcDstField(inst, 0, finder->second.field_size);
+          std::map<FieldID,Domain::CopySrcDstField> field_infos;
+          field_infos[new_fields.back()] = Domain::CopySrcDstField(inst, 0, finder->second.field_size);
           result = context->create_instance_manager(location, inst, field_infos, handle, get_field_mask(new_fields),
                                                     false/*remote*/, false/*clone*/);
+#ifdef LEGION_PROF
+          {
+            std::map<FieldID,size_t> inst_fields;
+            inst_fields[new_fields.back()] = finder->second.field_size;
+            LegionProf::register_instance_creation(inst.id, result->get_unique_id(), location.id, 
+                                0/*redop*/, 1/* blocking factor*/, inst_fields);
+          }
+#endif
         }
       }
       else
@@ -4336,21 +4609,32 @@ namespace LegionRuntime {
           field_sizes.push_back(finder->second.field_size);
         }
         // Now try and make the instance
-        PhysicalInstance inst = space.create_instance(location, field_sizes, blocking_factor);
+        PhysicalInstance inst = domain.create_instance(location, field_sizes, blocking_factor);
         if (inst.exists())
         {
-          std::map<FieldID,IndexSpace::CopySrcDstField> field_infos;
+          std::map<FieldID,Domain::CopySrcDstField> field_infos;
           unsigned accum_offset = 0;
 #ifdef DEBUG_HIGH_LEVEL
           assert(field_sizes.size() == new_fields.size());
 #endif
           for (unsigned idx = 0; idx < new_fields.size(); idx++)
           {
-            field_infos[new_fields[idx]] = IndexSpace::CopySrcDstField(inst, accum_offset, field_sizes[idx]);
+            field_infos[new_fields[idx]] = Domain::CopySrcDstField(inst, accum_offset, field_sizes[idx]);
             accum_offset += field_sizes[idx];
           }
           result = context->create_instance_manager(location, inst, field_infos, handle, get_field_mask(new_fields),
                                                     false/*remote*/, false/*clone*/);
+#ifdef LEGION_PROF
+          {
+            std::map<FieldID,size_t> inst_fields;
+            for (unsigned idx = 0; idx < new_fields.size(); idx++)
+            {
+              inst_fields[new_fields[idx]] = field_sizes[idx];
+            }
+            LegionProf::register_instance_creation(inst.id, result->get_unique_id(), location.id, 0/*redop*/,
+                                                  blocking_factor, inst_fields);
+          }
+#endif
         }
       }
       return result;
@@ -4487,12 +4771,14 @@ namespace LegionRuntime {
         assert(total_index_fields >= first_index);
 #endif
         shift = total_index_fields - first_index;
+        FieldMask update_mask;
         for (std::map<unsigned,FieldID>::const_iterator it = old_field_indexes.begin();
               it != old_field_indexes.end(); it++)
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(fields.find(it->second) == fields.end());
 #endif
+          update_mask |= (1 << (it->first + shift));
           fields[it->second] = FieldInfo(new_fields[it->second], it->first + shift);
           unsigned new_total_index_fields = it->first+shift+1;
 #ifdef DEBUG_HIGH_LEVEL
@@ -4506,9 +4792,15 @@ namespace LegionRuntime {
         {
           log_field(LEVEL_ERROR,"Exceeded maximum number of allocated fields for a field space %d when unpacking. "  
                                 "Change 'MAX_FIELDS' at the top of legion_types.h and recompile.", MAX_FIELDS);
+          assert(false);
           exit(ERROR_MAX_FIELD_OVERFLOW);
         }
 #endif
+        for (std::list<RegionNode*>::const_iterator it = logical_nodes.begin();
+              it != logical_nodes.end(); it++)
+        {
+          (*it)->update_top_mask(update_mask);
+        }
       }
       {
         size_t num_deleted_fields;
@@ -4728,6 +5020,34 @@ namespace LegionRuntime {
         else
           child->register_logical_region(user, az);
       }
+      // Everything below here is only a performance optimization to keep the lists
+      // from growing too big.  Turn it off for LegionSpy where we want to see
+      // all the mapping dependences no matter what.
+#ifndef LEGION_SPY
+#if 0
+      // This is the more complicated version that is currently wrong because
+      // we can't guarantee that operations in the list are in program order
+      //
+      // Check to see if any of the sets of users are too large, if they are,
+      // then resize them.  Yay for Nyquist, once we get 2X tasks, drop back to X tasks
+      // Only do this if we're not doing LegionSpy in which case we probably want
+      // to see all of the dependences anyway
+      unsigned max_window_size = HighLevelRuntime::get_max_context_users();
+      unsigned max_list_size = 2*max_window_size;
+      if (state.curr_epoch_users.size() >= max_list_size)
+        down_sample_list(state.curr_epoch_users, max_window_size);
+      if (state.prev_epoch_users.size() >= max_list_size)
+        down_sample_list(state.prev_epoch_users, max_window_size);
+#else
+      // The simpler way of shortening the lists by filtering out any tasks that have
+      // already mapped and therefore will never have any dependences performed on them
+      unsigned max_filter_size = HighLevelRuntime::get_max_filter_size();
+      if (state.curr_epoch_users.size() >= max_filter_size)
+        filter_user_list(state.curr_epoch_users);
+      if (state.prev_epoch_users.size() >= max_filter_size)
+        filter_user_list(state.prev_epoch_users);
+#endif
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4836,7 +5156,7 @@ namespace LegionRuntime {
         // partition.  This occurs whenever an index space task says its using a partition,
         // but might only use a subset of the regions in the partition, and then also has
         // a region requirement for another one of the regions in the partition.
-        if (closing_partition && (it->op == user.op))
+        if (closing_partition && (it->op == user.op) && (it->gen == user.gen))
           continue;
         // Check to see if things are disjoint
         if (user_mask * it->field_mask)
@@ -4969,6 +5289,50 @@ namespace LegionRuntime {
             }
           }
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::down_sample_list(std::list<LogicalUser> &users, unsigned max_users)
+    //--------------------------------------------------------------------------
+    {
+      EpochOperation *epoch_op = context->runtime->get_available_epoch();
+      // Get a mask containing the fields for all of the users we are about to pull off
+      FieldMask epoch_mask;
+      std::list<LogicalUser>::iterator it = users.begin();
+      // need to lock the epoch_op context when doing this so it can't trigger
+      epoch_op->start_analysis();
+      epoch_op->start_down_sample();
+      while (users.size() >= max_users)
+      {
+        LogicalUser user = *it;
+        it = users.erase(it);
+        if (user.op == epoch_op)
+          continue;
+        // If we added a dependence, update the mask 
+        if (user.op->add_waiting_dependence(epoch_op, user.idx, user.gen))
+        {
+          epoch_mask |= user.field_mask;
+          epoch_op->increment_dependence_count();
+        }
+      }
+      epoch_op->end_down_sample();
+      epoch_op->finish_analysis();
+      // Now push the new logical user onto the front of the list of users
+      users.push_front(LogicalUser(epoch_op, 0/*idx*/, epoch_mask, RegionUsage(READ_WRITE,EXCLUSIVE,0)));
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::filter_user_list(std::list<LogicalUser> &users)
+    //--------------------------------------------------------------------------
+    {
+      for (std::list<LogicalUser>::iterator it = users.begin();
+            it != users.end(); /*nothing*/)
+      {
+        if (it->op->has_mapped(it->gen))
+          it = users.erase(it);
+        else
+          it++;
       }
     }
 
@@ -5596,7 +5960,7 @@ namespace LegionRuntime {
         }
       }
       dirty_mask -= init_mask;
-      context_top = false;
+      top_mask -= init_mask;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5632,17 +5996,17 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(color_map.find(node->row_source->color) == color_map.end());
-      assert(context->has_node(node->handle));
 #endif
       color_map[node->row_source->color] = node;
       valid_map[node->row_source->color] = node;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::has_child(Color c)
+    bool RegionNode::has_child(Color c) const
     //--------------------------------------------------------------------------
     {
-      return (color_map.find(c) != color_map.end());
+      std::map<Color,PartitionNode*>::const_iterator finder = color_map.find(c);
+      return (finder != color_map.end());
     }
 
     //--------------------------------------------------------------------------
@@ -5736,10 +6100,13 @@ namespace LegionRuntime {
         PhysicalState &state = finder->second;
 #ifdef DEBUG_HIGH_LEVEL
         // If this ever fails we have aliasing between physical contexts which will be unresolvable
-        assert(state.context_top == top); 
+        //assert(state.context_top == top); 
 #endif
         if (clear)
           state.clear_state(init_mask);
+        // Put this after clear state since we just reset the bits for the top mask
+        if (top)
+          state.top_mask |= init_mask;
 
         // Only do children if we ourselves had a state
         for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
@@ -5750,7 +6117,7 @@ namespace LegionRuntime {
       }
       else if (top)
       {
-        physical_states[ctx] = PhysicalState(top);
+        physical_states[ctx] = PhysicalState(init_mask);
       }
     }
 
@@ -5767,12 +6134,14 @@ namespace LegionRuntime {
       to_add.redop = 0;
       to_add.open_children[open_child] = fill_mask;
       merge_new_field_state(state, to_add, true/*add state*/);
-      if (!state.context_top)
+      if (parent != NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(parent != NULL);
-#endif
+        state.top_mask -= fill_mask; 
         parent->fill_exclusive_context(ctx, fill_mask, row_source->color);
+      }
+      else
+      {
+        state.top_mask |= fill_mask;
       }
     }
 
@@ -5911,7 +6280,7 @@ namespace LegionRuntime {
             // Note that when the siphon operation is done it will automatically
             // update the set of valid instances
             // Now add our user and get the resulting reference back
-            rm.result = new_view->add_user(rm.uid, user);
+            rm.result = new_view->add_user(rm.uid, user, rm.task->index_point);
             rm.success = true;
           }
           else
@@ -5933,6 +6302,9 @@ namespace LegionRuntime {
             {
               log_inst(LEVEL_ERROR,"Reduction operation %d on region %d of task %s (ID %d) is not fully initialized",
                                     user.usage.redop, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEl
+              assert(false);
+#endif
               exit(ERROR_UNINITIALIZED_REDUCTION);
             }
             PhysicalCloser closer(user, rm, this, false/*keep open*/);
@@ -6014,7 +6386,7 @@ namespace LegionRuntime {
             // was an open operation.  Dirty determined by the kind of task
             update_valid_views(rm.ctx, user.field_mask, HAS_WRITE(user.usage), new_view);
             // Add our user and get the reference back
-            rm.result = new_view->add_user(rm.uid, user);
+            rm.result = new_view->add_user(rm.uid, user, rm.task->index_point);
             rm.success = true;
           }
           else
@@ -6335,21 +6707,74 @@ namespace LegionRuntime {
       }
       // Ask the mapper what to do
       std::vector<Memory> chosen_order;
+      std::set<FieldID> additional_fields;
       bool enable_WAR = false;
+      bool notify_result = false;
       {
         DetailedTimer::ScopedPush sp(TIME_MAPPER);
         AutoLock m_lock(rm.mapper_lock);
-        rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
-                                   rm.req, rm.idx, valid_memories, chosen_order, enable_WAR);
+        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
+                                   rm.req, rm.idx, valid_memories, chosen_order, additional_fields, enable_WAR);
       }
-#ifdef DEBUG_HIGH_LEVEL
+      // Filter out any memories that are not visible from the target processor
+      // if there is a processor that we're targeting (e.g. never do this for premaps)
+      if (!chosen_order.empty() && rm.target.exists())
+      {
+        Machine *machine = Machine::get_machine();
+        const std::set<Memory> &visible_memories = machine->get_visible_memories(rm.target);
+        std::vector<Memory> filtered_memories;
+        filtered_memories.reserve(chosen_order.size());
+        for (std::vector<Memory>::const_iterator it = chosen_order.begin();
+              it != chosen_order.end(); it++)
+        {
+          if (visible_memories.find(*it) != visible_memories.end())
+            filtered_memories.push_back(*it);
+          else
+          {
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x which is not visible from processor %x when mapping "
+                                      "region %d of task %s (ID %d)!  Removing memory from the chosen ordering!", 
+                                      it->id, rm.target.id, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
+          }
+        }
+        chosen_order = filtered_memories;
+      }
       if (valid_memories.empty() && chosen_order.empty())
       {
         log_region(LEVEL_ERROR,"Illegal mapper output, no memories specified for first instance of region %d of task %s (ID %d)",
                                 rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
+        assert(false);
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-#endif
+      // Check to see if the mapper requested any additional fields in this
+      // instance.  If it did, then re-run the computation to get the list
+      // of valid instances with the right set of fields
+      std::vector<FieldID> new_fields = rm.req.instance_fields;
+      if (!additional_fields.empty())
+      {
+        FieldSpaceNode *field_node = context->get_node(rm.req.region.field_space);
+        // Update the list of new_fields that will be needed and get the mask
+        // including the original fields with the instance fields
+        new_fields.insert(new_fields.end(),additional_fields.begin(),additional_fields.end());
+        // Get the additional field mask
+        FieldMask additional_mask = field_node->get_field_mask(new_fields);
+        // Now recompute the set of available instances
+        valid_instances.clear();
+        find_valid_instance_views(rm.ctx, valid_instances, additional_mask, additional_mask, true/*needs space*/);
+        valid_memories.clear();
+        // Recompute the set of valid memories to help our search, we've already filtered
+        // for the additional fields, they don't need to be valid fields as well.
+        for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it =
+               valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          Memory m = it->first->get_location();
+          if (valid_memories.find(m) == valid_memories.end())
+            valid_memories[m] = !(user.field_mask - it->second);
+          else if (!valid_memories[m])
+            valid_memories[m] = !(user.field_mask - it->second);
+          // Otherwise we already have an instance in this memory that
+          // dominates all the fields in which case we don't care
+        } 
+      }
       InstanceView *result = NULL;
       FieldMask needed_fields; 
       // Go through each of the memories provided by the mapper
@@ -6399,7 +6824,7 @@ namespace LegionRuntime {
             // These are instances which have space for all the required fields
             // but only a subset of those fields contain valid data.
             // Find the valid instance with the most valid fields to use.
-            int covered_fields = 0;
+            int covered_fields = -1;
             for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it =
                   valid_instances.begin(); it != valid_instances.end(); it++)
             {
@@ -6427,7 +6852,7 @@ namespace LegionRuntime {
           }
         }
         // If it didn't find a valid instance, try to make one
-        result = create_instance(*mit, rm); 
+        result = create_instance(*mit, rm, new_fields); 
         if (result != NULL)
         {
           // We successfully made an instance
@@ -6440,6 +6865,17 @@ namespace LegionRuntime {
       // for any fields
       if (result != NULL && !!needed_fields)
         issue_update_copies(result, rm, needed_fields); 
+
+      // If the mapper asked to be notified of the result, tell it
+      // Note we only need to tell if it succeeded, otherwise it will
+      // get told by the notify_failed_mapping call.
+      if (notify_result && (result != NULL))
+      {
+        DetailedTimer::ScopedPush sp(TIME_MAPPER);
+        AutoLock m_lock(rm.mapper_lock);
+        rm.mapper->notify_mapping_result(rm.task, rm.target, rm.req, rm.idx, rm.inline_mapping,
+                                          result->get_manager()->get_location());
+      }
 
       return result;
     }
@@ -6466,21 +6902,42 @@ namespace LegionRuntime {
       }
       // Ask the mapper what to do
       std::vector<Memory> chosen_order;
+      std::set<FieldID> additional_fields;
       bool enable_WAR = false;
+      bool notify_result = false;
       {
         DetailedTimer::ScopedPush sp(TIME_MAPPER);
         AutoLock m_lock(rm.mapper_lock);
-        rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
-                                   rm.req, rm.idx, valid_memories, chosen_order, enable_WAR);
+        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
+                                   rm.req, rm.idx, valid_memories, chosen_order, additional_fields, enable_WAR);
       }
-#ifdef DEBUG_HIGH_LEVEL
+      if (!chosen_order.empty() && rm.target.exists())
+      {
+        Machine *machine = Machine::get_machine();
+        const std::set<Memory> &visible_memories = machine->get_visible_memories(rm.target);
+        std::vector<Memory> filtered_memories;
+        filtered_memories.reserve(chosen_order.size());
+        for (std::vector<Memory>::const_iterator it = chosen_order.begin();
+              it != chosen_order.end(); it++)
+        {
+          if (visible_memories.find(*it) != visible_memories.end())
+            filtered_memories.push_back(*it);
+          else
+          {
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x which is not visible from processor %x when mapping "
+                                      "region %d of task %s (ID %d)!  Removing memory from the chosen ordering!", 
+                                      it->id, rm.target.id, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
+          }
+        }
+        chosen_order = filtered_memories;
+      }
       if (valid_memories.empty() && chosen_order.empty())
       {
         log_region(LEVEL_ERROR,"Illegal mapper output, no memories specified for first instance of region %d of task %s (ID %d)",
                                 rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
+        assert(false);
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-#endif
       ReductionView *result = NULL;
       // Go through each of the valid memories and see if we can either find
       // a reduction instance or we can make one
@@ -6516,6 +6973,18 @@ namespace LegionRuntime {
             break;
         }
       }
+
+      // If the mapper asked to be notified of the result, tell it
+      // Note we only need to tell if it succeeded, otherwise it will
+      // get told by the notify_failed_mapping call.
+      if (notify_result && (result != NULL))
+      {
+        DetailedTimer::ScopedPush sp(TIME_MAPPER);
+        AutoLock m_lock(rm.mapper_lock);
+        rm.mapper->notify_mapping_result(rm.task, rm.target, rm.req, rm.idx, rm.inline_mapping,
+                                          result->get_manager()->get_location());
+      }
+
       return result;
     }
 
@@ -6536,9 +7005,9 @@ namespace LegionRuntime {
       // needed to issue gather copies from multiple instances into the data structures below,
       // we then issue the copy when we're done and update the destination instance.
       std::set<Event> preconditions;
-      std::vector<IndexSpace::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<std::pair<InstanceView*,FieldMask> > src_instances;
-      std::vector<IndexSpace::CopySrcDstField> dst_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
 
       // No need to call the mapper if there is only one valid instance
       if (valid_instances.size() == 1)
@@ -6582,7 +7051,7 @@ namespace LegionRuntime {
               it++;
               continue;
             }
-            // Check to see if their are valid fields in the copy mask
+            // Check to see if there are valid fields in the copy mask
             FieldMask op_mask = copy_mask & it->second;
             if (!!op_mask)
             {
@@ -6616,7 +7085,7 @@ namespace LegionRuntime {
               it++;
               continue;
             }
-            // Check to see if their are valid fields in the copy mask
+            // Check to see if there are valid fields in the copy mask
             FieldMask op_mask = copy_mask & it->second;
             if (!!op_mask)
             {
@@ -6658,7 +7127,7 @@ namespace LegionRuntime {
         }
         LegionSpy::log_event_dependences(preconditions, copy_pre);
 #endif
-        Event copy_post = handle.index_space.copy(src_fields, dst_fields, copy_pre);
+        Event copy_post = row_source->domain.copy(src_fields, dst_fields, copy_pre);
         // If we have a post-copy event, add the necessary references
         if (copy_post.exists())
         {
@@ -6760,12 +7229,12 @@ namespace LegionRuntime {
       std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
       if (finder != physical_states.end())
       {
-        if (!last_use)
-        {
-          invalidate_instance_views(finder->second, invalid_mask, false/*clean*/);
-          invalidate_reduction_views(finder->second, invalid_mask);
-        }
-        else
+        // Always need to correctly invalidate the views so we don't
+        // accidentally leak any references to valid views
+        invalidate_instance_views(finder->second, invalid_mask, false/*clean*/);
+        invalidate_reduction_views(finder->second, invalid_mask);
+        // If it's the last use we can delete the context
+        if (last_use)
           physical_states.erase(finder);
         for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
               it != valid_map.end(); it++)
@@ -6834,11 +7303,10 @@ namespace LegionRuntime {
         physical_states[ctx] = PhysicalState();
       PhysicalState &state = physical_states[ctx];
       // If we can go up the tree, go up first
-      FieldMask up_mask = valid_mask - state.dirty_mask;
-      if (!!up_mask && !state.context_top)
+      FieldMask up_mask = valid_mask - (state.dirty_mask | state.top_mask);
+      if (!!up_mask && (parent != NULL))
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(parent != NULL);
         assert(parent->parent != NULL);
 #endif
         parent->parent->find_valid_instance_views(ctx, valid_views, 
@@ -6863,9 +7331,12 @@ namespace LegionRuntime {
         // the needed fields, check that first
         if (needs_space && !!(field_mask - it->first->get_physical_mask()))
           continue;
-        // See if there are any overlapping valid fields
+        // If we're looking for instances with space we want the instances
+        // even if they have no valid fields, otherwise if we're not looking
+        // for instances with enough space, we can exit out early if
+        // they don't have any valid fields.
         FieldMask overlap = valid_mask & it->second;
-        if (!overlap)
+        if (!needs_space && !overlap)
           continue;
 #ifdef DEBUG_HIGH_LEVEL
         assert(it->first->logical_region == this);
@@ -6883,7 +7354,7 @@ namespace LegionRuntime {
         physical_states[ctx] = PhysicalState();
       PhysicalState &state = physical_states[ctx];
       // See if we can continue going up the tree
-      if ((state.dirty_mask * valid_mask) && !state.context_top)
+      if ((state.dirty_mask * valid_mask) && (state.top_mask * valid_mask))
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(parent != NULL);
@@ -6905,7 +7376,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* RegionNode::create_instance(Memory location, RegionMapper &rm) 
+    InstanceView* RegionNode::create_instance(Memory location, RegionMapper &rm, const std::vector<FieldID> &new_fields) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6924,8 +7395,8 @@ namespace LegionRuntime {
       }
       FieldSpaceNode *field_node = context->get_node(handle.field_space);
       // Now get the field Mask and see if we can make the instance
-      InstanceManager *manager = field_node->create_instance(location, row_source->handle, 
-                                                      rm.req.instance_fields, blocking_factor);
+      InstanceManager *manager = field_node->create_instance(location, row_source->domain, 
+                                                              new_fields, blocking_factor);
       // See if we made the instance
       InstanceView *result = NULL;
       if (manager != NULL)
@@ -6972,7 +7443,7 @@ namespace LegionRuntime {
         // for right now we'll just over approximate with the number of elements
         // in the handle index space since ideally reduction lists are sparse
         // and will have less than one reduction per point.
-        IndexSpace ptr_space = IndexSpace::create_index_space(handle.index_space.get_valid_mask().get_num_elmts());
+        Domain ptr_space = Domain(IndexSpace::create_index_space(handle.index_space.get_valid_mask().get_num_elmts()));
         std::vector<size_t> element_sizes;
         element_sizes.push_back(sizeof(ptr_t)); // pointer types
         element_sizes.push_back(op->sizeof_rhs);
@@ -6983,18 +7454,34 @@ namespace LegionRuntime {
         {
           manager = context->create_reduction_manager(location, inst, rm.req.redop, op,
                                           false/*remote*/, false/*clone*/, ptr_space);
+#ifdef LEGION_PROF
+          {
+            std::map<FieldID,size_t> inst_fields;
+            inst_fields[0] = op->sizeof_rhs;
+            LegionProf::register_instance_creation(inst.id, manager->get_unique_id(), location.id,
+                rm.req.redop, 1/*blocking size*/, inst_fields);
+          }
+#endif
         }
       }
       else
       {
         // Easy case, there is only one field and it is the size of the RHS of the reduction
         // operation.  Note this is true regardless of how many fields are required of the instance.
-        PhysicalInstance inst = handle.index_space.create_instance(location, op->sizeof_rhs, rm.req.redop);
+        PhysicalInstance inst = row_source->domain.create_instance(location, op->sizeof_rhs, rm.req.redop);
         // Make the new manager
         if (inst.exists())
         {
           manager = context->create_reduction_manager(location, inst, rm.req.redop, op, 
                                           false/*remote*/, false/*clone*/); 
+#ifdef LEGION_PROF
+          {
+            std::map<FieldID,size_t> inst_fields;
+            inst_fields[0] = op->sizeof_rhs;
+            LegionProf::register_instance_creation(inst.id, manager->get_unique_id(), location.id,
+                rm.req.redop, 0/*blocking size*/, inst_fields);
+          }
+#endif
         }
       }
       ReductionView *result = NULL;
@@ -7007,7 +7494,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         LegionSpy::log_physical_reduction(manager->get_instance().id, location.id, handle.index_space.id,
                                           handle.field_space.id, handle.tree_id, manager->is_foldable(),
-                                          manager->get_pointer_space().id);
+                                          manager->get_pointer_space().exists() ? manager->get_pointer_space().get_index_space().id : 0);
         LegionSpy::log_reduction_manager(manager->get_instance().id, manager->get_unique_id());
 #endif
       }
@@ -7098,14 +7585,18 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    bool RegionNode::is_top_of_context(ContextID ctx) const
+    void RegionNode::update_top_mask(FieldMask allocated_mask)
     //--------------------------------------------------------------------------
     {
-      std::map<ContextID,PhysicalState>::const_iterator finder = physical_states.find(ctx);
-      if (finder == physical_states.end())
-        return false;
-      else
-        return finder->second.context_top;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent == NULL); // this method should only be called on top nodes
+#endif
+      // Iterate over all the contexts and update their top masks
+      for (std::map<ContextID,PhysicalState>::iterator it = physical_states.begin();
+            it != physical_states.end(); it++)
+      {
+        it->second.top_mask |= allocated_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7297,9 +7788,6 @@ namespace LegionRuntime {
                                           Serializer &rez, bool invalidate_views, bool recurse) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
-#endif
       PhysicalState &state = physical_states[ctx];
       // count the number of valid views
       size_t num_valid_views = 0;
@@ -7381,7 +7869,7 @@ namespace LegionRuntime {
           if (recurse)
           {
             for (std::map<Color,FieldMask>::const_iterator pit = it->open_children.begin();
-                  pit != it->open_children.end(); it++)
+                  pit != it->open_children.end(); pit++)
             {
               FieldMask overlap = pit->second & pack_mask;
               if (!overlap)
@@ -7822,17 +8310,17 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(color_map.find(node->row_source->color) == color_map.end());
-      assert(context->has_node(node->handle));
 #endif
       color_map[node->row_source->color] = node;
       valid_map[node->row_source->color] = node;
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::has_child(Color c)
+    bool PartitionNode::has_child(Color c) const
     //--------------------------------------------------------------------------
     {
-      return (color_map.find(c) != color_map.end());
+      std::map<Color,RegionNode*>::const_iterator finder = color_map.find(c);
+      return (finder != color_map.end());
     }
 
     //--------------------------------------------------------------------------
@@ -7955,7 +8443,6 @@ namespace LegionRuntime {
       // We better have a parent since we haven't found the top of the context yet
       // We also better not be the top of the context
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!state.context_top);
       assert(parent != NULL);
 #endif
       parent->fill_exclusive_context(ctx, fill_mask, row_source->color);
@@ -8347,9 +8834,6 @@ namespace LegionRuntime {
                                             Serializer &rez, bool invalidate_views, bool recurse)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
-#endif
       PhysicalState &state = physical_states[ctx];
       size_t num_field_states = 0;
       for (std::list<FieldState>::const_iterator it = state.field_states.begin();
@@ -8612,7 +9096,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(Memory m, PhysicalInstance inst, 
-            const std::map<FieldID,IndexSpace::CopySrcDstField> &infos, FieldSpace fsp,
+            const std::map<FieldID,Domain::CopySrcDstField> &infos, FieldSpace fsp,
             const FieldMask &mask, RegionTreeForest *ctx, UniqueManagerID mid, bool rem, bool cl)
       : PhysicalManager(ctx, mid, rem, cl, m, inst),
         fspace(fsp), allocated_fields(mask), field_infos(infos)
@@ -8672,13 +9156,14 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->manager == this);
+      assert(view != NULL);
 #endif
       all_views.push_back(view);
     }
 
     //--------------------------------------------------------------------------
     void InstanceManager::compute_copy_offsets(const FieldMask &field_mask,
-                           std::vector<IndexSpace::CopySrcDstField> &fields)
+                           std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8686,7 +9171,7 @@ namespace LegionRuntime {
       int found = 0;
 #endif
       FieldSpaceNode *field_space = context->get_node(fspace);
-      for (std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator it = 
+      for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
       {
         if (field_space->is_set(it->first, field_mask))
@@ -8703,7 +9188,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceManager::find_info(FieldID fid, std::vector<IndexSpace::CopySrcDstField> &sources)
+    void InstanceManager::find_info(FieldID fid, std::vector<Domain::CopySrcDstField> &sources)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8717,8 +9202,8 @@ namespace LegionRuntime {
     InstanceManager* InstanceManager::clone_manager(const FieldMask &mask, FieldSpaceNode *field_space) const
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,IndexSpace::CopySrcDstField> new_infos;
-      for (std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator it =
+      std::map<FieldID,Domain::CopySrcDstField> new_infos;
+      for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it =
             field_infos.begin(); it != field_infos.end(); it++)
       {
         if (field_space->is_set(it->first, mask))
@@ -8763,6 +9248,9 @@ namespace LegionRuntime {
         for (std::vector<InstanceView*>::const_iterator it = all_views.begin();
               it != all_views.end(); it++)
         {
+#ifdef DEBUG_HIGH_LEVEL
+          assert((*it) != NULL);
+#endif
           std::map<InstanceView*,FieldMask>::iterator finder = unique_views.find(*it);
           if (finder != unique_views.end())
           {
@@ -8791,7 +9279,7 @@ namespace LegionRuntime {
       result += sizeof(FieldSpace);
       result += sizeof(allocated_fields);
       result += sizeof(size_t);
-      result += (field_infos.size() * (sizeof(FieldID) + sizeof(IndexSpace::CopySrcDstField)));
+      result += (field_infos.size() * (sizeof(FieldID) + sizeof(Domain::CopySrcDstField)));
       return result;
     }
 
@@ -8812,7 +9300,7 @@ namespace LegionRuntime {
       rez.serialize(fspace);
       rez.serialize(allocated_fields);
       rez.serialize(field_infos.size());
-      for (std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator it =
+      for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it =
             field_infos.begin(); it != field_infos.end(); it++)
       {
         rez.serialize(it->first);
@@ -8841,14 +9329,14 @@ namespace LegionRuntime {
       derez.deserialize(fsp);
       FieldMask alloc_fields;
       derez.deserialize(alloc_fields);
-      std::map<FieldID,IndexSpace::CopySrcDstField> field_infos;
+      std::map<FieldID,Domain::CopySrcDstField> field_infos;
       size_t num_infos;
       derez.deserialize(num_infos);
       for (unsigned idx = 0; idx < num_infos; idx++)
       {
         FieldID fid;
         derez.deserialize(fid);
-        IndexSpace::CopySrcDstField info;
+        Domain::CopySrcDstField info;
         derez.deserialize(info);
         field_infos[fid] = info;
       }
@@ -8891,7 +9379,7 @@ namespace LegionRuntime {
       result += sizeof(lock);
       result += sizeof(fspace);
       result += sizeof(size_t); // number of allocated fields
-      result += (field_infos.size() * (sizeof(FieldID) + sizeof(IndexSpace::CopySrcDstField)));
+      result += (field_infos.size() * (sizeof(FieldID) + sizeof(Domain::CopySrcDstField)));
       return result;
     }
 
@@ -8905,7 +9393,7 @@ namespace LegionRuntime {
       rez.serialize(lock);
       rez.serialize(fspace);
       rez.serialize(field_infos.size());
-      for (std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator it = 
+      for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
       {
         rez.serialize(it->first);
@@ -8936,12 +9424,12 @@ namespace LegionRuntime {
       derez.deserialize(fsp);
       size_t num_infos;
       derez.deserialize(num_infos);
-      std::map<FieldID,IndexSpace::CopySrcDstField> field_infos;
+      std::map<FieldID,Domain::CopySrcDstField> field_infos;
       std::vector<FieldID> fields(num_infos);
       for (unsigned idx = 0; idx < num_infos; idx++)
       {
         derez.deserialize(fields[idx]);
-        IndexSpace::CopySrcDstField info;
+        Domain::CopySrcDstField info;
         derez.deserialize(info);
 #ifdef DEBUG_HIGH_LEVEL
         assert(field_infos.find(fields[idx]) == field_infos.end());
@@ -9005,6 +9493,9 @@ namespace LegionRuntime {
         lock.destroy_lock();
         instance = PhysicalInstance::NO_INST;
         lock = Lock::NO_LOCK;
+#ifdef LEGION_PROF
+        LegionProf::register_instance_deletion(unique_id);
+#endif
       }
 #endif
     }
@@ -9104,7 +9595,7 @@ namespace LegionRuntime {
       result += sizeof(location);
       result += sizeof(instance);
       result += sizeof(redop);
-      result += sizeof(IndexSpace);
+      result += sizeof(Domain);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -9148,7 +9639,7 @@ namespace LegionRuntime {
       ReductionOpID redop;
       derez.deserialize(redop);
       const ReductionOp *op = HighLevelRuntime::get_reduction_op(redop);
-      IndexSpace pointer_space;
+      Domain pointer_space;
       derez.deserialize(pointer_space);
       ReductionManager *result = context->create_reduction_manager(location, inst, redop, op, 
                                               true/*remote*/, false/*clone*/, pointer_space, mid);
@@ -9171,7 +9662,7 @@ namespace LegionRuntime {
       result += sizeof(location);
       result += sizeof(instance);
       result += sizeof(redop);
-      result += sizeof(IndexSpace);
+      result += sizeof(Domain);
       // no need to pack the view, it will get sent back seperately
       return result;
     }
@@ -9203,7 +9694,7 @@ namespace LegionRuntime {
       ReductionOpID redop;
       derez.deserialize(redop);
       const ReductionOp *op = HighLevelRuntime::get_reduction_op(redop);
-      IndexSpace pointer_space;
+      Domain pointer_space;
       derez.deserialize(pointer_space);
       ReductionManager *result = context->create_reduction_manager(location, inst, redop, op,
                                       false/*remote*/, false/*clone*/, pointer_space, mid);
@@ -9275,6 +9766,9 @@ namespace LegionRuntime {
         log_garbage(LEVEL_DEBUG,"Garbage collecting reduction instance %x in memory %x",instance.id, location.id);
         instance.destroy();
         instance = PhysicalInstance::NO_INST;
+#ifdef LEGION_PROF
+        LegionProf::register_instance_deletion(unique_id);
+#endif
       }
     }
 
@@ -9286,7 +9780,7 @@ namespace LegionRuntime {
     ListReductionManager::ListReductionManager(RegionTreeForest *ctx, UniqueManagerID mid, 
                                                 bool remote, bool clone, Memory loc, 
                                                 PhysicalInstance inst, ReductionOpID redop, 
-                                                const ReductionOp *op, IndexSpace space)
+                                                const ReductionOp *op, Domain space)
       : ReductionManager(ctx, mid, remote, clone, loc, inst, redop, op), ptr_space(space)
     //--------------------------------------------------------------------------
     {
@@ -9298,7 +9792,7 @@ namespace LegionRuntime {
     {
       // If this is the last version of the manager, destroy the pointer index space
       if (!remote && !clone)
-        ptr_space.destroy();
+        ptr_space.get_index_space().destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -9333,21 +9827,21 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void ListReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                std::vector<IndexSpace::CopySrcDstField> &fields)
+                                std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       // Assume that it's all the fields for right now
       // but offset by the pointer size
-      fields.push_back(IndexSpace::CopySrcDstField(instance, sizeof(ptr_t), op->sizeof_rhs));
+      fields.push_back(Domain::CopySrcDstField(instance, sizeof(ptr_t), op->sizeof_rhs));
     }
 
     //--------------------------------------------------------------------------
-    Event ListReductionManager::issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
-                                                const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
-                                                IndexSpace space, Event precondition, bool reduction_fold)
+    Event ListReductionManager::issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
+                                                const std::vector<Domain::CopySrcDstField> &dst_fields,
+                                                Domain space, Event precondition, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
-      IndexSpace::CopySrcDstField idx_field(instance, 0/*offset*/, sizeof(ptr_t));
+      Domain::CopySrcDstField idx_field(instance, 0/*offset*/, sizeof(ptr_t));
       return space.copy_indirect(idx_field, src_fields, dst_fields, precondition, redop, reduction_fold);
     }
 
@@ -9396,18 +9890,18 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FoldReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                std::vector<IndexSpace::CopySrcDstField> &fields)
+                                std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       // Assume that its all the fields for now
       // until we find a different way to do reductions on a subset of fields
-      fields.push_back(IndexSpace::CopySrcDstField(instance, 0/*offset*/, op->sizeof_rhs));
+      fields.push_back(Domain::CopySrcDstField(instance, 0/*offset*/, op->sizeof_rhs));
     }
     
     //--------------------------------------------------------------------------
-    Event FoldReductionManager::issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
-                                                const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
-                                                IndexSpace space, Event precondition, bool reduction_fold)
+    Event FoldReductionManager::issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
+                                                const std::vector<Domain::CopySrcDstField> &dst_fields,
+                                                Domain space, Event precondition, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
       return space.copy(src_fields, dst_fields, precondition, redop, reduction_fold);
@@ -9499,11 +9993,11 @@ namespace LegionRuntime {
           log_leak(LEVEL_WARNING,"Instance View for Instance %x from Logical Region (%x,%d,%d) still has %ld added users",
               manager->get_instance().id, logical_region->handle.index_space.id, logical_region->handle.field_space.id,
               logical_region->handle.tree_id, added_users.size());
-          for (std::map<UniqueID,TaskUser>::const_iterator it = added_users.begin();
+          for (std::map<UniqueID,ReferenceTracker>::const_iterator it = added_users.begin();
                 it != added_users.end(); it++)
           {
             log_leak(LEVEL_WARNING,"Instance View for Instance %x has user %d with %d references",
-                manager->get_instance().id, it->first, it->second.references);
+                manager->get_instance().id, it->first, it->second.get_reference_count());
           }
         }
       }
@@ -9531,7 +10025,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ChildKey key(pc,rc);
-      std::vector<InstanceView*> aliased_set;
+      std::set<InstanceView*> aliased_set;
       // First go through all our current children and see if any of them alias
       // with the new child
       IndexSpaceNode *index_node = logical_region->row_source;
@@ -9543,8 +10037,8 @@ namespace LegionRuntime {
           // Different partitions, see if they are disjoint or not
           if (!index_node->are_disjoint(it->first.first, pc))
           {
-            aliased_set.push_back(it->second);
-            aliased_children[it->second].push_back(child);
+            aliased_set.insert(it->second);
+            aliased_children[it->second].insert(child);
           }
         }
         else
@@ -9556,8 +10050,8 @@ namespace LegionRuntime {
           IndexPartNode *index_part = index_node->get_child(pc);
           if (!index_part->are_disjoint(it->first.second, rc))
           {
-            aliased_set.push_back(it->second);
-            aliased_children[it->second].push_back(child);
+            aliased_set.insert(it->second);
+            aliased_children[it->second].insert(child);
           }
         }
       }
@@ -9571,7 +10065,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef InstanceView::add_user(UniqueID uid, const PhysicalUser &user)
+    void InstanceView::remove_child_view(const ChildKey &key)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ChildKey,InstanceView*>::iterator finder = children.find(key); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != children.end());
+      assert(aliased_children.find(finder->second) != aliased_children.end());
+#endif
+      const std::set<InstanceView*> &aliases = aliased_children[finder->second];
+      for (std::set<InstanceView*>::const_iterator it = aliases.begin();
+            it != aliases.end(); it++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(aliased_children.find(*it) != aliased_children.end());
+        assert(aliased_children[*it].find(finder->second) != aliased_children[*it].end());
+#endif
+        aliased_children[*it].erase(finder->second);
+      }
+      children.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef InstanceView::add_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       // Find any dependences above or below for a specific user 
@@ -9591,19 +10107,17 @@ namespace LegionRuntime {
 #endif
       // Update the list of users
       bool use_single;
-      std::map<UniqueID,TaskUser>::iterator it = added_users.find(uid);
+      std::map<UniqueID,ReferenceTracker>::iterator it = added_users.find(uid);
       if (it == added_users.end())
       {
         if (added_users.empty())
           check_state_change(true/*adding*/);
-        added_users[uid] = TaskUser(user, 1);
+        added_users[uid] = ReferenceTracker(1, point);
         use_single = true;
       }
       else
       {
-        it->second.use_multi = true;
-        it->second.references++;
-        use_single = false;
+        use_single = it->second.add_reference(1, point);
       }
       // If we dominated everything then we can simply update the valid event,
       // otherwise we need to update the list of epoch users
@@ -9616,11 +10130,18 @@ namespace LegionRuntime {
       }
       else
       {
-        // Update the list of epoch users
-        if (epoch_users.find(uid) == epoch_users.end())
-          epoch_users[uid] = user.field_mask;
-        else
-          epoch_users[uid] |= user.field_mask;
+        std::pair<UniqueID,unsigned> key(uid,user.idx);
+        std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::iterator finder = epoch_users.find(key);
+        if (finder == epoch_users.end())
+          epoch_users[key] = user;
+#ifdef DEBUG_HIGH_LEVEL
+        else // otherwise these all better be the same
+        {
+          assert(finder->second.idx == user.idx);
+          assert(finder->second.usage == user.usage);
+          assert(finder->second.field_mask == user.field_mask);
+        }
+#endif
       }
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_state();
@@ -9630,7 +10151,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef InstanceView::add_init_user(UniqueID uid, const PhysicalUser &user)
+    InstanceRef InstanceView::add_init_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       // nothing to wait on since we're first
@@ -9644,8 +10165,11 @@ namespace LegionRuntime {
       }
 #endif
       check_state_change(true/*adding*/);
-      added_users[uid] = TaskUser(user, 1);
-      epoch_users[uid] = user.field_mask;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(added_users.find(uid) == added_users.end());
+#endif
+      added_users[uid] = ReferenceTracker(1, point);
+      epoch_users[std::pair<UniqueID,unsigned>(uid,user.idx)] = user;
       return InstanceRef(wait_event, manager->get_location(), manager->get_instance(),
                           this, false/*copy*/, (IS_ATOMIC(user.usage) ? manager->get_lock() : Lock::NO_LOCK));
     }
@@ -9688,28 +10212,54 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // deletions should only come out of the added users
-      std::map<UniqueID,TaskUser>::iterator it = added_users.find(uid);
+      std::map<UniqueID,ReferenceTracker>::iterator it = added_users.find(uid);
       if ((it == added_users.end()) && !force)
         return;
 #ifdef DEBUG_HIGH_LEVEL
       assert(it != added_users.end());
-      assert(it->second.references > 0);
 #endif
-      it->second.references--;
-      if (it->second.references == 0)
+      if (it->second.remove_reference(refs))
       {
 #ifndef LEGION_SPY
-        epoch_users.erase(uid);
+        // Delete all the indexes for this unique ID
+        {
+          std::vector<unsigned> indexes_to_delete;
+          for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
+                it != epoch_users.end(); it++)
+          {
+            if (it->first.first == uid)
+              indexes_to_delete.push_back(it->first.second);
+          }
+          for (std::vector<unsigned>::const_iterator it = indexes_to_delete.begin();
+                it != indexes_to_delete.end(); it++)
+          {
+            epoch_users.erase(std::pair<UniqueID,unsigned>(uid,*it));
+          }
+        }
 #else
         // If we're doing legion spy debugging, then keep it in the epoch users
         // and move it over to the deleted users 
         if (!force)
         {
-          it->second.use_multi = true; // everything use multi for safety in deleted users
+          // Shouldn't need this now since we never delete points
+          //it->second.use_multi = true; // everything use multi for safety in deleted users
           deleted_users.insert(*it);
         }
         else
-          epoch_users.erase(uid);
+        {
+          std::vector<unsigned> indexes_to_delete;
+          for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
+                it != epoch_users.end(); it++)
+          {
+            if (it->first.first == uid)
+              indexes_to_delete.push_back(it->first.second);
+          }
+          for (std::vector<unsigned>::const_iterator it = indexes_to_delete.begin();
+                it != indexes_to_delete.end(); it++)
+          {
+            epoch_users.erase(std::pair<UniqueID,unsigned>(uid,*it));
+          }
+        }
 #endif
         added_users.erase(it);
         if (added_users.empty())
@@ -9797,7 +10347,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void InstanceView::copy_to(RegionMapper &rm, const FieldMask &copy_mask,
                                std::set<Event> &preconditions,
-                               std::vector<IndexSpace::CopySrcDstField> &dst_fields)
+                               std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
       find_copy_preconditions(preconditions, true/*writing*/, 0/*no reduction*/, copy_mask);
@@ -9807,7 +10357,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     bool InstanceView::reduce_to(ReductionOpID redop, 
                                  const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                 std::vector<IndexSpace::CopySrcDstField> &dst_fields)
+                                 std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9821,7 +10371,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void InstanceView::copy_from(RegionMapper &rm, const FieldMask &copy_mask,
                                  std::set<Event> &preconditions,
-                                 std::vector<IndexSpace::CopySrcDstField> &src_fields)
+                                 std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
       find_copy_preconditions(preconditions, false/*writing*/, 0/*no reduction*/, copy_mask);
@@ -9859,21 +10409,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const PhysicalUser& InstanceView::find_user(UniqueID uid) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<UniqueID,TaskUser>::const_iterator finder = users.find(uid);
-      if (finder == users.end())
-      {
-        finder = added_users.find(uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != added_users.end());
-#endif
-      }
-      return finder->second.user;
-    }
-
-    //--------------------------------------------------------------------------
     void InstanceView::check_state_change(bool adding)
     //--------------------------------------------------------------------------
     {
@@ -9891,10 +10426,24 @@ namespace LegionRuntime {
             manager->remove_reference();
         }
       }
+      // Also check to see if we can remove this instance view from its
+      // parent view.  Same condition as garbage collection plus we need
+      // to not have any children (who could also still be valid)
+      if (!adding && (parent != NULL) && children.empty())
+      {
+        if ((valid_references == 0) && users.empty() && added_users.empty() &&
+            copy_users.empty() && added_copy_users.empty())
+        {
+          ChildKey key(logical_region->parent->row_source->color,
+                       logical_region->row_source->color);
+          parent->remove_child_view(key);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::find_dependences_above(std::set<Event> &wait_on, const PhysicalUser &user, InstanceView* child)
+    void InstanceView::find_dependences_above(std::set<Event> &wait_on, const PhysicalUser &user, 
+                                              InstanceView* child)
     //--------------------------------------------------------------------------
     {
       find_local_dependences(wait_on, user);
@@ -9904,8 +10453,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(aliased_children.find(child) != aliased_children.end());
 #endif
-      const std::vector<InstanceView*> &aliases = aliased_children[child];
-      for (std::vector<InstanceView*>::const_iterator it = aliases.begin();
+      const std::set<InstanceView*> &aliases = aliased_children[child];
+      for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
         (*it)->find_dependences_below(wait_on, user);
@@ -9924,8 +10473,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(aliased_children.find(child) != aliased_children.end());
 #endif
-      const std::vector<InstanceView*> &aliases = aliased_children[child];
-      for (std::vector<InstanceView*>::const_iterator it = aliases.begin();
+      const std::set<InstanceView*> &aliases = aliased_children[child];
+      for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
         (*it)->find_dependences_below(wait_on, writing, redop, mask);
@@ -9990,31 +10539,14 @@ namespace LegionRuntime {
       }
       
       // Go through all of the current epoch users and see if we have any dependences
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
         // Check for field disjointness 
-        if (!(it->second * user.field_mask))
+        if (!(it->second.field_mask * user.field_mask))
         {
-          std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
-          if (finder == users.end())
-          {
-            finder = added_users.find(it->first);
-#ifndef LEGION_SPY
-#ifdef DEBUG_HIGH_LEVEL
-            assert(finder != added_users.end());
-#endif
-#else
-            if (finder == added_users.end())
-            {
-              finder = deleted_users.find(it->first);
-#ifdef DEBUG_HIGH_LEVEL
-              assert(finder != deleted_users.end());
-#endif
-            }
-#endif
-          }
-          DependenceType dtype = check_dependence_type(finder->second.user.usage, user.usage);
+          DependenceType dtype = check_dependence_type(it->second.usage, user.usage);
+          bool has_dependence = false;
           switch (dtype)
           {
             // Atomic and simultaneous are not dependences here since we know that they
@@ -10030,14 +10562,36 @@ namespace LegionRuntime {
             case ANTI_DEPENDENCE:
               {
                 // Has a dependence, figure out which event to add
-                if (finder->second.use_multi)
-                  wait_on.insert(finder->second.user.multi_term);
-                else
-                  wait_on.insert(finder->second.user.single_term);
+                has_dependence = true;
                 break;
               }
             default:
               assert(false); // should never get here
+          }
+          if (has_dependence)
+          {
+            std::map<UniqueID,ReferenceTracker>::const_iterator finder = users.find(it->first.first);
+            if (finder == users.end())
+            {
+              finder = added_users.find(it->first.first);
+#ifndef LEGION_SPY
+#ifdef DEBUG_HIGH_LEVEL
+              assert(finder != added_users.end());
+#endif
+#else
+              if (finder == added_users.end())
+              {
+                finder = deleted_users.find(it->first.first);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(finder != deleted_users.end());
+#endif
+              }
+#endif
+            }
+            if (finder->second.use_single_event())
+              wait_on.insert(it->second.single_term);
+            else
+              wait_on.insert(it->second.multi_term);
           }
         }
       }
@@ -10047,7 +10601,7 @@ namespace LegionRuntime {
       {
         if (!(it->valid_mask * user.field_mask))
         {
-          DependenceType dtype = check_dependence_type(it->task_user.user.usage, user.usage);
+          DependenceType dtype = check_dependence_type(it->user.usage, user.usage);
           switch (dtype)
           {
             // Atomic and simultaneous are not dependences here since we know that they
@@ -10063,10 +10617,10 @@ namespace LegionRuntime {
             case ANTI_DEPENDENCE:
               {
                 // Has a dependence, figure out which event to add
-                if (it->task_user.use_multi)
-                  wait_on.insert(it->task_user.user.multi_term);
+                if (it->use_single)
+                  wait_on.insert(it->user.single_term);
                 else
-                  wait_on.insert(it->task_user.user.single_term);
+                  wait_on.insert(it->user.multi_term);
                 break;
               }
             default:
@@ -10233,38 +10787,39 @@ namespace LegionRuntime {
       if (writing)
       {
         // Record dependences on all users except ones with the same non-zero redop id
-        for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+        for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
               it != epoch_users.end(); it++)
         {
           // check for field disjointness
-          if (!(it->second * mask))
+          if (!(it->second.field_mask * mask))
           {
-            std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
-            if (finder == users.end())
-            {
-              finder = added_users.find(it->first);
-#ifndef LEGION_SPY
-#ifdef DEBUG_HIGH_LEVEL
-              assert(finder != added_users.end());
-#endif
-#else
-              if (finder == added_users.end())
-              {
-                finder = deleted_users.find(it->first);
-#ifdef DEBUG_HIGH_LEVEL
-                assert(finder != deleted_users.end());
-#endif
-              }
-#endif
-            }
-            if ((redop != 0) && (finder->second.user.usage.redop == redop))
+            if ((redop != 0) && (it->second.usage.redop == redop))
               all_dominated = false;
             else
             {
-              if (finder->second.use_multi)
-                wait_on.insert(finder->second.user.multi_term);
+              std::map<UniqueID,ReferenceTracker>::const_iterator finder = users.find(it->first.first);
+              if (finder == users.end())
+              {
+                finder = added_users.find(it->first.first);
+#ifndef LEGION_SPY
+#ifdef DEBUG_HIGH_LEVEL
+                assert(finder != added_users.end());
+#endif
+#else
+                if (finder == added_users.end())
+                {
+                  finder = deleted_users.find(it->first.first);
+#ifdef DEBUG_HIGH_LEVEL
+                  assert(finder != deleted_users.end());
+#endif
+                }
+#endif
+              }
+              // Pass in an empty domain point
+              if (finder->second.use_single_event())
+                wait_on.insert(it->second.single_term);
               else
-                wait_on.insert(finder->second.user.single_term);
+                wait_on.insert(it->second.multi_term);
             }
           }
         }
@@ -10274,12 +10829,12 @@ namespace LegionRuntime {
         {
           if (!(it->valid_mask * mask))
           {
-            if ((redop != it->task_user.user.usage.redop))
+            if ((redop != it->user.usage.redop))
             {
-              if (it->task_user.use_multi)
-                wait_on.insert(it->task_user.user.multi_term);
+              if (it->use_single)
+                wait_on.insert(it->user.single_term);
               else
-                wait_on.insert(it->task_user.user.single_term);
+                wait_on.insert(it->user.multi_term);
             }
           }
         }
@@ -10338,35 +10893,36 @@ namespace LegionRuntime {
       else
       {
         // We're reading, find any users or copies that have a write that we need to wait for
-        for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+        for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
               it != epoch_users.end(); it++)
         {
-          if (!(it->second * mask))
+          if (!(it->second.field_mask * mask))
           {
-            std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
-            if (finder == users.end())
+            if (HAS_WRITE(it->second.usage))
             {
-              finder = added_users.find(it->first);
+              std::map<UniqueID,ReferenceTracker>::const_iterator finder = users.find(it->first.first);
+              if (finder == users.end())
+              {
+                finder = added_users.find(it->first.first);
 #ifndef LEGION_SPY
 #ifdef DEBUG_HIGH_LEVEL
-              assert(finder != added_users.end());
+                assert(finder != added_users.end());
 #endif
 #else
-              if (finder == added_users.end())
-              {
-                finder = deleted_users.find(it->first);
+                if (finder == added_users.end())
+                {
+                  finder = deleted_users.find(it->first.first);
 #ifdef DEBUG_HIGH_LEVEL
-                assert(finder != deleted_users.end());
+                  assert(finder != deleted_users.end());
+#endif
+                }
 #endif
               }
-#endif
-            }
-            if (HAS_WRITE(finder->second.user.usage))
-            {
-              if (finder->second.use_multi)
-                wait_on.insert(finder->second.user.multi_term);
+              // Pass in an empty domain point since this is a copy
+              if (finder->second.use_single_event())
+                wait_on.insert(it->second.single_term);
               else
-                wait_on.insert(finder->second.user.single_term);
+                wait_on.insert(it->second.multi_term);
             }
             else
               all_dominated = false;
@@ -10377,12 +10933,12 @@ namespace LegionRuntime {
         {
           if (!(it->valid_mask * mask))
           {
-            if (HAS_WRITE(it->task_user.user.usage))
+            if (HAS_WRITE(it->user.usage))
             {
-              if (it->task_user.use_multi)
-                wait_on.insert(it->task_user.user.multi_term);
+              if (it->use_single)
+                wait_on.insert(it->user.single_term);
               else
-                wait_on.insert(it->task_user.user.single_term);
+                wait_on.insert(it->user.multi_term);
             }
           }
         }
@@ -10465,31 +11021,13 @@ namespace LegionRuntime {
 #endif
       // If there is anyone who matches on this mask, then there is
       // a WAR dependence
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
         // Check for field disjointness 
-        if (!(it->second * user.field_mask))
+        if (!(it->second.field_mask * user.field_mask))
         {
-          std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
-          if (finder == users.end())
-          {
-            finder = added_users.find(it->first);
-#ifndef LEGION_SPY
-#ifdef DEBUG_HIGH_LEVEL
-            assert(finder != added_users.end());
-#endif
-#else
-            if (finder == added_users.end())
-            {
-              finder = deleted_users.find(it->first);
-#ifdef DEBUG_HIGH_LEVEL
-              assert(finder != deleted_users.end());
-#endif
-            }
-#endif
-          }
-          DependenceType dtype = check_dependence_type(finder->second.user.usage, user.usage);
+          DependenceType dtype = check_dependence_type(it->second.usage, user.usage);
           switch (dtype)
           {
             case ANTI_DEPENDENCE:
@@ -10510,7 +11048,7 @@ namespace LegionRuntime {
       {
         if (!(it->valid_mask * user.field_mask))
         {
-          DependenceType dtype = check_dependence_type(it->task_user.user.usage, user.usage);
+          DependenceType dtype = check_dependence_type(it->user.usage, user.usage);
           switch (dtype)
           {
             case ANTI_DEPENDENCE:
@@ -10541,12 +11079,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Go through all the epoch users and remove ones from the new valid mask
-      remove_invalid_elements<UniqueID>(epoch_users, mask);
+      remove_invalid_users(epoch_users, mask);
       remove_invalid_elements<Event>(epoch_copy_users, mask);
 
       // Then update the set of valid events
       remove_invalid_elements<Event>(valid_events, mask);
-      valid_events[new_valid] = mask;
+      std::map<Event,FieldMask>::iterator finder = valid_events.find(new_valid);
+      if (finder == valid_events.end())
+        valid_events[new_valid] = mask;
+      else
+        finder->second |= mask;
 
       // Do it for all children
       for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
@@ -10578,6 +11120,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void InstanceView::remove_invalid_users(std::map<std::pair<UniqueID,unsigned>,PhysicalUser> &filter_users,
+                                            const FieldMask &new_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<UniqueID,unsigned> > to_delete;
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::iterator it = filter_users.begin();
+            it != filter_users.end(); it++)
+      {
+        it->second.field_mask -= new_mask;
+        if (!it->second.field_mask)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<std::pair<UniqueID,unsigned> >::const_iterator it = to_delete.begin();
+            it != to_delete.end(); it++)
+      {
+        filter_users.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     size_t InstanceView::compute_send_size(const FieldMask &pack_mask)
     //--------------------------------------------------------------------------
     {
@@ -10596,17 +11158,57 @@ namespace LegionRuntime {
         result += sizeof(it->second);
         packing_sizes[0]++;
       }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(needed_trackers.empty());
+#endif
       result += sizeof(size_t); // number of users
       packing_sizes[1] = 0;
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        if (it->second * pack_mask)
+        if (it->second.field_mask * pack_mask)
           continue;
         result += sizeof(it->first);
         result += sizeof(it->second);
-        result += sizeof(TaskUser);
+        needed_trackers[it->first.first] = -1;
         packing_sizes[1]++;
+      }
+      result += sizeof(size_t); // number of needed trackers
+      for (std::map<UniqueID,int>::iterator it = needed_trackers.begin();
+            it != needed_trackers.end(); it++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(it->second == -1);
+#endif
+        std::map<UniqueID,ReferenceTracker>::const_iterator finder = users.find(it->first);
+        if (finder == users.end())
+        {
+          finder = added_users.find(it->first);
+#ifndef LEGION_SPY
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != added_users.end());
+#endif
+          it->second = 1;
+#else
+          if (finder == added_users.end())
+          {
+            finder = deleted_users.find(it->first);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(finder != deleted_users.end());
+#endif
+            it->second = 2;
+          }
+          else
+            it->second = 1;
+#endif
+        }
+        else
+          it->second = 0;
+        result += sizeof(it->first);
+        result += finder->second.compute_tracker_send();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(it->second != -1);
+#endif
       }
       result += sizeof(size_t); // number of copy users
       packing_sizes[2] = 0;
@@ -10628,7 +11230,7 @@ namespace LegionRuntime {
       {
         if (it->valid_mask * pack_mask)
           continue;
-        packing_aliased_users.push_back(AliasedUser(it->valid_mask & pack_mask, it->task_user));
+        packing_aliased_users.push_back(AliasedUser(it->valid_mask & pack_mask, it->user, it->use_single));
       }
       result += (packing_aliased_users.size() * sizeof(AliasedUser));
       result += sizeof(size_t); // number of aliased copy users
@@ -10673,35 +11275,52 @@ namespace LegionRuntime {
         rez.serialize(overlap);
       }
       rez.serialize(packing_sizes[1]);
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        FieldMask overlap = it->second & pack_mask;
+        FieldMask overlap = it->second.field_mask & pack_mask;
         if (!overlap)
           continue;
         rez.serialize(it->first);
-        rez.serialize(overlap);
-        // Find the user
-        std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
-        if (finder == users.end())
-        {
-          finder = added_users.find(it->first);
-#ifndef LEGION_SPY
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != added_users.end());
-#endif
-#else
-          if (finder == added_users.end())
-          {
-            finder = deleted_users.find(it->first);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(finder != deleted_users.end());
-#endif
-          }
-#endif
-        }
-        rez.serialize(finder->second);
+        rez.serialize(it->second);
       }
+      rez.serialize(needed_trackers.size());
+      for (std::map<UniqueID,int>::const_iterator it = needed_trackers.begin();
+            it != needed_trackers.end(); it++)
+      {
+        rez.serialize(it->first);
+        switch (it->second)
+        {
+          case 0:
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(users.find(it->first) != users.end());
+#endif
+              users[it->first].pack_tracker_send(rez);
+            }
+          case 1:
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(added_users.find(it->first) != added_users.end());
+#endif
+              added_users[it->first].pack_tracker_send(rez);
+              break;
+            }
+#ifdef LEGION_SPY
+          case 2:
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(deleted_users.find(it->first) != deleted_users.end());
+#endif
+              deleted_users[it->first].pack_tracker_send(rez);
+              break;
+            }
+#endif
+          default:
+            assert(false); // bad location
+        }
+      }
+      needed_trackers.clear();
       rez.serialize(packing_sizes[2]);
       for (std::map<Event,FieldMask>::const_iterator it = epoch_copy_users.begin();
             it != epoch_copy_users.end(); it++)
@@ -10774,14 +11393,19 @@ namespace LegionRuntime {
       derez.deserialize(num_users);
       for (unsigned idx = 0; idx < num_users; idx++)
       {
+        std::pair<UniqueID,unsigned> key;
+        derez.deserialize(key);
+        PhysicalUser user;
+        derez.deserialize(user);
+        result->epoch_users[key] = user;
+      }
+      size_t num_trackers;
+      derez.deserialize(num_trackers);
+      for (unsigned idx = 0; idx < num_trackers; idx++)
+      {
         UniqueID uid;
         derez.deserialize(uid);
-        FieldMask user_mask;
-        derez.deserialize(user_mask);
-        TaskUser user;
-        derez.deserialize(user);
-        result->epoch_users[uid] = user_mask;
-        result->users[uid] = user;
+        result->users[uid].unpack_tracker_send(derez);
       }
       size_t num_copy_users;
       derez.deserialize(num_copy_users);
@@ -10907,8 +11531,8 @@ namespace LegionRuntime {
       assert(aliased_children.find(child_source) != aliased_children.end());
 #endif
       // Now do any children which are aliased with the child source
-      const std::vector<InstanceView*> &aliases = aliased_children[child_source];
-      for (std::vector<InstanceView*>::const_iterator it = aliases.begin();
+      const std::set<InstanceView*> &aliases = aliased_children[child_source];
+      for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
         (*it)->find_aliased_below(add_aliased_users, add_aliased_copies,
@@ -10944,16 +11568,16 @@ namespace LegionRuntime {
     {
       // Go through all our different users and valid events and find the ones
       // that overlap with the packing mask
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        if (!(it->second * packing_mask))
+        if (!(it->second.field_mask * packing_mask))
         {
           // Find it and add it to the list of aliased users
-          std::map<UniqueID,TaskUser>::const_iterator finder = users.find(it->first);
+          std::map<UniqueID,ReferenceTracker>::const_iterator finder = users.find(it->first.first);
           if (finder == users.end())
           {
-            finder = added_users.find(it->first);
+            finder = added_users.find(it->first.first);
 #ifndef LEGION_SPY
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != added_users.end());
@@ -10961,14 +11585,16 @@ namespace LegionRuntime {
 #else
             if (finder == added_users.end())
             {
-              finder = deleted_users.find(it->first);
+              finder = deleted_users.find(it->first.first);
 #ifdef DEBUG_HIGH_LEVEL
               assert(finder != deleted_users.end());
 #endif
             }
 #endif
           }
-          add_aliased_users.push_back(AliasedUser(it->second & packing_mask, finder->second));
+          // Pass in an empty domain point for the comparison
+          add_aliased_users.push_back(AliasedUser(it->second.field_mask & packing_mask, it->second, 
+                                                  finder->second.use_single_event()));
         }
       }
       for (std::map<Event,FieldMask>::const_iterator it = epoch_copy_users.begin();
@@ -11014,7 +11640,7 @@ namespace LegionRuntime {
       {
         if (!(it->valid_mask * packing_mask))
         {
-          add_aliased_users.push_back(AliasedUser(it->valid_mask & packing_mask, it->task_user));
+          add_aliased_users.push_back(AliasedUser(it->valid_mask & packing_mask, it->user, it->use_single));
         }
       }
       for (std::vector<AliasedCopyUser>::const_iterator it = aliased_copy_users.begin();
@@ -11082,16 +11708,16 @@ namespace LegionRuntime {
         result += sizeof(it->second);
       }
       result += sizeof(size_t); // number of epoch users
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        if (it->second * pack_mask)
+        if (it->second.field_mask * pack_mask)
           continue;
         // Only pack these up if we're overwriting or its new
-        std::map<UniqueID,TaskUser>::const_iterator finder = added_users.find(it->first);
+        std::map<UniqueID,ReferenceTracker>::const_iterator finder = added_users.find(it->first.first);
         if (!overwrite && (finder == added_users.end())
 #ifdef LEGION_SPY
-              && (deleted_users.find(it->first) == deleted_users.end())
+              && (deleted_users.find(it->first.first) == deleted_users.end())
 #endif
             )
           continue;
@@ -11107,22 +11733,22 @@ namespace LegionRuntime {
           result += sizeof(bool);
 #endif
           result += sizeof(finder->first);
-          result += sizeof(finder->second);
+          result += finder->second.compute_tracker_return();
           // Add it to the list of escaped users
-          escaped_users[EscapedUser(get_key(), finder->first)] = finder->second.references;
+          escaped_users[EscapedUser(get_key(), it->first.first)] = finder->second.get_reference_count();
         }
 #ifdef LEGION_SPY
         // make sure it is not a user before sending it back
-        else if (users.find(it->first) == users.end())
+        else if (users.find(it->first.first) == users.end())
         {
-          finder = deleted_users.find(it->first);
+          finder = deleted_users.find(it->first.first);
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != deleted_users.end());
 #endif
           packing_sizes[3]++;
           result += sizeof(bool);
           result += sizeof(finder->first);
-          result += sizeof(finder->second);
+          result += finder->second.compute_tracker_return();
         }
 #endif
       }
@@ -11204,18 +11830,27 @@ namespace LegionRuntime {
       if (already_returning)
       {
         // Find the set of added users not in the epoch users
-        for (std::map<UniqueID,TaskUser>::const_iterator it = added_users.begin();
+        for (std::map<UniqueID,ReferenceTracker>::const_iterator it = added_users.begin();
               it != added_users.end(); it++)
         {
-          std::map<UniqueID,FieldMask>::const_iterator finder = epoch_users.find(it->first);
-          if ((finder != epoch_users.end()) &&
-              !(finder->second * returning_mask))
+          bool has_epoch_user = false;
+          for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator eit = epoch_users.begin();
+                eit != epoch_users.end(); eit++)
           {
-            packing_sizes[5]--;
+            if (eit->first.first != it->first)
+              continue;
+            if (eit->second.field_mask * returning_mask)
+              continue;
+            has_epoch_user = true;;
+            break;
           }
+          if (has_epoch_user)
+            packing_sizes[5]--;
+          else
+            result += it->second.compute_tracker_return();
         }
       }
-      result += (packing_sizes[5] * (sizeof(UniqueID) + sizeof(TaskUser)));
+      result += (packing_sizes[5] * sizeof(UniqueID));
       result += sizeof(size_t); // number of added copy users
       packing_sizes[6] = added_copy_users.size();
       if (already_returning)
@@ -11235,10 +11870,10 @@ namespace LegionRuntime {
       }
       result += (packing_sizes[6] * (sizeof(Event) + sizeof(ReductionOpID)));
       // Update the esacped references
-      for (std::map<UniqueID,TaskUser>::const_iterator it = added_users.begin();
+      for (std::map<UniqueID,ReferenceTracker>::const_iterator it = added_users.begin();
             it != added_users.end(); it++)
       {
-        escaped_users[EscapedUser(get_key(), it->first)] = it->second.references;
+        escaped_users[EscapedUser(get_key(), it->first)] = it->second.get_reference_count();
       }
       for (std::map<Event,ReductionOpID>::const_iterator it = added_copy_users.begin();
             it != added_copy_users.end(); it++)
@@ -11274,7 +11909,7 @@ namespace LegionRuntime {
         rez.serialize(manager->unique_id);
         rez.serialize(logical_region->handle);
       }
-      // A quick not about packing field masks here.  Event though there may be fields
+      // A quick thought about not about packing field masks here.  Even though there may be fields
       // that have been created that haven't been returned, we know that none of these
       // fields are newly created fields, because the only states returned by this series
       // of function calls is based on fields dictated by region requirements which means
@@ -11291,19 +11926,19 @@ namespace LegionRuntime {
         rez.serialize(it->second);
       }
       rez.serialize(packing_sizes[1]); // number of returning epoch users 
-      std::vector<UniqueID> return_add_users;
+      std::set<UniqueID> return_add_users;
 #ifdef LEGION_SPY
-      std::vector<UniqueID> return_deleted_users;
+      std::set<UniqueID> return_deleted_users;
 #endif
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        if (it->second * pack_mask)
+        if (it->second.field_mask * pack_mask)
           continue;
-        std::map<UniqueID,TaskUser>::const_iterator finder = added_users.find(it->first);
+        std::map<UniqueID,ReferenceTracker>::const_iterator finder = added_users.find(it->first.first);
         if (!overwrite && (finder == added_users.end())
 #ifdef LEGION_SPY
-              && (deleted_users.find(it->first) == deleted_users.end())
+              && (deleted_users.find(it->first.first) == deleted_users.end())
 #endif
             )
           continue;
@@ -11311,13 +11946,13 @@ namespace LegionRuntime {
         rez.serialize(it->second);
         if (finder != added_users.end())
         {
-          return_add_users.push_back(it->first);
+          return_add_users.insert(it->first.first);
           rez.serialize(true); // has returning
         }
 #ifdef LEGION_SPY
-        else if (deleted_users.find(it->first) != deleted_users.end())
+        else if (deleted_users.find(it->first.first) != deleted_users.end())
         {
-          return_deleted_users.push_back(it->first);
+          return_deleted_users.insert(it->first.first);
           rez.serialize(true); // has returning
         }
 #endif
@@ -11375,10 +12010,10 @@ namespace LegionRuntime {
       rez.serialize(packing_sizes[3]);
       if (packing_sizes[3] > 0)
       {
-        for (std::vector<UniqueID>::const_iterator it = return_add_users.begin();
+        for (std::set<UniqueID>::const_iterator it = return_add_users.begin();
               it != return_add_users.end(); it++)
         {
-          std::map<UniqueID,TaskUser>::iterator finder = added_users.find(*it);
+          std::map<UniqueID,ReferenceTracker>::iterator finder = added_users.find(*it);
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != added_users.end());
 #endif
@@ -11386,7 +12021,7 @@ namespace LegionRuntime {
           rez.serialize<bool>(true);
 #endif
           rez.serialize(*it);
-          rez.serialize(finder->second);
+          finder->second.pack_tracker_return(rez);
           // Remove it from the added users and put it in the users
 #ifdef DEBUG_HIGH_LEVEL
           assert(users.find(*it) == users.end());
@@ -11395,12 +12030,12 @@ namespace LegionRuntime {
           added_users.erase(finder);
         }
 #ifdef LEGION_SPY
-        for (std::vector<UniqueID>::const_iterator it = return_deleted_users.begin();
+        for (std::set<UniqueID>::const_iterator it = return_deleted_users.begin();
               it != return_deleted_users.end(); it++)
         {
           rez.serialize<bool>(false);
           rez.serialize(*it);
-          rez.serialize(deleted_users[*it]);
+          deleted_users[*it].pack_tracker_return(rez);
         }
 #endif
       }
@@ -11463,11 +12098,11 @@ namespace LegionRuntime {
       assert(added_users.size() == packing_sizes[5]);
 #endif
       rez.serialize(added_users.size());
-      for (std::map<UniqueID,TaskUser>::const_iterator it = added_users.begin();
+      for (std::map<UniqueID,ReferenceTracker>::iterator it = added_users.begin();
             it != added_users.end(); it++)
       {
         rez.serialize(it->first);
-        rez.serialize(it->second);
+        it->second.pack_tracker_return(rez);
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(added_copy_users.size() == packing_sizes[6]);
@@ -11533,7 +12168,7 @@ namespace LegionRuntime {
       if (overwrite)
       {
         result->remove_invalid_elements<Event>(result->valid_events, unpack_mask); 
-        result->remove_invalid_elements<UniqueID>(result->epoch_users, unpack_mask);
+        result->remove_invalid_users(result->epoch_users, unpack_mask);
         result->remove_invalid_elements<Event>(result->epoch_copy_users, unpack_mask);
       }
       // Now we can unpack everything and add it
@@ -11554,27 +12189,37 @@ namespace LegionRuntime {
       derez.deserialize(new_epoch_users);
       for (unsigned idx = 0; idx < new_epoch_users; idx++)
       {
-        UniqueID user;
+        std::pair<UniqueID,unsigned> key;
+        derez.deserialize(key);
+        PhysicalUser user;
         derez.deserialize(user);
-        FieldMask valid_mask;
-        derez.deserialize(valid_mask);
         bool has_returning;
         derez.deserialize(has_returning);
         // It's possible that epoch users were removed locally while we were
         // remote, in which case if this user isn't marked as returning
-        // we should check to still make sure that there is a user before putting
+        // we should check to make sure that there is a user before putting
         // it in the set of epoch users.  Note we don't need to do this for LEGION_SPY
         // since we know that the user already exists in one of the sets of users
         // (possibly the deleted ones).
 #ifndef LEGION_SPY
-        if (!has_returning && (result->users.find(user) == result->users.end())
-            && (result->added_users.find(user) == result->added_users.end()))
+        if (!has_returning && (result->users.find(key.first) == result->users.end())
+            && (result->added_users.find(key.first) == result->added_users.end()))
           continue;
+#ifdef DEBUG_HIGH_LEVEL
+        if (result->epoch_users.find(key) != result->epoch_users.end())
+        {
+          assert(result->epoch_users[key].usage == user.usage);
+          assert(result->epoch_users[key].single_term == user.single_term);
+          assert(result->epoch_users[key].multi_term == user.multi_term);
+          assert(result->epoch_users[key].idx == user.idx);
+        }
 #endif
-        if (result->epoch_users.find(user) == result->epoch_users.end())
-          result->epoch_users[user] = valid_mask;
+#endif
+        std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::iterator finder = result->epoch_users.find(key);
+        if (finder == result->epoch_users.end())
+          result->epoch_users[key] = user;
         else
-          result->epoch_users[user] |= valid_mask;
+          finder->second.field_mask |= user.field_mask;
       }
       size_t new_epoch_copy_users;
       derez.deserialize(new_epoch_copy_users);
@@ -11592,10 +12237,11 @@ namespace LegionRuntime {
             && (result->added_copy_users.find(copy_event) == result->added_copy_users.end()))
           continue;
 #endif
-        if (result->epoch_copy_users.find(copy_event) == result->epoch_copy_users.end())
+        std::map<Event,FieldMask>::iterator finder = result->epoch_copy_users.find(copy_event); 
+        if (finder == result->epoch_copy_users.end())
           result->epoch_copy_users[copy_event] = valid_mask;
         else
-          result->epoch_copy_users[copy_event] |= valid_mask;
+          finder->second |= valid_mask;
       }
       size_t new_added_users;
       derez.deserialize(new_added_users);
@@ -11609,27 +12255,13 @@ namespace LegionRuntime {
 #endif
         UniqueID uid;
         derez.deserialize(uid);
-        TaskUser user;
-        derez.deserialize(user);
-        // Only need to add it if it didn't already exist since this is all about
-        // state and not about reference counting for garbage collection
 #ifdef LEGION_SPY
-        if (is_added) {
-#endif
-        if (result->added_users.find(uid) == result->added_users.end())
-          result->added_users[uid] = user;
+        if (is_added)
+          result->added_users[uid].unpack_tracker_return(derez);
         else
-        {
-          // Need to merge the users together
-          result->added_users[uid].references += user.references;
-          result->added_users[uid].use_multi = true;
-        }
-#ifdef LEGION_SPY
-        }
-        else
-        {
-          result->deleted_users[uid] = user;
-        }
+          result->deleted_users[uid].unpack_tracker_return(derez);
+#else
+        result->added_users[uid].unpack_tracker_return(derez);
 #endif
       }
       size_t new_added_copy_users;
@@ -11713,15 +12345,7 @@ namespace LegionRuntime {
       {
         UniqueID uid;
         derez.deserialize(uid);
-        TaskUser user;
-        derez.deserialize(user);
-        if (result->added_users.find(uid) == result->added_users.end())
-          result->added_users[uid] = user;
-        else
-        {
-          result->added_users[uid].references += user.references;
-          result->added_users[uid].use_multi = true;
-        }
+        result->added_users[uid].unpack_tracker_return(derez);
       }
       size_t num_added_copy_users;
       derez.deserialize(num_added_copy_users);
@@ -11837,13 +12461,13 @@ namespace LegionRuntime {
       }
 #endif
       // There should be an entry for each epoch user
-      for (std::map<UniqueID,FieldMask>::const_iterator it = epoch_users.begin();
+      for (std::map<std::pair<UniqueID,unsigned>,PhysicalUser>::const_iterator it = epoch_users.begin();
             it != epoch_users.end(); it++)
       {
-        assert((users.find(it->first) != users.end())
-               || (added_users.find(it->first) != added_users.end())
+        assert((users.find(it->first.first) != users.end())
+               || (added_users.find(it->first.first) != added_users.end())
 #ifdef LEGION_SPY
-               || (deleted_users.find(it->first) != deleted_users.end())
+               || (deleted_users.find(it->first.first) != deleted_users.end())
 #endif
                );
       }
@@ -11860,6 +12484,143 @@ namespace LegionRuntime {
       }
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    bool InstanceView::ReferenceTracker::add_reference(unsigned refs, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      references += refs;
+      points.insert(point);
+      return (points.size() <= 1);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceView::ReferenceTracker::remove_reference(unsigned refs) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(references >= refs);
+#endif
+      references -= refs;
+      return (references == 0);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceView::ReferenceTracker::use_single_event(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Only use the single event in the case that we have multiple points
+      // that are accessing the region
+      if (points.size() <= 1)
+        return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InstanceView::ReferenceTracker::get_reference_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return references;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InstanceView::ReferenceTracker::compute_tracker_send(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need to send the points that are valid
+      // If we already have more than two, we only need to send two since
+      // that is sufficient to trigger the use of the multi event
+      size_t result = sizeof(size_t);
+      size_t num_points = points.size();
+      if (num_points > 2)
+        num_points = 2;
+      result += (num_points * sizeof(DomainPoint));
+      // No need to send the references since they can't be removed remotely anyway
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::ReferenceTracker::pack_tracker_send(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points = points.size();
+      if (num_points > 2)
+        num_points = 2;
+      rez.serialize(num_points);
+      std::set<DomainPoint>::const_iterator it = points.begin();
+      while (num_points > 0)
+      {
+        rez.serialize(*it);
+        it++;
+        num_points--;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::ReferenceTracker::unpack_tracker_send(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points;
+      derez.deserialize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        DomainPoint p;
+        derez.deserialize(p);
+        points.insert(p);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(num_points == points.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InstanceView::ReferenceTracker::compute_tracker_return(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need to send back at most two points
+      size_t result = sizeof(size_t);
+      size_t num_points = points.size();
+      if (num_points > 2)
+        num_points = 2;
+      result += (num_points * sizeof(DomainPoint));
+      result += sizeof(references);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::ReferenceTracker::pack_tracker_return(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points = points.size();
+      if (num_points > 2)
+        num_points = 2;
+      rez.serialize(num_points);
+      std::set<DomainPoint>::const_iterator it = points.begin();
+      while (num_points > 0)
+      {
+        rez.serialize(*it);
+        it++;
+        num_points--;
+      }
+      rez.serialize(references);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::ReferenceTracker::unpack_tracker_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points;
+      derez.deserialize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        DomainPoint p;
+        derez.deserialize(p);
+        points.insert(p);
+      }
+      unsigned new_references;
+      derez.deserialize(new_references);
+      references += new_references;
+    }
 
     /////////////////////////////////////////////////////////////
     // Reduction View 
@@ -12011,21 +12772,6 @@ namespace LegionRuntime {
       added_copy_users.erase(it);
       if (added_copy_users.empty())
         check_state_change(false/*adding*/);
-    }
-
-    //--------------------------------------------------------------------------
-    const PhysicalUser& ReductionView::find_user(UniqueID uid) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<UniqueID,TaskUser>::const_iterator finder = users.find(uid);
-      if (finder == users.end())
-      {
-        finder = added_users.find(uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != added_users.end());
-#endif
-      }
-      return finder->second.user;
     }
 
     //--------------------------------------------------------------------------
@@ -12348,7 +13094,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool ReductionView::reduce_to(ReductionOpID redop, const FieldMask &reduce_mask, std::set<Event> &preconditions,
-                                  std::vector<IndexSpace::CopySrcDstField> &dst_fields)
+                                  std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12368,7 +13114,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void ReductionView::reduce_from(ReductionOpID redop, const FieldMask &reduce_mask, std::set<Event> &preconditions,
-                                    std::vector<IndexSpace::CopySrcDstField> &src_fields)
+                                    std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -12393,8 +13139,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       std::set<Event> preconditions;
-      std::vector<IndexSpace::CopySrcDstField> src_fields;
-      std::vector<IndexSpace::CopySrcDstField> dst_fields;
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = dst->reduce_to(manager->redop, reduce_mask, preconditions, dst_fields);
       this->reduce_from(manager->redop, reduce_mask, preconditions, src_fields);
       // Issue the reduction operation
@@ -12409,7 +13155,7 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependences(preconditions, reduce_pre);
 #endif
       Event reduce_post = manager->issue_reduction(src_fields, dst_fields, 
-                      logical_region->handle.index_space, reduce_pre, fold);
+                      logical_region->row_source->domain, reduce_pre, fold);
 #ifdef LEGION_SPY
       if (!reduce_post.exists())
       {
@@ -12545,7 +13291,7 @@ namespace LegionRuntime {
     InstanceRef::InstanceRef(void)
       : ready_event(Event::NO_EVENT), required_lock(Lock::NO_LOCK),
         location(Memory::NO_MEMORY), instance(PhysicalInstance::NO_INST),
-        view(NULL)
+        copy(false), is_reduction(false), view(NULL), manager(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -12557,6 +13303,29 @@ namespace LegionRuntime {
         instance(inst), copy(c), view(v)
     //--------------------------------------------------------------------------
     {
+      if (view == NULL)
+      {
+        is_reduction = false;
+        manager = NULL;
+      }
+      else
+      {
+        is_reduction = view->is_reduction_view();
+        manager = view->get_manager();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef::InstanceRef(PhysicalManager *m, Event ready, Memory loc,
+                             PhysicalInstance inst, bool c /*= false*/, Lock lock /*= Lock::NO_LOCK*/)
+      : ready_event(ready), required_lock(lock), location(loc), instance(inst),
+        copy(c), view(NULL), manager(m)
+    //--------------------------------------------------------------------------
+    {
+      if (manager == NULL)   
+        is_reduction = false;
+      else
+        is_reduction = manager->is_reduction_manager();
     }
 
     //--------------------------------------------------------------------------
@@ -12597,15 +13366,49 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    bool LogicalUser::operator==(const LogicalUser &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_mask != rhs.field_mask)
+        return false;
+      if (usage != rhs.usage)
+        return false;
+      if (op != rhs.op)
+        return false;
+      if (idx != rhs.idx)
+        return false;
+      if (gen != rhs.gen)
+        return false;
+      return true;
+    }
+
     /////////////////////////////////////////////////////////////
     // Physical User 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const FieldMask &m, const RegionUsage &u, Event single, Event multi)
-      : GenericUser(m, u), single_term(single), multi_term(multi)
+    PhysicalUser::PhysicalUser(const FieldMask &m, const RegionUsage &u, Event single, Event multi, unsigned id)
+      : GenericUser(m, u), single_term(single), multi_term(multi), idx(id)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalUser::operator==(const PhysicalUser &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (field_mask != rhs.field_mask)
+        return false;
+      if (usage != rhs.usage)
+        return false;
+      if (single_term != rhs.single_term)
+        return false;
+      if (multi_term != rhs.multi_term)
+        return false;
+      if (idx != rhs.idx)
+        return false;
+      return true;
     }
 
     /////////////////////////////////////////////////////////////
@@ -12801,6 +13604,9 @@ namespace LegionRuntime {
         if (to_reuse.empty() && to_create.empty())
         {
           log_region(LEVEL_ERROR,"Invalid mapper output for rank copy targets.  Must specify at least one target memory.");
+#ifdef DEBUG_HIGH_LEVEl
+          assert(false);
+#endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
         // Now process the results
@@ -12841,7 +13647,7 @@ namespace LegionRuntime {
               it != to_create.end(); it++)
         {
           // Try making an instance in the memory 
-          InstanceView *new_view = close_target->create_instance(*it, rm);
+          InstanceView *new_view = close_target->create_instance(*it, rm, rm.req.instance_fields);
           if (new_view != NULL)
           {
             // Update all the fields

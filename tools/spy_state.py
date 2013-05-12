@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright 2012 Stanford University
+# Copyright 2013 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 import subprocess
 import string
 import sys
-from spy_timeline import TimeLine
+#from spy_timeline import TimeLine
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
@@ -110,42 +110,42 @@ class Processor(object):
     def append_task_instance(self, task):
         self.executed_tasks.append(task)
 
-    def print_timeline(self):
-        if len(self.executed_tasks) == 0:
-            return
-        # Find the first and last points in time 
-        first = self.executed_tasks[0].start_time 
-        assert first <> None
-        last = self.executed_tasks[0].end_time
-        assert last <> None
-        for t in self.executed_tasks:
-            if t.start_time < first:
-                first = t.start_time
-            if t.end_time > last:
-                last = t.end_time
-        assert first < last
-        name = "processor_"+str(self.uid)+"_timeline" 
-        timeline = TimeLine(name, first, last) 
-        # Map from enclosing contexts to lines in the processor printout
-        contexts = dict()
-        for t in self.executed_tasks:
-            # Find the enclosing context, first check if it is the top level task
-            enclosing = None
-            assert t.enclosing <> None
-            if t.enclosing.enclosing <> None:
-                enclosing = t.enclosing.enclosing
-                assert enclosing <> None
-            if enclosing not in contexts:
-                # We need to make the line
-                if enclosing == None:
-                    # Handle the case where the task is the top level task
-                    contexts[enclosing] = timeline.add_line("Top Level Task")
-                else:
-                    contexts[enclosing] = timeline.add_line(enclosing.get_name())
-            assert enclosing in contexts
-            line = contexts[enclosing]
-            timeline.add_instance(line, t.get_name(), t.start_time, t.end_time, "black")
-        timeline.write_pdf(1000)
+#    def print_timeline(self):
+ #       if len(self.executed_tasks) == 0:
+ #           return
+ #       # Find the first and last points in time 
+ #       first = self.executed_tasks[0].start_time 
+ #       assert first <> None
+ #       last = self.executed_tasks[0].end_time
+ #       assert last <> None
+ #       for t in self.executed_tasks:
+ #           if t.start_time < first:
+ #               first = t.start_time
+ #           if t.end_time > last:
+ #               last = t.end_time
+ #       assert first < last
+ #       name = "processor_"+str(self.uid)+"_timeline" 
+ #       timeline = TimeLine(name, first, last) 
+ #       # Map from enclosing contexts to lines in the processor printout
+ #       contexts = dict()
+ #       for t in self.executed_tasks:
+ #           # Find the enclosing context, first check if it is the top level task
+ #           enclosing = None
+ #           assert t.enclosing <> None
+ #          if t.enclosing.enclosing <> None:
+ #               enclosing = t.enclosing.enclosing
+ #               assert enclosing <> None
+ #           if enclosing not in contexts:
+ #               # We need to make the line
+ #               if enclosing == None:
+ #                   # Handle the case where the task is the top level task
+ #                   contexts[enclosing] = timeline.add_line("Top Level Task")
+ #               else:
+ #                   contexts[enclosing] = timeline.add_line(enclosing.get_name())
+ #           assert enclosing in contexts
+ #           line = contexts[enclosing]
+ #           timeline.add_instance(line, t.get_name(), t.start_time, t.end_time, "black")
+ #       timeline.write_pdf(1000)
             
 
 class UtilityProcessor(object):
@@ -219,7 +219,7 @@ class IndexSpaceNode(object):
         assert tid not in self.instances
         region_node = RegionNode(self.state, self, field_node, tid, parent_inst)
         self.instances[tid] = region_node
-        for color,child in self.children:
+        for color,child in self.children.iteritems():
             child.instantiate(region_node, field_node, tid)
 
     def add_child(self, color, child):
@@ -252,7 +252,7 @@ class IndexPartNode(object):
         assert tid not in self.instances
         part_node = PartitionNode(self.state, self, field_node, tid, parent_inst)
         self.instances[tid] = part_node
-        for color,child in self.children:
+        for color,child in self.children.iteritems():
             child.instantiate(part_node, field_node, tid)
 
     def add_child(self, color, child):
@@ -339,7 +339,7 @@ class TaskInstance(object):
 
     def print_instance(self):
         if self.enclosing.index_space:
-            print "Point "+str(self.point)+" of task "+str(self.enclosing.name)+" UID "+str(self.enclosing.uid)
+            print "Point "+self.point.to_string()+" of task "+str(self.enclosing.name)+" UID "+str(self.enclosing.uid)
         else:
             print "Single task "+str(self.enclosing.name)+" UID "+str(self.enclosing.uid)
         for idx,req in self.requirements.iteritems():
@@ -350,11 +350,17 @@ class TaskInstance(object):
         self.point = point
         self.start_event = start_event
         self.term_event = term_event
-        self.node_name = 'task_node_'+str(self.handle.uid)+'_'+str(point)
+        self.node_name = 'task_node_'+str(self.handle.uid)+'_'+self.point.to_simple_string()
         if self.index_space:
-            self.name = str(self.enclosing.name)+" "+str(point)+" UID:"+str(self.enclosing.uid)
+            self.name = str(self.enclosing.name)+" "+self.point.to_string()+" UID:"+str(self.enclosing.uid)
         else:
             self.name = str(self.enclosing.name)+" UID:"+str(self.enclosing.uid)
+
+    def uses_memory(self, mem):
+        for idx,man in self.managers:
+            if man.inst.memory == mem:
+                return True
+        return False
 
     def append_op(self, op):
         self.ops.append(op)
@@ -460,10 +466,25 @@ class TaskInstance(object):
             printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
 
+    def clear_prev_event_dependences(self):
+        self.prev_event_deps = set()
+
+    def print_filtered_dependences(self, printer, printed_nodes):
+        assert self in printed_nodes
+        self.start_event.print_prev_filtered_dependences(printer, self.node_name, printed_nodes) 
+
+    def print_prev_filtered_dependences(self, printer, later_name, printed_nodes):
+        if self not in printed_nodes:
+            self.print_physical_node(printer)
+            printed_nodes.add(self)
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+
     def print_physical_node(self, printer):
         index_string = ""
         if self.index_space:
-            index_string = '\\nIndex\ Space\ Point\ '+str(self.point)
+            index_string = '\\nIndex\ Space\ Point\ '+self.point.to_string()
         printer.println(self.node_name+' [style=filled,label="'+str(self.enclosing.name)+index_string+ 
             '\\nUnique\ ID\ '+str(self.handle.uid)+'",fillcolor=lightskyblue,fontsize=14,fontcolor=black,shape=record,penwidth=2];')
 
@@ -708,6 +729,11 @@ class Mapping(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def uses_memory(self, mem):
+        if self.manager.inst.memory == mem:
+            return True
+        return False
+
     def find_dependences(self, op):
         op.find_individual_dependences(self, self.req)
 
@@ -749,6 +775,21 @@ class Mapping(object):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
 
     def print_prev_event_dependences(self, printer, later_name):
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+
+    def clear_prev_event_dependences(self):
+        self.prev_event_deps = set()
+
+    def print_filtered_dependences(self, printer, printed_nodes):
+        assert self in printed_nodes
+        self.start_event.print_prev_filtered_dependences(printer, self.node_name, printed_nodes)
+
+    def print_prev_filtered_dependences(self, printer, later_name, printed_nodes):
+        if self not in printed_nodes:
+            self.print_physical_nodes(printer)
+            printed_nodes.add(self)
         if later_name not in self.prev_event_deps:
             printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
@@ -857,7 +898,7 @@ class Requirement(object):
 
     def print_requirement(self):
         if self.is_reg:
-            print "    Logical Region Requirement ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
+            print "    Logical Region Requirement ("+str(hex(self.ispace))+","+str(self.fspace)+","+str(self.tid)+")"
         else:
             print "    Logical Partition Requirement ("+str(self.ispace)+","+str(self.fsapce)+","+str(self.tid)+")"
         field_str = "    Fields: "
@@ -905,7 +946,7 @@ class Requirement(object):
 
     def to_string(self):
         if self.is_reg:
-            print "Region Requirement for ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
+            print "Region Requirement for ("+str(hex(self.ispace))+","+str(self.fspace)+","+str(self.tid)+")"
         else:
             print "Partition Requirement for ("+str(self.ispace)+","+str(self.fspace)+","+str(self.tid)+")"
         print "    Privilege: "+self.get_privilege()
@@ -989,8 +1030,43 @@ class Event(object):
         for n in self.physical_incoming:
             n.print_prev_event_dependences(printer, name)
 
+    def print_prev_filtered_dependences(self, printer, name, printed_nodes):
+        for n in self.physical_incoming:
+            n.print_prev_filtered_dependences(printer, name, printed_nodes)
+
     def event_graph_traverse(self, traverser):
         traverser.visit_event(self)
+
+
+class Point(object):
+    def __init__(self, point_id, dim):
+        self.point_id = point_id
+        self.dim = dim
+        self.values = list()
+
+    def add_value(self, val):
+        self.values.append(val)
+
+    def to_string(self):
+        result = '('
+        first = True
+        for val in self.values:
+            if not(first):
+                result = result + ','
+            result = result + str(val)
+            first = False
+        result = result + ')'
+        return result
+
+    def to_simple_string(self):
+        result = ''
+        first = True
+        for val in self.values:
+            if not(first):
+                result = result + '_'
+            result = result + str(val)
+            first = False
+        return result
 
 
 def parse_mask(mask):
@@ -1029,6 +1105,13 @@ class CopyInstance(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def uses_memory(self, mem):
+        if self.src_manager.inst.memory == mem:
+            return True
+        if self.dst_manager.inst_memory == mem:
+            return True
+        return False
+
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.name)
 
@@ -1037,11 +1120,26 @@ class CopyInstance(object):
             printer.println(self.name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
 
+    def clear_prev_event_dependences(self):
+        self.prev_event_deps = set()
+
+    def print_filtered_dependences(self, printer, printed_nodes):
+        assert self in printed_nodes
+        self.start_event.print_prev_filtered_dependences(printer, self.name, printed_nodes)
+
+    def print_prev_filtered_dependences(self, printer, later_name, printed_nodes):
+        if self not in printed_nodes:
+            self.print_physical_node(printer)
+            printed_nodes.add(self)
+        if later_name not in self.prev_event_deps:
+            printer.println(self.name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+
     def print_physical_node(self, printer):
-        printer.println(self.name+' [style=filled,label="Src\ Inst:\ '+str(self.src_manager.inst.uid)+'\ Src\ Loc:\ '+
-            str(self.src_manager.inst.memory.uid)+
-            '\\nDst\ Inst:\ '+str(self.dst_manager.inst.uid)+'\ Dst\ Loc:\ '+str(self.dst_manager.inst.memory.uid)+
-            '\\nLogical\ Region:\ (index:'+str(self.index_space)+',field:'+str(self.field_space)+',tree:'+str(self.tree_id)+')'+
+        printer.println(self.name+' [style=filled,label="Src\ Inst:\ '+str(hex(self.src_manager.inst.uid))+'\ Src\ Loc:\ '+
+            str(hex(self.src_manager.inst.memory.uid))+
+            '\\nDst\ Inst:\ '+str(hex(self.dst_manager.inst.uid))+'\ Dst\ Loc:\ '+str(hex(self.dst_manager.inst.memory.uid))+
+            '\\nLogical\ Region:\ (index:'+str(hex(self.index_space))+',field:'+str(self.field_space)+',tree:'+str(self.tree_id)+')'+
             '\\nCopy\ Fields:\ '+self.mask+
             '\\nCopy\ ID:\ '+str(self.uid)+
             '",fillcolor=darkgoldenrod1,fontsize=14,fontcolor=black,shape=record,penwidth=2];')
@@ -1087,6 +1185,13 @@ class ReduceInstance(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def uses_memory(self, mem):
+        if self.src_manager.inst.memory == mem:
+            return True
+        if self.dst_manager.inst.memory == mem:
+            return True
+        return False
+
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.name)
 
@@ -1095,11 +1200,26 @@ class ReduceInstance(object):
             printer.println(self.name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
 
+    def clear_prev_event_dependences(self):
+        self.prev_event_deps = set()
+
+    def print_filtered_dependences(self, printer, printed_nodes):
+        assert self in printed_nodes
+        self.start_event.print_prev_filtered_dependences(printer, self.node_name, printed_nodes)
+
+    def print_prev_filtered_dependences(self, printer, later_name, printed_nodes):
+        if self not in printed_nodes:
+            self.print_physical_node(printer)
+            printed_nodes.add(self)
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+
     def print_physical_node(self, printer):
-        printer.println(self.name+' [style=filled,label="Src\ Inst:\ '+str(self.src_manager.inst.uid)+'\ Src\ Loc:\ '+
-            str(self.src_manager.inst.memory.uid)+
-            '\\nDst\ Inst:\ '+str(self.dst_manager.inst.uid)+'\ Dst\ Loc:\ '+str(self.dst_manager.inst.memory.uid)+
-            '\\nLogical\ Region:\ (index:'+str(self.index_space)+',field:'+str(self.field_space)+',tree:'+str(self.tree_id)+')'+
+        printer.println(self.name+' [style=filled,label="Src\ Inst:\ '+str(hex(self.src_manager.inst.uid))+'\ Src\ Loc:\ '+
+            str(hex(self.src_manager.inst.memory.uid))+
+            '\\nDst\ Inst:\ '+str(hex(self.dst_manager.inst.uid))+'\ Dst\ Loc:\ '+str(hex(self.dst_manager.inst.memory.uid))+
+            '\\nLogical\ Region:\ (index:'+str(hex(self.index_space))+',field:'+str(self.field_space)+',tree:'+str(self.tree_id)+')'+
             '\\nReduce\ Fields:\ '+self.mask+
             '\\nReduction\ Op:\ '+str(self.redop)+
             '\\nReduction\ ID:\ '+str(self.uid)+
@@ -1213,7 +1333,7 @@ class InstanceManager(object):
             self.find_transitive_dependences(u.op)
         for h,u in self.reduce_users.iteritems():
             self.find_transitive_dependences(u.op) 
-        print "Performing data-race detection for manager "+str(self.uid)+" of instance "+str(self.inst.uid)+" in memory "+str(self.inst.memory.uid)
+        print "Performing data-race detection for manager "+str(self.uid)+" of instance "+str(hex(self.inst.uid))+" in memory "+str(hex(self.inst.memory.uid))
         # Now do all of the dependence checks between all pairs
         for h1,u1 in self.task_users.iteritems():
             for h2,u2 in self.task_users.iteritems():
@@ -1730,6 +1850,8 @@ class GraphPrinter(object):
         #self.println('ratio = 1;')
         #self.println('size = "10,10";')
         self.println('compound = true;')
+        self.println('rankdir="LR";')
+        self.println('size = "36,36";')
 
     def close(self):
         self.up()
@@ -1765,11 +1887,13 @@ class State(object):
         self.mappings = dict()
         self.deletions = dict()
         self.events = dict()
-        self.copies = dict()
+        self.copies = set()
+        self.reduces = set()
         self.physical_instances = dict()
         self.reduction_instances = dict()
         self.physical_managers = dict()
         self.reduction_managers = dict()
+        self.points = dict()
         self.next_copy = 1
         self.next_reduce = 1
         self.verbose = verbose 
@@ -1780,24 +1904,49 @@ class State(object):
 
     def add_processor(self, pid, util, kind):
         assert pid not in self.processors
-        assert util in self.utilities
+        if util not in self.utilities:
+            return False
         self.processors[pid] = Processor(self, pid, self.utilities[util], kind)
+        return True
 
     def add_memory(self, mid, capacity):
         assert mid not in self.memories
         self.memories[mid] = Memory(self, mid, capacity)
 
     def set_proc_mem(self, pid, mid, bandwidth, latency):
-        assert pid in self.processors
-        assert mid in self.memories
+        if pid not in self.processors:
+            return False
+        if mid not in self.memories:
+            return False
         self.processors[pid].add_memory(self.memories[mid], bandwidth, latency)
         self.memories[mid].add_processor(self.processors[pid], bandwidth, latency)
+        return True
 
     def set_mem_mem(self, mem1, mem2, bandwidth, latency):
-        assert mem1 in self.memories
-        assert mem2 in self.memories
+        if mem1 not in self.memories:
+            return False
+        if mem2 not in self.memories:
+            return False
         self.memories[mem1].add_memory(self.memories[mem2], bandwidth, latency)
         self.memories[mem2].add_memory(self.memories[mem1], bandwidth, latency)
+        return True
+
+    def add_point(self, node, pid, dim, val1=0, val2=0, val3=0):
+        if node not in self.points:
+            self.points[node] = dict()
+        assert pid not in self.points[node]
+        self.points[node][pid] = Point(pid, dim)
+        if dim > 0:
+          self.points[node][pid].add_value(val1)
+        if dim > 1:
+          self.points[node][pid].add_value(val2)
+        if dim > 2:
+          self.points[node][pid].add_value(val3)
+
+    def get_point(self, node, pid):
+        assert node in self.points
+        assert pid in self.points[node]
+        return self.points[node][pid]
 
     def add_index_space(self, uid):
         assert uid not in self.index_space_nodes
@@ -1805,27 +1954,36 @@ class State(object):
 
     def add_index_partition(self, pid, uid, disjoint, color):
         assert uid not in self.index_part_nodes
-        assert pid in self.index_space_nodes
+        if pid not in self.index_space_nodes:
+            return False
         self.index_part_nodes[uid] = IndexPartNode(self, uid, disjoint, color, self.index_space_nodes[pid])
+        return True
 
     def add_index_subspace(self, pid, uid, color):
         assert uid not in self.index_space_nodes
-        assert pid in self.index_part_nodes
+        if pid not in self.index_part_nodes:
+            return False
         self.index_space_nodes[uid] = IndexSpaceNode(self, uid, color, self.index_part_nodes[pid])
+        return True
 
     def add_field_space(self, uid):
         assert uid not in self.field_space_nodes
         self.field_space_nodes[uid] = FieldSpaceNode(self, uid)
 
     def add_field(self, uid, fid):
-        assert uid in self.field_space_nodes
+        if uid not in self.field_space_nodes:
+            return False
         self.field_space_nodes[uid].add_field(fid)
+        return True
 
     def add_region(self, iid, fid, tid):
         assert tid not in self.region_trees
-        assert iid in self.index_space_nodes
-        assert fid in self.field_space_nodes
+        if iid not in self.index_space_nodes:
+            return False
+        if fid not in self.field_space_nodes:
+            return False
         self.region_trees[tid] = self.index_space_nodes[iid].instantiate(None, self.field_space_nodes[fid], tid)
+        return True
 
     def add_top_task(self, hid, gen, uid, ctx, tid):
         assert uid not in self.task_ops
@@ -1833,67 +1991,84 @@ class State(object):
 
     def add_task(self, uid, tid, pid, ctx, hid, gen, index_space):
         parent_handle = TaskHandle(pid, ctx, hid, gen)
-        assert parent_handle in self.task_instances
+        if parent_handle not in self.task_instances:
+            return False
         task_op = TaskOp(self, uid, tid, self.task_instances[parent_handle], index_space, None)
         assert uid not in self.task_ops
         self.task_ops[uid] = task_op
         # Tell the parent task instance about the operation
         self.task_instances[parent_handle].append_op(task_op)
+        return True
 
     def add_mapping(self, uid, pid, ctx, hid, gen):
         parent_handle = TaskHandle(pid, ctx, hid, gen)
-        assert parent_handle in self.task_instances
+        if parent_handle not in self.task_instances:
+            return False
         mapping = Mapping(self, uid, self.task_instances[parent_handle])
         assert uid not in self.mappings
         self.mappings[uid] = mapping
         self.task_instances[parent_handle].append_op(mapping)
+        return True
 
     def add_deletion(self, uid, pid, ctx, hid, gen):
         parent_handle = TaskHandle(pid, ctx, hid, gen)
-        assert parent_handle in self.task_instances
+        if parent_handle not in self.task_instances:
+            return False
         deletion = Deletion(self, uid, self.task_instances[parent_handle])
         assert uid not in self.deletions
         self.deletions[uid] = deletion
         self.task_instances[parent_handle].append_op(deletion)
+        return True
 
     def add_name(self, uid, name):
-        assert uid in self.task_ops
+        if uid not in self.task_ops:
+            return False
         self.task_ops[uid].name = name
+        return True
 
     def add_requirement(self, uid, index, is_reg, ispace, fspace, tid, priv, coher, redop):
         if uid in self.mappings:
             self.mappings[uid].add_requirement(index, is_reg, ispace, fspace, tid, priv, coher, redop)
         else:
-            assert uid in self.task_ops
+            if uid not in self.task_ops:
+                return False
             self.task_ops[uid].add_requirement(index, is_reg, ispace, fspace, tid, priv, coher, redop)
+        return True
 
     def add_req_field(self, uid, index, fid):
         if uid in self.mappings:
             self.mappings[uid].add_req_field(index, fid)
         else:
-            assert uid in self.task_ops
+            if uid not in self.task_ops:
+                return False
             self.task_ops[uid].add_req_field(index, fid)
+        return True
 
     def add_mapping_dependence(self, pid, ctx, hid, gen, prev_id, pidx, next_id, nidx, dtype):
         prev_op = self.get_op(prev_id)
         next_op = self.get_op(next_id)
         handle = TaskHandle(pid, ctx, hid, gen)
-        assert handle in self.task_instances
+        if not handle in self.task_instances:
+            return False
         self.task_instances[handle].add_mdep(prev_op, next_op, pidx, nidx, dtype)
         prev_op.add_logical_incoming(next_op)
         next_op.add_logical_outgoing(prev_op)
+        return True
 
     def add_instance_requirement(self, uid, ctx, gen, hid, idx, index):
         handle = TaskHandle(uid, ctx, hid, gen)
         if handle not in self.task_instances:
-            assert uid in self.task_ops
+            if not uid in self.task_ops:
+                return False
             # Has to be an index space if we are doing this
             self.task_instances[handle] = TaskInstance(self, handle, self.task_ops[uid], True)
         self.task_instances[handle].update_requirement(idx, index)
+        return True
 
     def add_task_instance(self, uid, ctx, hid, gen, index_space, point, startid, startgen, termid, termgen):
+        if uid not in self.task_ops:
+            return False
         handle = TaskHandle(uid, ctx, hid, gen) 
-        assert uid in self.task_ops
         if handle not in self.task_instances:
             self.task_instances[handle] = TaskInstance(self, handle, self.task_ops[uid], index_space)
         start_event = self.get_event(EventHandle(startid,startgen))
@@ -1903,6 +2078,7 @@ class State(object):
         self.task_ops[uid].add_instance(point,task_inst)
         start_event.add_physical_outgoing(task_inst)
         term_event.add_physical_incoming(task_inst)
+        return True
 
     def add_event_dependence(self, id1, gen1, id2, gen2):
         e1 = self.get_event(EventHandle(id1,gen1))
@@ -1911,120 +2087,159 @@ class State(object):
         e2.add_physical_incoming(e1)
 
     def add_index_term(self, uid, termid, termgen):
-        assert uid in self.task_ops
+        if uid not in self.task_ops:
+            return False
         term_event = self.get_event(EventHandle(termid,termgen))
         self.task_ops[uid].add_term_event(term_event)
+        return True
 
     def add_map_instance(self, uid, startid, startgen, termid, termgen):
-        assert uid in self.mappings
+        if uid not in self.mappings:
+            return False
         start_event = self.get_event(EventHandle(startid,startgen))
         term_event = self.get_event(EventHandle(termid,termgen))
         self.mappings[uid].add_instance(start_event,term_event)
         start_event.add_physical_outgoing(self.mappings[uid])
         term_event.add_physical_incoming(self.mappings[uid])
+        return True
 
     def add_copy_instance(self, srcman, dstman, index, field, tree, startid, startgen, termid, termgen, mask):
-        assert srcman in self.physical_managers
-        assert dstman in self.physical_managers
+        if srcman not in self.physical_managers:
+            return False
+        if dstman not in self.physical_managers:
+            return False
         src_manager = self.physical_managers[srcman]
         dst_manager = self.physical_managers[dstman]
         start_event = self.get_event(EventHandle(startid,startgen))
         term_event = self.get_event(EventHandle(termid,termgen))
         copy_op = CopyInstance(self, self.next_copy, src_manager, dst_manager, index, field, tree, start_event, term_event, mask)
+        self.copies.add(copy_op)
         self.next_copy = self.next_copy + 1
         start_event.add_physical_outgoing(copy_op)
         term_event.add_physical_incoming(copy_op)
         src_manager.add_copy_user(copy_op, False)
         dst_manager.add_copy_user(copy_op, True)
+        return True
 
     def add_reduce_instance(self, srcman, dstman, index, field, tree, startid, startgen, termid, termgen, redop, mask):
-        assert srcman in self.reduction_managers
+        if srcman not in self.reduction_managers:
+            return False
         src_manager = self.reduction_managers[srcman]
         dst_manager = None
         if dstman in self.reduction_managers:
             dst_manager = self.reduction_managers[dstman]
         else:
-            assert dstman in self.physical_managers
+            if dstman not in self.physical_managers:
+                return False
             dst_manager = self.physical_managers[dstman]
         start_event = self.get_event(EventHandle(startid,startgen))
         term_event = self.get_event(EventHandle(termid,termgen))
         reduce_op = ReduceInstance(self, self.next_reduce, src_manager, dst_manager, index, field, tree, start_event, term_event, redop, mask)
+        self.reduces.add(reduce_op)
         self.next_reduce = self.next_reduce + 1
         start_event.add_physical_outgoing(reduce_op)
         term_event.add_physical_incoming(reduce_op)
         src_manager.add_reduce_user(reduce_op, False)
         dst_manager.add_reduce_user(reduce_op, True)
+        return True
 
     def add_physical_instance(self, iid, memory, index, field, tid):
         assert iid not in self.physical_instances
-        assert memory in self.memories
-        assert index in self.index_space_nodes
-        assert field in self.field_space_nodes
-        assert tid in self.region_trees
+        if memory not in self.memories:
+            return False
+        if index not in self.index_space_nodes:
+            return False
+        if field not in self.field_space_nodes:
+            return False
+        if tid not in self.region_trees:
+            return False
         index_node = self.get_index_node(True, index)
         self.physical_instances[iid] = PhysicalInstance(self, iid, self.memories[memory], index_node.get_instance(tid))
+        return True
 
     def add_reduction_instance(self, iid, memory, index, field, tid, foldable, indirect):
         assert iid not in self.reduction_instances
-        assert memory in self.memories
-        assert index in self.index_space_nodes
-        assert field in self.field_space_nodes
-        assert tid in self.region_trees
+        if memory not in self.memories:
+            return False
+        if index not in self.index_space_nodes:
+            return False
+        if field not in self.field_space_nodes:
+            return False
+        if tid not in self.region_trees:
+            return False
         index_node = self.get_index_node(True, index)
         self.reduction_instances[iid] = ReductionInstance(self, iid, self.memories[memory], index_node.get_instance(tid), foldable, indirect)
+        return True
 
     def add_instance_manager(self, iid, manager_id):
-        assert iid in self.physical_instances
+        if iid not in self.physical_instances:
+            return False
         assert manager_id not in self.physical_managers
         manager = InstanceManager(self, manager_id, self.physical_instances[iid])
         self.physical_managers[manager_id] = manager
         self.physical_instances[iid].add_manager(manager)
+        return True
 
     def add_reduction_manager(self, iid, manager_id):
-        assert iid in self.reduction_instances
+        if iid not in self.reduction_instances:
+            return False
         assert manager_id not in self.reduction_managers
         manager = ReductionManager(self, manager_id, self.reduction_instances[iid])
         self.reduction_managers[manager_id] = manager
         self.reduction_instances[iid].add_manager(manager)
+        return True
 
     def add_task_user(self, uid, ctx, gen, hid, idx, manager_id):
         handle = TaskHandle(uid, ctx, hid, gen) 
-        assert handle in self.task_instances
+        if handle not in self.task_instances:
+            return False
         task_inst = self.task_instances[handle]
         manager = None
         if manager_id in self.physical_managers:
             manager = self.physical_managers[manager_id]
         else:
-            assert manager_id in self.reduction_managers
+            if manager_id not in self.reduction_managers:
+                return False
             manager = self.reduction_managers[manager_id]
         manager.add_task_user(handle, task_inst, idx)
+        return True
 
     def add_mapping_user(self, uid, manager_id):
-        assert uid in self.mappings
+        if uid not in self.mappings:
+            return False
         mapping = self.mappings[uid]
         manager = None
         if manager_id in self.physical_managers:
             manager = self.physical_managers[manager_id]
         else:
-            assert manager_id in self.reduction_managers
+            if manager_id not in self.reduction_managers:
+                return False
             manager = self.reduction_managers[manager_id]
         manager.add_map_user(uid, mapping)
+        return True
 
     def set_exec_info(self, uid, ctx, gen, hid, proc):
         handle = TaskHandle(uid, ctx, hid, gen)
-        assert handle in self.task_instances
-        assert proc in self.processors
+        if not handle in self.task_instances:
+            return False
+        if not proc in self.processors:
+            return False
         self.task_instances[handle].set_processor(self.processors[proc])
+        return True
 
     def set_task_start(self, uid, ctx, gen, hid, start):
         handle = TaskHandle(uid, ctx, hid, gen)
-        assert handle in self.task_instances
+        if handle not in self.task_instances:
+            return False
         self.task_instances[handle].set_start_time(start)
+        return True
 
     def set_task_end(self, uid, ctx, gen, hid, end):
         handle = TaskHandle(uid, ctx, hid, gen)
-        assert handle in self.task_instances
+        if handle not in self.task_instances:
+            return False
         self.task_instances[handle].set_end_time(end)
+        return True
 
     def get_op(self, uid):
         if uid in self.mappings:
@@ -2126,12 +2341,90 @@ class State(object):
         for handle,task_inst in self.task_instances.iteritems():  
             task_inst.check_data_flow()
 
-    def print_instances(self):
+    def print_instances(self, path):
         for handle,inst in self.task_instances.iteritems():
             inst.print_instance()
         for handle,mapping in self.mappings.iteritems():
             mapping.print_instance()
 
+    def print_processor_graphs(self, path):
+        for pid,proc in self.processors.iteritems():
+            self.clear_prev_event_dependences()
+            name = 'processor_graph_'+str(proc.uid)
+            printer = GraphPrinter(path,name)
+            orig_nodes = set()
+            printed_nodes = set()
+            # First find the set of nodes which use this processor and print them
+            for handle,task in self.task_instances.iteritems():
+                if task.executing_processor == proc:
+                    orig_nodes.add(task)
+                    printed_nodes.add(task)
+                    task.print_physical_node(printer)
+            for uid,mapping in self.mappings.iteritems():
+                if mapping.enclosing.executing_processor == proc:
+                    orig_nodes.add(mapping)
+                    printed_nodes.add(mapping)
+                    mapping.print_physical_node(printer)
+            # Then print all the dependences and nodes which they might depend on
+            for node in orig_nodes:
+                node.print_filtered_dependences(printer, printed_nodes)
+            dot_file = printer.close()
+            pdf_file = name+'.pdf'
+            try:
+                subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+            except:
+                print "WARNING: DOT failure, image for "+pdf_file+" not generated"
+                subprocess.call(['rm -f core '+pdf_file],shell=True)
+
+    def print_memory_graphs(self,path):
+        for mid,mem in self.memories.iteritems():
+            self.clear_prev_event_dependences()
+            name = 'memory_graph_'+str(mem.uid)
+            printer = GraphPrinter(path,name)
+            orig_nodes = set()
+            printed_nodes = set()
+            for handle,task in self.task_instances.iteritems():
+                if task.uses_memory(mem):
+                    orig_nodes.add(task)
+                    printed_nodes.add(task)
+                    task.print_physical_node(printer)
+            for uid,mapping in self.mappings.iteritems():
+                if mapping.uses_memory(mem):
+                    orig_nodes.add(mapping)
+                    printed_nodes.add(mapping)
+                    mapping.print_physical_node(printer)
+            for copy in self.copies:
+                if copy.uses_memory(mem):
+                    orig_nodes.add(copy)
+                    printed_nodes.add(copy)
+                    copy.print_physical_node(printer)
+            for reduce_op in self.reduces:
+                if reduce_op.uses_memory(mem):
+                    orig_nodes.add(reduce_op)
+                    printed_nodes.add(reduce_op)
+                    reduce_op.print_physical_node(printer)
+            # Now print the depenendences
+            for node in orig_nodes:
+                node.print_filtered_dependences(printer, printed_nodes)
+            dot_file = printer.close()
+            pdf_file = name+'.pdf'
+            try:
+                subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+            except:
+                print "WARNING: DOT failure, image for "+pdf_file+" not generated"
+                subprocess.call(['rm -f core '+pdf_file],shell=True)
+
+    def clear_prev_event_dependences(self):
+        for handle,task in self.task_instances.iteritems():
+            task.clear_prev_event_dependences()
+        for uid,mapping in self.mappings.iteritems():
+            mapping.clear_prev_event_dependences()
+        for copy in self.copies:
+            copy.clear_prev_event_dependences()
+        for reduce_op in self.reduces:
+            reduce_op.clear_prev_event_dependences()
+
+    # Legacy functions.  Have been usurped by LegionProf
     def print_processor_timelines(self):
         for uid,p in self.processors.iteritems():
             p.print_timeline()

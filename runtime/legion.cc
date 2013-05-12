@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 #include "legion.h"
 #include "legion_utilities.h"
 #include "legion_logging.h"
+#include "legion_profiling.h"
 #include "legion_ops.h"
 #include "region_tree.h"
 #include "default_mapper.h"
@@ -27,6 +28,7 @@
 #define DEFAULT_OPS             4
 #define MAX_TASK_WINDOW         1024
 #define MIN_TASKS_TO_PERFORM_SCHEDULING 1
+#define MAX_FILTER_SIZE         (16*MIN_TASKS_TO_PERFORM_SCHEDULING) 
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -43,6 +45,14 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
+    };
+#endif
+
+#ifdef LEGION_PROF
+    namespace LegionProf {
+      Logger::Category log_prof("legion_prof");
+      ProcessorProfiler *legion_prof_table = 
+        (ProcessorProfiler*)malloc((MAX_NUM_PROCS+1)*sizeof(ProcessorProfiler));
     };
 #endif
 
@@ -135,24 +145,9 @@ namespace LegionRuntime {
       : task_id(0), args(NULL), arglen(0), map_id(0), tag(0),
         orig_proc(Processor::NO_PROC), steal_count(0), depth(0), 
         must_parallelism(false), is_index_space(false), 
-        index_space(IndexSpace::NO_SPACE), index_point(NULL), 
-        index_element_size(0), index_dimensions(0), variants(NULL)
+        index_domain(Domain::NO_DOMAIN), variants(NULL)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    void Task::set_index_point(const void *buffer, size_t point_size, unsigned dim)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(index_point == NULL);
-#endif
-      size_t num_bytes = point_size * dim;
-      index_point = malloc(num_bytes);
-      memcpy(index_point, buffer, num_bytes);
-      index_element_size = point_size;
-      index_dimensions = dim;
     }
 
     //--------------------------------------------------------------------------
@@ -176,15 +171,8 @@ namespace LegionRuntime {
       this->depth = rhs->depth;
       this->must_parallelism = rhs->must_parallelism;
       this->is_index_space = rhs->is_index_space;
-      this->index_space = rhs->index_space;
-      if (is_index_space && (rhs->index_point != NULL))
-      {
-        size_t bytes = rhs->index_element_size * rhs->index_dimensions;
-        this->index_point = malloc(bytes);
-        memcpy(this->index_point,rhs->index_point,bytes);
-        this->index_element_size = rhs->index_element_size;
-        this->index_dimensions = rhs->index_dimensions;
-      }
+      this->index_domain = rhs->index_domain;
+      this->index_point = rhs->index_point;
       this->variants = rhs->variants;
     }
 
@@ -212,14 +200,8 @@ namespace LegionRuntime {
       if (is_index_space)
       {
         result += sizeof(must_parallelism);
-        result += sizeof(index_space);
-        result += sizeof(bool); // has point
-        if (index_point != NULL)
-        {
-          result += sizeof(index_element_size);
-          result += sizeof(index_dimensions);
-          result += (index_element_size * index_dimensions);
-        }
+        result += sizeof(index_domain);
+        result += sizeof(index_point);
       }
       return result;
     }
@@ -255,15 +237,8 @@ namespace LegionRuntime {
       if (is_index_space)
       {
         rez.serialize<bool>(must_parallelism);
-        rez.serialize<IndexSpace>(index_space);
-        bool has_point = (index_point != NULL);
-        rez.serialize<bool>(has_point);
-        if (has_point)
-        {
-          rez.serialize<size_t>(index_element_size);
-          rez.serialize<unsigned>(index_dimensions);
-          rez.serialize(index_point,index_element_size*index_dimensions);
-        }
+        rez.serialize<Domain>(index_domain);
+        rez.serialize<DomainPoint>(index_point);
       }
     }
     
@@ -306,16 +281,8 @@ namespace LegionRuntime {
       if (is_index_space)
       {
         derez.deserialize<bool>(must_parallelism);
-        derez.deserialize<IndexSpace>(index_space);
-        bool has_point;
-        derez.deserialize<bool>(has_point);
-        if (has_point)
-        {
-          derez.deserialize<size_t>(index_element_size);
-          derez.deserialize<unsigned>(index_dimensions);
-          index_point = malloc(index_element_size * index_dimensions);
-          derez.deserialize(index_point, index_element_size * index_dimensions);
-        }
+        derez.deserialize<Domain>(index_domain);
+        derez.deserialize<DomainPoint>(index_point);
       }
       variants = HighLevelRuntime::find_collection(task_id);
     }
@@ -353,6 +320,9 @@ namespace LegionRuntime {
       }
       log_variant(LEVEL_ERROR,"User task %s (ID %d) has no registered variants for "
           "processors of kind %d and index space %d",name, user_id, kind, index_space);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
       exit(ERROR_UNREGISTERED_VARIANT);
       return 0;
     }
@@ -397,6 +367,9 @@ namespace LegionRuntime {
       }
       log_variant(LEVEL_ERROR,"User task %s (ID %d) has no registered variants for "
           "processors of kind %d and index space %d",name, user_id, kind, index);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
       exit(ERROR_UNREGISTERED_VARIANT);
       return variants[0];
     }
@@ -717,6 +690,7 @@ namespace LegionRuntime {
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
         log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
 #endif
@@ -740,6 +714,7 @@ namespace LegionRuntime {
       if (IS_REDUCE(*this))
       {
         log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
 #endif
@@ -763,6 +738,7 @@ namespace LegionRuntime {
       if (redop == 0)
       {
         log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
 #endif
@@ -786,6 +762,7 @@ namespace LegionRuntime {
       if (redop == 0)
       {
         log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
 #endif
@@ -804,6 +781,7 @@ namespace LegionRuntime {
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
         log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
 #endif
@@ -823,6 +801,7 @@ namespace LegionRuntime {
       if (IS_REDUCE(*this))
       {
         log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
 #endif
@@ -842,6 +821,7 @@ namespace LegionRuntime {
       if (redop == 0)
       {
         log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
 #endif
@@ -861,6 +841,7 @@ namespace LegionRuntime {
       if (redop == 0)
       {
         log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
 #endif
@@ -1118,6 +1099,7 @@ namespace LegionRuntime {
       }
       return ACCESSOR_NONE;
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool RegionRequirement::has_field_privilege(FieldID fid) const
@@ -1125,7 +1107,6 @@ namespace LegionRuntime {
     {
       return (privilege_fields.find(fid) != privilege_fields.end());
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Physical Region 
@@ -1639,6 +1620,7 @@ namespace LegionRuntime {
       if (!valid)
       {
         log_region(LEVEL_ERROR,"Accessing invalidated mapping for task region %d",idx);
+        assert(false);
         exit(ERROR_INVALID_MAPPING_ACCESS);
       }
 #endif
@@ -1653,6 +1635,7 @@ namespace LegionRuntime {
       if (!valid)
       {
         log_region(LEVEL_ERROR,"Accessing invalidated mapping for task region %d",idx);
+        assert(false);
         exit(ERROR_INVALID_MAPPING_ACCESS);
       }
 #endif
@@ -1675,6 +1658,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = manager->get_field_accessor(fid);
+#ifdef DEBUG_HIGH_LEVEL
+      if (!req->has_field_privilege(fid))
+      {
+        log_run(LEVEL_ERROR,"Invalid request for field accessor without privileges for field %d", fid);
+        assert(false);
+        exit(ERROR_INVALID_FIELD_ACCESSOR_PRIVILEGES);
+      }
+#endif
 #ifdef PRIVILEGE_CHECKS
       assert(req->has_field_privilege(fid));
       result.set_privileges_untyped(req->get_accessor_privilege());
@@ -1763,6 +1754,8 @@ namespace LegionRuntime {
     TaskArgument ArgumentMapImpl::find_point(const AnyPoint &point) const
     //--------------------------------------------------------------------------
     {
+      // Good property to have here: if we don't find the point, we just
+      // return an empty task argument which is the right answer.
       TaskArgument result;
       for (std::map<AnyPoint,TaskArgument>::const_iterator it = arguments.begin();
             it != arguments.end(); it++)
@@ -2130,18 +2123,26 @@ namespace LegionRuntime {
         {
           // Match get the impl and set the result
           FutureImpl *impl = it->second;
-          // There better have been a user event too
+          // See if there is an event we need to trigger or not
+          UserEvent ready_event;
+          bool has_ready_event = false;
+          std::map<FutureImpl*,UserEvent>::iterator finder = waiter_events.find(impl);
+          if (finder != waiter_events.end())
+          {
+            has_ready_event = true;
+            ready_event = finder->second;
 #ifdef DEBUG_HIGH_LEVEL
-          assert(waiter_events.find(impl) != waiter_events.end());
+            assert(ready_event.exists());
 #endif
-          UserEvent ready_event = waiter_events[impl];
-          // Remove it from the map
-          waiter_events.erase(impl);
+            // Remove it from the map
+            waiter_events.erase(finder);
+          }
           // Don't need to be holding the lock when doing this
           unlock();
           impl->set_result(res, result_size, point_finish, owner);
           // Then trigger the waiting event 
-          ready_event.trigger();
+          if (has_ready_event)
+            ready_event.trigger();
           // Now we're done
           return;
         }
@@ -2933,6 +2934,8 @@ namespace LegionRuntime {
         ready_queues[i].clear();
         outstanding_steals[i] = std::set<Processor>();
       }
+      this->dependence_lock = Lock::create_lock();
+      this->idle_lock = Lock::create_lock();
 #ifdef LOW_LEVEL_LOCKS
       mapper_locks[0] = Lock::create_lock();
       this->mapping_lock = Lock::create_lock();
@@ -2981,6 +2984,8 @@ namespace LegionRuntime {
       mapper_objects.clear();
       mapper_locks.clear();
       ready_queues.clear();
+      dependence_lock.destroy_lock();
+      idle_lock.destroy_lock();
 #ifdef LOW_LEVEL_LOCKS
       mapping_lock.destroy_lock();
       queue_lock.destroy_lock();
@@ -3003,6 +3008,7 @@ namespace LegionRuntime {
       if (check && (id == 0))
       {
         log_run(LEVEL_ERROR,"Invalid mapping ID.  ID 0 is reserved.");
+        assert(false);
         exit(ERROR_RESERVED_MAPPING_ID);
       }
 #endif
@@ -3070,6 +3076,21 @@ namespace LegionRuntime {
 #endif
 #endif
       mappable->initialize_mappable(mapper_objects[map_id], mapper_locks[map_id]);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Mapper* HighLevelRuntime::ProcessorManager::find_mapper(MapperID id) 
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef LOW_LEVEL_LOCKS
+      AutoLock map_lock(mapping_lock,false/*exclusive*/);
+#else
+      AutoLock map_lock(mapping_lock);
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+      assert(id < mapper_objects.size());
+#endif
+      return mapper_objects[id];
     }
 
 #ifdef INORDER_EXECUTION
@@ -3177,11 +3198,12 @@ namespace LegionRuntime {
 
     // The high level runtime map 
     HighLevelRuntime **HighLevelRuntime::runtime_map = 
-      (HighLevelRuntime**)malloc(MAX_NUM_PROCS*sizeof(HighLevelRuntime*));
+      (HighLevelRuntime**)malloc((MAX_NUM_PROCS+1/*+1 since 0 proc is NO_PROC*/)*sizeof(HighLevelRuntime*));
 
     //--------------------------------------------------------------------------
     HighLevelRuntime::HighLevelRuntime(LowLevel::Machine *m, Processor local)
       : utility_proc(local.get_utility_processor()), 
+        explicit_utility_proc(m->has_explicit_utility_processors()), 
         local_procs(m->get_local_processors(local)),
         machine(m),
         unique_stride(m->get_all_processors().size())
@@ -3201,7 +3223,18 @@ namespace LegionRuntime {
             it != local_procs.end(); it++)
       {
         HighLevelRuntime::runtime_map[(it->id & 0xffff)] = this;
+#ifdef LEGION_PROF
+        Processor::Kind kind = machine->get_processor_kind(*it);
+        LegionProf::initialize_processor(*it, false/*util*/, kind);
+#endif
       }
+#ifdef LEGION_PROF
+      if (explicit_utility_proc)
+      {
+        Processor::Kind kind = machine->get_processor_kind(utility_proc);
+        LegionProf::initialize_processor(utility_proc, true/*util*/, kind);
+      }
+#endif
       {
         // Compute our location in the list of processors
         unsigned idx = 1;
@@ -3299,7 +3332,7 @@ namespace LegionRuntime {
         top->executing_processor = *first_cpu;
         find_manager(*first_cpu)->initialize_mappable(top, 0);
 #ifdef LEGION_SPY
-        LegionSpy::log_top_level_task(utility_proc.id, top->get_gen(), top->get_unique_id(), top->ctx_id, HighLevelRuntime::legion_main_id);
+        LegionSpy::log_top_level_task(utility_proc.id, top->get_gen(), top->get_unique_task_id(), top->ctx_id, HighLevelRuntime::legion_main_id);
         // Also log all the low-level information for the shape of the machine
         {
           std::set<Processor> utility_procs;
@@ -3350,16 +3383,25 @@ namespace LegionRuntime {
           }
         }
 #endif
-        // Pack up the future and a pointer to the context so we can deactivate the task
+#ifdef LEGION_PROF
+        {
+          // Tell the profiler about all the memories and their kinds
+          const std::set<Memory> &all_mems = machine->get_all_memories();
+          for (std::set<Memory>::const_iterator it = all_mems.begin();
+                it != all_mems.end(); it++)
+          {
+            Memory::Kind kind = machine->get_memory_kind(*it);
+            LegionProf::initialize_memory(*it, kind);
+          }
+        }
+#endif
+        // Pack up the event for when the future will trigger so we can deactivate the task
         // context when we're done.  This will make sure that everything gets
         // cleanedup and will help capture any leaks.
         Future f = top->get_future();
-        Serializer rez(sizeof(FutureImpl*));
-        rez.serialize<FutureImpl*>(f.impl);
-        // Mark that this task is executing, it will be decremented immediately
-        // as soon as the termination task runs
-        increment_processor_executing(*first_cpu);
-        first_cpu->spawn(TERMINATION_ID,rez.get_buffer(),sizeof(Future));
+        Serializer rez(sizeof(Event));
+        rez.serialize<Event>(f.impl->set_event);
+        first_cpu->spawn(TERMINATION_ID,rez.get_buffer(),sizeof(Event));
         // Now we can launch the task on the actual processor that we're running on
         top->perform_mapping();
         top->launch_task();
@@ -3378,11 +3420,20 @@ namespace LegionRuntime {
     HighLevelRuntime::~HighLevelRuntime(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF
+      for (std::set<Processor>::const_iterator it = local_procs.begin();
+            it != local_procs.end(); it++)
+      {
+        LegionProf::finalize_processor(*it);
+      }
+      if (explicit_utility_proc)
+        LegionProf::finalize_processor(utility_proc);
+#endif
       log_run(LEVEL_SPEW,"Shutting down high-level runtime on processor %x",utility_proc.id);
       {
         AutoLock ctx_lock(available_lock);
 #define DELETE_ALL_OPS(listing,type)                                    \
-        for (std::list<type*>::iterator it = listing.begin();           \
+        for (std::vector<type*>::iterator it = listing.begin();         \
               it != listing.end(); it++)                                \
         {                                                               \
           delete *it;                                                   \
@@ -3531,6 +3582,9 @@ namespace LegionRuntime {
         {
           log_run(LEVEL_ERROR,"Tasks of variant %s different leaf statements.  All tasks of the "
                               "same variant must all be leaves, or all be not leaves.", table[uid]->name);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
           exit(ERROR_LEAF_MISMATCH);
         }
         // Update the variants for the attribute
@@ -3548,6 +3602,9 @@ namespace LegionRuntime {
       if (finder == table.end())
       {
         log_run(LEVEL_ERROR,"Unable to find registered projection ID %d", pid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
         exit(ERROR_INVALID_PROJECTION_ID);
       }
       return finder->second;
@@ -3563,6 +3620,9 @@ namespace LegionRuntime {
         if (table.find(idx) != table.end())
         {
           log_run(LEVEL_ERROR,"Task ID %d is reserved for high-level runtime tasks",idx);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
           exit(ERROR_RESERVED_TASK_ID);
         }
       }
@@ -3577,6 +3637,7 @@ namespace LegionRuntime {
       table[NOTIFY_MAPPED_ID]   = HighLevelRuntime::notify_children_mapped;
       table[NOTIFY_FINISH_ID]   = HighLevelRuntime::notify_finish;
       table[ADVERTISEMENT_ID]   = HighLevelRuntime::advertise_work;
+      table[FINALIZE_DEL_ID]    = HighLevelRuntime::finalize_deletion;
       table[TERMINATION_ID]     = HighLevelRuntime::detect_termination;
       table[CUSTOM_PREDICATE_ID]= HighLevelRuntime::custom_predicate_eval;
     }
@@ -3589,6 +3650,9 @@ namespace LegionRuntime {
       if (table.find(tid) == table.end())
       {
         log_run(LEVEL_ERROR, "Unable to find task variant collection for tasks with ID %d", tid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
         exit(ERROR_MISSING_TASK_COLLECTION);
       }
       return table[tid];
@@ -3598,6 +3662,7 @@ namespace LegionRuntime {
     /*static*/ Processor::TaskFuncID HighLevelRuntime::legion_main_id = 0;
     /*static*/ unsigned HighLevelRuntime::max_task_window_per_context = MAX_TASK_WINDOW;
     /*static*/ unsigned HighLevelRuntime::min_tasks_to_schedule = MIN_TASKS_TO_PERFORM_SCHEDULING;
+    /*static*/ unsigned HighLevelRuntime::max_filter_size = MAX_FILTER_SIZE;
 #ifdef INORDER_EXECUTION
     /*static*/ bool HighLevelRuntime::program_order_execution = false;
 #endif
@@ -3606,6 +3671,8 @@ namespace LegionRuntime {
 #endif
 #ifdef DEBUG_HIGH_LEVEL
     /*static*/ bool HighLevelRuntime::logging_region_tree_state = false;
+    /*static*/ bool HighLevelRuntime::check_privileges = true;
+    /*static*/ bool HighLevelRuntime::verify_disjointness = false;
 #endif
 
     //--------------------------------------------------------------------------
@@ -3617,11 +3684,13 @@ namespace LegionRuntime {
       if (type_table.find(parent) == type_table.end())
       {
         log_field(LEVEL_ERROR,"Invalid type handle %d", parent);
+        assert(false);
         exit(ERROR_INVALID_TYPE_HANDLE);
       }
       if (type_table.find(child) == type_table.end())
       {
         log_field(LEVEL_ERROR,"Invalid type handle %d", child);
+        assert(false);
         exit(ERROR_INVALID_TYPE_HANDLE);
       }
 #endif
@@ -3655,6 +3724,9 @@ namespace LegionRuntime {
       if (redop_id == 0)
       {
         log_run(LEVEL_ERROR,"ERROR: ReductionOpID zero is reserved.");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
         exit(ERROR_RESERVED_REDOP_ID);
       }
       LowLevel::ReductionOpTable &red_table = HighLevelRuntime::get_reduction_table();
@@ -3662,6 +3734,7 @@ namespace LegionRuntime {
       if (red_table.find(redop_id) == red_table.end())
       {
         log_run(LEVEL_ERROR,"Invalid ReductionOpID %d",redop_id);
+        assert(false);
         exit(ERROR_INVALID_REDOP_ID);
       }
 #endif
@@ -3669,13 +3742,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ int HighLevelRuntime::start(int argc, char **argv)
+    /*static*/ int HighLevelRuntime::start(int argc, char **argv, bool background /*= false*/)
     //--------------------------------------------------------------------------
     {
       // Need to pass argc and argv to low-level runtime before we can record their values
-      // as they might be changed by GASNet or MPI or whatever
-      Machine m(&argc, &argv, HighLevelRuntime::get_task_table(true/*add runtime tasks*/), 
-                HighLevelRuntime::get_reduction_table(), false/*cps style*/);
+      // as they might be changed by GASNet or MPI or whatever.
+      // Note that the logger isn't initialized until after this call returns which means
+      // any logging that occurs before this has undefined behavior.
+      Machine *m = new Machine(&argc, &argv, HighLevelRuntime::get_task_table(true/*add runtime tasks*/), 
+			       HighLevelRuntime::get_reduction_table(), false/*cps style*/);
       // Parse any inputs for the high level runtime
       {
 #define INT_ARG(argname, varname) do { \
@@ -3692,6 +3767,7 @@ namespace LegionRuntime {
 
         max_task_window_per_context = MAX_TASK_WINDOW;
         min_tasks_to_schedule = MIN_TASKS_TO_PERFORM_SCHEDULING;
+        max_filter_size = MAX_FILTER_SIZE;
         for (int i = 1; i < argc; i++)
         {
 #ifdef INORDER_EXECUTION
@@ -3705,6 +3781,7 @@ namespace LegionRuntime {
 #endif
           INT_ARG("-hl:window", max_task_window_per_context);
           INT_ARG("-hl:sched", min_tasks_to_schedule);
+          INT_ARG("-hl:maxfilter", max_filter_size);
 #ifdef DYNAMIC_TESTS
           BOOL_ARG("-hl:dynamic",dynamic_independence_tests); 
 #else
@@ -3716,11 +3793,17 @@ namespace LegionRuntime {
 #endif
 #ifdef DEBUG_HIGH_LEVEL
           BOOL_ARG("-hl:tree",logging_region_tree_state);
+          BOOL_ARG("-hl:disjointness",verify_disjointness);
 #else
           if (!strcmp(argv[i],"-hl:tree"))
           {
             log_run(LEVEL_WARNING,"WARNING: Region tree state logging is disabled.  To enable region tree state logging "
                               "compile in debug mode.");
+          }
+          if (!strcmp(argv[i],"-hl:disjointness"))
+          {
+            log_run(LEVEL_WARNING,"WARNING: Disjointness verification for partition creation is disabled.  To enable dynamic "
+                              "disjointness testing compile in debug mode.");
           }
 #endif
         }
@@ -3730,13 +3813,33 @@ namespace LegionRuntime {
         assert(max_task_window_per_context > 0);
 #endif
       }
+#ifdef LEGION_PROF
+      // Do some logging here since the logger was initialized earlier
+      {
+        const std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = HighLevelRuntime::get_collection_table();
+        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::const_iterator it = table.begin();
+              it != table.end(); it++)
+        {
+          LegionProf::register_task_variant(it->first, it->second->leaf, it->second->name);
+        }
+      }
+#endif
       // Now we can set out input args
       HighLevelRuntime::get_input_args().argv = argv;
       HighLevelRuntime::get_input_args().argc = argc;
-      // Kick off the low-level machine (control never returns)
-      m.run();
-      // We should never make it here (if we do return with non-zero error code)
+      // Kick off the low-level machine
+      m->run(0, Machine::ONE_TASK_ONLY, 0, 0, background);
+      // We should only make it here if the machine thread is backgrounded
+      assert(background);
       return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void HighLevelRuntime::wait_for_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      Machine *machine = Machine::get_machine();
+      machine->wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -3859,6 +3962,14 @@ namespace LegionRuntime {
 #undef UNPACK_ORIGINAL_PROCESSOR
 
     //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::finalize_deletion(const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------------------------
+    {
+      DeletionOperation *del_op = *((DeletionOperation**)args);
+      del_op->finalize();
+    }
+
+    //--------------------------------------------------------------------------------------------
     void HighLevelRuntime::custom_predicate_eval(const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------------------------
     {
@@ -3894,7 +4005,11 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG,"Registering new single task with unique id %d and task %s (ID %d) with high level runtime on processor %x",
                 task->get_unique_id(), task->variants->name, task_id, utility_proc.id);
 #endif
-      task->set_requirements(indexes, fields, regions, true/*perform checks*/);
+#ifdef DEBUG_HIGH_LEVEL
+      task->set_requirements(indexes, fields, regions, (check_privileges && !explicit_utility_proc)/*perform checks*/);
+#else
+      task->set_requirements(indexes, fields, regions, false/*preform checks*/);
+#endif
 
       // Need to get this before we put things on the queue to execute
       Future result = task->get_future();
@@ -3913,7 +4028,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    FutureMap HighLevelRuntime::execute_index_space(Context ctx, Processor::TaskFuncID task_id, IndexSpace index_space,
+    FutureMap HighLevelRuntime::execute_index_space(Context ctx, Processor::TaskFuncID task_id, const Domain domain,
                                                     const std::vector<IndexSpaceRequirement> &indexes,
                                                     const std::vector<FieldSpaceRequirement> &fields,
                                                     const std::vector<RegionRequirement> &regions,
@@ -3929,8 +4044,12 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG,"Registering new index space task with unique id %d and task %s (ID %d) with "
                             "high level runtime on processor %x", task->get_unique_id(), task->variants->name, task_id, utility_proc.id);
 #endif
-      task->set_index_space(index_space, arg_map, regions.size(), must);
-      task->set_requirements(indexes, fields, regions, true/*perform checks*/);
+      task->set_index_domain(domain, arg_map, regions.size(), must);
+#ifdef DEBUG_HIGH_LEVEL
+      task->set_requirements(indexes, fields, regions, (check_privileges && !explicit_utility_proc));
+#else
+      task->set_requirements(indexes, fields, regions, false/*perform checks*/);
+#endif
 
       // Need to get the future map prior to putting this on the queue to execute
       FutureMap result = task->get_future_map();
@@ -3948,7 +4067,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    Future HighLevelRuntime::execute_index_space(Context ctx, Processor::TaskFuncID task_id, IndexSpace index_space,
+    Future HighLevelRuntime::execute_index_space(Context ctx, Processor::TaskFuncID task_id, Domain domain,
                                                  const std::vector<IndexSpaceRequirement> &indexes,
                                                  const std::vector<FieldSpaceRequirement> &fields,
                                                  const std::vector<RegionRequirement> &regions,
@@ -3965,8 +4084,12 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG,"Registering new index space task with unique id %d and task %s (ID %d) with "
                             "high level runtime on processor %x", task->get_unique_id(), task->variants->name, task_id, utility_proc.id);
 #endif
-      task->set_index_space(index_space, arg_map, regions.size(), must);
-      task->set_requirements(indexes, fields, regions, true/*perform checks*/);
+      task->set_index_domain(domain, arg_map, regions.size(), must);
+#ifdef DEBUG_HIGH_LEVEL
+      task->set_requirements(indexes, fields, regions, (check_privileges && !explicit_utility_proc));
+#else
+      task->set_requirements(indexes, fields, regions, false/*perform checks*/);
+#endif
       task->set_reduction_args(reduction, initial_value);
 
       // Need to get this before putting it on the queue to execute
@@ -3989,6 +4112,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_INDEX_SPACE);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_INDEX_SPACE> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
       IndexSpace space = IndexSpace::create_index_space(max_num_elmts);
 #ifdef DEBUG_HIGH_LEVEL
       log_index(LEVEL_DEBUG, "Creating index space %x in task %s (ID %d) with %ld maximum elements", space.id,
@@ -3997,7 +4123,51 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_top_index_space(space.id);
 #endif
-      ctx->create_index_space(space);
+      // If we have an explicit utilty processor deffer this operation
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_index_space_creation(ctx, Domain(space));
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // Otherwise just do the operation now
+        ctx->create_index_space(Domain(space));
+      }
+      return space;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space(Context ctx, Domain domain)
+    //--------------------------------------------------------------------------------------------
+    {
+      DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_INDEX_SPACE);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_INDEX_SPACE> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      // Make a dummy index space that will be associated with the domain
+      IndexSpace space = 
+      domain.get_index_space(true/*create if needed*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(domain.exists());
+      log_index(LEVEL_DEBUG, "Creating dummy index space %x in task %s (ID %d) for domain", space.id,
+                              ctx->variants->name, ctx->get_unique_id());
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_top_index_space(space.id);
+#endif
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_index_space_creation(ctx, domain);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // Otherwise just do the operation now
+        ctx->create_index_space(domain);
+      }
       return space;
     }
 
@@ -4029,6 +4199,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_INDEX_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
       IndexPartition pid = get_unique_partition_id();
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
@@ -4036,7 +4209,7 @@ namespace LegionRuntime {
                               pid, parent.id, ctx->variants->name, ctx->get_unique_id());
 #endif
       // Perform the coloring
-      std::map<Color,IndexSpace> new_index_spaces; 
+      std::map<Color,Domain> new_index_spaces; 
       for (std::map<Color,ColoredPoints<ptr_t> >::const_iterator cit = 
             coloring.begin(); cit != coloring.end(); cit++)
       {
@@ -4053,22 +4226,96 @@ namespace LegionRuntime {
           child_mask.enable(it->first.value, it->second-it->first+1);
         }
         IndexSpace child_space = IndexSpace::create_index_space(parent, child_mask);
-        new_index_spaces[cit->first] = child_space;
+        new_index_spaces[cit->first] = Domain(child_space);
       }
-     
-      // Create the new partition
-#ifdef LEGION_SPY
-      part_color = 
-#endif
-      ctx->create_index_partition(pid, parent, disjoint, part_color, new_index_spaces);
-#ifdef LEGION_SPY
-      LegionSpy::log_index_partition(parent.id, pid, disjoint, part_color);
-      for (std::map<Color,IndexSpace>::const_iterator it = new_index_spaces.begin();
-            it != new_index_spaces.end(); it++)
+#ifdef DEBUG_HIGH_LEVEL
+      if (disjoint && verify_disjointness)
       {
-        LegionSpy::log_index_subspace(pid, it->second.id, it->first);
+        std::set<Color> current_colors;
+        for (std::map<Color,Domain>::const_iterator it1 = new_index_spaces.begin();
+              it1 != new_index_spaces.end(); it1++)
+        {
+          current_colors.insert(it1->first);
+          for (std::map<Color,Domain>::const_iterator it2 = new_index_spaces.begin();
+                it2 != new_index_spaces.end(); it2++)
+          {
+            // Skip pairs that we already checked
+            if (current_colors.find(it2->first) != current_colors.end())
+              continue;
+            // Otherwise perform the check
+            const LowLevel::ElementMask &em1 = it1->second.get_index_space().get_valid_mask();
+            const LowLevel::ElementMask &em2 = it2->second.get_index_space().get_valid_mask();
+            LowLevel::ElementMask::OverlapResult result = em1.overlaps_with(em2, 1/*effort level*/);
+            if (result == LowLevel::ElementMask::OVERLAP_YES)
+            {
+              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of partition %d are not disjoint when they were claimed to be!",
+                                  it1->first, it2->first, pid);
+              assert(false);
+              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+            }
+            else if (result == LowLevel::ElementMask::OVERLAP_MAYBE)
+            {
+              log_run(LEVEL_WARNING, "WARNING: colors %d and %d of partition %d may not be disjoint when they were claimed to be!"
+                                    "(At least according to the low-level runtime.  You might also try telling the the low-level runtime "
+                                    "to stop being a lazy bum and try harder.)", it1->first, it2->first, pid);
+            }
+          }
+        }
       }
+#endif 
+      // Create the new partition
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx); 
+        creation->initialize_index_partition_creation(ctx, pid, parent, disjoint, part_color, new_index_spaces);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // Otherwise we can just do the creation here
+#ifdef LEGION_SPY
+        part_color = 
 #endif
+        ctx->create_index_partition(pid, parent, disjoint, part_color, new_index_spaces);
+#ifdef LEGION_SPY
+        LegionSpy::log_index_partition(parent.id, pid, disjoint, part_color);
+        for (std::map<Color,Domain>::const_iterator it = new_index_spaces.begin();
+              it != new_index_spaces.end(); it++)
+        {
+          LegionSpy::log_index_subspace(pid, it->second.get_index_space().id, it->first);
+        }
+#endif
+      }
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_index_partition(Context ctx, IndexSpace parent,
+                                  Domain color_space, const DomainColoring &coloring,
+                                  bool disjoint, int part_color /*= -1*/)
+    //--------------------------------------------------------------------------------------------
+    {
+      DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_INDEX_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      IndexPartition pid = get_unique_partition_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(pid > 0);
+      log_region(LEVEL_DEBUG, "Creating index partition %d with parent index space %x in task %s (ID %d)",
+                              pid, parent.id, ctx->variants->name, ctx->get_unique_id());
+#endif
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_index_partition_creation(ctx, pid, parent, disjoint, part_color, coloring, color_space);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // otherwise we can just do the creation here 
+        ctx->create_index_partition(pid, parent, disjoint, part_color, coloring, color_space);
+      }
       return pid;
     }
 
@@ -4099,7 +4346,55 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_INDEX_PARTITION);
-      return ctx->get_index_partition(parent, color);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_INDEX_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      // Tricky thing here: since we can deffer the creation of things like partitions, they might
+      // still be sitting in the dependence queue waiting to be performed, so if we might have
+      // defferred it we have to do the following to find it
+      // 1. lock the dependence queue to prevent it from escaping
+      // 2. try to find what we're looking for in the context
+      // 3. if it fails then check the dependence queue
+      // 4. if that still doesn't work then something is wrong so raise an error
+      IndexPartition result = 0;
+      if (explicit_utility_proc)
+      {
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        result = ctx->get_index_partition(parent, color, false/*can create*/);
+        // If we still haven't found it, check the dependence queue
+        if (result == 0)
+        {
+          // Failed to find it, go backwards through the queue looking for matches
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            // dynamic cast shouldn't be too expensive since we already have the runtime
+            // type information around implicitly for doing the virtual function dispatches
+            // on GeneralizedOperation and its subtypes.
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it); 
+            // See if it is a creation op and it is the one we're looking for, if
+            // it is then it returns true and we're done
+            if ((op != NULL) && op->get_index_partition(ctx, parent, color, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+      }
+      else
+      {
+        result = ctx->get_index_partition(parent, color, true/*can create*/); 
+      }
+      if (result == 0)
+      {
+        log_index(LEVEL_ERROR, "Invalid color %d for get index partitions", color);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4107,7 +4402,161 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE);
-      return ctx->get_index_subspace(parent, color);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_INDEX_SUBSPACE> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      IndexSpace result = IndexSpace::NO_SPACE;
+      if (explicit_utility_proc)
+      {
+        // See comments in get_index_partition about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        result = ctx->get_index_subspace(parent, color, false/*can create*/);
+        if (!result.exists())
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_index_subspace(ctx, parent, color, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+      }
+      else
+      {
+        result = ctx->get_index_subspace(parent, color, true/*can create*/);
+      }
+      if (!result.exists())
+      {
+        log_index(LEVEL_ERROR, "Invalid color %d for get index subspace", color);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_PART_COLOR); 
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Domain HighLevelRuntime::get_index_space_domain(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------------------------
+    {
+      DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_INDEX_DOMAIN> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      Domain result = Domain::NO_DOMAIN;
+      if (explicit_utility_proc)
+      {
+        // See comments in get_index_partition about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        result = ctx->get_index_space_domain(handle, false/*can create*/);
+        if (!result.exists())
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_index_space_domain(ctx, handle, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+      }
+      else
+      {
+        result = ctx->get_index_space_domain(handle, true/*can create*/);
+      }
+      if (!result.exists())
+      {
+        log_index(LEVEL_ERROR, "Invalid handle %d for get index space domain", handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_DOMAIN);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Domain HighLevelRuntime::get_index_partition_color_space(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------------------------
+    {
+      DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_INDEX_PARTITION);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_INDEX_PARTITION_COLOR_SPACE> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      Domain result = Domain::NO_DOMAIN;
+      if (explicit_utility_proc)
+      {
+        // See comments in get_index_partition about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        result = ctx->get_index_partition_color_space(p, false/*can create*/);
+        if (!result.exists())
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_index_partition_color_space(ctx, p, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+      }
+      else
+      {
+        result = ctx->get_index_partition_color_space(p, true/*can create*/);
+      }
+      if (!result.exists())
+      {
+        log_index(LEVEL_ERROR, "Invalid partition handle %d for get index partition color space", p);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_PART_DOMAIN);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    ptr_t HighLevelRuntime::safe_cast(Context ctx, ptr_t pointer, LogicalRegion region)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_SAFE_CAST> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (pointer.is_null())
+        return pointer;
+      Domain domain = get_index_space_domain(ctx, region.get_index_space()); 
+      DomainPoint point(pointer.value);
+      if (domain.contains(point))
+        return pointer;
+      else
+        return ptr_t::nil();
+    }
+
+    //--------------------------------------------------------------------------------------------
+    DomainPoint HighLevelRuntime::safe_cast(Context ctx, DomainPoint point, LogicalRegion region)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_SAFE_CAST> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (point.is_null())
+        return point;
+      Domain domain = get_index_space_domain(ctx, region.get_index_space());
+      if (domain.contains(point))
+        return point;
+      else
+        return DomainPoint::nil();
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4115,6 +4564,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_FIELD_SPACE);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_FIELD_SPACE> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
       FieldSpace space(get_unique_field_space_id());
 #ifdef DEBUG_HIGH_LEVEL
       log_field(LEVEL_DEBUG, "Creating field space %x in task %s (ID %d)", space.id,
@@ -4123,7 +4575,17 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_field_space(space.id);
 #endif
-      ctx->create_field_space(space);
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_field_space_creation(ctx, space);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // No utility processor, so just make it now
+        ctx->create_field_space(space);
+      }
       return space;
     }
 
@@ -4150,24 +4612,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    FieldID HighLevelRuntime::allocate_field(Context ctx, FieldSpace space, size_t field_size)
+    FieldID HighLevelRuntime::allocate_field(Context ctx, FieldSpace space, size_t field_size, FieldID desired_fieldid)
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_ALLOCATE_FIELD);
-      FieldID new_field = get_unique_field_id();
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_ALLOCATE_FIELDS> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (desired_fieldid == FIELDID_DYNAMIC)
+        desired_fieldid = get_unique_field_id();
 #ifdef DEBUG_HIGH_LEVEL
       log_field(LEVEL_DEBUG,"Allocating new field %d of size %ld for field space %d in task %s (ID %d)",
-                              new_field, field_size, space.id, ctx->variants->name, ctx->get_unique_id());
+                              desired_fieldid, field_size, space.id, ctx->variants->name, ctx->get_unique_id());
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_field_creation(space.id, new_field);
+      LegionSpy::log_field_creation(space.id, desired_fieldid);
 #endif
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_field_creation(ctx, space, desired_fieldid, field_size);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
       {
         std::map<FieldID,size_t> field_allocations;
-        field_allocations[new_field] = field_size;
+        field_allocations[desired_fieldid] = field_size;
         ctx->allocate_fields(space, field_allocations);
       }
-      return new_field;
+      return desired_fieldid;
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4201,12 +4674,26 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_ALLOCATE_FIELD);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_ALLOCATE_FIELDS> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
       resulting_fields.clear();
       std::map<FieldID,size_t> field_allocations;
+      unsigned field_idx = 0;
       for (std::vector<size_t>::const_iterator it = field_sizes.begin();
-            it != field_sizes.end(); it++)
+            it != field_sizes.end(); it++, field_idx++)
       {
-        FieldID new_field = get_unique_field_id();
+        // check to see if the user has already specified a field id to use
+        FieldID new_field;
+        if ((field_idx >= resulting_fields.size()) || 
+            (resulting_fields[field_idx] == FIELDID_DYNAMIC))
+        {
+          new_field = get_unique_field_id();
+        }
+        else
+        {
+          new_field = resulting_fields[field_idx];
+        }
 #ifdef DEBUG_HIGH_LEVEL
         log_field(LEVEL_DEBUG,"Allocating new field %d of size %ld for field space %d in task %s (ID %d)",
                               new_field, *it, space.id, ctx->variants->name, ctx->get_unique_id());
@@ -4215,9 +4702,25 @@ namespace LegionRuntime {
         LegionSpy::log_field_creation(space.id, new_field);
 #endif
         field_allocations[new_field] = *it; 
-        resulting_fields.push_back(new_field);
+        // If it's already been allocated just write the value in
+        // otherwise add it to the back
+        if (field_idx < resulting_fields.size())
+          resulting_fields[field_idx] = new_field;
+        else
+          resulting_fields.push_back(new_field);
       }
-      ctx->allocate_fields(space, field_allocations);
+      if (explicit_utility_proc)
+      {
+        // Defer the creation
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_field_creation(ctx, space, field_allocations);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // Otherwise just do it now
+        ctx->allocate_fields(space, field_allocations);
+      }
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4250,6 +4753,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_CREATE_REGION);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_CREATE_REGION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
       RegionTreeID tid = get_unique_tree_id();
       LogicalRegion region(tid, index_space, field_space);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4259,7 +4765,17 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_top_region(index_space.id, field_space.id, tid);
 #endif
-      ctx->create_region(region);
+      if (explicit_utility_proc)
+      {
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_region_creation(ctx, region);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+      }
+      else
+      {
+        // Just make it now
+        ctx->create_region(region);
+      }
 
       return region;
     }
@@ -4313,7 +4829,20 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION);
-      return ctx->get_region_partition(parent, handle);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // We already know the answer here so make the right answer
+        // and then insert an op that will update the region tree correctly
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_partition(ctx, parent, handle);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return LogicalPartition(parent.tree_id, handle, parent.field_space);
+      }
+      else
+        return ctx->get_region_partition(parent, handle);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4321,7 +4850,45 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION);
-      return ctx->get_region_subcolor(parent, c);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // Need to do this one for real since we can't infer the answer 
+        // See get_index_partition for comments about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        LogicalPartition result = ctx->get_region_subcolor(parent, c, false/*can create*/);
+        if (result == LogicalPartition::NO_PART)
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_logical_partition_by_color(ctx, parent, c, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+        if (result == LogicalPartition::NO_PART)
+        {
+          log_region(LEVEL_ERROR, "Invalid color %d for get logical partition", c);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_INDEX_PART_COLOR);
+        }
+        // No matter what we have to inject the operation to touch the nodes since we couldn't
+        // be sure if we made them this time or not
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_partition_by_color(ctx, parent, c);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return result;
+      }
+      else
+        return ctx->get_region_subcolor(parent, c, true/*can create*/);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4329,7 +4896,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION);
-      return ctx->get_partition_subtree(handle, space, tid);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_PARTITION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // We know the answer here, so we can make it, still need op to touch the node
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_partition_by_tree(ctx, handle, space, tid);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return LogicalPartition(tid, handle, space);
+      }
+      else
+        return ctx->get_partition_subtree(handle, space, tid);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4337,7 +4916,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION);
-      return ctx->get_partition_subregion(parent, handle);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_SUBREGION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // We know the answer here, so we can make it, still need to touch the node
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_subregion(ctx, parent, handle);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return LogicalRegion(parent.tree_id, handle, parent.field_space);
+      }
+      else
+        return ctx->get_partition_subregion(parent, handle);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4345,7 +4936,45 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION);
-      return ctx->get_partition_subcolor(parent, c);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_SUBREGION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // Don't know the answer here, so we need to go get it
+        // See get_index_partition for comments about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();    
+        LogicalRegion result = ctx->get_partition_subcolor(parent, c, false/*can create*/);
+        if (result == LogicalRegion::NO_REGION)
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_logical_subregion_by_color(ctx, parent, c, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+        if (result == LogicalRegion::NO_REGION)
+        {
+          log_region(LEVEL_ERROR, "Invalid color %d for get logical region", c);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+        }
+        // No matter what we still need to push the operation to touch the node
+        // since we were unable to be sure if we touched it before
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_subregion_by_color(ctx, parent, c);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return result;
+      }
+      else
+        return ctx->get_partition_subcolor(parent, c, true/*can create*/);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4353,7 +4982,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION);
-      return ctx->get_region_subtree(handle, space, tid);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_GET_LOGICAL_SUBREGION> rec(ctx->task_id, ctx->get_unique_task_id(), ctx->index_point);
+#endif
+      if (explicit_utility_proc)
+      {
+        // We know the right answer here
+        CreationOperation *creation = get_available_creation(ctx);
+        creation->initialize_get_logical_subregion_by_tree(ctx, handle, space, tid);
+        add_to_dependence_queue(ctx->get_executing_processor(), creation);
+        return LogicalRegion(tid, handle, space);
+      }
+      else
+        return ctx->get_region_subtree(handle, space, tid);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4391,7 +5032,11 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_INLINE_MAP);
       MappingOperation *map_op = get_available_mapping(ctx);
-      map_op->initialize(ctx, req, id, tag);
+#ifdef DEBUG_HIGH_LEVEL
+      map_op->initialize(ctx, req, id, tag, (check_privileges && !explicit_utility_proc));
+#else
+      map_op->initialize(ctx, req, id, tag, false/*check privilege*/);
+#endif
       log_run(LEVEL_DEBUG, "Registering a map operation for region (%x,%x,%x) in task %s (ID %d)",
                            req.region.index_space.id, req.region.field_space.id, req.region.tree_id,
                            ctx->variants->name, ctx->get_unique_id());
@@ -4411,7 +5056,10 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_INLINE_MAP);
       MappingOperation *map_op = get_available_mapping(ctx);
-      map_op->initialize(ctx, idx, id, tag);
+      // Don't need to check privileges for these inline mappings since they are original
+      // region requirements for our task in which case we already know we have the privileges
+      map_op->initialize(ctx, idx, id, tag, false);
+
       log_run(LEVEL_DEBUG, "Registering a map operation for region index %d in task %s (ID %d)",
                            idx, ctx->variants->name, ctx->get_unique_id());
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
@@ -4429,7 +5077,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       DetailedTimer::ScopedPush sp(TIME_HIGH_LEVEL_INLINE_MAP); 
-      ctx->unmap_physical_region(region);
+      if (explicit_utility_proc)
+      {
+        UnmapOperation *unmap = get_available_unmap(ctx);
+        unmap->initialize(ctx, region);
+        add_to_dependence_queue(ctx->get_executing_processor(), unmap);
+      }
+      else
+        ctx->unmap_physical_region(region);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4502,8 +5157,23 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG,"Beginning task %s (ID %d) with unique id %d on processor %x",
         ctx->variants->name,ctx->task_id,ctx->get_unique_id(),utility_proc.id);
 #endif
-      // Tell the processor manager that this task has started on the low-level runtime
-      increment_processor_executing(ctx->get_executing_processor());
+      if (ctx->needs_pre_start())
+      {
+        // We do this to defer any calls that may involve touching
+        // the RegionTreeForest so that we don't block waiting on any of its locks 
+        if (explicit_utility_proc)
+        {
+          // Make a start operation and put it on the dependence queue
+          StartOperation *start = get_available_start(ctx);
+          start->initialize(ctx);
+          add_to_dependence_queue(ctx->get_executing_processor(), start);
+        }
+        else
+        {
+          // No utility processor so just do it here
+          ctx->pre_start();
+        }
+      }
       ctx->start_task(physical_regions);
       // Set the argument length and return the pointer to the arguments buffer for the task
       arglen = ctx->arglen;
@@ -4521,15 +5191,43 @@ namespace LegionRuntime {
         ctx->variants->name, ctx->task_id,ctx->get_unique_id(),utility_proc.id);
 #endif
       // Tell the processor manager that this task has finished running on the low-level runtime
-      decrement_processor_executing(ctx->get_executing_processor());
       ctx->complete_task(result,result_size,physical_regions, owned);
+      // Then figure out how to do the post-complete part of the task
+      // We do this to defer any calls taht may involve touching
+      // the RegionTreeForest so that we don't block waiting on any of its locks
+      if (explicit_utility_proc)
+      {
+        CompleteOperation *complete = get_available_complete(ctx);
+        complete->initialize(ctx);
+        add_to_dependence_queue(ctx->get_executing_processor(), complete);
+      }
+      else
+      {
+        // no utility proc so just do it now
+        ctx->post_complete_task();
+      }
     }
 
     //--------------------------------------------------------------------------------------------
-    const void* HighLevelRuntime::get_local_args(Context ctx, void *point, size_t point_size, size_t &local_size)
+    const void* HighLevelRuntime::get_local_args(Context ctx, DomainPoint &point, size_t &local_size)
     //--------------------------------------------------------------------------------------------
     {
-      return ctx->get_local_args(point, point_size, local_size);
+      return ctx->get_local_args(point, local_size);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Mapper* HighLevelRuntime::get_mapper(Context ctx, MapperID id)
+    //--------------------------------------------------------------------------------------------
+    {
+      ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+      return manager->find_mapper(id);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Processor HighLevelRuntime::get_executing_processor(Context ctx)
+    //--------------------------------------------------------------------------------------------
+    {
+      return ctx->get_executing_processor();
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4542,8 +5240,8 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_indiv_tasks.empty())
         {
-          result = available_indiv_tasks.front();
-          available_indiv_tasks.pop_front();
+          result = available_indiv_tasks.back();
+          available_indiv_tasks.pop_back();
         }
         else
         {
@@ -4587,8 +5285,8 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_index_tasks.empty())
         {
-          result = available_index_tasks.front();
-          available_index_tasks.pop_front();
+          result = available_index_tasks.back();
+          available_index_tasks.pop_back();
         }
         else
         {
@@ -4629,8 +5327,8 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_slice_tasks.empty())
         {
-          result = available_slice_tasks.front();
-          available_slice_tasks.pop_front();
+          result = available_slice_tasks.back();
+          available_slice_tasks.pop_back();
         }
         else
         {
@@ -4658,8 +5356,8 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_point_tasks.empty())
         {
-          result = available_point_tasks.front();
-          available_point_tasks.pop_front();
+          result = available_point_tasks.back();
+          available_point_tasks.pop_back();
         }
         else
         {
@@ -4691,12 +5389,52 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_maps.empty())
         {
-          result = available_maps.front();
-          available_maps.pop_front();
+          result = available_maps.back();
+          available_maps.pop_back();
         }
         else
         {
           result = new MappingOperation(this);
+        }
+        window_wait = increment_task_window(parent);
+      }
+      if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
+        window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+      bool activated = 
+#endif
+      result->activate(parent);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(activated);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    UnmapOperation* HighLevelRuntime::get_available_unmap(Context parent)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      UnmapOperation *result = NULL;
+      Event window_wait = Event::NO_EVENT;
+      {
+        AutoLock av_lock(available_lock);
+        if (!available_unmaps.empty())
+        {
+          result = available_unmaps.back();
+          available_unmaps.pop_back();
+        }
+        else
+        {
+          result = new UnmapOperation(this);
         }
         window_wait = increment_task_window(parent);
       }
@@ -4731,12 +5469,160 @@ namespace LegionRuntime {
         AutoLock av_lock(available_lock);
         if (!available_deletions.empty())
         {
-          result = available_deletions.front();
-          available_deletions.pop_front();
+          result = available_deletions.back();
+          available_deletions.pop_back();
         }
         else
         {
           result = new DeletionOperation(this);
+        }
+        window_wait = increment_task_window(parent);
+      }
+      if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
+        window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+      bool activated = 
+#endif
+      result->activate(parent);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(activated);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    CreationOperation* HighLevelRuntime::get_available_creation(Context parent)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      CreationOperation *result = NULL;
+      Event window_wait = Event::NO_EVENT;
+      {
+        AutoLock av_lock(available_lock);
+        if (!available_creations.empty())
+        {
+          result = available_creations.back();
+          available_creations.pop_back();
+        }
+        else
+        {
+          result = new CreationOperation(this);
+        }
+        window_wait = increment_task_window(parent);
+      }
+      if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
+        window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+      bool activated = 
+#endif
+      result->activate(parent);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(activated);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    EpochOperation* HighLevelRuntime::get_available_epoch(void)
+    //--------------------------------------------------------------------------------------------
+    {
+      EpochOperation *result = NULL;
+      {
+        AutoLock av_lock(available_lock);
+        if (!available_epochs.empty())
+        {
+          result = available_epochs.back();
+          available_epochs.pop_back();
+        }
+        else
+        {
+          result = new EpochOperation(this);
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+      bool activated = 
+#endif
+      result->activate(NULL/*no parent*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(activated);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    StartOperation* HighLevelRuntime::get_available_start(Context parent)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      StartOperation *result = NULL;
+      Event window_wait = Event::NO_EVENT;
+      {
+        AutoLock av_lock(available_lock);
+        if (!available_starts.empty())
+        {
+          result = available_starts.back();
+          available_starts.pop_back();
+        }
+        else
+        {
+          result = new StartOperation(this);
+        }
+        window_wait = increment_task_window(parent);
+      }
+      if (window_wait.exists())
+      {
+        Processor executing_proc = parent->get_executing_processor();
+        decrement_processor_executing(executing_proc);
+        window_wait.wait();
+        increment_processor_executing(executing_proc);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+      bool activated = 
+#endif
+      result->activate(parent);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(activated);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    CompleteOperation* HighLevelRuntime::get_available_complete(Context parent)
+    //--------------------------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      CompleteOperation *result = NULL;
+      Event window_wait = Event::NO_EVENT;
+      {
+        AutoLock av_lock(available_lock);
+        if (!available_completes.empty())
+        {
+          result = available_completes.back();
+          available_completes.pop_back();
+        }
+        else
+        {
+          result = new CompleteOperation(this);
         }
         window_wait = increment_task_window(parent);
       }
@@ -4799,11 +5685,51 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::free_unmap(UnmapOperation *op)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock av_lock(available_lock);
+      available_unmaps.push_back(op);
+    }
+
+    //--------------------------------------------------------------------------------------------
     void HighLevelRuntime::free_deletion(DeletionOperation *op)
     //--------------------------------------------------------------------------------------------
     {
       AutoLock av_lock(available_lock);
       available_deletions.push_back(op);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::free_creation(CreationOperation *op)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock av_lock(available_lock);
+      available_creations.push_back(op);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::free_epoch(EpochOperation *op)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock av_lock(available_lock);
+      available_epochs.push_back(op);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::free_start(StartOperation *op)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock av_lock(available_lock);
+      available_starts.push_back(op);
+    }
+    
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::free_complete(CompleteOperation *op)
+    //--------------------------------------------------------------------------------------------
+    {
+      AutoLock av_lock(available_lock);
+      available_completes.push_back(op);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -4857,7 +5783,10 @@ namespace LegionRuntime {
       }
 #endif
       // Always do this when an operation completes
-      decrement_task_window(parent);
+      {
+        AutoLock av_lock(available_lock);
+        decrement_task_window(parent);
+      }
     }
 
     //--------------------------------------------------------------------------------------------
@@ -5506,11 +6435,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------------------------
     {
       Deserializer derez(args, arglen);
-      // Unpack the future from the buffer
-      FutureImpl *impl;
-      derez.deserialize<FutureImpl*>(impl);
-      // This will wait until the top level task has finished
-      impl->get_void_result();
+      // Unpack the event to wait on and then wait for it
+      Event termination_event;
+      derez.deserialize<Event>(termination_event);
+      // Wait until the set event has completed
+      termination_event.wait();
       log_task(LEVEL_SPEW,"Computation has terminated, shutting down high level runtime...");
       // Once this is over shutdown the machine
       machine->shutdown();
@@ -5542,6 +6471,9 @@ namespace LegionRuntime {
       assert(local_procs.find(proc) != local_procs.end());
 #endif
       log_run(LEVEL_DEBUG,"Running scheduler on processor %x", proc.id);
+#ifdef LEGION_PROF
+      LegionProf::Recorder<PROF_SCHEDULER> rec(0, 0, DomainPoint());
+#endif
       ProcessorManager *manager = proc_managers[proc];
       // first perform the dependence analysis 
       manager->perform_dependence_analysis();
@@ -5571,18 +6503,44 @@ namespace LegionRuntime {
     void HighLevelRuntime::ProcessorManager::perform_dependence_analysis(void)
     //--------------------------------------------------------------------------------------------
     {
-      std::vector<GeneralizedOperation*> ops;
+      // There is something fancy going on here: since there are some operations
+      // (e.g. get_subregion_by_color) that introspect this queue, we can't clear
+      // the queue until those operations have been applied to the RegionTreeForest.
+      // So we pull out the operations we are going to perform, but don't clear
+      // them from the queue until we are actually done applying the operations.
+      // This two-phase approach to handling dependence analysis allows us to keep
+      // the operations in the queue so they can be queried while they still may
+      // yet to be performed.
+      std::list<GeneralizedOperation*> ops;
+      size_t num_ops_handled;
       // Empty out the queue
       {
-        AutoLock q_lock(queue_lock);
-        ops = dependence_queue;
-        dependence_queue.clear();
+        // Only reading the dependence queue this time
+        AutoLock d_lock(dependence_lock,1,false/*exclusive*/);
+        num_ops_handled = dependence_queue.size();
+        ops.insert(ops.end(),dependence_queue.begin(),dependence_queue.end());
       }
-      for (unsigned idx = 0; idx < ops.size(); idx++)
+      // VERY VERY IMPORTANT that these get done in order
+      for (std::list<GeneralizedOperation*>::iterator it = ops.begin();
+            it != ops.end(); /*nothing*/)
       {
-        // Have each operation perform dependence analysis, they will
-        // enqueue themselves when ready
-        ops[idx]->perform_dependence_analysis();
+        // Only keep them in the list if we should deactivate them 
+        if ((*it)->perform_dependence_analysis())
+          it++;
+        else
+          it = ops.erase(it);
+      }
+      // Now that we're done applying the operations, pull them off the dependence queue
+      {
+        AutoLock d_lock(dependence_lock);
+        for (unsigned idx = 0; idx < num_ops_handled; idx++)
+          dependence_queue.pop_front();
+      }
+      // Finally we can deactivate the operations which are finished
+      for (std::list<GeneralizedOperation*>::const_iterator it = ops.begin();
+            it != ops.end(); it++)
+      {
+        (*it)->deactivate(); 
       }
     }
 
@@ -5619,6 +6577,12 @@ namespace LegionRuntime {
     void HighLevelRuntime::ProcessorManager::perform_scheduling(void)
     //--------------------------------------------------------------------------------------------
     {
+      // Do a quick check to see if we should run the scheduler
+      bool do_scheduling;
+      {
+        AutoLock i_lock(idle_lock);
+        do_scheduling = (current_outstanding < min_outstanding);
+      }
       // Get the lists of tasks to map
       std::vector<TaskContext*> tasks_to_map;
       // Also get the list of any steals the mappers want to perform
@@ -5626,6 +6590,7 @@ namespace LegionRuntime {
       // Whether or not any of the mappers are still actively trying to
       // steal (e.g. guess a processor not on the blacklist)
       bool still_stealing = false; 
+      if (do_scheduling)
       {
         AutoLock q_lock(queue_lock);
         AutoLock m_lock(mapping_lock);
@@ -5679,7 +6644,7 @@ namespace LegionRuntime {
             }
           }
         }
-      } // release the queue lock
+      } // release the queue lock and the mapping lock
 
       std::vector<TaskContext*> failed_mappings;
       // Now we've got our list of tasks to map so map all of them
@@ -5691,7 +6656,8 @@ namespace LegionRuntime {
       }
 
       // Also send out any steal requests that might have been made
-      runtime->send_steal_request(targets, local_proc);
+      if (!targets.empty())
+        runtime->send_steal_request(targets, local_proc);
       
       // If we had any failed mappings, put them back on the (front of the) ready queue
       if (!failed_mappings.empty())
@@ -5708,22 +6674,30 @@ namespace LegionRuntime {
       std::vector<MapperID> mappers_with_work;
       // Now we need to determine if should disable the idle task
       {
-        // Need to hold the lock while doing this
+        // Need to hold all the queue locks while doing this
+        // Disable only if all of the following are true
+        bool disable = true;
+        // 1. No ops in dependence queue
+        AutoLock d_lock(dependence_lock,1,false/*exclusive*/); // only reading
+        disable = disable && dependence_queue.empty();
+        // 2. No ops in other_ready_queue
         AutoLock q_lock(queue_lock);
-        // Update the number of current outstanding tasks
-        bool disable = dependence_queue.empty() && other_ready_queue.empty() && !still_stealing;
-        // Only need to check to see if we have tasks to map if we're below the threshold
-        if (current_outstanding < min_outstanding)
+        disable = disable && other_ready_queue.empty();
+        bool have_ready_tasks = false;
+        // Need to run this loop anyway to get the set of mappers with work for advertising
+        for (unsigned map_id = 0; map_id < ready_queues.size(); map_id++)
         {
-          for (unsigned map_id = 0; disable && (map_id < ready_queues.size()); map_id++)
+          if (mapper_objects[map_id] == NULL)
+            continue;
+          if (!ready_queues[map_id].empty())
           {
-            if (mapper_objects[map_id] == NULL)
-              continue;
-            disable = disable && ready_queues[map_id].empty();
-            if (!ready_queues[map_id].empty())
-              mappers_with_work.push_back(map_id);
+            mappers_with_work.push_back(map_id);
+            have_ready_tasks = true;
           }
         }
+        // 3. Have enough tasks in flight or (all the ready_queues are empty and not still stealing)
+        AutoLock i_lock(idle_lock);
+        disable = disable && ((current_outstanding >= min_outstanding) || (!have_ready_tasks && !still_stealing));
         if (disable)
         {
           idle_task_enabled = false;
@@ -5874,9 +6848,31 @@ namespace LegionRuntime {
     void HighLevelRuntime::ProcessorManager::add_to_dependence_queue(GeneralizedOperation *op)
     //--------------------------------------------------------------------------------------------
     {
-      AutoLock q_lock(queue_lock);
-      dependence_queue.push_back(op);
-      enable_scheduler();
+      // The call to this function should always come from 
+      // an application task calling into the runtime, so 
+      // there are no other runtime locks held.  This allows
+      // us to do non-blocking locking so processors are always busy.
+      {
+        Event dep_event = dependence_lock.lock(0,true/*exclusive*/); 
+        dep_event.wait(true/*block*/);
+        dependence_queue.push_back(op);
+        dependence_lock.unlock();
+      }
+      // Now enable the scheduler without block-waiting on an event
+      // Note by not continuing to hold the dependence queue lock
+      // while setting this, we can cause spurious runs of the
+      // scheduler, but that is better than blocking a compute thread.
+      {
+        Event idle_event = idle_lock.lock(0,true/*exclusive*/);
+        idle_event.wait(true/*block*/);
+        if (!idle_task_enabled)
+        {
+          idle_task_enabled = true;
+          Processor copy = local_proc;
+          copy.enable_idle_task();
+        }
+        idle_lock.unlock();
+      }
     }
 
     //--------------------------------------------------------------------------------------------
@@ -5888,9 +6884,7 @@ namespace LegionRuntime {
       initialize_mappable(task, task->get_mapper_id());
       AutoLock q_lock(queue_lock);
       ready_queues[task->map_id].push_back(task);
-      // Only enable the ready queue, if we need to schedule tasks
-      if (current_outstanding < min_outstanding)
-        enable_scheduler();
+      enable_scheduler();
     }
 
     //--------------------------------------------------------------------------------------------
@@ -5909,6 +6903,7 @@ namespace LegionRuntime {
     void HighLevelRuntime::ProcessorManager::enable_scheduler(void)
     //--------------------------------------------------------------------------------------------
     {
+      AutoLock i_lock(idle_lock);
       if (!idle_task_enabled)
       {
         idle_task_enabled = true;
@@ -5921,21 +6916,55 @@ namespace LegionRuntime {
     void HighLevelRuntime::ProcessorManager::increment_outstanding(void)
     //--------------------------------------------------------------------------------------------
     {
-      AutoLock q_lock(queue_lock);
+      // Assume that we're not going to be holding any other locks when doing this
+      Event idle_event = idle_lock.lock(0,true/*exclusive*/);
+      idle_event.wait(true/*block*/);
       current_outstanding++;
+      idle_lock.unlock();
     }
 
     //--------------------------------------------------------------------------------------------
     void HighLevelRuntime::ProcessorManager::decrement_outstanding(void)
     //--------------------------------------------------------------------------------------------
     {
-      AutoLock q_lock(queue_lock);
+      // Assume that we're not going to be holding any other locks when doing this
+      Event idle_event = idle_lock.lock(0,true/*exclusive*/);
+      idle_event.wait(true/*block*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(current_outstanding > 0);
 #endif
       current_outstanding--;
-      if (current_outstanding < min_outstanding)
-        enable_scheduler();
+      if (!idle_task_enabled && (current_outstanding < min_outstanding))
+      {
+        idle_task_enabled = true;
+        Processor copy = local_proc;
+        copy.enable_idle_task();
+      }
+      idle_lock.unlock();
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::ProcessorManager::lock_dependence_queue(void)
+    //--------------------------------------------------------------------------------------------
+    {
+      // Assume we're not holding any other locks when this is called
+      // and that we're only going to be reading the queue
+      Event lock_event = dependence_lock.lock(1,false/*exclusive*/);
+      lock_event.wait(true/*block*/);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void HighLevelRuntime::ProcessorManager::unlock_dependence_queue(void)
+    //--------------------------------------------------------------------------------------------
+    {
+      dependence_lock.unlock();
+    }
+
+    //--------------------------------------------------------------------------------------------
+    const std::list<GeneralizedOperation*>& HighLevelRuntime::ProcessorManager::get_dependence_queue(void) const
+    //--------------------------------------------------------------------------------------------
+    {
+      return dependence_queue;
     }
 
     //--------------------------------------------------------------------------------------------

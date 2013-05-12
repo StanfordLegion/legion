@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include "common.h"
 #include "utilities.h"
 #include "accessor.h"
+#include "arrays.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -72,6 +73,9 @@ namespace LegionRuntime {
 
       // causes calling thread to block until event has occurred
       void wait(bool block = false) const;
+
+      // used by non-legion threads to wait on an event - always blocking
+      void external_wait(void) const;
 
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for);
@@ -191,6 +195,19 @@ namespace LegionRuntime {
       static const Memory NO_MEMORY;
 
       bool exists(void) const { return id != 0; }
+
+      // Different Memory types
+      enum Kind {
+        GLOBAL_MEM, // Guaranteed visible to all processors on all nodes (e.g. GASNet memory, universally slow)
+        SYSTEM_MEM, // Visible to all processors on a node
+        PINNED_MEM, // Visible to all processors on a node, can be a target of RDMA
+        SOCKET_MEM, // Memory visible to all processors within a node, better performance to processors on same socket 
+        Z_COPY_MEM, // Zero-Copy memory visible to all CPUs within a node and one or more GPUs 
+        GPU_FB_MEM,   // Framebuffer memory for one GPU and all its SMs
+        LEVEL3_CACHE, // CPU L3 Visible to all processors on the node, better performance to processors on same socket 
+        LEVEL2_CACHE, // CPU L2 Visible to all processors on the node, better performance to one processor
+        LEVEL1_CACHE, // CPU L1 Visible to all processors on the node, better performance to one processor
+      };
     };
 
     class ElementMask {
@@ -206,8 +223,8 @@ namespace LegionRuntime {
       void enable(int start, int count = 1);
       void disable(int start, int count = 1);
 
-      int find_enabled(int count = 1);
-      int find_disabled(int count = 1);
+      int find_enabled(int count = 1, int start = 0) const;
+      int find_disabled(int count = 1, int start = 0) const;
       
       bool is_set(int ptr) const;
       size_t pop_count(bool enabled = true) const;
@@ -283,7 +300,7 @@ namespace LegionRuntime {
     };
 #endif
 
-    typedef unsigned ReductionOpID;
+    typedef int ReductionOpID;
     class ReductionOpUntyped {
     public:
       size_t sizeof_lhs;
@@ -459,6 +476,453 @@ namespace LegionRuntime {
 					   size_t num_elmts,
 					   off_t child_offset = 0);
 
+      void destroy(void) const;
+
+      IndexSpaceAllocator create_allocator(void) const;
+
+      const ElementMask &get_valid_mask(void) const;
+    };
+
+    class DomainPoint {
+    public:
+      enum { MAX_POINT_DIM = 3 };
+
+      DomainPoint(void) : dim(0) { point_data[0] = 0; }
+      DomainPoint(int index) : dim(0) { point_data[0] = index; }
+
+      DomainPoint(const DomainPoint &rhs) : dim(rhs.dim)
+      {
+        for (int i = 0; i < MAX_POINT_DIM; i++)
+          point_data[i] = rhs.point_data[i];
+      }
+
+      DomainPoint& operator=(const DomainPoint &rhs)
+      {
+        dim = rhs.dim;
+        for (int i = 0; i < MAX_POINT_DIM; i++)
+          point_data[i] = rhs.point_data[i];
+        return *this;
+      }
+      
+      bool operator==(const DomainPoint &rhs) const
+      {
+	if(dim != rhs.dim) return false;
+	for(int i = 0; (i == 0) || (i < dim); i++)
+	  if(point_data[i] != rhs.point_data[i]) return false;
+	return true;
+      }
+
+      struct STLComparator {
+	bool operator()(const DomainPoint& a, const DomainPoint& b) const
+	{
+	  if(a.dim < b.dim) return true;
+	  if(a.dim > b.dim) return false;
+	  for(int i = 0; (i == 0) || (i < a.dim); i++) {
+	    if(a.point_data[i] < b.point_data[i]) return true;
+	    if(a.point_data[i] > b.point_data[i]) return false;
+	  }
+	  return false;
+	}
+      };
+
+      template<int DIM>
+      static DomainPoint from_point(typename Arrays::Point<DIM> p)
+      {
+	DomainPoint dp;
+	assert(DIM <= MAX_POINT_DIM); 
+	dp.dim = DIM;
+	p.to_array(dp.point_data);
+	return dp;
+      }
+
+      int get_index(void) const
+      {
+	assert(dim == 0);
+	return point_data[0];
+      }
+
+      int get_dim(void) const { return dim; }
+
+      template <int DIM>
+      Arrays::Point<DIM> get_point(void) const { assert(dim == DIM); return Arrays::Point<DIM>(point_data); }
+
+      bool is_null(void) const { return (dim > -1); }
+
+      static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
+
+    protected:
+    public:
+      int dim;
+      int point_data[MAX_POINT_DIM];
+    };
+
+    class DomainLinearization {
+    public:
+      DomainLinearization(void) : dim(-1), lptr(0) {}
+      DomainLinearization(const DomainLinearization& other) : dim(other.dim), lptr(other.lptr) {}
+
+      bool valid(void) const { return(dim >= 0); }
+
+      DomainLinearization& operator=(const DomainLinearization& other)
+      {
+	dim = other.dim;
+	lptr = other.lptr;
+	return *this;
+      }
+
+      template <int DIM>
+      static DomainLinearization from_mapping(typename Arrays::Mapping<DIM, 1> *mapping)
+      {
+	DomainLinearization l;
+	l.dim = DIM;
+	l.lptr = (void *)mapping;
+	return l;
+      }
+
+      void serialize(int *data) const
+      {
+	data[0] = dim;
+	switch(dim) {
+	case 0: break; // nothing to serialize
+	case 1: ((Arrays::Mapping<1, 1> *)lptr)->serialize_mapping(data + 1); break;
+	case 2: ((Arrays::Mapping<2, 1> *)lptr)->serialize_mapping(data + 1); break;
+	case 3: ((Arrays::Mapping<3, 1> *)lptr)->serialize_mapping(data + 1); break;
+	default: assert(0);
+	}
+      }
+
+      void deserialize(const int *data)
+      {
+	dim = data[0];
+	switch(dim) {
+	case 0: break; // nothing to serialize
+	case 1: lptr = (void *)(Arrays::Mapping<1, 1>::deserialize_mapping(data + 1)); break;
+	case 2: lptr = (void *)(Arrays::Mapping<2, 1>::deserialize_mapping(data + 1)); break;
+	case 3: lptr = (void *)(Arrays::Mapping<3, 1>::deserialize_mapping(data + 1)); break;
+	default: assert(0);
+	}
+      }
+
+      int get_dim(void) const { return dim; }
+
+      template <int DIM>
+      Arrays::Mapping<DIM, 1> *get_mapping(void) const
+      {
+	assert(DIM == dim);
+	return (Arrays::Mapping<DIM, 1> *)lptr;
+      }
+
+      int get_image(const DomainPoint& p) const
+      {
+	assert(dim == p.dim);
+	switch(dim) {
+	case 0: // index space
+	  {
+	    // assume no offset for now - probably wrong
+	    return p.get_index();
+	  }
+
+	case 1:
+	  {
+	    //printf("%d -> %d\n", p.get_point<1>()[0], get_mapping<1>()->image(p.get_point<1>())[0]);
+	    return get_mapping<1>()->image(p.get_point<1>());
+	  }
+
+	case 2:
+	  {
+	    //printf("%d -> %d\n", p.get_point<2>()[0], get_mapping<2>()->image(p.get_point<2>())[0]);
+	    return get_mapping<2>()->image(p.get_point<2>());
+	  }
+
+	case 3:
+	  {
+	    //printf("%d -> %d\n", p.get_point<3>()[0], get_mapping<3>()->image(p.get_point<3>())[0]);
+	    return get_mapping<3>()->image(p.get_point<3>());
+	  }
+
+	default:
+	  assert(0);
+	}
+      }
+
+      protected:
+	int dim;
+	void *lptr;
+      };
+
+    class Domain {
+    public:
+      enum { MAX_RECT_DIM = 3 };
+      Domain(void) : is_id(0), dim(0) {}
+      Domain(LegionRuntime::LowLevel::IndexSpace is) : is_id(is.id), dim(0) {}
+      Domain(const Domain& other) : is_id(other.is_id), dim(other.dim)
+      {
+	for(int i = 0; i < MAX_RECT_DIM*2; i++)
+	  rect_data[i] = other.rect_data[i];
+      }
+
+      Domain& operator=(const Domain& other)
+      {
+	is_id = other.is_id;
+	dim = other.dim;
+	for(int i = 0; i < MAX_RECT_DIM*2; i++)
+	  rect_data[i] = other.rect_data[i];
+	return *this;
+      }
+
+      bool operator==(const Domain &rhs) const
+      {
+	if(is_id != rhs.is_id) return false;
+	if(dim != rhs.dim) return false;
+	for(int i = 0; i < dim; i++) {
+	  if(rect_data[i*2] != rhs.rect_data[i*2]) return false;
+	  if(rect_data[i*2+1] != rhs.rect_data[i*2+1]) return false;
+	}
+	return true;
+      }
+
+      bool operator!=(const Domain &rhs) const { return !(*this == rhs); }
+
+      static const Domain NO_DOMAIN;
+
+      bool exists(void) const { return (is_id != 0) || (dim > 0); }
+
+      template<int DIM>
+      static Domain from_rect(typename Arrays::Rect<DIM> r)
+      {
+	Domain d;
+	assert(DIM <= MAX_RECT_DIM); 
+	d.dim = DIM;
+	r.to_array(d.rect_data);
+	return d;
+      }
+
+      int *serialize(int *data) const
+      {
+	*data++ = dim;
+	if(dim == 0) {
+	  *data++ = is_id;
+	} else {
+	  for(int i = 0; i < dim*2; i++)
+	    *data++ = rect_data[i];
+	}
+	return data;
+      }
+
+      const int *deserialize(const int *data)
+      {
+	dim = *data++;
+	if(dim == 0) {
+	  is_id = *data++;
+	} else {
+	  for(int i = 0; i < dim*2; i++)
+	    rect_data[i] = *data++;
+	}
+	return data;
+      }
+
+      LegionRuntime::LowLevel::IndexSpace get_index_space(void) const
+      {
+	assert(is_id);
+	IndexSpace is = { is_id };
+	return is;
+      }
+
+      LegionRuntime::LowLevel::IndexSpace get_index_space(bool create_if_needed = false)
+      {
+	IndexSpace is;
+	if(!is_id) {
+	  assert(create_if_needed);
+	  is_id = IndexSpace::create_index_space(1).id;
+	}
+	is.id = is_id;
+	return is;
+      }
+
+      bool contains(DomainPoint point) const
+      {
+        bool result = false;
+        switch (dim)
+        {
+          case -1:
+            break;
+          case 0:
+            {
+              const ElementMask &mask = get_index_space().get_valid_mask();
+              result = mask.is_set(point.point_data[0]);
+              break;
+            }
+          case 1:
+            {
+              Arrays::Point<1> p1 = point.get_point<1>();
+              Arrays::Rect<1> r1 = get_rect<1>();
+              result = r1.contains(p1);
+              break;
+            }
+          case 2:
+            {
+              Arrays::Point<2> p2 = point.get_point<2>();
+              Arrays::Rect<2> r2 = get_rect<2>();
+              result = r2.contains(p2);
+              break;
+            }
+          case 3:
+            {
+              Arrays::Point<3> p3 = point.get_point<3>();
+              Arrays::Rect<3> r3 = get_rect<3>();
+              result = r3.contains(p3);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        return result;
+      }
+
+      int get_dim(void) const { return dim; }
+
+      template <int DIM>
+      Arrays::Rect<DIM> get_rect(void) const { assert(dim == DIM); return Arrays::Rect<DIM>(rect_data); }
+
+      class DomainPointIterator {
+      public:
+        DomainPointIterator(const Domain& d) 
+	{
+	  p.dim = d.get_dim();
+	  switch(p.get_dim()) {
+	  case 0: // index space
+	    {
+	      const ElementMask *mask = &(d.get_index_space().get_valid_mask());
+	      iterator = (void *)mask;
+	      int index = mask->first_enabled();
+	      p.point_data[0] = index;
+	      any_left = (index >= 0);
+	    }
+	    break;
+
+	  case 1:
+	    {
+	      Arrays::GenericPointInRectIterator<1> *pir = new Arrays::GenericPointInRectIterator<1>(d.get_rect<1>());
+	      iterator = (void *)pir;
+	      pir->p.to_array(p.point_data);
+	      any_left = pir->any_left;
+	    }
+	    break;
+
+	  case 2:
+	    {
+	      Arrays::GenericPointInRectIterator<2> *pir = new Arrays::GenericPointInRectIterator<2>(d.get_rect<2>());
+	      iterator = (void *)pir;
+	      pir->p.to_array(p.point_data);
+	      any_left = pir->any_left;
+	    }
+	    break;
+
+	  case 3:
+	    {
+	      Arrays::GenericPointInRectIterator<3> *pir = new Arrays::GenericPointInRectIterator<3>(d.get_rect<3>());
+	      iterator = (void *)pir;
+	      pir->p.to_array(p.point_data);
+	      any_left = pir->any_left;
+	    }
+	    break;
+
+	  default:
+	    assert(0);
+	  };
+	}
+
+	~DomainPointIterator(void)
+	{
+	  switch(p.get_dim()) {
+	  case 0:
+	    // nothing to do
+	    break;
+
+	  case 1:
+	    {
+	      Arrays::GenericPointInRectIterator<1> *pir = (Arrays::GenericPointInRectIterator<1> *)iterator;
+	      delete pir;
+	    }
+	    break;
+
+	  case 2:
+	    {
+	      Arrays::GenericPointInRectIterator<2> *pir = (Arrays::GenericPointInRectIterator<2> *)iterator;
+	      delete pir;
+	    }
+	    break;
+
+	  case 3:
+	    {
+	      Arrays::GenericPointInRectIterator<3> *pir = (Arrays::GenericPointInRectIterator<3> *)iterator;
+	      delete pir;
+	    }
+	    break;
+
+	  default:
+	    assert(0);
+	  }
+	}
+
+	DomainPoint p;
+	bool any_left;
+	void *iterator;
+
+	bool step(void)
+	{
+	  switch(p.get_dim()) {
+	  case 0:
+	    {
+	      const ElementMask *mask = (const ElementMask *)iterator;
+	      int index = mask->find_enabled(1, p.point_data[0] + 1);
+	      p.point_data[0] = index;
+	      any_left = (index >= 0);
+	    }
+	    break;
+
+	  case 1:
+	    {
+	      Arrays::GenericPointInRectIterator<1> *pir = (Arrays::GenericPointInRectIterator<1> *)iterator;
+	      any_left = pir->step();
+	      pir->p.to_array(p.point_data);
+	    }
+	    break;
+
+	  case 2:
+	    {
+	      Arrays::GenericPointInRectIterator<2> *pir = (Arrays::GenericPointInRectIterator<2> *)iterator;
+	      any_left = pir->step();
+	      pir->p.to_array(p.point_data);
+	    }
+	    break;
+
+	  case 3:
+	    {
+	      Arrays::GenericPointInRectIterator<3> *pir = (Arrays::GenericPointInRectIterator<3> *)iterator;
+	      any_left = pir->step();
+	      pir->p.to_array(p.point_data);
+	    }
+	    break;
+
+	  default:
+	    assert(0);
+	  }
+
+	  return any_left;
+	}
+
+	operator bool(void) const { return any_left; }
+	DomainPointIterator& operator++(int /*i am postfix*/) { step(); return *this; }
+      };
+
+    protected:
+    public:
+      int is_id;
+      int dim;
+      int rect_data[2 * MAX_RECT_DIM];
+
+    public:
       // simple instance creation for the lazy
       RegionInstance create_instance(Memory memory, size_t elem_size,
 				     ReductionOpID redop_id = 0) const;
@@ -467,10 +931,6 @@ namespace LegionRuntime {
 				     const std::vector<size_t> &field_sizes,
 				     size_t block_size,
 				     ReductionOpID redop_id = 0) const;
-
-      void destroy(void) const;
-
-      IndexSpaceAllocator create_allocator(void) const;
 
       struct CopySrcDstField {
       public:
@@ -510,8 +970,6 @@ namespace LegionRuntime {
 			  const ElementMask& mask,
 			  Event wait_on = Event::NO_EVENT,
 			  ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      const ElementMask &get_valid_mask(void) const;
     };
 
     class IndexSpaceAllocator {
@@ -531,6 +989,9 @@ namespace LegionRuntime {
       unsigned alloc(unsigned count = 1) const;
       void reserve(unsigned ptr, unsigned count = 1) const;
       void free(unsigned ptr, unsigned count = 1) const;
+
+      template <typename LIN>
+      void reserve(const LIN& linearizer, Arrays::Point<LIN::IDIM> point) const;
 
       void destroy(void);
     };
@@ -879,10 +1340,12 @@ namespace LegionRuntime {
 
 
       void run(Processor::TaskFuncID task_id = 0, RunStyle style = ONE_TASK_ONLY,
-	       const void *args = 0, size_t arglen = 0);
+	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of all the processors
-      void shutdown(void);
+      void shutdown(bool local_request = true);
+
+      void wait_for_shutdown(void);
 
     public:
       const std::set<Memory>&    get_all_memories(void) const { return memories; }
@@ -901,12 +1364,17 @@ namespace LegionRuntime {
 
       // Return the set of processors "local" to a given other one
       const std::set<Processor>& get_local_processors(Processor p) const;
+      // Return whether or not the machine is running with explicit utility processors
+      bool has_explicit_utility_processors(void) const { return explicit_utility_procs; }
 
       Processor::Kind get_processor_kind(Processor p) const;
+      Memory::Kind get_memory_kind(Memory m) const;
       size_t get_memory_size(const Memory m) const;
 
       //void add_processor(Processor p) { procs.insert(p); }
       static Machine* get_machine(void);
+
+      static Processor get_executing_processor(void);
     public:
       struct ProcessorMemoryAffinity {
 	Processor p;
@@ -937,7 +1405,8 @@ namespace LegionRuntime {
       std::map<Processor,std::set<Memory> > visible_memories_from_procs;
       std::map<Memory,std::set<Memory> > visible_memories_from_memory;
       std::map<Memory,std::set<Processor> > visible_procs_from_memory;
-
+      bool explicit_utility_procs;
+      void *background_pthread; // pointer to pthread_t in the background
     public:
       struct NodeAnnounceData;
 

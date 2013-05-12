@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,32 @@
 #define LOWLEVEL_DMA_H
 
 #include "lowlevel_impl.h"
+#include "activemsg.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
+    struct RemoteCopyArgs {
+      int num_srcs, num_dsts;
+      ReductionOpID redop_id;
+      bool red_fold;
+      Event before_copy, after_copy;
+    };
+
+    extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
+
+    enum DMAActiveMessageIDs {
+      REMOTE_COPY_MSGID = 200,
+    };
+
+    typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
+				       RemoteCopyArgs,
+				       handle_remote_copy> RemoteCopyMessage;
+
     extern void init_dma_handler(void);
 
     extern void start_dma_worker_threads(int count);
 
+    /*
     extern Event enqueue_dma(IndexSpace idx,
 			     RegionInstance src, 
 			     RegionInstance target,
@@ -31,6 +50,7 @@ namespace LegionRuntime {
 			     size_t bytes_to_copy,
 			     Event before_copy,
 			     Event after_copy = Event::NO_EVENT);
+    */
   };
 };
 

@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,9 +140,8 @@ Processor CircuitMapper::select_target_processor(const Task *task)
   // All other tasks get mapped onto the GPU
   assert(task->is_index_space);
 
-  unsigned point[1];
-  task->get_index_point<unsigned,1>(point);
-  unsigned proc_id = point[0] % gpu_procs.size();
+  DomainPoint point = task->get_index_point();
+  unsigned proc_id = point.get_index() % gpu_procs.size();
   return gpu_procs[proc_id];
 }
 
@@ -158,11 +157,12 @@ void CircuitMapper::permit_task_steal(Processor thief, const std::vector<const T
   // No stealing, so do nothing
 }
 
-void CircuitMapper::map_task_region(const Task *task, Processor target, 
+bool CircuitMapper::map_task_region(const Task *task, Processor target, 
                                 MappingTagID tag, bool inline_mapping,
                                 const RegionRequirement &req, unsigned index,
                                 const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                 std::vector<Memory> &target_ranking,
+                                std::set<FieldID> &additional_fields, 
                                 bool &enable_WAR_optimization)
 {
   // CPU mapper should only be called for region main
@@ -277,6 +277,7 @@ void CircuitMapper::map_task_region(const Task *task, Processor target,
         assert(false);
     }
   }
+  return true;
 }
 
 void CircuitMapper::rank_copy_target(const Task *task, Processor target,
@@ -293,7 +294,7 @@ void CircuitMapper::rank_copy_target(const Task *task, Processor target,
 }
 
 void CircuitMapper::slice_index_space(const Task *task, const IndexSpace &index_space,
-                                  std::vector<Mapper::IndexSplit> &slices)
+                                  std::vector<Mapper::DomainSplit> &slices)
 {
   DefaultMapper::decompose_index_space(index_space, gpu_procs, 1/*splitting factor*/, slices);
 }

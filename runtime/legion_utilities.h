@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,6 +89,7 @@ namespace LegionRuntime {
       inline void serialize(const T &element);
       inline void serialize(const void *src, size_t bytes);
       inline void grow(size_t more_bytes);
+      inline off_t get_index(void) const { return index; }
       inline const void* get_buffer(void) const 
       { 
 #ifdef DEBUG_HIGH_LEVEL

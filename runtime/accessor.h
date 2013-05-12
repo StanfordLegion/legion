@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,10 @@
 #define CUDAPREFIX
 #endif
 
+#include "arrays.h"
+
+using namespace LegionRuntime::Arrays;
+
 namespace LegionRuntime {
 #ifdef PRIVILEGE_CHECKS
   enum AccessorPrivilege {
@@ -32,7 +36,43 @@ namespace LegionRuntime {
     ACCESSOR_ALL    = 0x00000007,
   };
 #endif
+  namespace LowLevel {
+    class DomainPoint;
+    class Domain;
+  }
+
   namespace Accessor {
+
+    class ByteOffset {
+    public:
+      ByteOffset(void) : offset(0) {}
+      explicit ByteOffset(off_t _offset) : offset(_offset) { assert(offset == _offset); }
+      explicit ByteOffset(int _offset) : offset(_offset) {}
+
+      template <typename T>
+      T *add_to_pointer(T *ptr) const
+      {
+	return (T*)(((char *)ptr) + offset);
+      }
+
+      bool operator==(const ByteOffset rhs) const { return offset == rhs.offset; }
+
+      ByteOffset& operator+=(ByteOffset rhs) { offset += rhs.offset; return *this; }
+      ByteOffset& operator*=(int scale) { offset *= scale; return *this; }
+      
+      ByteOffset operator+(const ByteOffset rhs) const { return ByteOffset(offset + rhs.offset); }
+      ByteOffset operator*(int scale) const { return ByteOffset(offset * scale); }
+      
+      int offset;
+    };
+
+    inline ByteOffset operator*(int scale, const ByteOffset rhs) { return ByteOffset(scale * rhs.offset); }
+
+    template <typename T>
+    inline T* operator+(T *ptr, const ByteOffset offset) { return offset.add_to_pointer(ptr); }
+
+    template <typename T>
+    inline T*& operator+=(T *&ptr, const ByteOffset offset) { ptr = offset.add_to_pointer(ptr); return ptr; }
 
     namespace TemplateFu {
       // bool IsAStruct<T>::value == true if T is a class/struct, else false
@@ -94,6 +134,7 @@ namespace LegionRuntime {
 #ifdef POINTER_CHECKS
       // TODO: Make this function work for GPUs
       void verify_access(void *impl_ptr, unsigned ptr);
+      void verify_access(void *impl_ptr, const DomainPoint& dp);
 #endif
 
       struct Generic {
@@ -113,10 +154,16 @@ namespace LegionRuntime {
 	  void read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset = 0) const;
 	  void write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset = 0) const;
 
+	  void read_untyped(const LowLevel::DomainPoint& dp, void *dst, size_t bytes, off_t offset = 0) const;
+	  void write_untyped(const LowLevel::DomainPoint& dp, const void *src, size_t bytes, off_t offset = 0) const;
+
 	  RegionAccessor<Generic, void, void> get_untyped_field_accessor(off_t _field_offset, size_t _field_size)
 	  {
 	    return RegionAccessor<Generic, void, void>(Untyped(internal, field_offset + _field_offset));
 	  }
+
+	  template <int DIM>
+	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets);
 
 	  void *internal;
 	  off_t field_offset;
@@ -147,7 +194,8 @@ namespace LegionRuntime {
           inline void set_privileges(AccessorPrivilege p) { priv = p; }
 #endif
 
-	  inline T read(ptr_t ptr) const 
+	  template <typename PTRTYPE>
+	  inline T read(PTRTYPE ptr) const 
           { 
 #ifdef PRIVILEGE_CHECKS
             assert(priv & ACCESSOR_READ);
@@ -157,7 +205,9 @@ namespace LegionRuntime {
 #endif
             T val; read_untyped(ptr, &val, sizeof(val)); return val; 
           }
-	  inline void write(ptr_t ptr, const T& newval) const 
+
+	  template <typename PTRTYPE>
+	  inline void write(PTRTYPE ptr, const T& newval) const 
           { 
 #ifdef PRIVILEGE_CHECKS
             assert(priv & ACCESSOR_WRITE);
@@ -167,7 +217,11 @@ namespace LegionRuntime {
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
+
 	  // no way to get a direct element pointer
+	  template <int DIM>
+	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets)
+	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets)); }
 
 	  template<typename REDOP>
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
@@ -377,6 +431,8 @@ namespace LegionRuntime {
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
+	  //char *elem_ptr(const LowLevel::DomainPoint& dp) const;
+	  //char *elem_ptr_linear(const LowLevel::Domain& d, LowLevel::Domain& subrect, ByteOffset *offsets);
 
 	  char *base;
 #ifdef POINTER_CHECKS
@@ -464,6 +520,10 @@ namespace LegionRuntime {
             this->impl_ptr = impl;
           }
 #endif
+
+	  //T *elem_ptr(const LowLevel::DomainPoint& dp) const { return (T*)(Untyped::elem_ptr(dp)); }
+	  //T *elem_ptr_linear(const LowLevel::Domain& d, LowLevel::Domain& subrect, ByteOffset *offsets)
+	  //{ return (T*)(Untyped::elem_ptr_linear(d, subrect, offsets)); }
 	};
       };
 

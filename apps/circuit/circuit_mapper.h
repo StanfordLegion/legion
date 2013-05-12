@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,11 +29,12 @@ public:
   virtual Processor target_task_steal(const std::set<Processor> &blacklisted);
   virtual void permit_task_steal(Processor thief, const std::vector<const Task*> &tasks,
                                       std::set<const Task*> &to_steal);
-  virtual void map_task_region(const Task *task, Processor target, 
+  virtual bool map_task_region(const Task *task, Processor target, 
                                 MappingTagID tag, bool inline_mapping,
                                 const RegionRequirement &req, unsigned index,
                                 const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                 std::vector<Memory> &target_ranking,
+                                std::set<FieldID> &additional_fields,
                                 bool &enable_WAR_optimization);
   virtual void rank_copy_target(const Task *task, Processor target,
                                 MappingTagID tag, bool inline_mapping,
@@ -43,7 +44,7 @@ public:
                                 std::vector<Memory> &to_create,
                                 bool &create_one);
   virtual void slice_index_space(const Task *task, const IndexSpace &index_space,
-                                  std::vector<Mapper::IndexSplit> &slices);
+                                  std::vector<Mapper::DomainSplit> &slices);
 public:
   std::vector<Processor> cpu_procs;
   std::vector<Processor> gpu_procs;

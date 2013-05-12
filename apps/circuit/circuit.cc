@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -233,36 +233,36 @@ void region_main(const void *args, size_t arglen,
 
 void calculate_currents_task_cpu(const void *global_args, size_t global_arglen,
                                  const void *local_args, size_t local_arglen,
-                                 const unsigned point[1],
+                                 const DomainPoint &point, 
                                  const std::vector<RegionRequirement> &logical_regions,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   calc_new_currents_cpu(p, physical_regions);
 }
 
 void distribute_charge_task_cpu(const void *global_args, size_t global_arglen,
                                 const void *local_args, size_t local_arglen,
-                                const unsigned point[1],
+                                const DomainPoint &point,
                                 const std::vector<RegionRequirement> &logical_regions,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_cpu(p, physical_regions);
 }
 
 void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
                               const void *local_args, size_t local_arglen,
-                              const unsigned point[1],
+                              const DomainPoint &point,
                               const std::vector<RegionRequirement> &logical_regions,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_cpu(p, physical_regions);
 }
@@ -271,12 +271,12 @@ void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
 #ifndef USING_SHARED
 void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
                                  const void *local_args, size_t local_arglen,
-                                 const unsigned point[1],
+                                 const DomainPoint &point,
                                  const std::vector<RegionRequirement> &logical_regions,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   // Call the __host__ function in circuit_gpu.cc that launches the kernel
   calc_new_currents_gpu(p, physical_regions);
@@ -284,24 +284,24 @@ void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
 
 void distribute_charge_task_gpu(const void *global_args, size_t global_arglen,
                                 const void *local_args, size_t local_arglen,
-                                const unsigned point[1],
+                                const DomainPoint &point,
                                 const std::vector<RegionRequirement> &logical_regions,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_gpu(p, physical_regions);
 }
 
 void update_voltages_task_gpu(const void *global_args, size_t global_arglen,
                               const void *local_args, size_t local_arglen,
-                              const unsigned point[1],
+                              const DomainPoint &point,
                               const std::vector<RegionRequirement> &logical_regions,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU update voltages for point %d",point[0]);
+  log_circuit(LEVEL_PRINT,"GPU update voltages for point %d",point.get_index());
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_gpu(p, physical_regions);
 }
@@ -326,19 +326,19 @@ int main(int argc, char **argv)
   // CPU variants
   HighLevelRuntime::register_single_task<region_main>
           (REGION_MAIN, Processor::LOC_PROC, false/*leaf*/, "region_main");
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,calculate_currents_task_cpu>
+  HighLevelRuntime::register_index_task<calculate_currents_task_cpu>
           (CALC_NEW_CURRENTS, Processor::LOC_PROC, true/*leaf*/, "calc_new_currents");
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,distribute_charge_task_cpu>
+  HighLevelRuntime::register_index_task<distribute_charge_task_cpu>
           (DISTRIBUTE_CHARGE, Processor::LOC_PROC, true/*leaf*/, "distribute_charge");
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,update_voltages_task_cpu>
+  HighLevelRuntime::register_index_task<update_voltages_task_cpu>
           (UPDATE_VOLTAGES, Processor::LOC_PROC, true/*leaf*/, "update_voltages");
 #ifndef USING_SHARED
   // GPU variants
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,calculate_currents_task_gpu>
+  HighLevelRuntime::register_index_task<calculate_currents_task_gpu>
           (CALC_NEW_CURRENTS, Processor::TOC_PROC, true/*leaf*/, "calc_new_currents");
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,distribute_charge_task_gpu>
+  HighLevelRuntime::register_index_task<distribute_charge_task_gpu>
           (DISTRIBUTE_CHARGE, Processor::TOC_PROC, true/*leaf*/, "distribute_charge");
-  HighLevelRuntime::register_index_task<INDEX_TYPE,INDEX_DIM,update_voltages_task_gpu>
+  HighLevelRuntime::register_index_task<update_voltages_task_gpu>
           (UPDATE_VOLTAGES, Processor::TOC_PROC, true/*leaf*/, "update_voltages");
 
   // Register the callback function for using the custom CircuitMapper

@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ struct OutgoingMessage {
 class ActiveMessageEndpoint {
 public:
   static const int NUM_LMBS = 2;
-  static const size_t LMB_SIZE = (4 << 20);
+  static const size_t LMB_SIZE = (16 << 20);
 
   ActiveMessageEndpoint(gasnet_node_t _peer, const gasnet_seginfo_t *seginfos)
     : peer(_peer)
@@ -390,6 +390,19 @@ protected:
 			       hdr->args[3], hdr->args[4], hdr->args[5]);
       break;
 
+    case 8:
+      if(hdr->payload_mode != PAYLOAD_NONE)
+	gasnet_AMRequestMedium8(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+				hdr->args[0], hdr->args[1], hdr->args[2],
+				hdr->args[3], hdr->args[4], hdr->args[5],
+				hdr->args[6], hdr->args[7]);
+      else
+	gasnet_AMRequestShort8(peer, hdr->msgid,
+			       hdr->args[0], hdr->args[1], hdr->args[2],
+			       hdr->args[3], hdr->args[4], hdr->args[5],
+			       hdr->args[6], hdr->args[7]);
+      break;
+
     case 10:
       if(hdr->payload_mode != PAYLOAD_NONE)
 	gasnet_AMRequestMedium10(peer, hdr->msgid, hdr->payload, hdr->payload_size,
@@ -420,6 +433,25 @@ protected:
 				hdr->args[9], hdr->args[10], hdr->args[11]);
       break;
 
+    case 16:
+      if(hdr->payload_mode != PAYLOAD_NONE)
+	gasnet_AMRequestMedium16(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+				 hdr->args[0], hdr->args[1], hdr->args[2],
+				 hdr->args[3], hdr->args[4], hdr->args[5],
+				 hdr->args[6], hdr->args[7], hdr->args[8],
+				 hdr->args[9], hdr->args[10], hdr->args[11],
+				 hdr->args[12], hdr->args[13], hdr->args[14],
+				 hdr->args[15]);
+      else
+	gasnet_AMRequestShort16(peer, hdr->msgid,
+				hdr->args[0], hdr->args[1], hdr->args[2],
+				hdr->args[3], hdr->args[4], hdr->args[5],
+				hdr->args[6], hdr->args[7], hdr->args[8],
+				hdr->args[9], hdr->args[10], hdr->args[11],
+				hdr->args[12], hdr->args[13], hdr->args[14],
+				hdr->args[15]);
+      break;
+
     default:
       fprintf(stderr, "need to support short/medium of size=%d\n", hdr->num_args);
       assert(1==2);
@@ -446,6 +478,13 @@ protected:
       gasnet_AMRequestLong3(peer, hdr->msgid, 
 			    hdr->payload, hdr->payload_size, dest_ptr,
 			    hdr->args[0], hdr->args[1], hdr->args[2]);
+      break;
+
+    case 4:
+      gasnet_AMRequestLong4(peer, hdr->msgid, 
+			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->args[0], hdr->args[1], hdr->args[2],
+			    hdr->args[3]);
       break;
 
     case 6:

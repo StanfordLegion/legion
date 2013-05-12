@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,9 @@
 #include <vector>
 #include <pthread.h>
 #include <time.h>
+
+#include <fcntl.h>
+
 #ifdef __MACH__
 #include <mach/clock.h>
 #include <mach/mach.h>
@@ -78,8 +81,61 @@ namespace LegionRuntime {
    */
   class Logger {
   public:
+    // Use the -DLEGION_LOGGING flag whenever you need to have ordered
+    // output.  The posix standard guarantees that all writes to files
+    // open for appending will be atomic, which is necessary for safely
+    // merging multiple streams of output when running across many nodes.
+    // Note that the user is responsible for deleting the log file
+    // between execution runs or risk accumulating messages from multiple runs.
+    // WARNING: apparently this is not true on NFS so instead we use file
+    // locks in distributed environments to serialize access to the file
+    // for safe logging.
+#ifdef LEGION_LOGGING
+    // Make the buffer 1 MB
+    static const int logging_buffer_size = (1 << 20);
+    static inline int get_log_file(void)
+    {
+      static int log_file = -1;
+      if (log_file == -1)
+      {
+        log_file = open("legion.log",O_WRONLY | O_CREAT | O_APPEND,
+                        S_IRUSR | S_IWUSR /*no other permissions so locks work*/);
+        assert(log_file != -1);
+      }
+      return log_file;
+    }
+    static inline char* get_logging_buffer(void)
+    {
+      static char *log_buffer = NULL;
+      if (log_buffer == NULL)
+      {
+        log_buffer = (char*)malloc(logging_buffer_size);
+        assert(log_buffer != NULL);
+      }
+      return log_buffer;
+    }
+    // Make this a long long so it can never roll over
+    static long long* get_logging_location(void)
+    {
+      static long long current_location = 0;
+      return &current_location;
+    }
+    static int* get_written_location(void)
+    {
+      static int current_writing = 0;
+      return &current_writing;
+    }
+    // Need a finalize if we have a log file
+    static void finalize(void);
+#endif
     static void init(int argc, const char *argv[])
     {
+#ifdef LEGION_LOGGING
+      get_log_file(); // Initializes the log file
+      get_logging_buffer(); // Initialize the buffer
+      get_logging_location(); // Initialize the current location
+      get_written_location(); // Initialize the written location
+#endif
       for(std::vector<bool>::iterator it = Logger::get_log_cats_enabled().begin();
           it != Logger::get_log_cats_enabled().end();
           it++)
@@ -139,7 +195,7 @@ namespace LegionRuntime {
         }
       printf("\n");
 #endif
-    }
+    } 
 
     static inline void log(LogLevel level, int category, const char *fmt, ...)
     {
@@ -351,11 +407,11 @@ namespace LegionRuntime {
       }
     }
   public:
-    static inline unsigned long get_current_time_in_micros(void)
+    static inline unsigned long long get_current_time_in_micros(void)
     {
       struct timespec spec;
       clock_gettime(CLOCK_MONOTONIC, &spec);
-      unsigned long result = (((unsigned long)spec.tv_sec) << 20) + (((unsigned long)spec.tv_nsec) >> 10);
+      unsigned long long result = (((unsigned long long)spec.tv_sec) << 20) + (((unsigned long long)spec.tv_nsec) >> 10);
       return result;
     }
   private:
@@ -402,14 +458,14 @@ namespace LegionRuntime {
       } 
     }
   public:
-    static inline unsigned long get_current_time_in_micros(void)
+    static inline unsigned long long get_current_time_in_micros(void)
     {
       mach_timespec_t spec;
       clock_serv_t cclock;
       host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
       clock_get_time(cclock, &spec);
       mach_port_deallocate(mach_task_self(), cclock);
-      unsigned long result = (((unsigned long) spec.tv_sec) << 20) + (((unsigned long)spec.tv_nsec) >> 10);
+      unsigned long long result = (((unsigned long long) spec.tv_sec) << 20) + (((unsigned long long)spec.tv_nsec) >> 10);
       return result;
     }
   private:

@@ -1,4 +1,4 @@
-# Copyright 2012 Stanford University
+# Copyright 2013 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,17 @@
 
 
 ifndef GASNET
-GASNET 	:= /usr/local/gasnet-1.16.2-noxrc
+ifndef SHARED_LOWLEVEL
+GASNET 	:= /usr/local/gasnet-1.20.0-openmpi
+CC := mpicc
+CXX := mpicxx
+GCC := $(CXX)
+LD_FLAGS += -L/usr/local/openmpi-1.6.4/lib -lmpi
+else
+CC := gcc
+CXX:= g++
+GCC:= $(CXX)
+endif
 endif
 ifndef CUDA
 CUDA	:= /usr/local/cuda
@@ -41,16 +51,16 @@ NVCC_FLAGS	+= -arch=sm_20
 ifdef DEBUG
 NVCC_FLAGS      += -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL
 #NVCC_FLAGS	+= -g -G 
-NVCC_FLAGS	+= -O3
+NVCC_FLAGS	+= -O2
 else
-NVCC_FLAGS	+= -O3
+NVCC_FLAGS	+= -O2
 endif
 endif
 
 ifdef DEBUG
 CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb -Wall
 else
-CC_FLAGS	+= -O3 
+CC_FLAGS	+= -O2 
 endif
 
 # Manage the output setting

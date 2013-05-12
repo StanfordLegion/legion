@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -324,8 +324,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    void DefaultMapper::slice_index_space(const Task *task, const IndexSpace &index_space,
-                                   std::vector<Mapper::IndexSplit> &slices)
+    void DefaultMapper::slice_domain(const Task *task, const Domain &domain,
+                                   std::vector<Mapper::DomainSplit> &slices)
     //--------------------------------------------------------------------------------------------
     {
       log_mapper(LEVEL_SPEW,"Slice index space in default mapper for task %s (ID %d) for processor %x",
@@ -334,7 +334,7 @@ namespace LegionRuntime {
       const std::set<Processor> &all_procs = machine->get_all_processors();
       std::vector<Processor> procs(all_procs.begin(),all_procs.end());
 
-      DefaultMapper::decompose_index_space(index_space, procs, splitting_factor, slices);
+      DefaultMapper::decompose_index_space(domain, procs, splitting_factor, slices);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -362,18 +362,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
-    void DefaultMapper::map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping,
+    bool DefaultMapper::map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping,
                                         const RegionRequirement &req, unsigned index,
                                         const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                         std::vector<Memory> &target_ranking,
+                                        std::set<FieldID> &additional_fields,
                                         bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
       log_mapper(LEVEL_SPEW,"Map task region in default mapper for region ? of task %s (ID %d) "
                  "for processor %x", task->variants->name, task->get_unique_task_id(), local_proc.id);
       // Just give our processor stack
+      if(!target.exists()) {
+	log_mapper.info("Asked to map region to NO_PROC - using local proc's memory stack");
+	target = local_proc;
+      }
       target_ranking = memory_stacks[target];
       enable_WAR_optimization = war_enabled;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------------------------
+    void DefaultMapper::notify_mapping_result(const Task *task, Processor target,
+                                              const RegionRequirement &req,
+                                              unsigned index, bool inline_mapping, Memory result)
+    //--------------------------------------------------------------------------------------------
+    {
+      log_mapper(LEVEL_INFO,"Task %s mapped region requirement for index %d to memory %x",
+                              task->variants->name, index, result.id);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -382,19 +398,23 @@ namespace LegionRuntime {
                                               unsigned index, bool inline_mapping)
     //--------------------------------------------------------------------------------------------
     {
-      log_mapper(LEVEL_SPEW,"Notify failed mapping for task %s (ID %d) in default mapper for processor %x",
+      log_mapper(LEVEL_ERROR,"Notify failed mapping for task %s (ID %d) in default mapper for processor %x",
                  task->variants->name, task->get_unique_task_id(), local_proc.id);
       assert(false);
     }
 
     //--------------------------------------------------------------------------------------------
-    size_t DefaultMapper::select_region_layout(const Task *task, const Processor target,
+    size_t DefaultMapper::select_region_layout(const Task *task, Processor target,
                                                const RegionRequirement &req, unsigned index,
                                                const Memory &chosen_mem, size_t max_blocking_factor)
     //--------------------------------------------------------------------------------------------
     {
       log_mapper(LEVEL_SPEW,"Select region layout for task %s (ID %d) in default mapper for processor %x",
                  task->variants->name, task->get_unique_task_id(), local_proc.id);
+      if(!target.exists()) {
+	log_mapper.info("Asked to select region layout for NO_PROC - using local proc's processor type");
+	target = local_proc;
+      }
       if (machine->get_processor_kind(target) == Processor::TOC_PROC)
         return max_blocking_factor;
       return 1;
@@ -581,65 +601,120 @@ namespace LegionRuntime {
       return Processor::NO_PROC;
     }
 
+    template <unsigned DIM>
+    static void round_robin_point_assign(const Domain &domain, const std::vector<Processor> &targets,
+					 unsigned splitting_factor, std::vector<Mapper::DomainSplit> &slices)
+    {
+      Arrays::Rect<DIM> r = domain.get_rect<DIM>();
+
+      std::vector<Processor>::const_iterator target_it = targets.begin();
+      for(Arrays::GenericPointInRectIterator<DIM> pir(r); pir; pir++) {
+	Arrays::Rect<DIM> subrect(pir.p, pir.p); // rect containing a single point
+	Mapper::DomainSplit ds(Domain::from_rect<DIM>(subrect), *target_it++, false /* recurse */, false /* stealable */);
+	slices.push_back(ds);
+	if(target_it == targets.end())
+	  target_it = targets.begin();
+      }
+    }
+
     //--------------------------------------------------------------------------------------------
-    /*static*/ void DefaultMapper::decompose_index_space(const IndexSpace &index_space, const std::vector<Processor> &targets,
-                                                         unsigned splitting_factor, std::vector<Mapper::IndexSplit> &slices)
+    /*static*/ void DefaultMapper::decompose_index_space(const Domain &domain, const std::vector<Processor> &targets,
+                                                         unsigned splitting_factor, std::vector<Mapper::DomainSplit> &slices)
     //--------------------------------------------------------------------------------------------
     {
-      // This assumes the IndexSpace is 1-dimensional and split it according to the splitting factor.
-      LowLevel::ElementMask mask = index_space.get_valid_mask();
+      switch(domain.get_dim()) {
+      case 2:
+	round_robin_point_assign<2>(domain, targets, splitting_factor, slices);
+	return;
 
-      // Count valid elements in mask.
-      unsigned num_elts = 0;
+      case 3:
+	round_robin_point_assign<3>(domain, targets, splitting_factor, slices);
+	return;
+
+	// cases 0 and 1 fall through to old code for now
+      }
+
+      // Only handle these two cases right now
+      assert((domain.get_dim() == 0) || (domain.get_dim() == 1));
+      if (domain.get_dim() == 0)
       {
-        LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
-        int position = 0, length = 0;
-        while (enabled->get_next(position, length)) {
-          num_elts += length;
-        }
-      }
+        IndexSpace index_space = domain.get_index_space();
+        // This assumes the IndexSpace is 1-dimensional and split it according to the splitting factor.
+        LowLevel::ElementMask mask = index_space.get_valid_mask();
 
-      // Choose split sizes based on number of elements and processors.
-      unsigned num_chunks = targets.size() * splitting_factor;
-      if (num_chunks > num_elts) {
-        num_chunks = num_elts;
-      }
-      unsigned num_elts_per_chunk = num_elts / num_chunks;
-      unsigned num_elts_extra = num_elts % num_chunks;
-
-      std::vector<LowLevel::ElementMask> chunks(num_chunks, mask);
-      for (unsigned chunk = 0; chunk < num_chunks; chunk++) {
-        LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
-        int position = 0, length = 0;
-        while (enabled->get_next(position, length)) {
-          chunks[chunk].disable(position, length);
-        }
-      }
-
-      // Iterate through valid elements again and assign to chunks.
-      {
-        LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
-        int position = 0, length = 0;
-        unsigned chunk = 0;
-        int remaining_in_chunk = num_elts_per_chunk + (chunk < num_elts_extra ? 1 : 0);
-        while (enabled->get_next(position, length)) {
-          for (; chunk < num_chunks; chunk++,
-                 remaining_in_chunk = num_elts_per_chunk + (chunk < num_elts_extra ? 1 : 0)) {
-            if (length <= remaining_in_chunk) {
-              chunks[chunk].enable(position, length);
-              break;
-            }
-            chunks[chunk].enable(position, remaining_in_chunk);
-            position += remaining_in_chunk;
-            length -= remaining_in_chunk;
+        // Count valid elements in mask.
+        unsigned num_elts = 0;
+        {
+          LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
+          int position = 0, length = 0;
+          while (enabled->get_next(position, length)) {
+            num_elts += length;
           }
         }
-      }
 
-      for (unsigned chunk = 0; chunk < num_chunks; chunk++) {
-        // TODO: Come up with a better way of distributing work across the processor groups
-        slices.push_back(Mapper::IndexSplit(IndexSpace::create_index_space(index_space, chunks[chunk]),
-                                   targets[(chunk % targets.size())], false, false));
+        // Choose split sizes based on number of elements and processors.
+        unsigned num_chunks = targets.size() * splitting_factor;
+        if (num_chunks > num_elts) {
+          num_chunks = num_elts;
+        }
+        unsigned num_elts_per_chunk = num_elts / num_chunks;
+        unsigned num_elts_extra = num_elts % num_chunks;
+
+        std::vector<LowLevel::ElementMask> chunks(num_chunks, mask);
+        for (unsigned chunk = 0; chunk < num_chunks; chunk++) {
+          LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
+          int position = 0, length = 0;
+          while (enabled->get_next(position, length)) {
+            chunks[chunk].disable(position, length);
+          }
+        }
+
+        // Iterate through valid elements again and assign to chunks.
+        {
+          LowLevel::ElementMask::Enumerator *enabled = mask.enumerate_enabled();
+          int position = 0, length = 0;
+          unsigned chunk = 0;
+          int remaining_in_chunk = num_elts_per_chunk + (chunk < num_elts_extra ? 1 : 0);
+          while (enabled->get_next(position, length)) {
+            for (; chunk < num_chunks; chunk++,
+                   remaining_in_chunk = num_elts_per_chunk + (chunk < num_elts_extra ? 1 : 0)) {
+              if (length <= remaining_in_chunk) {
+                chunks[chunk].enable(position, length);
+                break;
+              }
+              chunks[chunk].enable(position, remaining_in_chunk);
+              position += remaining_in_chunk;
+              length -= remaining_in_chunk;
+            }
+          }
+        }
+
+        for (unsigned chunk = 0; chunk < num_chunks; chunk++) {
+          // TODO: Come up with a better way of distributing work across the processor groups
+          slices.push_back(Mapper::DomainSplit(Domain(IndexSpace::create_index_space(index_space, chunks[chunk])),
+                                     targets[(chunk % targets.size())], false, false));
+        }
+      }
+      else
+      {
+        // Only works for one dimensional rectangles right now
+        assert(domain.get_dim() == 1);
+        Arrays::Rect<1> rect = domain.get_rect<1>();
+        unsigned num_elmts = rect.volume();
+        unsigned num_chunks = targets.size()*splitting_factor;
+        if (num_chunks > num_elmts)
+          num_chunks = num_elmts;
+        // Number of elements per chunk rounded up
+        // which works because we know that rectangles are contiguous
+        unsigned elmts_per_chunk = (num_elmts+(num_chunks-1))/num_chunks;
+        for (unsigned idx = 0; idx < num_chunks; idx++)
+        {
+          Arrays::Point<1> lo(idx*elmts_per_chunk);  
+          Arrays::Point<1> hi((((idx+1)*elmts_per_chunk > num_elmts) ? num_elmts : (idx+1)*elmts_per_chunk)-1);
+          Arrays::Rect<1> chunk(lo,hi);
+          unsigned proc_idx = idx % targets.size();
+          slices.push_back(DomainSplit(Domain::from_rect<1>(chunk), targets[proc_idx], false, false));
+        }
       }
     }
 

@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,17 +38,20 @@ namespace LegionRuntime {
       virtual Processor target_task_steal(const std::set<Processor> &blacklisted);
       virtual void permit_task_steal(Processor thief, const std::vector<const Task*> &tasks,
                                       std::set<const Task*> &to_steal);
-      virtual void slice_index_space(const Task *task, const IndexSpace &index_space,
-                                      std::vector<Mapper::IndexSplit> &slices);
+      virtual void slice_domain(const Task *task, const Domain &domain,
+                                      std::vector<Mapper::DomainSplit> &slices);
       virtual VariantID select_task_variant(const Task *task, Processor target);
       virtual bool map_region_virtually(const Task *task, Processor target,
                                         const RegionRequirement &req, unsigned index);
-      virtual void map_task_region(const Task *task, Processor target, 
+      virtual bool map_task_region(const Task *task, Processor target, 
                                     MappingTagID tag, bool inline_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,
+                                    std::set<FieldID> &additional_fields,
                                     bool &enable_WAR_optimization);
+      virtual void notify_mapping_result(const Task *task, Processor target, const RegionRequirement &req,
+                                          unsigned index, bool inline_mapping, Memory result);
       virtual void notify_failed_mapping(const Task *task, Processor target,
                                           const RegionRequirement &req, unsigned index, bool inline_mapping);
       virtual size_t select_region_layout(const Task *task, Processor target,
@@ -76,8 +79,8 @@ namespace LegionRuntime {
       // Pick a random processor of a given kind
       static Processor select_random_processor(const std::set<Processor> &options, Processor::Kind filter, Machine *machine);
       // Break an IndexSpace of tasks into IndexSplits
-      static void decompose_index_space(const IndexSpace &index_space, const std::vector<Processor> &targets,
-                                        unsigned splitting_factor, std::vector<Mapper::IndexSplit> &slice);
+      static void decompose_index_space(const Domain &domain, const std::vector<Processor> &targets,
+                                        unsigned splitting_factor, std::vector<Mapper::DomainSplit> &slice);
     protected:
       HighLevelRuntime *const runtime;
       const Processor local_proc;

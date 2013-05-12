@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,21 +47,25 @@ namespace LegionRuntime {
       bool compute_index_path(IndexSpace parent, IndexSpace child, std::vector<Color> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child, std::vector<Color> &path);
       bool is_disjoint(LogicalPartition partition);
+      // Checks for r1 <= r2 or r2 <= r1, but won't catch !(r1 * r2) at the same level
+      bool are_overlapping(LogicalRegion h1, LogicalRegion h2);
     public:
       // Index Space operations
-      void create_index_space(IndexSpace space);
-      void destroy_index_space(IndexSpace space);
+      void create_index_space(Domain domain);
+      void destroy_index_space(IndexSpace space, bool finalize, const std::vector<ContextID> &deletion_contexts);
       void get_destroyed_regions(IndexSpace space, std::vector<LogicalRegion> &new_deletions);
       Color create_index_partition(IndexPartition pid, IndexSpace parent, bool disjoint, int color,
-                                  const std::map<Color,IndexSpace> &coloring); 
-      void destroy_index_partition(IndexPartition pid);
+                                  const std::map<Color,Domain> &coloring, Domain color_space); 
+      void destroy_index_partition(IndexPartition pid, bool finalize, const std::vector<ContextID> &deletion_contexts);
       void get_destroyed_partitions(IndexPartition pid, std::vector<LogicalPartition> &new_deletions);
-      IndexPartition get_index_partition(IndexSpace parent, Color color);
-      IndexSpace get_index_subspace(IndexPartition p, Color color);
+      IndexPartition get_index_partition(IndexSpace parent, Color color, bool can_create);
+      IndexSpace get_index_subspace(IndexPartition p, Color color, bool can_create);
+      Domain get_index_space_domain(IndexSpace handle, bool can_create);
+      Domain get_index_partition_color_space(IndexPartition p, bool can_create);
     public:
       // Field Space operations
       void create_field_space(FieldSpace space);
-      void destroy_field_space(FieldSpace space);
+      void destroy_field_space(FieldSpace space, bool finalize, const std::vector<ContextID> &deletion_contexts);
       void get_destroyed_regions(FieldSpace space, std::vector<LogicalRegion> &new_deletions);
       void allocate_fields(FieldSpace space, const std::map<FieldID,size_t> &field_allocations);
       void free_fields(FieldSpace space, const std::set<FieldID> &to_free);
@@ -70,12 +74,12 @@ namespace LegionRuntime {
     public:
       // Logical Region operations
       void create_region(LogicalRegion handle, ContextID ctx);  
-      void destroy_region(LogicalRegion handle);
-      void destroy_partition(LogicalPartition handle);
+      void destroy_region(LogicalRegion handle, bool finalize, const std::vector<ContextID> &deletion_contexts);
+      void destroy_partition(LogicalPartition handle, bool finalize, const std::vector<ContextID> &deletion_contexts);
       LogicalPartition get_region_partition(LogicalRegion parent, IndexPartition handle);
       LogicalRegion get_partition_subregion(LogicalPartition parent, IndexSpace handle);
-      LogicalPartition get_region_subcolor(LogicalRegion parent, Color c);
-      LogicalRegion get_partition_subcolor(LogicalPartition parent, Color c);
+      LogicalPartition get_region_subcolor(LogicalRegion parent, Color c, bool can_create);
+      LogicalRegion get_partition_subcolor(LogicalPartition parent, Color c, bool can_create);
       LogicalPartition get_partition_subtree(IndexPartition handle, FieldSpace space, RegionTreeID tid);
       LogicalRegion get_region_subtree(IndexSpace handle, FieldSpace space, RegionTreeID tid);
       LogicalRegion get_partition_parent(LogicalPartition handle);
@@ -92,7 +96,8 @@ namespace LegionRuntime {
       void analyze_partition_deletion(ContextID ctx, LogicalPartition handle, DeletionOperation *op);
     public:
       // Physical Region contexts
-      InstanceRef initialize_physical_context(const RegionRequirement &req, InstanceRef ref, UniqueID uid, ContextID ctx);
+      InstanceRef initialize_physical_context(const RegionRequirement &req, unsigned idx, InstanceRef ref, UniqueID uid, 
+                                              ContextID ctx, Event term_event, const DomainPoint &point);
       void map_region(RegionMapper &rm, LogicalRegion start_region);
       Event close_to_instance(const InstanceRef &ref, RegionMapper &rm);
       Event close_to_reduction(const InstanceRef &ref, RegionMapper &rm);
@@ -142,7 +147,7 @@ namespace LegionRuntime {
       // Packing and unpacking structure updates return
       size_t compute_region_tree_updates_return(void);
       void pack_region_tree_updates_return(Serializer &rez);
-      void unpack_region_tree_updates_return(Deserializer &derez);
+      void unpack_region_tree_updates_return(Deserializer &derez, const std::vector<ContextID> &enclosing_contexts);
     public:
       // Packing and unpacking state return
       size_t compute_region_tree_state_return(const RegionRequirement &req, unsigned idx, 
@@ -214,6 +219,7 @@ namespace LegionRuntime {
       friend class IndexSpaceNode;
       friend class IndexPartNode;
       friend class FieldSpaceNode;
+      friend class RegionTreeNode;
       friend class RegionNode;
       friend class PartitionNode;
       friend class InstanceManager;
@@ -225,17 +231,17 @@ namespace LegionRuntime {
       friend class InstanceView;
       friend class ReductionView;
     public: 
-      IndexSpaceNode* create_node(IndexSpace sp, IndexPartNode *par, Color c, bool add);
-      IndexPartNode* create_node(IndexPartition p, IndexSpaceNode *par, Color c, bool dis, bool add);
+      IndexSpaceNode* create_node(Domain d, IndexPartNode *par, Color c, bool add);
+      IndexPartNode* create_node(IndexPartition p, IndexSpaceNode *par, Color c, Domain color_space, bool dis, bool add);
       FieldSpaceNode* create_node(FieldSpace sp);
       RegionNode* create_node(LogicalRegion r, PartitionNode *par, bool add);
       PartitionNode* create_node(LogicalPartition p, RegionNode *par, bool add);
     public:
-      void destroy_node(IndexSpaceNode *node, bool top); // (recursive)
-      void destroy_node(IndexPartNode *node, bool top); // (recursive)
+      void destroy_node(IndexSpaceNode *node, bool top, bool finalize); // (recursive)
+      void destroy_node(IndexPartNode *node, bool top, bool finalize); // (recursive)
       void destroy_node(FieldSpaceNode *node);
-      void destroy_node(RegionNode *node, bool top); // (recursive)
-      void destroy_node(PartitionNode *node, bool top); // (recursive)
+      void destroy_node(RegionNode *node, bool top, bool finalize, const std::vector<ContextID> &deletion_contexts); // (recursive)
+      void destroy_node(PartitionNode *node, bool top, bool finalize, const std::vector<ContextID> &deletion_contexts); // (recursive)
     public:
       IndexSpaceNode* get_node(IndexSpace space);
       IndexPartNode*  get_node(IndexPartition part);
@@ -252,11 +258,11 @@ namespace LegionRuntime {
     public:
       InstanceView* create_instance_view(InstanceManager *manager, InstanceView *par, RegionNode *reg, bool made_local);
       InstanceManager* create_instance_manager(Memory location, PhysicalInstance inst, 
-                        const std::map<FieldID,IndexSpace::CopySrcDstField> &infos, FieldSpace fsp,
+                        const std::map<FieldID,Domain::CopySrcDstField> &infos, FieldSpace fsp,
                         const FieldMask &field_mask, bool remote, bool clone, UniqueManagerID mid = 0);
       ReductionView* create_reduction_view(ReductionManager *manager, RegionNode *reg, bool made_local);
       ReductionManager* create_reduction_manager(Memory location, PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, 
-            bool remote, bool clone, IndexSpace sparse_space = IndexSpace::NO_SPACE, UniqueManagerID mid = 0);
+            bool remote, bool clone, Domain domain = Domain::NO_DOMAIN, UniqueManagerID mid = 0);
       PhysicalView* find_view(InstanceKey key) const;
       PhysicalManager* find_manager(UniqueManagerID mid) const;
       InstanceView* find_instance_view(InstanceKey key) const;
@@ -271,15 +277,29 @@ namespace LegionRuntime {
       Color generate_unique_color(const std::map<Color,T> &current_map);
     private:
       HighLevelRuntime *const runtime;
+      // There are two primary locks for a RegionTreeForest.  The context_lock
+      // is the coarse grained lock that supports mutating the state of the
+      // RegionTreeForest.  In general all operations need to hold this lock
+      // before performing any operations on the data structure.  The second lock,
+      // the creation_lock is used for reading the shape of the forest without
+      // holding the context_lock.  This allows for simultaneous mapping and
+      // resolving of name queuries (e.g. get subregion with color 'c' or partition P)
+      // which means tasks don't need to wait for mapping to finish before
+      // continuing.  To update the shape of the structure of the RegionTreeForest
+      // you still need to hold the context lock and the creation lock.
 #ifdef LOW_LEVEL_LOCKS
       Lock context_lock;
+      Lock creation_lock;
 #else
       ImmovableLock context_lock;
+      ImmovableLock creation_lock;
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       bool lock_held;
 #endif
     private:
+      // The creation lock must be held whenever updating one of these
+      // five data structures or any of the color_maps
       std::map<IndexSpace,IndexSpaceNode*>     index_nodes;
       std::map<IndexPartition,IndexPartNode*>  index_parts;
       std::map<FieldSpace,FieldSpaceNode*>     field_nodes;
@@ -377,13 +397,14 @@ namespace LegionRuntime {
       friend class PhysicalView;
       friend class InstanceView;
       friend class ReductionView;
-      IndexSpaceNode(IndexSpace sp, IndexPartNode *par,
+      IndexSpaceNode(Domain d, IndexPartNode *par,
                 Color c, bool add, RegionTreeForest *ctx);
       ~IndexSpaceNode(void);
       void mark_destroyed(void);
     public:
       void add_child(IndexPartition handle, IndexPartNode *node);
       void remove_child(Color c);
+      bool has_child(Color c) const;
       IndexPartNode* get_child(Color c);
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
@@ -401,6 +422,7 @@ namespace LegionRuntime {
       IndexSpaceNode* find_top_marked(void) const;
       void find_new_partitions(std::vector<IndexPartNode*> &new_parts) const;
     private:
+      const Domain domain;
       const IndexSpace handle;
       const unsigned depth;
       const Color color;
@@ -434,12 +456,13 @@ namespace LegionRuntime {
       friend class InstanceView;
       friend class ReductionView;
       IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                Color c, bool dis, bool add, RegionTreeForest *ctx);
+                Color c, Domain color_space, bool dis, bool add, RegionTreeForest *ctx);
       ~IndexPartNode(void);
       void mark_destroyed(void);
     public:
       void add_child(IndexSpace handle, IndexSpaceNode *node);
       void remove_child(Color c);
+      bool has_child(Color c) const;
       IndexSpaceNode* get_child(Color c);
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
@@ -459,6 +482,7 @@ namespace LegionRuntime {
       const IndexPartition handle;
       const unsigned depth;
       const Color color;
+      const Domain color_space;
       IndexSpaceNode *const parent;
       RegionTreeForest *const context;
       std::map<Color,IndexSpaceNode*> color_map; // all children seen locally ever
@@ -507,7 +531,7 @@ namespace LegionRuntime {
     public:
       void add_instance(RegionNode *node);
       void remove_instance(RegionNode *node);
-      InstanceManager* create_instance(Memory location, IndexSpace space, 
+      InstanceManager* create_instance(Memory location, Domain domain, 
                     const std::vector<FieldID> &fields, size_t blocking_factor);
     public:
       size_t compute_node_size(void) const;
@@ -595,7 +619,8 @@ namespace LegionRuntime {
       };
       struct PhysicalState : public GenericState {
       public:
-        PhysicalState(bool top = false) : context_top(top) { }
+        PhysicalState(void) { }
+        PhysicalState(FieldMask top) : top_mask(top) { }
       public:
         std::map<InstanceView*,FieldMask> valid_views;
         std::map<ReductionView*,FieldMask> reduction_views;
@@ -604,7 +629,8 @@ namespace LegionRuntime {
         // Used for tracking diffs in the physical tree for sending back
         std::map<InstanceView*,FieldMask> added_views;
         std::map<ReductionView*,FieldMask> added_reductions;
-        bool context_top;
+        // Mark the top of the context for given fields
+        FieldMask top_mask;
       public:
         void clear_state(const FieldMask &init_mask);
       };
@@ -654,6 +680,8 @@ namespace LegionRuntime {
       // This will upgrade all the fields to the new state, checking that upgrades are safe
       void upgrade_new_field_state(GenericState &gstate, const FieldState &new_state, bool add_state);
       void sanity_check_field_states(const GenericState &gstate);
+      void down_sample_list(std::list<LogicalUser> &users, unsigned max_users);
+      void filter_user_list(std::list<LogicalUser> &users);
     protected:
       virtual bool are_children_disjoint(Color c1, Color c2) = 0;
       virtual bool are_closing_partition(void) const = 0;
@@ -694,7 +722,7 @@ namespace LegionRuntime {
       void mark_destroyed(void);
     public:
       void add_child(LogicalPartition handle, PartitionNode *child);
-      bool has_child(Color c);
+      bool has_child(Color c) const;
       PartitionNode* get_child(Color c);
       void remove_child(Color c);
     public:
@@ -739,12 +767,12 @@ namespace LegionRuntime {
                                      std::list<std::pair<InstanceView*,FieldMask> > &valid_views, 
                                      const FieldMask &valid_mask, const FieldMask &field_mask, bool needs_space);
       void find_valid_reduction_views(ContextID ctx, std::list<ReductionView*> &valid_views, const FieldMask &valid_mask);
-      InstanceView* create_instance(Memory location, RegionMapper &rm);
+      InstanceView* create_instance(Memory location, RegionMapper &rm, const std::vector<FieldID> &new_fields);
       ReductionView* create_reduction(Memory location, RegionMapper &rm);
       void issue_final_close_operation(ContextID ctx, const PhysicalUser &user, TreeCloser &closer);
       void pull_valid_views(ContextID ctx, const FieldMask &field_mask);
       void flush_reductions(const PhysicalUser &user, RegionMapper &rm);
-      bool is_top_of_context(ContextID ctx) const;
+      void update_top_mask(FieldMask allocated_mask);
     public:
       size_t compute_tree_size(bool returning) const;
       void serialize_tree(Serializer &rez, bool returning);
@@ -806,7 +834,7 @@ namespace LegionRuntime {
       void mark_destroyed(void);
     public:
       void add_child(LogicalRegion handle, RegionNode *child);
-      bool has_child(Color c);
+      bool has_child(Color c) const;
       RegionNode* get_child(Color c);
       void remove_child(Color c);
     public:
@@ -883,6 +911,11 @@ namespace LegionRuntime {
       RegionUsage(const RegionRequirement &req)
         : privilege(req.privilege), prop(req.prop), redop(req.redop) { }
     public:
+      inline bool operator==(const RegionUsage &rhs) const
+      { return ((privilege == rhs.privilege) && (prop == rhs.prop) && (redop == rhs.redop)); }
+      inline bool operator!=(const RegionUsage &rhs) const
+      { return !((*this) == rhs); }
+    public:
       PrivilegeMode     privilege;
       CoherenceProperty prop;
       ReductionOpID     redop;
@@ -908,6 +941,9 @@ namespace LegionRuntime {
       LogicalUser(void) : GenericUser(), op(NULL), idx(0), gen(0) { }
       LogicalUser(GeneralizedOperation *o, unsigned id, const FieldMask &m, const RegionUsage &u);
     public:
+      bool operator==(const LogicalUser &rhs) const;
+      bool operator!=(const LogicalUser &rhs) const { return !((*this) == rhs); }
+    public:
       GeneralizedOperation *op;
       unsigned idx;
       GenerationID gen;
@@ -918,11 +954,15 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
     struct PhysicalUser : public GenericUser {
     public:
-      PhysicalUser(void) : GenericUser(), single_term(Event::NO_EVENT), multi_term(Event::NO_EVENT) { }
-      PhysicalUser(const FieldMask &m, const RegionUsage &u, Event single, Event multi);
+      PhysicalUser(void) : GenericUser(), single_term(Event::NO_EVENT), multi_term(Event::NO_EVENT), idx(0) { }
+      PhysicalUser(const FieldMask &m, const RegionUsage &u, Event single, Event multi, unsigned idx);
+    public:
+      bool operator==(const PhysicalUser &rhs) const;
+      bool operator!=(const PhysicalUser &rhs) const { return !((*this) == rhs); }
     public:
       Event single_term;
       Event multi_term;
+      unsigned idx;
     };
 
     /////////////////////////////////////////////////////////////
@@ -979,7 +1019,7 @@ namespace LegionRuntime {
      */
     class InstanceManager : public PhysicalManager {
     public:
-      InstanceManager(Memory m, PhysicalInstance inst, const std::map<FieldID,IndexSpace::CopySrcDstField> &infos,
+      InstanceManager(Memory m, PhysicalInstance inst, const std::map<FieldID,Domain::CopySrcDstField> &infos,
               FieldSpace fsp, const FieldMask &mask, RegionTreeForest *ctx, UniqueManagerID mid, bool rem, bool clone);
       virtual ~InstanceManager(void);
     public:
@@ -996,7 +1036,7 @@ namespace LegionRuntime {
       }
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const
       {
-        std::map<FieldID,IndexSpace::CopySrcDstField>::const_iterator finder = field_infos.find(fid);
+        std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = field_infos.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
         assert(finder != field_infos.end());
@@ -1011,8 +1051,8 @@ namespace LegionRuntime {
       void add_reference(void);
       void remove_reference(void);
       void add_view(InstanceView *view);
-      void compute_copy_offsets(const FieldMask &mask, std::vector<IndexSpace::CopySrcDstField> &fields);
-      void find_info(FieldID fid, std::vector<IndexSpace::CopySrcDstField> &sources);
+      void compute_copy_offsets(const FieldMask &mask, std::vector<Domain::CopySrcDstField> &fields);
+      void find_info(FieldID fid, std::vector<Domain::CopySrcDstField> &sources);
       InstanceManager* clone_manager(const FieldMask &mask, FieldSpaceNode *node) const;
     public:
       // This function helps to find views that need to be sent from the a specific logical region
@@ -1046,7 +1086,7 @@ namespace LegionRuntime {
       Lock lock;
       const FieldSpace fspace;
       FieldMask allocated_fields;
-      std::map<FieldID,IndexSpace::CopySrcDstField> field_infos;
+      std::map<FieldID,Domain::CopySrcDstField> field_infos;
       // One nice property of this view of views is that they are in
       // a partial order that will allow them to be serialized and deserialized correctly
       std::vector<InstanceView*> all_views;
@@ -1070,12 +1110,12 @@ namespace LegionRuntime {
       virtual InstanceManager* as_instance_manager(void) const { return NULL; }
       virtual ReductionManager* as_reduction_manager(void) const { return const_cast<ReductionManager*>(this); }
       virtual ReductionManager* clone_manager(void) const = 0;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<IndexSpace::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
-                                    const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
-                                    IndexSpace space, Event precondition, bool reduction_fold) = 0;
+      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields) = 0;
+      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
+                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
+                                    Domain space, Event precondition, bool reduction_fold) = 0;
       virtual bool is_foldable(void) const = 0;
-      virtual IndexSpace get_pointer_space(void) const = 0;
+      virtual Domain get_pointer_space(void) const = 0;
     public:
       void set_view(ReductionView *v);
       void add_reference(void);
@@ -1117,20 +1157,20 @@ namespace LegionRuntime {
     class ListReductionManager : public ReductionManager {
     public:
       ListReductionManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, 
-                        PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, IndexSpace space);
+                        PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, Domain domain);
       virtual ~ListReductionManager(void);
     public:
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
       virtual ReductionManager* clone_manager(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<IndexSpace::CopySrcDstField> &fields);
-      virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
-                                    const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
-                                    IndexSpace space, Event precondition, bool reduction_fold);
+      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields);
+      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
+                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
+                                    Domain space, Event precondition, bool reduction_fold);
       virtual bool is_foldable(void) const { return false; }
-      virtual IndexSpace get_pointer_space(void) const { return ptr_space; }
+      virtual Domain get_pointer_space(void) const { return ptr_space; }
     public:
-      const IndexSpace ptr_space;
+      const Domain ptr_space;
     };
 
     /////////////////////////////////////////////////////////////
@@ -1148,12 +1188,12 @@ namespace LegionRuntime {
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
       virtual ReductionManager* clone_manager(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<IndexSpace::CopySrcDstField> &fields);
-      virtual Event issue_reduction(const std::vector<IndexSpace::CopySrcDstField> &src_fields,
-                                    const std::vector<IndexSpace::CopySrcDstField> &dst_fields,
-                                    IndexSpace space, Event precondition, bool reduction_fold);
+      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields);
+      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
+                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
+                                    Domain space, Event precondition, bool reduction_fold);
       virtual bool is_foldable(void) const { return true; }
-      virtual IndexSpace get_pointer_space(void) const { return IndexSpace::NO_SPACE; }
+      virtual Domain get_pointer_space(void) const { return Domain::NO_DOMAIN; }
     };
 
     /**
@@ -1190,15 +1230,13 @@ namespace LegionRuntime {
       virtual InstanceView* as_instance_view(void) const = 0;
       virtual ReductionView* as_reduction_view(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
-      virtual InstanceRef add_user(UniqueID uid, const PhysicalUser &user) = 0;
       virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading) = 0;
       virtual void remove_user(UniqueID uid, unsigned refs, bool force) = 0;
       virtual void remove_copy(Event copy, bool force) = 0;
-      virtual const PhysicalUser& find_user(UniqueID uid) const = 0;
       virtual void add_valid_reference(void) = 0;
       virtual void remove_valid_reference(void) = 0;
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &dst_fields) = 0;
+                                            std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
     public:
       RegionTreeForest *const context;
       RegionNode *const logical_region;
@@ -1221,16 +1259,28 @@ namespace LegionRuntime {
      */
     class InstanceView : public PhysicalView {
     protected:
-      struct TaskUser {
+      struct ReferenceTracker {
       public:
-        TaskUser(void)
-          : references(0), use_multi(false) { }
-        TaskUser(const PhysicalUser u, unsigned ref)
-          : user(u), references(ref), use_multi(false) { }
+        ReferenceTracker(void)
+          : references(0) { }
+        ReferenceTracker(unsigned refs, const DomainPoint &point)
+          : references(refs) { }
       public:
-        PhysicalUser user;
+        bool add_reference(unsigned refs, const DomainPoint &point);
+        bool remove_reference(unsigned refs);
+        bool use_single_event(void) const;
+        unsigned get_reference_count(void) const;
+      public:
+        size_t compute_tracker_send(void) const;
+        void pack_tracker_send(Serializer &rez);
+        void unpack_tracker_send(Deserializer &derez);
+      public:
+        size_t compute_tracker_return(void) const;
+        void pack_tracker_return(Serializer &rez);
+        void unpack_tracker_return(Deserializer &derez);
+      private:
         unsigned references;
-        bool use_multi;
+        std::set<DomainPoint,DomainPoint::STLComparator> points;
       };
       struct CopyUser {
       public:
@@ -1245,11 +1295,12 @@ namespace LegionRuntime {
       struct AliasedUser {
       public:
         AliasedUser(void) { }
-        AliasedUser(const FieldMask &mask, const TaskUser &user)
-          : valid_mask(mask), task_user(user) { }
+        AliasedUser(const FieldMask &mask, const PhysicalUser &u, bool single)
+          : valid_mask(mask), user(u), use_single(single) { }
       public:
         FieldMask valid_mask;
-        TaskUser task_user;
+        PhysicalUser user;
+        bool use_single;
       };
       struct AliasedCopyUser {
       public:
@@ -1269,12 +1320,13 @@ namespace LegionRuntime {
     public:
       InstanceView* get_subview(Color pc, Color rc);
       void add_child_view(Color pc, Color rc, InstanceView *child);
+      void remove_child_view(const std::pair<Color,Color> &key);
     public:
       virtual bool is_reduction_view(void) const { return false; } 
       virtual InstanceView* as_instance_view(void) const { return const_cast<InstanceView*>(this); }
       virtual ReductionView* as_reduction_view(void) const { return NULL; } 
-      virtual InstanceRef add_user(UniqueID uid, const PhysicalUser &user);
-      InstanceRef add_init_user(UniqueID uid, const PhysicalUser &user);
+      InstanceRef add_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point);
+      InstanceRef add_init_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point);
       virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading);
       virtual void remove_user(UniqueID uid, unsigned refs, bool force);
       virtual void remove_copy(Event copy, bool force);
@@ -1294,13 +1346,12 @@ namespace LegionRuntime {
       inline LogicalRegion get_handle(void) const { return logical_region->handle; }
       Event get_valid_event(const FieldMask &mask);
       void copy_to(RegionMapper &rm, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &dst_fields);
+                                            std::vector<Domain::CopySrcDstField> &dst_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &dst_fields);
+                                            std::vector<Domain::CopySrcDstField> &dst_fields);
       void copy_from(RegionMapper &rm, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &src_fields);
+                                            std::vector<Domain::CopySrcDstField> &src_fields);
       void find_copy_preconditions(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
-      virtual const PhysicalUser& find_user(UniqueID uid) const;
       void update_valid_event(Event new_valid, const FieldMask &mask);
     private:
       void check_state_change(bool adding);
@@ -1315,6 +1366,7 @@ namespace LegionRuntime {
       bool has_local_war_dependence(const PhysicalUser &user) const;
       template<typename T>
       void remove_invalid_elements(std::map<T,FieldMask> &elements, const FieldMask &new_mask);
+      void remove_invalid_users(std::map<std::pair<UniqueID,unsigned>,PhysicalUser> &users, const FieldMask &new_mask);
     public:
       size_t compute_send_size(const FieldMask &pack_mask);
       void pack_view_send(const FieldMask &pack_mask, Serializer &rez);
@@ -1372,25 +1424,25 @@ namespace LegionRuntime {
       friend class ReductionManager;
       friend class ListReductionManager;
       friend class FoldReducitonManager;
-      typedef std::pair<Color,Color> ChildKey;
+      typedef std::pair<Color/*part color*/,Color/*region color*/> ChildKey;
       std::map<ChildKey,InstanceView*> children;
       // For each child keep track of other children with which it aliases
-      std::map<InstanceView*,std::vector<InstanceView*> > aliased_children;
+      std::map<InstanceView*,std::set<InstanceView*> > aliased_children;
       // The next four members only deal with garbage collection
       // and should be passed back whenever an InstanceView is
       // passed back and is not remote
-      std::map<UniqueID,TaskUser> users;
-      std::map<UniqueID,TaskUser> added_users;
+      std::map<UniqueID,ReferenceTracker> users;
+      std::map<UniqueID,ReferenceTracker> added_users;
       std::map<Event,ReductionOpID> copy_users; // if redop > 0 then writing reduction, otherwise just a read
       std::map<Event,ReductionOpID> added_copy_users;
 #ifdef LEGION_SPY
-      std::map<UniqueID,TaskUser> deleted_users;
+      std::map<UniqueID,ReferenceTracker> deleted_users;
       std::map<Event,ReductionOpID> deleted_copy_users;
 #endif
       // The next three members deal with dependence analysis
       // and the state of the view, they should always entirely
       // be passed back
-      std::map<UniqueID,FieldMask> epoch_users;
+      std::map<std::pair<UniqueID,unsigned/*idx*/>,PhysicalUser> epoch_users;
       std::map<Event,FieldMask> epoch_copy_users;
       std::map<Event,FieldMask> valid_events;
       // These are users and valid events that would normally come
@@ -1408,6 +1460,8 @@ namespace LegionRuntime {
       std::vector<AliasedUser> packing_aliased_users;
       std::vector<AliasedCopyUser> packing_aliased_copy_users;
       std::vector<AliasedEvent> packing_aliased_valid_events;
+      // For packing trackers
+      std::map<UniqueID,int/*location*/> needed_trackers;
     };
 
     /////////////////////////////////////////////////////////////
@@ -1448,12 +1502,11 @@ namespace LegionRuntime {
       virtual InstanceView* as_instance_view(void) const { return NULL; }
       virtual ReductionView* as_reduction_view(void) const { return const_cast<ReductionView*>(this); } 
       virtual PhysicalManager* get_manager(void) const { return manager; }
-      virtual InstanceRef add_user(UniqueID uid, const PhysicalUser &user);
+      InstanceRef add_user(UniqueID uid, const PhysicalUser &user);
       InstanceRef add_init_user(UniqueID uid, const PhysicalUser &user);
       virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading);
       virtual void remove_user(UniqueID uid, unsigned refs, bool force);
       virtual void remove_copy(Event copy, bool force);
-      virtual const PhysicalUser& find_user(UniqueID uid) const;
       virtual void add_valid_reference(void);
       virtual void remove_valid_reference(void);
     public:
@@ -1463,9 +1516,9 @@ namespace LegionRuntime {
       inline PhysicalInstance get_instance(void) const { return manager->get_instance(); }
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &dst_fields);
+                                            std::vector<Domain::CopySrcDstField> &dst_fields);
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask, std::set<Event> &preconditions,
-                                            std::vector<IndexSpace::CopySrcDstField> &src_fields);
+                                            std::vector<Domain::CopySrcDstField> &src_fields);
       void perform_reduction(PhysicalView *dst, const FieldMask &reduce_mask, RegionMapper &rm);
       
       Event get_valid_event(const FieldMask &mask);
@@ -1520,13 +1573,17 @@ namespace LegionRuntime {
       InstanceRef(void);
       InstanceRef(Event ready, Memory loc, PhysicalInstance inst, 
                   PhysicalView *v, bool copy = false, Lock lock = Lock::NO_LOCK);
+      InstanceRef(PhysicalManager *m, Event ready, Memory loc, PhysicalInstance inst,
+                  bool copy = false, Lock lock = Lock::NO_LOCK);
     public:
-      inline bool is_virtual_ref(void) const { return (view == NULL); }
+      inline bool is_virtual_ref(void) const { return (!location.exists()); }
       inline Event get_ready_event(void) const { return ready_event; }
       inline bool has_required_lock(void) const { return required_lock.exists(); }
       inline Lock get_required_lock(void) const { return required_lock; }
       inline PhysicalInstance get_instance(void) const { return instance; }
-      inline PhysicalManager* get_manager(void) const { return view->get_manager(); }
+      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline Memory get_memory(void) const { return manager->get_location(); }
+      inline bool is_reduction_ref(void) const { return is_reduction; }
       void remove_reference(UniqueID uid, bool strict);
     private:
       friend class RegionTreeForest;
@@ -1535,7 +1592,9 @@ namespace LegionRuntime {
       Memory location;
       PhysicalInstance instance;
       bool copy;
+      bool is_reduction;
       PhysicalView *view;
+      PhysicalManager *manager;
     };
 
     /////////////////////////////////////////////////////////////

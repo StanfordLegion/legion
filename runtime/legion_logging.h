@@ -1,4 +1,4 @@
-/* Copyright 2012 Stanford University
+/* Copyright 2013 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,46 +33,48 @@ namespace LegionRuntime {
 
       extern Logger::Category log_spy;
 
+      static int next_point_id = 0;
+
       // Logger calls for the machine architecture
       static inline void log_utility_processor(unsigned unique_id)
       {
-        log_spy(LEVEL_INFO, "Utility %d", unique_id);
+        log_spy(LEVEL_INFO, "Utility %x", unique_id);
       }
 
       static inline void log_processor(unsigned unique_id, unsigned util_id, unsigned kind)
       {
-        log_spy(LEVEL_INFO, "Processor %d %d %d", unique_id, util_id, kind);
+        log_spy(LEVEL_INFO, "Processor %x %x %d", unique_id, util_id, kind);
       }
 
       static inline void log_memory(unsigned unique_id, size_t capacity)
       {
-        log_spy(LEVEL_INFO, "Memory %d %ld", unique_id, capacity);
+        log_spy(LEVEL_INFO, "Memory %x %ld", unique_id, capacity);
       }
 
       static inline void log_proc_mem_affinity(unsigned proc_id, unsigned mem_id, unsigned bandwidth, unsigned latency)
       {
-        log_spy(LEVEL_INFO, "Processor Memory %d %d %d %d", proc_id, mem_id, bandwidth, latency);
+        log_spy(LEVEL_INFO, "Processor Memory %x %x %d %d", proc_id, mem_id, bandwidth, latency);
       }
 
       static inline void log_mem_mem_affinity(unsigned mem1, unsigned mem2, unsigned bandwidth, unsigned latency)
       {
-        log_spy(LEVEL_INFO, "Memory Memory %d %d %d %d", mem1, mem2, bandwidth, latency);
+        log_spy(LEVEL_INFO, "Memory Memory %x %x %d %d", mem1, mem2, bandwidth, latency);
       }
 
       // Logger calls for the shape of region trees
       static inline void log_top_index_space(unsigned unique_id)
       {
-        log_spy(LEVEL_INFO,"Index Space %d", unique_id);
+        log_spy(LEVEL_INFO,"Index Space %x", unique_id);
       }
 
       static inline void log_index_partition(unsigned parent_id, unsigned unique_id, bool disjoint, unsigned color)
       {
-        log_spy(LEVEL_INFO,"Index Partition %d %d %d %d", parent_id, unique_id, disjoint, color);
+        log_spy(LEVEL_INFO,"Index Partition %x %d %d %d", parent_id, unique_id, disjoint, color);
       }
 
       static inline void log_index_subspace(unsigned parent_id, unsigned unique_id, unsigned color)
       {
-        log_spy(LEVEL_INFO,"Index Subspace %d %d %d", parent_id, unique_id, color);
+        log_spy(LEVEL_INFO,"Index Subspace %d %x %d", parent_id, unique_id, color);
       }
 
       static inline void log_field_space(unsigned unique_id)
@@ -87,28 +89,28 @@ namespace LegionRuntime {
 
       static inline void log_top_region(unsigned index_space, unsigned field_space, unsigned tree_id)
       {
-        log_spy(LEVEL_INFO,"Region %d %d %d", index_space, field_space, tree_id);
+        log_spy(LEVEL_INFO,"Region %x %d %d", index_space, field_space, tree_id);
       }
 
       // Logger calls for operations 
       static inline void log_top_level_task(unsigned hid, unsigned gen, unsigned unique_id, unsigned context, unsigned top_id)
       {
-        log_spy(LEVEL_INFO,"Top Task %d %d %d %d %d", hid, gen, context, unique_id, top_id);
+        log_spy(LEVEL_INFO,"Top Task %x %d %d %d %d", hid, gen, context, unique_id, top_id);
       }
 
       static inline void log_task_operation(unsigned unique_id, unsigned task_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen, bool index_space)
       {
-        log_spy(LEVEL_INFO,"Task Operation %d %d %d %d %d %d %d", unique_id, task_id, parent_id, parent_ctx, hid, gen, index_space);
+        log_spy(LEVEL_INFO,"Task Operation %d %d %d %d %x %d %d", unique_id, task_id, parent_id, parent_ctx, hid, gen, index_space);
       }
 
       static inline void log_mapping_operation(unsigned unique_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen)
       {
-        log_spy(LEVEL_INFO,"Mapping Operation %d %d %d %d %d", unique_id, parent_id, parent_ctx, hid, gen);
+        log_spy(LEVEL_INFO,"Mapping Operation %d %d %d %x %d", unique_id, parent_id, parent_ctx, hid, gen);
       }
 
       static inline void log_deletion_operation(unsigned unique_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen)
       {
-        log_spy(LEVEL_INFO,"Deletion Operation %d %d %d %d %d", unique_id, parent_id, parent_ctx, hid, gen);
+        log_spy(LEVEL_INFO,"Deletion Operation %d %d %d %x %d", unique_id, parent_id, parent_ctx, hid, gen);
       }
 
       static inline void log_task_name(unsigned unique_id, const char *name)
@@ -120,7 +122,7 @@ namespace LegionRuntime {
       static inline void log_logical_requirement(unsigned unique_id, unsigned index, bool region, unsigned index_component,
                             unsigned field_component, unsigned tree_id, unsigned privilege, unsigned coherence, unsigned redop)
       {
-        log_spy(LEVEL_INFO,"Logical Requirement %d %d %d %d %d %d %d %d %d", unique_id, index, region, index_component,
+        log_spy(LEVEL_INFO,"Logical Requirement %d %d %d %x %d %d %d %d %d", unique_id, index, region, index_component,
                                                 field_component, tree_id, privilege, coherence, redop);
       }
 
@@ -136,20 +138,20 @@ namespace LegionRuntime {
       static inline void log_mapping_dependence(unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen, unsigned prev_id, 
                                                 unsigned prev_idx, unsigned next_id, unsigned next_idx, unsigned dep_type)
       {
-        log_spy(LEVEL_INFO,"Mapping Dependence %d %d %d %d %d %d %d %d %d", parent_id, parent_ctx, hid, gen, prev_id, prev_idx, next_id, next_idx, dep_type);
+        log_spy(LEVEL_INFO,"Mapping Dependence %d %d %x %d %d %d %d %d %d", parent_id, parent_ctx, hid, gen, prev_id, prev_idx, next_id, next_idx, dep_type);
       }
 
       // Logger calls for physical dependence analysis
       static inline void log_task_instance_requirement(unsigned unique_id, unsigned ctx, unsigned gen, unsigned hid, unsigned idx, unsigned index)
       {
-        log_spy(LEVEL_INFO,"Task Instance Requirement %d %d %d %d %d %d", unique_id, ctx, gen, hid, idx, index);
+        log_spy(LEVEL_INFO,"Task Instance Requirement %d %d %d %x %d %x", unique_id, ctx, gen, hid, idx, index);
       }
 
       // Logger calls for events
       static inline void log_event_dependence(Event one, Event two)
       {
         if (one != two)
-          log_spy(LEVEL_INFO,"Event Event %d %d %d %d", one.id, one.gen, two.id, two.gen);
+          log_spy(LEVEL_INFO,"Event Event %x %d %x %d", one.id, one.gen, two.id, two.gen);
       }
 
       static inline void log_event_dependences(const std::set<Event> &preconditions, Event result)
@@ -158,26 +160,43 @@ namespace LegionRuntime {
               it != preconditions.end(); it++)
         {
           if (*it != result)
-            log_spy(LEVEL_INFO,"Event Event %d %d %d %d", it->id, it->gen, result.id, result.gen);
+            log_spy(LEVEL_INFO,"Event Event %x %d %x %d", it->id, it->gen, result.id, result.gen);
         }
       }
 
-      // TODO: figure out how to handle non-1-D points as well as points that aren't integers
-      static inline void log_task_events(unsigned hid, unsigned gen, unsigned ctx, unsigned unique_id, bool index_space, unsigned point, Event start_event, Event term_event)
+      static inline void log_task_events(unsigned hid, unsigned gen, unsigned ctx, unsigned unique_id, bool index_space, unsigned point, 
+                                          Event start_event, Event term_event)
       {
-        log_spy(LEVEL_INFO,"Task Events %d %d %d %d %d %d %d %d %d %d", hid, gen, ctx, unique_id, index_space, point, start_event.id, start_event.gen, term_event.id, term_event.gen);
+        log_spy(LEVEL_INFO,"Task Events %x %d %d %d %d %d %x %d %x %d", hid, gen, ctx, unique_id, index_space, point, start_event.id, start_event.gen, term_event.id, term_event.gen);
+      }
+
+      template<int DIM>
+      static inline void log_task_events(unsigned hid, unsigned gen, unsigned ctx, unsigned unique_id, bool index_space, Arrays::Point<DIM> point,
+                                          Event start_event, Event term_event)
+      {
+        int point_id = next_point_id++;
+        char point_buffer[128];
+        point_buffer[0] = '\0';
+        for (int i = 0; i < DIM; i++)
+        {
+          char idx_buffer[128];
+          sprintf(idx_buffer,"%d ", point[i]);
+          strcat(point_buffer,idx_buffer);
+        }
+        log_spy(LEVEL_INFO,"Point Value %d %d %s\n", DIM, point_id, point_buffer);
+        log_spy(LEVEL_INFO,"Point Task Events %x %d %d %d %d %d %x %d %x %d", hid, gen, ctx, unique_id, index_space, point_id, start_event.id, start_event.gen, term_event.id, term_event.gen);
       }
 
       static inline void log_index_task_termination(unsigned unique_id, Event term_event)
       {
-        log_spy(LEVEL_INFO,"Index Termination %d %d %d", unique_id, term_event.id, term_event.gen);
+        log_spy(LEVEL_INFO,"Index Termination %d %x %d", unique_id, term_event.id, term_event.gen);
       }
 
       static inline void log_copy_operation(unsigned src_manager_id, unsigned dst_manager_id,
                                             unsigned index_handle, unsigned field_handle, unsigned tree_id,
                                             Event start_event, Event term_event, const char *mask)
       {
-        log_spy(LEVEL_INFO,"Copy Events %d %d %d %d %d %d %d %d %d %s", src_manager_id, dst_manager_id,
+        log_spy(LEVEL_INFO,"Copy Events %d %d %x %d %d %x %d %x %d %s", src_manager_id, dst_manager_id,
           index_handle, field_handle, tree_id, start_event.id, start_event.gen, term_event.id, term_event.gen, mask);
       }
 
@@ -185,39 +204,39 @@ namespace LegionRuntime {
                                                  unsigned index_handle, unsigned field_handle, unsigned tree_id,
                                                  Event start_event, Event term_event, unsigned redop, const char *mask)
       {
-        log_spy(LEVEL_INFO,"Reduce Events %d %d %d %d %d %d %d %d %d %d %s", src_manager_id, dst_manager_id, 
+        log_spy(LEVEL_INFO,"Reduce Events %d %d %x %d %d %x %d %x %d %d %s", src_manager_id, dst_manager_id, 
           index_handle, field_handle, tree_id, start_event.id, start_event.gen, term_event.id, term_event.gen, redop, mask);
       }
 
       static inline void log_map_events(unsigned unique_id, Event start_event, Event term_event)
       {
-        log_spy(LEVEL_INFO, "Map Events %d %d %d %d %d", unique_id, start_event.id, start_event.gen, term_event.id, term_event.gen);
+        log_spy(LEVEL_INFO, "Map Events %d %x %d %x %d", unique_id, start_event.id, start_event.gen, term_event.id, term_event.gen);
       }
 
       // Logger calls for physical instances
       static inline void log_physical_instance(unsigned inst_id, unsigned mem_id, unsigned index_handle, unsigned field_handle, unsigned tree_id)
       {
-        log_spy(LEVEL_INFO, "Physical Instance %d %d %d %d %d", inst_id, mem_id, index_handle, field_handle, tree_id);
+        log_spy(LEVEL_INFO, "Physical Instance %x %x %x %d %d", inst_id, mem_id, index_handle, field_handle, tree_id);
       }
 
       static inline void log_instance_manager(unsigned inst_id, unsigned manager_id)
       {
-        log_spy(LEVEL_INFO, "Instance Manager %d %d", inst_id, manager_id);
+        log_spy(LEVEL_INFO, "Instance Manager %x %d", inst_id, manager_id);
       }
 
       static inline void log_physical_reduction(unsigned inst_id, unsigned mem_id, unsigned index_handle, unsigned field_handle, unsigned tree_id, bool fold, unsigned indirect_id = 0)
       {
-        log_spy(LEVEL_INFO, "Reduction Instance %d %d %d %d %d %d %d", inst_id, mem_id, index_handle, field_handle, tree_id, fold, indirect_id);
+        log_spy(LEVEL_INFO, "Reduction Instance %x %x %x %d %d %d %d", inst_id, mem_id, index_handle, field_handle, tree_id, fold, indirect_id);
       }
 
       static inline void log_reduction_manager(unsigned inst_id, unsigned manager_id)
       {
-        log_spy(LEVEL_INFO, "Reduction Manager %d %d", inst_id, manager_id);
+        log_spy(LEVEL_INFO, "Reduction Manager %x %d", inst_id, manager_id);
       }
 
       static inline void log_task_user(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned idx, unsigned manager_id)
       {
-        log_spy(LEVEL_INFO, "Task Instance User %d %d %d %d %d %d", uid, ctx, gen, hid, idx, manager_id);
+        log_spy(LEVEL_INFO, "Task Instance User %d %d %d %x %d %d", uid, ctx, gen, hid, idx, manager_id);
       }
 
       static inline void log_mapping_user(unsigned uid, unsigned manager_id)
@@ -228,17 +247,17 @@ namespace LegionRuntime {
       // Logger calls for timing information
       static inline void log_task_execution_information(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned proc_id)
       {
-        log_spy(LEVEL_INFO, "Execution Information %d %d %d %d %d", uid, ctx, gen, hid, proc_id); 
+        log_spy(LEVEL_INFO, "Execution Information %d %d %d %x %d", uid, ctx, gen, hid, proc_id); 
       }
 
       static inline void log_task_begin_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long start_time)
       {
-        log_spy(LEVEL_INFO, "Begin Task Timing %d %d %d %d %ld", uid, ctx, gen, hid, start_time);
+        log_spy(LEVEL_INFO, "Begin Task Timing %d %d %d %x %ld", uid, ctx, gen, hid, start_time);
       }
 
       static inline void log_task_end_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long end_time)
       {
-        log_spy(LEVEL_INFO, "End Task Timing %d %d %d %d %ld", uid, ctx, gen, hid, end_time);
+        log_spy(LEVEL_INFO, "End Task Timing %d %d %d %x %ld", uid, ctx, gen, hid, end_time);
       }
     };
 

@@ -1,4 +1,4 @@
-# Copyright 2012 Stanford University
+# Copyright 2013 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,13 +21,13 @@ endif
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols
 OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
-SHARED_LOWLEVEL=1	  # Use the shared low level
+#SHARED_LOWLEVEL=1	  # Use the shared low level
 #ALT_MAPPERS=1		  # Include the alternative mappers
 
 # Put the binary file name here
-OUTFILE		:= saxpy
+OUTFILE		:= saxpy_array
 # List all the application source files here
-GEN_SRC		:= saxpy.cc	# .cc files
+GEN_SRC		:= $(OUTFILE).cc	# .cc files
 GEN_GPU_SRC	:=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
