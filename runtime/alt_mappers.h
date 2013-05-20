@@ -37,7 +37,7 @@ namespace LegionRuntime {
       virtual void permit_task_steal(Processor thief, const std::vector<const Task*> &tasks,
                                       std::set<const Task*> &to_steal);
       virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping,
+                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,
@@ -60,7 +60,7 @@ namespace LegionRuntime {
       SharedMapper(Machine *m, HighLevelRuntime *rt, Processor local);
     public:
       virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping,
+                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,
@@ -88,7 +88,7 @@ namespace LegionRuntime {
     public:
       virtual bool spawn_child_task(const Task *task);
       virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping,
+                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,

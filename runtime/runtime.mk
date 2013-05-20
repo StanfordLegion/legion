@@ -80,7 +80,7 @@ endif
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
-MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc $(LG_RT_DIR)/mapping_utilities.cc
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifdef ALT_MAPPERS
 MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc

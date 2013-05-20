@@ -218,7 +218,8 @@ namespace LegionRuntime {
       // First make sure that all the privilege fields are valid for the given
       // fields space of the region or partition
       lock_context();
-      FieldSpace sp = (req.handle_type == SINGULAR) ? req.region.field_space : req.partition.field_space;
+      FieldSpace sp = (req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION)
+                          ? req.region.field_space : req.partition.field_space;
       for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
             it != req.privilege_fields.end(); it++)
       {
@@ -231,7 +232,7 @@ namespace LegionRuntime {
       }
 
       // Make sure that the requested node is a valid request
-      if (req.handle_type == SINGULAR)
+      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
         if (!forest_ctx->has_node(req.region, false/*strict*/))
         {
@@ -270,7 +271,7 @@ namespace LegionRuntime {
 
       // If this is a projection requirement and the child region selected will 
       // need to be in exclusive mode then the partition must be disjoint
-      if ((req.handle_type == PROJECTION) && 
+      if ((req.handle_type == PART_PROJECTION) && 
           (IS_WRITE(req)))
       {
         lock_context();
@@ -1032,7 +1033,7 @@ namespace LegionRuntime {
       FieldID bad_field;
       size_t bad_size;
       unsigned bad_idx;
-      if (requirement.handle_type == PROJECTION)
+      if ((requirement.handle_type == PART_PROJECTION) || (requirement.handle_type == REG_PROJECTION))
       {
         log_region(LEVEL_ERROR,"Projection region requirements are not permitted for inline mappings (in task %s)",
                                 parent_ctx->variants->name);
@@ -1060,7 +1061,8 @@ namespace LegionRuntime {
           }
         case ERROR_FIELD_SPACE_FIELD_MISMATCH:
           {
-            FieldSpace sp = (requirement.handle_type == SINGULAR) ? requirement.region.field_space : requirement.partition.field_space;
+            FieldSpace sp = (requirement.handle_type == SINGULAR) || (requirement.handle_type == REG_PROJECTION)
+                                            ? requirement.region.field_space : requirement.partition.field_space;
             log_region(LEVEL_ERROR,"Field %d is not a valid field of field space %d for inline mapping (ID %d)",
                                     bad_field, sp.id, get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2239,10 +2241,11 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        LegionSpy::log_logical_requirement(get_unique_id(), idx, (regions[idx].handle_type == SINGULAR),
-              (regions[idx].handle_type == SINGULAR) ? regions[idx].region.index_space.id : regions[idx].partition.index_partition,
-              (regions[idx].handle_type == SINGULAR) ? regions[idx].region.field_space.id : regions[idx].partition.field_space.id,
-              (regions[idx].handle_type == SINGULAR) ? regions[idx].region.tree_id : regions[idx].partition.tree_id,
+        bool singular = (regions[idx].handle_type == SINGULAR) || (regions[idx].handle_type == REG_PROJECTION);
+        LegionSpy::log_logical_requirement(get_unique_id(), idx, singular,
+              singular ? regions[idx].region.index_space.id : regions[idx].partition.index_partition,
+              singular ? regions[idx].region.field_space.id : regions[idx].partition.field_space.id,
+              singular ? regions[idx].region.tree_id : regions[idx].partition.tree_id,
               regions[idx].privilege, regions[idx].prop, regions[idx].redop);
         LegionSpy::log_requirement_fields(get_unique_id(), idx, regions[idx].privilege_fields);
       }
@@ -2335,7 +2338,8 @@ namespace LegionRuntime {
           size_t bad_size;
           unsigned bad_idx;
           LegionErrorType et = verify_requirement(regions[idx], bad_field, bad_size, bad_idx);
-          if ((et == NO_ERROR) && !is_index_space && (regions[idx].handle_type == PROJECTION))
+          if ((et == NO_ERROR) && !is_index_space && 
+              ((regions[idx].handle_type == PART_PROJECTION) || (regions[idx].handle_type == REG_PROJECTION)))
             et = ERROR_BAD_PROJECTION_USE;
           // If that worked, then check the privileges with the parent context
           if (et == NO_ERROR)
@@ -2384,7 +2388,8 @@ namespace LegionRuntime {
               }
             case ERROR_FIELD_SPACE_FIELD_MISMATCH:
               {
-                FieldSpace sp = (regions[idx].handle_type == SINGULAR) ? regions[idx].region.field_space : regions[idx].partition.field_space;
+                FieldSpace sp = (regions[idx].handle_type == SINGULAR) || (regions[idx].handle_type == REG_PROJECTION) 
+                                                ? regions[idx].region.field_space : regions[idx].partition.field_space;
                 log_region(LEVEL_ERROR,"Field %d is not a valid field of field space %d for region %d of task %s (ID %d)",
                                         bad_field, sp.id, idx, this->variants->name, get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2676,6 +2681,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::invoke_mapper_profile_task(Processor target)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock);
+      DetailedTimer::ScopedPush sp(TIME_MAPPER);
+      return mapper->profile_task_execution(this, target);
+    }
+
+    //--------------------------------------------------------------------------
     Processor TaskContext::invoke_mapper_select_target_proc(void)
     //--------------------------------------------------------------------------
     {
@@ -2726,6 +2740,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::invoke_mapper_notify_profiling(Processor target, const Mapper::ExecutionProfile &profile)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock);
+      DetailedTimer::ScopedPush sp(TIME_MAPPER);
+      mapper->notify_profiling_info(this, target, profile);
+    }
+
+    //--------------------------------------------------------------------------
     bool TaskContext::perform_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -2739,7 +2762,7 @@ namespace LegionRuntime {
         // Analyze everything in the parent contexts logical scope
         RegionAnalyzer az(parent_ctx->ctx_id, this, idx, regions[idx]);
         // Compute the path to path to the destination
-        if (regions[idx].handle_type == SINGULAR)
+        if ((regions[idx].handle_type == SINGULAR) || (regions[idx].handle_type == REG_PROJECTION))
           forest_ctx->compute_index_path(regions[idx].parent.index_space, 
                                           regions[idx].region.index_space, az.path);
         else
@@ -3000,6 +3023,7 @@ namespace LegionRuntime {
         low_id = 0;
         unmapped = 0;
         notify_runtime = false;
+        profile_task = false;
       }
       return activated;
     }
@@ -3925,7 +3949,7 @@ namespace LegionRuntime {
         {
           // Check that there is a path between the parent and the child
           lock_context();
-          if (req.handle_type == SINGULAR)
+          if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
           {
             std::vector<unsigned> path;
             if (!forest_ctx->compute_index_path(req.parent.index_space, req.region.index_space, path))
@@ -3959,7 +3983,7 @@ namespace LegionRuntime {
           }
           if (req.privilege & (~(it->privilege)))
           {
-            if (req.handle_type == SINGULAR)
+            if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
               return ERROR_BAD_REGION_PRIVILEGES;
             else
               return ERROR_BAD_PARTITION_PRIVILEGES;
@@ -3972,7 +3996,7 @@ namespace LegionRuntime {
       {
         // Check that there is a path between the parent and the child
         lock_context();
-        if (req.handle_type == SINGULAR)
+        if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
         {
           std::vector<unsigned> path;
           if (!forest_ctx->compute_index_path(req.parent.index_space, req.region.index_space, path))
@@ -4045,6 +4069,8 @@ namespace LegionRuntime {
                                     physical_instances[idx].get_manager()->get_unique_id());
 #endif
       } 
+      if (this->profile_task)
+        this->exec_profile.start_time = (TimeStamp::get_current_time_in_micros() - HighLevelRuntime::init_time);
     }
 
     //--------------------------------------------------------------------------
@@ -4052,6 +4078,11 @@ namespace LegionRuntime {
                       std::vector<PhysicalRegion> &physical_regions, bool owner)
     //--------------------------------------------------------------------------
     {
+      if (this->profile_task)
+      {
+        this->exec_profile.stop_time = (TimeStamp::get_current_time_in_micros() - HighLevelRuntime::init_time);
+        invoke_mapper_notify_profiling(this->executing_processor, this->exec_profile);
+      }
       // Tell the runtime that we're done with this task
       runtime->decrement_processor_executing(this->executing_processor);
       // Clean up some of our stuff from the task execution
@@ -4695,6 +4726,8 @@ namespace LegionRuntime {
         forest_ctx->unlock_context();
         // Since the mapping was a success we now know that we're going to run on this processor
         this->executing_processor = target;
+        // Ask the mapper if it wants to profile this task
+        this->profile_task = invoke_mapper_profile_task(target);
       }
       else
       {
@@ -7069,65 +7102,97 @@ namespace LegionRuntime {
         }
         else
         {
-          Color subregion_color;
+          LogicalRegion region_handle;
+          LogicalRegion parent_handle;
           // We need to compute the projected function based on this point
           if (it->projection == 0)
           {
-	    switch(index_point.get_dim()) {
-	    case 0:
-	      {
-		subregion_color = unsigned(index_point.get_index());
-		break;
-	      }
+            if (it->handle_type == PART_PROJECTION)
+            {
+              Color subregion_color;
+              switch(index_point.get_dim()) {
+              case 0:
+                {
+                  subregion_color = unsigned(index_point.get_index());
+                  break;
+                }
 
-	    case 1:
-	      {
-		Arrays::Rect<1> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
-											  false).get_rect<1>();
-		Arrays::CArrayLinearization<1> color_space_lin(color_space);
-		subregion_color = (Color)(color_space_lin.image(index_point.get_point<1>()));
-		break;
-	      }
+              case 1:
+                {
+                  Arrays::Rect<1> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
+                                                                                            false).get_rect<1>();
+                  Arrays::CArrayLinearization<1> color_space_lin(color_space);
+                  subregion_color = (Color)(color_space_lin.image(index_point.get_point<1>()));
+                  break;
+                }
 
-	    case 2:
-	      {
-		Arrays::Rect<2> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
-											  false).get_rect<2>();
-		Arrays::CArrayLinearization<2> color_space_lin(color_space);
-		subregion_color = (Color)(color_space_lin.image(index_point.get_point<2>()));
-		break;
-	      }
+              case 2:
+                {
+                  Arrays::Rect<2> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
+                                                                                            false).get_rect<2>();
+                  Arrays::CArrayLinearization<2> color_space_lin(color_space);
+                  subregion_color = (Color)(color_space_lin.image(index_point.get_point<2>()));
+                  break;
+                }
 
-	    case 3:
-	      {
-		Arrays::Rect<3> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
-											  false).get_rect<3>();
-		Arrays::CArrayLinearization<3> color_space_lin(color_space);
-		subregion_color = (Color)(color_space_lin.image(index_point.get_point<3>()));
-		break;
-	      }
+              case 3:
+                {
+                  Arrays::Rect<3> color_space = forest_ctx->get_index_partition_color_space(it->partition.get_index_partition(), 
+                                                                                            false).get_rect<3>();
+                  Arrays::CArrayLinearization<3> color_space_lin(color_space);
+                  subregion_color = (Color)(color_space_lin.image(index_point.get_point<3>()));
+                  break;
+                }
 
-	    default:
-              log_task(LEVEL_ERROR,"Projection ID 0 is invalid for tasks whose points"
-                                  " are not one dimensional unsigned integers.  Points for "
-                                  "task %s have elements of %d dimensions",
-                                  this->variants->name, index_point.get_dim());
+              default:
+                log_task(LEVEL_ERROR,"Projection ID 0 is invalid for tasks whose points"
+                                    " are not one dimensional unsigned integers.  Points for "
+                                    "task %s have elements of %d dimensions",
+                                    this->variants->name, index_point.get_dim());
 #ifdef DEBUG_HIGH_LEVEL
-              assert(false);
+                assert(false);
 #endif
-              exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
+                exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
+              }
+              lock_context();
+              region_handle = forest_ctx->get_partition_subcolor(it->partition, 
+                                            subregion_color, true/*can create*/);
+              parent_handle = forest_ctx->get_partition_parent(it->partition);
+              unlock_context();
             }
+            else
+            {
+              // The default thing to do for region projection is to use the region
+              region_handle = it->region;
+              parent_handle = it->region;
+            }
+          }
+          else if (it->handle_type == PART_PROJECTION)
+          {
+            PartitionProjectionFnptr projfn = HighLevelRuntime::find_partition_projection_function(it->projection);
+            // Compute the logical region for this point
+            region_handle = (*projfn)(it->partition,index_point,runtime);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(region_handle != LogicalRegion::NO_REGION);
+#endif
+            // Get the parent handle
+            lock_context();
+            parent_handle = forest_ctx->get_partition_parent(it->partition);
+            unlock_context();
           }
           else
           {
-            ProjectionFnptr projfn = HighLevelRuntime::find_projection_function(it->projection);
-            // Compute the color for the subregion that we want
-            subregion_color = (*projfn)(index_point);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(it->handle_type == REG_PROJECTION);
+#endif
+            RegionProjectionFnptr projfn = HighLevelRuntime::find_region_projection_function(it->projection);
+            // Compute the logical region for this point
+            region_handle = (*projfn)(it->region,index_point,runtime);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(region_handle != LogicalRegion::NO_REGION);
+#endif
+            parent_handle = it->region;
           }
-          lock_context();
-          LogicalRegion region_handle = forest_ctx->get_partition_subcolor(it->partition, subregion_color, true/*can create*/);
-          LogicalRegion parent_handle = forest_ctx->get_partition_parent(it->partition);
-          unlock_context();
           // We use different constructors for reductions
           if (it->redop == 0)
           {
@@ -7425,7 +7490,7 @@ namespace LegionRuntime {
                                 parent_ctx->get_executing_processor(), termination_event, termination_event,
                                 tag, true/*sanitizing*/, false/*inline mapping*/,
                                 source_copy_instances);
-        if (regions[idx].handle_type == SINGULAR)
+        if ((regions[idx].handle_type == SINGULAR) || (regions[idx].handle_type == REG_PROJECTION))
         {
 #ifdef DEBUG_HIGH_LEVEL
           bool result = 
@@ -8197,6 +8262,7 @@ namespace LegionRuntime {
           derez.deserialize(num_regions);
           std::set<LogicalRegion> touched_regions;
           // Pretend this is a single region coming back
+          HandleType handle_holder = regions[idx].handle_type;
           regions[idx].handle_type = SINGULAR;
           for (unsigned cnt = 0; cnt < num_regions; cnt++)
           {
@@ -8213,7 +8279,7 @@ namespace LegionRuntime {
                                                         );
           }
           // Set the handle type back
-          regions[idx].handle_type = PROJECTION;
+          regions[idx].handle_type = handle_holder;
           // If this is not a DIFF, then check to make sure we didn't overlap
           // slices at any point.  If it is a DIFF then we already did this check
           // when having the PHYSICAL parts come back
@@ -9375,7 +9441,8 @@ namespace LegionRuntime {
         // Also check for overlapping slices
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-          if ((regions[idx].handle_type == PROJECTION) &&
+          if (((regions[idx].handle_type == PART_PROJECTION) || 
+               (regions[idx].handle_type == REG_PROJECTION)) &&
               (IS_WRITE(regions[idx])))
           {
             std::set<LogicalRegion> touched_regions;

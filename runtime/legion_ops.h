@@ -528,9 +528,11 @@ namespace LegionRuntime {
       bool invoke_mapper_locally_mapped(void);
       bool invoke_mapper_stealable(void);
       bool invoke_mapper_map_region_virtual(unsigned idx, Processor target);
+      bool invoke_mapper_profile_task(Processor target);
       Processor invoke_mapper_select_target_proc(void);
       Processor::TaskFuncID invoke_mapper_select_variant(Processor target);
       void invoke_mapper_failed_mapping(unsigned idx, Processor target);
+      void invoke_mapper_notify_profiling(Processor target, const Mapper::ExecutionProfile &profile);
     protected:
       void clone_task_context_from(TaskContext *rhs);
     protected:
@@ -747,6 +749,9 @@ namespace LegionRuntime {
 #endif
       // For packing up return created fields
       std::map<unsigned,std::vector<FieldID> > need_pack_created_fields;
+      // For doing profiling of a task's execution
+      bool profile_task;
+      Mapper::ExecutionProfile exec_profile;
     };
 
     /////////////////////////////////////////////////////////////

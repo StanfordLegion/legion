@@ -67,6 +67,7 @@ namespace LegionRuntime {
     public:
       inline LogicalRegion& operator=(const LogicalRegion &rhs);
       inline bool operator==(const LogicalRegion &rhs) const;
+      inline bool operator!=(const LogicalRegion &rhs) const;
       inline bool operator<(const LogicalRegion &rhs) const;
     public:
       inline IndexSpace get_index_space(void) const;
@@ -95,6 +96,7 @@ namespace LegionRuntime {
     public:
       inline LogicalPartition& operator=(const LogicalPartition &rhs);
       inline bool operator==(const LogicalPartition &rhs) const;
+      inline bool operator!=(const LogicalPartition &rhs) const;
       inline bool operator<(const LogicalPartition &rhs) const;
     public:
       inline IndexPartition get_index_partition(void) const;
@@ -192,7 +194,7 @@ namespace LegionRuntime {
       const Processor::TaskFuncID user_id;
       const char *name;
       const bool leaf;
-    private:
+    public:
       std::map<VariantID,Variant> variants;
     };
 
@@ -462,6 +464,13 @@ namespace LegionRuntime {
                         PrivilegeMode _priv, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+
+      RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        const std::set<FieldID> &privilege_fields,
+                        const std::vector<FieldID> &instance_fields,
+                        PrivilegeMode _priv, CoherenceProperty _prop,
+                        LogicalRegion _parent, MappingTagID _tag = 0,
+                        bool _verified = false, TypeHandle _inst = 0);
       
       // Corresponding region requirements for reductions
       // Notice you pass a ReductionOpID instead of a Privilege
@@ -476,6 +485,11 @@ namespace LegionRuntime {
                         ReductionOpID op, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+      RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        const std::set<FieldID> &privilege_fields,
+                        const std::vector<FieldID> &instance_fields,
+                        ReductionOpID op, CoherenceProperty _prop, LogicalRegion _parent,
+                        MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
 
     public:
       // For use by the SizedRegionRequirement class
@@ -487,6 +501,9 @@ namespace LegionRuntime {
                         PrivilegeMode _priv, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+      RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        PrivilegeMode _priv, CoherenceProperty _prop, LogicalRegion _parent,
+                        MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
       RegionRequirement(LogicalRegion _handle,
                         ReductionOpID op, CoherenceProperty _prop, LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
@@ -494,6 +511,9 @@ namespace LegionRuntime {
                         ReductionOpID op, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+      RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        ReductionOpID op, CoherenceProperty _prop, LogicalRegion _parent,
+                        MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
     public:
       // For adding fields, will always add to privilege, optional add to instance
       inline void add_field(FieldID fid, bool instance = true);
@@ -534,6 +554,12 @@ namespace LegionRuntime {
                         PrivilegeMode _priv, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+      SizedRegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        FieldID privilege_fields[NUM_PRIV],
+                        FieldID instance_fields[NUM_INST],
+                        PrivilegeMode _priv, CoherenceProperty _prop,
+                        LogicalRegion _parent,
+                        MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
       
       // Corresponding region requirements for reductions
       // Notice you pass a ReductionOpID instead of a Privilege
@@ -548,6 +574,12 @@ namespace LegionRuntime {
                         ReductionOpID op, CoherenceProperty _prop,
                         LogicalRegion _parent,
 			MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
+      SizedRegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        FieldID privilege_fields[NUM_PRIV],
+                        FieldID instance_fields[NUM_INST],
+                        ReductionOpID op, CoherenceProperty _prop,
+                        LogicalRegion _parent,
+                        MappingTagID _tag = 0, bool _verified = false, TypeHandle _inst = 0);
     };
 
 // Namespaces and enums aren't very friendly with each
@@ -763,8 +795,10 @@ namespace LegionRuntime {
     public:
       // Register a projection function for mapping from a point in an index space to
       // a point in a partition
-      template<Color (*PROJ_PTR)(const DomainPoint&)>
-      static ProjectionID register_projection_function(ProjectionID handle);
+      template<LogicalRegion (*PROJ_PTR)(LogicalRegion,const DomainPoint&,HighLevelRuntime*)>
+      static ProjectionID register_region_projection_function(ProjectionID handle);
+      template<LogicalRegion (*PROJ_PTR)(LogicalPartition,const DomainPoint&,HighLevelRuntime*)>
+      static ProjectionID register_partition_projection_function(ProjectionID handle);
     protected:
       friend class LowLevel::Processor;
       // Static methods for calls from the processor to the high level runtime
@@ -789,13 +823,15 @@ namespace LegionRuntime {
       static LowLevel::ReductionOpTable& get_reduction_table(void); 
       static std::map<Processor::TaskFuncID,TaskVariantCollection*>& get_collection_table(void);
       static TypeTable& get_type_table(void);
-      static ProjectionTable& get_projection_table(void);
+      static RegionProjectionTable& get_region_projection_table(void);
+      static PartitionProjectionTable& get_partition_projection_table(void);
       static TaskID update_collection_table(void (*low_level_ptr)(const void *,size_t,Processor),
                                           TaskID uid, const char *name, bool index_space,
                                           Processor::Kind proc_kind, bool leaf);
       static void register_runtime_tasks(Processor::TaskIDTable &table);
       static TaskVariantCollection* find_collection(Processor::TaskFuncID tid);
-      static ProjectionFnptr find_projection_function(ProjectionID pid);
+      static RegionProjectionFnptr find_region_projection_function(ProjectionID pid);
+      static PartitionProjectionFnptr find_partition_projection_function(ProjectionID pid);
     protected:
       static bool is_subtype(TypeHandle parent, TypeHandle child);
     private:
@@ -1151,6 +1187,7 @@ namespace LegionRuntime {
       static HighLevelRuntime **runtime_map;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
+      static const long long init_time;
 #ifdef INORDER_EXECUTION
       static bool program_order_execution;
 #endif
@@ -1387,6 +1424,11 @@ namespace LegionRuntime {
         bool recurse;
         bool stealable;
       };
+      struct ExecutionProfile {
+      public:
+        unsigned long long start_time; // In micro-seconds since program start
+        unsigned long long stop_time; // In micro-seconds since program start
+      };
     public:
       Mapper(void) { }
       virtual ~Mapper(void) { }
@@ -1473,7 +1515,7 @@ namespace LegionRuntime {
        * Return true if the mapper wants to be notified of the result, otherwise return false.
        */
       virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping,
+                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,
@@ -1546,6 +1588,18 @@ namespace LegionRuntime {
       virtual void rank_copy_sources(const std::set<Memory> &current_instances,
                                      const Memory &dst, std::vector<Memory> &chosen_order) = 0;
 
+      /**
+       * Indicate whether this task's execution should be profiled by the runtime.
+       * If it is then the runtime will call notify_profiling_info once the task
+       * has finished executing.
+       */
+      virtual bool profile_task_execution(const Task *task, Processor target) = 0;
+
+      /**
+       * The callback containing the profiling information for the task after it
+       * has finished executing.
+       */
+      virtual void notify_profiling_info(const Task *task, Processor target, const ExecutionProfile &profiling) = 0; 
 
       /**
        * Ask the mapper for a given predicate if it would like to speculate and if
@@ -2036,6 +2090,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline bool LogicalRegion::operator!=(const LogicalRegion &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (!((*this) == rhs));
+    }
+
+    //--------------------------------------------------------------------------
     inline bool LogicalRegion::operator<(const LogicalRegion &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -2149,6 +2210,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline bool LogicalPartition::operator!=(const LogicalPartition &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (!((*this) == rhs));
+    }
+
+    //--------------------------------------------------------------------------
     inline bool LogicalPartition::operator<(const LogicalPartition &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -2197,10 +2265,27 @@ namespace LegionRuntime {
     template<int NUM_PRIV, int NUM_INST>
     SizedRegionRequirement<NUM_PRIV,NUM_INST>::SizedRegionRequirement(LogicalPartition pid, ProjectionID _proj,
                         FieldID priv_fields[NUM_PRIV], FieldID inst_fields[NUM_INST],
-                        PrivilegeMode _priv, CoherenceProperty _prop,LogicalRegion _parent,
+                        PrivilegeMode _priv, CoherenceProperty _prop, LogicalRegion _parent,
 			MappingTagID _tag /*= 0*/, bool _verified /*= false*/,
                         TypeHandle _inst /*= 0*/)
       : RegionRequirement(pid, _proj, _priv, _prop, _parent, _tag, _verified, _inst)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NUM_PRIV; idx++)
+        privilege_fields.insert(priv_fields[idx]);
+      instance_fields.resize(NUM_INST);
+      for (unsigned idx = 0; idx < NUM_INST; idx++)
+        instance_fields[idx] = inst_fields[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    template<int NUM_PRIV, int NUM_INST>
+    SizedRegionRequirement<NUM_PRIV,NUM_INST>::SizedRegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        FieldID priv_fields[NUM_PRIV], FieldID inst_fields[NUM_INST],
+                        PrivilegeMode _priv, CoherenceProperty _prop, LogicalRegion _parent,
+                        MappingTagID _tag /*= 0*/, bool _verified /*= false*/,
+                        TypeHandle _inst /*= 0*/)
+      : RegionRequirement(_handle, _proj, _priv, _prop, _parent, _tag, _verified, _inst)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < NUM_PRIV; idx++)
@@ -2235,6 +2320,23 @@ namespace LegionRuntime {
 			MappingTagID _tag /*= 0*/, bool _verified /*= false*/,
                         TypeHandle _inst /*= 0*/)
       : RegionRequirement(pid, _proj, op, _prop, _parent, _tag, _verified, _inst)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < NUM_PRIV; idx++)
+        privilege_fields.insert(priv_fields[idx]);
+      instance_fields.resize(NUM_INST);
+      for (unsigned idx = 0; idx < NUM_INST; idx++)
+        instance_fields[idx] = inst_fields[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    template<int NUM_PRIV, int NUM_INST>
+    SizedRegionRequirement<NUM_PRIV,NUM_INST>::SizedRegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        FieldID priv_fields[NUM_PRIV], FieldID inst_fields[NUM_INST],
+                        ReductionOpID op, CoherenceProperty _prop, LogicalRegion _parent,
+                        MappingTagID _tag /*= 0*/, bool _verified /*= false*/,
+                        TypeHandle _inst /*= 0*/)
+      : RegionRequirement(_handle, _proj, op, _prop, _parent, _tag, _verified, _inst)
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < NUM_PRIV; idx++)
@@ -2944,8 +3046,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<Color (*PROJ_PTR)(const DomainPoint&)>
-    /*static*/ ProjectionID HighLevelRuntime::register_projection_function(ProjectionID handle)
+    template<LogicalRegion (*PROJ_PTR)(LogicalRegion,const DomainPoint&,HighLevelRuntime*)>
+    /*static*/ ProjectionID HighLevelRuntime::register_region_projection_function(ProjectionID handle)
     //--------------------------------------------------------------------------
     {
       if (handle == 0)
@@ -2956,10 +3058,51 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
-      ProjectionTable &proj_table = HighLevelRuntime::get_projection_table();
+      RegionProjectionTable &proj_table = HighLevelRuntime::get_region_projection_table();
       if (proj_table.find(handle) != proj_table.end())
       {
-        fprintf(stderr,"ERROR: ProjectionID %d has already been used in the projection table\n",handle);
+        fprintf(stderr,"ERROR: ProjectionID %d has already been used in the region projection table\n",handle);
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_PROJECTION_ID);
+      }
+      if (handle == AUTO_GENERATE_ID)
+      {
+        for (ProjectionID idx = 1; idx < AUTO_GENERATE_ID; idx++)
+        {
+          if (proj_table.find(idx) == proj_table.end())
+          {
+            handle = idx;
+            break;
+          }
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        // We should never run out of type handles
+        assert(handle != AUTO_GENERATE_ID);
+#endif
+      }
+      proj_table[handle] = PROJ_PTR;  
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    template<LogicalRegion (*PROJ_PTR)(LogicalPartition,const DomainPoint&,HighLevelRuntime*)>
+    /*static*/ ProjectionID HighLevelRuntime::register_partition_projection_function(ProjectionID handle)
+    //--------------------------------------------------------------------------
+    {
+      if (handle == 0)
+      {
+        fprintf(stderr,"ERROR: ProjectionID zero is reserved.\n");
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_PROJECTION_ID);
+      }
+      PartitionProjectionTable &proj_table = HighLevelRuntime::get_partition_projection_table();
+      if (proj_table.find(handle) != proj_table.end())
+      {
+        fprintf(stderr,"ERROR: ProjectionID %d has already been used in the partition projection table\n",handle);
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
 #endif

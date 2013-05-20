@@ -64,7 +64,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------------------------
     bool DebugMapper::map_task_region(const Task *task, Processor target, 
-                                      MappingTagID tag, bool inline_mapping,
+                                      MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                       const RegionRequirement &req, unsigned index,
                                       const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                       std::vector<Memory> &target_ranking,
@@ -77,7 +77,11 @@ namespace LegionRuntime {
           req.region.get_tree_id(), task->variants->name,
           task->task_id, task->get_unique_task_id(), local_proc.id);
       // Always move things into the last memory in our stack
-      target_ranking.push_back(memory_stacks[local_proc].back());
+      std::vector<Memory> memory_stack;
+      machine_interface.find_memory_stack(target, memory_stack, 
+          (machine->get_processor_kind(target) == Processor::LOC_PROC));
+      assert(!memory_stack.empty());
+      target_ranking.push_back(memory_stack.back());
       enable_WAR_optimization = false;
       return true;
     }
@@ -95,7 +99,10 @@ namespace LegionRuntime {
       log_debug(LEVEL_SPEW,"Rank copy targets in debug mapper for task %s (ID %d) (unique id %d) "
           "on processor %x", task->variants->name, task->task_id, task->get_unique_task_id(), local_proc.id);
       // Always map things into the last memory in our stack
-      Memory last = memory_stacks[local_proc].back();
+      std::vector<Memory> memory_stack;
+      machine_interface.find_memory_stack(target, memory_stack, 
+                                          (machine->get_processor_kind(target) == Processor::LOC_PROC));
+      Memory last = memory_stack.back();
       if (current_instances.find(last) != current_instances.end())
         to_reuse.insert(last);
       else
@@ -146,7 +153,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------------------------
     bool SharedMapper::map_task_region(const Task *task, Processor target, 
-                                       MappingTagID tag, bool inline_mapping,
+                                       MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                        const RegionRequirement &req, unsigned index,
                                        const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                        std::vector<Memory> &target_ranking,
@@ -203,7 +210,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------------------------
     bool SequoiaMapper::map_task_region(const Task *task, Processor target, 
-                                        MappingTagID tag, bool inline_mapping,
+                                        MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                         const RegionRequirement &req, unsigned index,
                                         const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                         std::vector<Memory> &target_ranking,
@@ -218,17 +225,19 @@ namespace LegionRuntime {
       // Perform a Sequoia-like creation of instances.  If this is the first instance, put
       // it in the global memory, otherwise find the instance closest to the processor and
       // select one memory closer.
+      std::vector<Memory> memory_stack;
+      machine_interface.find_memory_stack(target, memory_stack,
+                              (machine->get_processor_kind(target) == Processor::LOC_PROC));
       if (current_instances.empty())
       {
         log_sequoia(LEVEL_DEBUG,"No prior instances for region (%x,%x,%d) on processor %x",
             req.region.get_index_space().id, req.region.get_field_space().get_id(),
             req.region.get_tree_id(), local_proc.id);
-        target_ranking.push_back(memory_stacks[local_proc].back());
+        target_ranking.push_back(memory_stack.back());
       }
       else
       {
         // Find the current instance closest to the processor, list from one closer
-        const std::vector<Memory> &memory_stack = memory_stacks[local_proc];
         unsigned closest_idx = memory_stack.size() - 1;
         for (unsigned idx = 0; idx < memory_stack.size(); idx++)
         {
@@ -269,14 +278,16 @@ namespace LegionRuntime {
           "on processor %x", task->variants->name, task->task_id, task->get_unique_task_id(), local_proc.id);
       // This is also Sequoia-like creation of instances.  Find the least common denominator
       // in our stack and pick that memory followed by any memories after it back to the global memory
+      std::vector<Memory> memory_stack;
+      machine_interface.find_memory_stack(target, memory_stack, 
+                            (machine->get_processor_kind(target) == Processor::LOC_PROC));
       if (current_instances.empty())
       {
-        to_create.push_back(memory_stacks[local_proc].back());
+        to_create.push_back(memory_stack.back());
         create_one = true;
       }
       else
       {
-        std::vector<Memory> &memory_stack = memory_stacks[local_proc];
         unsigned last_idx = memory_stack.size()-1;
         for (unsigned idx = memory_stack.size()-1; idx >= 0; idx--)
         {

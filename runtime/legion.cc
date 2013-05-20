@@ -681,7 +681,7 @@ namespace LegionRuntime {
 					 MappingTagID _tag, bool _verified, TypeHandle _inst)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), verified(_verified), sanitized(false), 
-        handle_type(SINGULAR), inst_type(_inst)
+        handle_type(SINGULAR), projection(0), inst_type(_inst)
     //--------------------------------------------------------------------------
     { 
       privilege_fields = priv_fields;
@@ -705,9 +705,33 @@ namespace LegionRuntime {
                 TypeHandle _inst)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), verified(_verified), sanitized(false), 
-        handle_type(PROJECTION), projection(_proj), inst_type(_inst)
+        handle_type(PART_PROJECTION), projection(_proj), inst_type(_inst)
     //--------------------------------------------------------------------------
     { 
+      privilege_fields = priv_fields;
+      instance_fields = inst_fields;
+#ifdef DEBUG_HIGH_LEVEL
+      if (IS_REDUCE(*this))
+      {
+        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
+        exit(ERROR_USE_REDUCTION_REGION_REQ);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                const std::set<FieldID> &priv_fields,
+                const std::vector<FieldID> &inst_fields,
+                PrivilegeMode _priv, CoherenceProperty _prop,
+                LogicalRegion _parent, MappingTagID _tag, bool _verified,
+                TypeHandle _inst)
+      : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
+        redop(0), tag(_tag), verified(_verified), sanitized(false),
+        handle_type(REG_PROJECTION), projection(_proj), inst_type(_inst)
+    //--------------------------------------------------------------------------
+    {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
 #ifdef DEBUG_HIGH_LEVEL
@@ -753,7 +777,31 @@ namespace LegionRuntime {
                         TypeHandle _inst)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), verified(_verified), sanitized(false), 
-        handle_type(PROJECTION), projection(_proj), inst_type(_inst)
+        handle_type(PART_PROJECTION), projection(_proj), inst_type(_inst)
+    //--------------------------------------------------------------------------
+    {
+      privilege_fields = priv_fields;
+      instance_fields = inst_fields;
+#ifdef DEBUG_HIGH_LEVEL
+      if (redop == 0)
+      {
+        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
+        exit(ERROR_RESERVED_REDOP_ID);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        const std::set<FieldID> &priv_fields,
+                        const std::vector<FieldID> &inst_fields,
+                        ReductionOpID op, CoherenceProperty _prop,
+                        LogicalRegion _parent, MappingTagID _tag, bool _verified,
+                        TypeHandle _inst)
+      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), verified(_verified), sanitized(false),
+        handle_type(REG_PROJECTION), projection(_proj), inst_type(_inst)
     //--------------------------------------------------------------------------
     {
       privilege_fields = priv_fields;
@@ -794,9 +842,29 @@ namespace LegionRuntime {
                 TypeHandle _inst)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
         redop(0), tag(_tag), verified(_verified), sanitized(false), 
-        handle_type(PROJECTION), projection(_proj), inst_type(_inst)
+        handle_type(PART_PROJECTION), projection(_proj), inst_type(_inst)
     //--------------------------------------------------------------------------
     { 
+#ifdef DEBUG_HIGH_LEVEL
+      if (IS_REDUCE(*this))
+      {
+        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement constructor for reductions");
+        assert(false);
+        exit(ERROR_USE_REDUCTION_REGION_REQ);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                  PrivilegeMode _priv, CoherenceProperty _prop,
+                  LogicalRegion _parent, MappingTagID _tag, bool _verified,
+                  TypeHandle _inst)
+      : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
+        redop(0), tag(_tag), verified(_verified), sanitized(false),
+        handle_type(REG_PROJECTION), projection(_proj), inst_type(_inst)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
@@ -834,7 +902,7 @@ namespace LegionRuntime {
                         TypeHandle _inst)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
         redop(op), tag(_tag), verified(_verified), sanitized(false),
-        handle_type(PROJECTION), projection(_proj), inst_type(_inst)
+        handle_type(PART_PROJECTION), projection(_proj), inst_type(_inst)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -847,6 +915,25 @@ namespace LegionRuntime {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    RegionRequirement::RegionRequirement(LogicalRegion _handle, ProjectionID _proj,
+                        ReductionOpID op, CoherenceProperty _prop,
+                        LogicalRegion _parent, MappingTagID _tag, bool _verified,
+                        TypeHandle _inst)
+      : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
+        redop(op), tag(_tag), verified(_verified), sanitized(false),
+        handle_type(REG_PROJECTION), projection(_proj), inst_type(_inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (redop == 0)
+      {
+        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        assert(false);
+        exit(ERROR_RESERVED_REDOP_ID);
+      }
+#endif
+    }
 
     //--------------------------------------------------------------------------
     bool RegionRequirement::operator==(const RegionRequirement &rhs) const
@@ -858,7 +945,8 @@ namespace LegionRuntime {
           (sanitized == rhs.sanitized) && (inst_type == rhs.inst_type))
       {
         if (((handle_type == SINGULAR) && (region == rhs.region)) ||
-            ((handle_type == PROJECTION) && (partition == rhs.partition) && (projection == rhs.projection)))
+            ((handle_type == PART_PROJECTION) && (partition == rhs.partition) && (projection == rhs.projection)) ||
+            ((handle_type == REG_PROJECTION) && (region == rhs.region)))
         {
           if ((privilege_fields.size() == rhs.privilege_fields.size()) &&
               (instance_fields.size() == rhs.instance_fields.size()))
@@ -942,11 +1030,20 @@ namespace LegionRuntime {
                           {
                             if (handle_type == SINGULAR)
                               return (region < rhs.region);
-                            else
+                            else if (handle_type == PART_PROJECTION)
                             {
                               if (partition < rhs.partition)
                                 return true;
-                              else if (!(partition == rhs.partition)) // therefore greater than
+                              else if (partition != rhs.partition) // therefore greater than
+                                return false;
+                              else
+                                return (projection < rhs.projection);
+                            }
+                            else
+                            {
+                              if (region < rhs.region)
+                                return true;
+                              else if (region != rhs.region)
                                 return false;
                               else
                                 return (projection < rhs.projection);
@@ -968,7 +1065,7 @@ namespace LegionRuntime {
     RegionRequirement& RegionRequirement::operator=(const RegionRequirement &rhs)
     //--------------------------------------------------------------------------
     {
-      if (rhs.handle_type == SINGULAR)
+      if ((rhs.handle_type == SINGULAR) || (rhs.handle_type == REG_PROJECTION))
         region = rhs.region;
       else
         partition = rhs.partition;
@@ -992,7 +1089,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       size_t result = 0;
-      if (handle_type == SINGULAR)
+      if ((handle_type == SINGULAR) || (handle_type == REG_PROJECTION))
         result += sizeof(this->region);
       else
         result += sizeof(this->partition);
@@ -1016,7 +1113,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       rez.serialize(this->handle_type);
-      if (handle_type == SINGULAR)
+      if ((handle_type == SINGULAR) || (handle_type == REG_PROJECTION))
         rez.serialize(this->region);
       else
         rez.serialize(this->partition);
@@ -1048,7 +1145,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(this->handle_type);
-      if (handle_type == SINGULAR)
+      if ((handle_type == SINGULAR) || (handle_type == REG_PROJECTION))
         derez.deserialize(this->region);
       else
         derez.deserialize(this->partition);
@@ -3511,10 +3608,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionTable& HighLevelRuntime::get_projection_table(void)
+    /*static*/ RegionProjectionTable& HighLevelRuntime::get_region_projection_table(void)
     //--------------------------------------------------------------------------
     {
-      static ProjectionTable proj_table;
+      static RegionProjectionTable proj_table;
+      return proj_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PartitionProjectionTable& HighLevelRuntime::get_partition_projection_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static PartitionProjectionTable proj_table;
       return proj_table;
     }
 
@@ -3594,14 +3699,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionFnptr HighLevelRuntime::find_projection_function(ProjectionID pid)
+    /*static*/ RegionProjectionFnptr HighLevelRuntime::find_region_projection_function(ProjectionID pid)
     //--------------------------------------------------------------------------
     {
-      const ProjectionTable &table = get_projection_table();
-      ProjectionTable::const_iterator finder = table.find(pid);
+      const RegionProjectionTable &table = get_region_projection_table();
+      RegionProjectionTable::const_iterator finder = table.find(pid);
       if (finder == table.end())
       {
-        log_run(LEVEL_ERROR,"Unable to find registered projection ID %d", pid);
+        log_run(LEVEL_ERROR,"Unable to find registered region projection ID %d", pid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_ID);
+      }
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PartitionProjectionFnptr HighLevelRuntime::find_partition_projection_function(ProjectionID pid)
+    //--------------------------------------------------------------------------
+    {
+      const PartitionProjectionTable &table = get_partition_projection_table();
+      PartitionProjectionTable::const_iterator finder = table.find(pid);
+      if (finder == table.end())
+      {
+        log_run(LEVEL_ERROR,"Unable to find registered partition projection ID %d", pid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -3660,6 +3782,7 @@ namespace LegionRuntime {
 
     /*static*/ volatile RegistrationCallbackFnptr HighLevelRuntime::registration_callback = NULL;
     /*static*/ Processor::TaskFuncID HighLevelRuntime::legion_main_id = 0;
+    /*static*/ const long long HighLevelRuntime::init_time = TimeStamp::get_current_time_in_micros();
     /*static*/ unsigned HighLevelRuntime::max_task_window_per_context = MAX_TASK_WINDOW;
     /*static*/ unsigned HighLevelRuntime::min_tasks_to_schedule = MIN_TASKS_TO_PERFORM_SCHEDULING;
     /*static*/ unsigned HighLevelRuntime::max_filter_size = MAX_FILTER_SIZE;

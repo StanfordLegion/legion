@@ -158,7 +158,7 @@ void CircuitMapper::permit_task_steal(Processor thief, const std::vector<const T
 }
 
 bool CircuitMapper::map_task_region(const Task *task, Processor target, 
-                                MappingTagID tag, bool inline_mapping,
+                                MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                 const RegionRequirement &req, unsigned index,
                                 const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                 std::vector<Memory> &target_ranking,

@@ -1189,7 +1189,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(lock_held);
 #endif
-      FieldSpaceNode *field_node = get_node(rm.req.handle_type == SINGULAR ? rm.req.region.field_space : rm.req.partition.field_space);
+      FieldSpaceNode *field_node = get_node((rm.req.handle_type == SINGULAR) || (rm.req.handle_type == REG_PROJECTION)
+                                                            ? rm.req.region.field_space : rm.req.partition.field_space);
       FieldMask field_mask = field_node->get_field_mask(rm.req.instance_fields);
       PhysicalUser user(field_mask, RegionUsage(rm.req), rm.single_term, rm.multi_term, rm.idx);
       RegionNode *top_node = get_node(start_region);
@@ -1383,7 +1384,7 @@ namespace LegionRuntime {
       {
         if (it->privilege != NO_ACCESS)
         {
-          if (it->handle_type == SINGULAR)
+          if ((it->handle_type == SINGULAR) || (it->handle_type == REG_PROJECTION))
           {
             RegionNode *node = get_node(it->region);
             node->mark_node(true/*recurse*/);
@@ -1422,7 +1423,7 @@ namespace LegionRuntime {
       {
         if (it->privilege != NO_ACCESS)
         {
-          if (it->handle_type == SINGULAR)
+          if ((it->handle_type == SINGULAR) || (it->handle_type == REG_PROJECTION))
           {
             RegionNode *node = get_node(it->region);
             send_logical_nodes.insert(node->find_top_marked());
@@ -1565,7 +1566,7 @@ namespace LegionRuntime {
       if (!packing_mask)
         return 0;
       size_t result = 0;
-      if (req.handle_type == SINGULAR)
+      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
         RegionNode *top_node = get_node(req.region);
         std::set<InstanceManager*> needed_managers;
@@ -1688,7 +1689,7 @@ namespace LegionRuntime {
       FieldMask packing_mask = compute_field_mask(req, mode, field_node);
       if (!packing_mask)
         return;
-      if (req.handle_type == SINGULAR)
+      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
         RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1750,7 +1751,7 @@ namespace LegionRuntime {
       FieldMask unpacking_mask = compute_field_mask(req, mode, field_node);
       if (!unpacking_mask)
         return;
-      if (req.handle_type == SINGULAR)
+      if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
         RegionNode *top_node = get_node(req.region);
         top_node->initialize_physical_context(ctx, false/*clear*/, unpacking_mask, true/*top*/);
@@ -2222,7 +2223,7 @@ namespace LegionRuntime {
         std::vector<RegionNode*> &diff_regions = diff_region_maps[idx];
         std::vector<PartitionNode*> &diff_partitions = diff_part_maps[idx];
         
-        if (req.handle_type == SINGULAR)
+        if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
         {
           RegionNode *top_node = get_node(req.region);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2280,7 +2281,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == PROJECTION);
+      assert(req.handle_type == PART_PROJECTION);
       assert(IS_WRITE(req)); // should only need to do this for write requirements
 #endif
       FieldSpaceNode *field_node = get_node(req.parent.field_space);
@@ -2554,7 +2555,7 @@ namespace LegionRuntime {
         diff_regions.clear();
         diff_partitions.clear();
         // Invalidate any parent views of a partition node
-        if (req.handle_type == PROJECTION)
+        if (req.handle_type == PART_PROJECTION)
         {
           PartitionNode *top_node = get_node(req.partition);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2575,7 +2576,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == PROJECTION);
+      assert(req.handle_type == PART_PROJECTION);
       assert(IS_WRITE(req)); // should only need to do this for write requirements
 #endif
       FieldSpaceNode *field_node = get_node(req.parent.field_space);
@@ -2735,7 +2736,7 @@ namespace LegionRuntime {
           get_node(handle)->unpack_diff_state(ctx, derez);
         }
 #ifdef DEBUG_HIGH_LEVEL
-        if (req.handle_type == SINGULAR)
+        if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
         {
           RegionNode *top_node = get_node(req.region);
           TreeStateLogger::capture_state(runtime, ridx, task_name, uid, top_node, ctx, false/*pack*/, false/*send*/, unpacking_mask, unpacking_mask);
@@ -6713,7 +6714,7 @@ namespace LegionRuntime {
       {
         DetailedTimer::ScopedPush sp(TIME_MAPPER);
         AutoLock m_lock(rm.mapper_lock);
-        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
+        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping, (!rm.target.exists()),
                                    rm.req, rm.idx, valid_memories, chosen_order, additional_fields, enable_WAR);
       }
       // Filter out any memories that are not visible from the target processor
@@ -6908,7 +6909,7 @@ namespace LegionRuntime {
       {
         DetailedTimer::ScopedPush sp(TIME_MAPPER);
         AutoLock m_lock(rm.mapper_lock);
-        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping,
+        notify_result = rm.mapper->map_task_region(rm.task, rm.target, rm.tag, rm.inline_mapping, (!rm.target.exists()),
                                    rm.req, rm.idx, valid_memories, chosen_order, additional_fields, enable_WAR);
       }
       if (!chosen_order.empty() && rm.target.exists())

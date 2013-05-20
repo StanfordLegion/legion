@@ -469,7 +469,7 @@ public:
     last_memory = *it;
   }
 public:
-  virtual bool map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping,
+  virtual bool map_task_region(const Task *task, Processor target, MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                 const RegionRequirement &req, unsigned index,
                                 const std::map<Memory,bool> &current_instances, std::vector<Memory> &target_ranking,
                                 std::set<FieldID> &additional_fields, bool &enable_WAR_optimization)

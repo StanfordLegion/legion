@@ -151,8 +151,9 @@ namespace LegionRuntime {
     };
 
     enum HandleType {
-      SINGULAR,
-      PROJECTION,
+      SINGULAR, // a single logical region
+      PART_PROJECTION, // projection from a partition
+      REG_PROJECTION, // projection from a region
     };
 
     enum DependenceType {
@@ -328,10 +329,12 @@ namespace LegionRuntime {
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine *machine, HighLevelRuntime *rt, const std::set<Processor> &local_procs);
-    typedef Color (*ProjectionFnptr)(const DomainPoint&);
+    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, const DomainPoint&, HighLevelRuntime *rt);
+    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, const DomainPoint&, HighLevelRuntime *rt);
     typedef bool (*PredicateFnptr)(const void*, size_t, const std::vector<Future> futures);
     typedef std::map<TypeHandle,Structure> TypeTable;
-    typedef std::map<ProjectionID,ProjectionFnptr> ProjectionTable;
+    typedef std::map<ProjectionID,RegionProjectionFnptr> RegionProjectionTable;
+    typedef std::map<ProjectionID,PartitionProjectionFnptr> PartitionProjectionTable;
     typedef BitMask<FIELD_TYPE, MAX_FIELDS> FieldMask;
     typedef Fraction<unsigned long> InstFrac;
 

@@ -18,6 +18,7 @@
 #define __DEFAULT_MAPPER_H__
 
 #include "legion.h"
+#include "mapping_utilities.h"
 
 #include <cstdlib>
 #include <cassert>
@@ -44,7 +45,7 @@ namespace LegionRuntime {
       virtual bool map_region_virtually(const Task *task, Processor target,
                                         const RegionRequirement &req, unsigned index);
       virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping,
+                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
                                     const RegionRequirement &req, unsigned index,
                                     const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
                                     std::vector<Memory> &target_ranking,
@@ -69,13 +70,12 @@ namespace LegionRuntime {
                                     bool &create_one);
       virtual void rank_copy_sources(const std::set<Memory> &current_instances,
                                      const Memory &dst, std::vector<Memory> &chosen_order);
+      virtual bool profile_task_execution(const Task *task, Processor target);
+      virtual void notify_profiling_info(const Task *task, Processor target, const ExecutionProfile &profile);
       virtual bool speculate_on_predicate(MappingTagID tag, bool &speculative_value);
     public:
       // Helper methods for building other kinds of mappers, made static so they can be used in non-derived classes
 
-      // Construct a memory stack for the target processor and put it in the result vector.  By default sorts by
-      // bandwidth.  Passing false to bandwidth will result in memories being sorted by latency instead.
-      static void compute_memory_stack(Processor target, std::vector<Memory> &result, Machine *machine, bool bandwidth = true);
       // Pick a random processor of a given kind
       static Processor select_random_processor(const std::set<Processor> &options, Processor::Kind filter, Machine *machine);
       // Break an IndexSpace of tasks into IndexSplits
@@ -85,7 +85,6 @@ namespace LegionRuntime {
       HighLevelRuntime *const runtime;
       const Processor local_proc;
       const Processor::Kind local_kind;
-      std::map<Processor,Processor::Kind> local_procs;
       Machine *const machine;
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts
@@ -108,10 +107,10 @@ namespace LegionRuntime {
       bool stealing_enabled;
       // The maximum number of tasks scheduled per step
       unsigned max_schedule_count;
-      // The memory stack for each processor in this mapper
-      std::map<Processor,std::vector<Memory> > memory_stacks;
-      // For every processor group, get the set of types of processors that it has
-      std::map<Processor,Processor::Kind> other_procs;
+      // Utilities for use within the default mapper 
+      MappingUtilities::MachineQueryInterface machine_interface;
+      MappingUtilities::MappingMemoizer memoizer;
+      MappingUtilities::MappingProfiler profiler;
     };
 
   };
