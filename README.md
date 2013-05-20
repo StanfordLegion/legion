@@ -1,14 +1,80 @@
-legion
+Legion
 ======
 
-Publicly visible repository for the Legion parallel programming project at Stanford University
+Publicly visible repository for the Legion parallel programming project at Stanford University.
 
 Overview
 ==================================================================================
-Legion is a programming model and runtime system designed for capturing properties
-of program data to enable higher productivity and efficiency when running on
-distributed heterogeneous hardware.  More details of the Legion programming model
-can be found in our Supercomputing paper.
+Legion is a programming model and runtime system designed for decoupling the specification
+of parallel algorithms from their mapping onto distributed heterogenous architectures.  Since
+running on the target class of machines requires distributing not just computation but data
+as well, Legion presents the abstraction of logical regions for desribing the structure of
+program data in a machine independent way.  Programmers specify the partitioning of logical
+regions into subregions, which provides a mechanism for communicating both the independence 
+and locality of program data to the programming system.  Since the programming system
+has knowledge of both the structure of tasks and data within the program, it can aid the
+programmer in host of problems that are commonly the burden of the programmer:
+
+  * Discovering/verifying correctness of parallel execution: determining when two tasks
+    can be run in parallel without a data race is often difficult.  Legion provides mechanisms
+    for creating both implicit and explicit parallel task launches.  For implicit constructs 
+    Legion will automatically discover parallelism.  For explicit constructs, Legion will
+    notify the programmer if there are potential data races between tasks intended to be
+    run in parallel.
+  * Managing communication: when Legion determines that there are data dependences between
+    two tasks run in different locations, Legion will automatically insert the necessary
+    copies and apply the necessary constraints so the second task will not run until
+    its data is available.  We describe how tasks and data are placed in the next paragraph
+    on mapping Legion programs.
+
+The Legion programming model is designed to abstract computations in a way that makes
+them portable across many different potential architectures.  The challenge then is to make
+it easy to map the abstracted computation of the program onto actual architectures.  At
+a high level, mapping a Legion program entails making two kinds of decisions:
+  
+  1. For each task: select a processor on which to run the task.
+  2. For each logical region a task needs: select a memory in which to create
+     a physical instance of the logical region for the task to use.
+
+To facilitate this process Legion introduces a novel runtime 'mapping' interface.  One of the
+NON-goals of the Legion project was to design a programming system that was magically capable 
+of making intelligent mapping decisions.  Instead the mapping interface provides a declarative
+mechanism for the programmer to communicate mapping decisions to the runtime system
+without having to actually write any code to perform the mapping (e.g. actually writing
+the code to perform a copy or synchronization).  Furthermore, by making the mapping interface
+dynamic, it allows the programmer to make mapping decisions based on information that
+may only be available at runtime.  This includes decisions based on:
+
+  * Program data: some computations are dependent on data (e.g. is our irregular graph
+    sparse or dense in the number of edges).
+  * System data: which processors or nodes are currently up or down, or which are running
+    fast or slow to conserve power.
+  * Execution data: profiling data that is fed back to the mapper about how a certain
+    mapping performed previously.  Alternatively which processors are currently over-
+    or under- loaded.
+
+All of this information is made available to the mapper via various mapper calls, some
+of which query the mapping interface while others simply are communicating information
+to the mapper.
+
+One very important property of the mapping interface is that no mapping decisions are
+capable of impacting the correctness of the program.  Consequently, all mapping decisions
+made are only performance decisions.  Programmers can then easily tune a Legion application
+by modifying the mapping interface implementation without needing to be concerned
+with how their decisions impact correctness.  Ultimately, this makes it possible in Legion
+to explore whole spaces of mapping choices (which tasks run on CPUs or GPUs, or where data 
+gets placed in the memory hierarchy) simply by enumerating all the possible mapping
+decisions and trying them.
+
+To make it easy to get a working program, Legion provides a default mapper implementation
+that uses heuristics to make mapping decisions.  In general these decision are good, but
+they are certain to be sub-optimal across all applications and architectures.  All calls
+in the mapping interface are C++ virtual functions that can be overriden, so programmers
+can extend the default mapper and only override the mapping calls that are impacting performance.
+Alternatively a program can implement the mapping interface entirely from scratch.
+
+For more details on the Legion programming model and its current implementation
+we refer to you to our Supercomputing paper.
 
 http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
@@ -26,7 +92,9 @@ circuit simulation used in our paper on Legion.  We plan to release additional
 application examples once we figure out the necessary licensing constraints.
 
 tools: The tools directory contains the source code for the 'legion_spy' debugging
-tool that we use for doing correctness and performance debugging in Legion.
+tool that we use for doing correctness and performance debugging in Legion.  We also
+have a 'legion_prof' tool that does performance profiling of Legion application
+runs and can be used for generating both statistics and execution diagrams.
 
 Dependences
 ==================================================================================
