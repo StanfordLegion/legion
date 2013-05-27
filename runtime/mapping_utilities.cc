@@ -35,6 +35,15 @@ namespace LegionRuntime {
       {
         if (global_memory.exists())
           return global_memory;
+        global_memory = MachineQueryInterface::find_global_memory(machine);
+        return global_memory;
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_global_memory(Machine *machine)
+      //--------------------------------------------------------------------------------------------
+      {
+        Memory global_memory = Memory::NO_MEMORY;
         const std::set<Memory> &all_memories = machine->get_all_memories();
         for (std::set<Memory>::const_iterator it = all_memories.begin();
               it != all_memories.end(); it++)
@@ -72,15 +81,23 @@ namespace LegionRuntime {
         {
           stack = finder->second;
           if (!latency)
-            sort_memories(proc, stack, latency);
+            MachineQueryInterface::sort_memories(machine, proc, stack, latency);
           return;
         }
-        const std::set<Memory> &visible = machine->get_visible_memories(proc);
-        stack.insert(stack.end(),visible.begin(),visible.end());
-        sort_memories(proc, stack, latency);
+        MachineQueryInterface::find_memory_stack(machine, proc, stack, latency); 
         proc_mem_stacks[proc] = stack;
         if (!latency)
-          sort_memories(proc, proc_mem_stacks[proc], latency);
+          MachineQueryInterface::sort_memories(machine, proc, proc_mem_stacks[proc], latency);
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, Processor proc,
+                                                          std::vector<Memory> &stack, bool latency)
+      //--------------------------------------------------------------------------------------------
+      {
+        const std::set<Memory> &visible = machine->get_visible_memories(proc);
+        stack.insert(stack.end(),visible.begin(),visible.end());
+        MachineQueryInterface::sort_memories(machine, proc, stack, latency);
       }
 
       //--------------------------------------------------------------------------------------------
@@ -93,15 +110,23 @@ namespace LegionRuntime {
         {
           stack = finder->second;
           if (!latency)
-            sort_memories(mem, stack, latency);
+            MachineQueryInterface::sort_memories(machine, mem, stack, latency);
           return;
         }
-        const std::set<Memory> &visible = machine->get_visible_memories(mem);
-        stack.insert(stack.end(),visible.begin(),visible.end());
-        sort_memories(mem, stack, latency);
+        MachineQueryInterface::find_memory_stack(machine, mem, stack, latency); 
         mem_mem_stacks[mem] = stack;
         if (!latency)
-          sort_memories(mem, mem_mem_stacks[mem], latency);
+          MachineQueryInterface::sort_memories(machine, mem, mem_mem_stacks[mem], latency);
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, Memory mem,
+                                                          std::vector<Memory> &stack, bool latency)
+      //--------------------------------------------------------------------------------------------
+      {
+        const std::set<Memory> &visible = machine->get_visible_memories(mem);
+        stack.insert(stack.end(),visible.begin(),visible.end());
+        MachineQueryInterface::sort_memories(machine, mem, stack, latency);
       }
 
       //--------------------------------------------------------------------------------------------
@@ -112,17 +137,22 @@ namespace LegionRuntime {
         std::map<std::pair<Processor,Memory::Kind>,Memory>::const_iterator finder = proc_mem_table.find(key);
         if (finder != proc_mem_table.end())
           return finder->second;
+        Memory result = MachineQueryInterface::find_memory_kind(machine, proc, kind);
+        proc_mem_table[key] = result;
+        return result;
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_memory_kind(Machine *machine, Processor proc, Memory::Kind kind)
+      //--------------------------------------------------------------------------------------------
+      {
         const std::set<Memory> &visible_memories = machine->get_visible_memories(proc);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
-              it != visible_memories.end(); it++)
+            it != visible_memories.end(); it++)
         {
           if (machine->get_memory_kind(*it) == kind)
-          {
-            proc_mem_table[key] = *it;
             return *it;
-          }
         }
-        proc_mem_table[key] = Memory::NO_MEMORY;
         return Memory::NO_MEMORY;
       }
 
@@ -134,17 +164,22 @@ namespace LegionRuntime {
         std::map<std::pair<Memory,Memory::Kind>,Memory>::const_iterator finder = mem_mem_table.find(key);
         if (finder != mem_mem_table.end())
           return finder->second;
+        Memory result = MachineQueryInterface::find_memory_kind(machine, mem, kind); 
+        mem_mem_table[key] = result;
+        return result;
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_memory_kind(Machine *machine, Memory mem, Memory::Kind kind)
+      //--------------------------------------------------------------------------------------------
+      {
         const std::set<Memory> &visible_memories = machine->get_visible_memories(mem);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
               it != visible_memories.end(); it++)
         {
           if (machine->get_memory_kind(*it) == kind)
-          {
-            mem_mem_table[key] = *it;
             return *it;
-          }
         }
-        mem_mem_table[key] = Memory::NO_MEMORY;
         return Memory::NO_MEMORY;
       }
 
@@ -156,22 +191,116 @@ namespace LegionRuntime {
         std::map<std::pair<Memory,Processor::Kind>,Processor>::const_iterator finder = mem_proc_table.find(key);
         if (finder != mem_proc_table.end())
           return finder->second;
+        Processor result = MachineQueryInterface::find_processor_kind(machine, mem, kind); 
+        mem_proc_table[key] = result;
+        return result;
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ Processor MachineQueryInterface::find_processor_kind(Machine *machine, Memory mem, Processor::Kind kind)
+      //--------------------------------------------------------------------------------------------
+      {
         const std::set<Processor> &visible_procs = machine->get_shared_processors(mem);
         for (std::set<Processor>::const_iterator it = visible_procs.begin();
               it != visible_procs.end(); it++)
         {
           if (machine->get_processor_kind(*it) == kind)
-          {
-            mem_proc_table[key] = *it;
             return *it;
-          }
         }
-        mem_proc_table[key] = Processor::NO_PROC;
         return Processor::NO_PROC;
       }
 
       //--------------------------------------------------------------------------------------------
-      void MachineQueryInterface::sort_memories(Processor proc, std::vector<Memory> &memories, bool latency)
+      const std::set<Processor>& MachineQueryInterface::filter_processors(Processor::Kind kind)
+      //--------------------------------------------------------------------------------------------
+      {
+        std::map<Processor::Kind,std::set<Processor> >::const_iterator finder = proc_kinds.find(kind); 
+        if (finder != proc_kinds.end())
+          return finder->second;
+        std::set<Processor> &result = proc_kinds[kind];
+        MachineQueryInterface::filter_processors(machine, kind, result);
+        return result;
+      }
+      
+      //--------------------------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::filter_processors(Machine *machine, Processor::Kind kind,
+                                                                        std::set<Processor> &procs)
+      //--------------------------------------------------------------------------------------------
+      {
+        if (procs.empty())
+        {
+          const std::set<Processor> &all_procs = machine->get_all_processors();
+          for (std::set<Processor>::const_iterator it = all_procs.begin();
+                it != all_procs.end(); it++)
+          {
+            if (machine->get_processor_kind(*it) == kind)
+              procs.insert(*it);
+          }
+        }
+        else
+        {
+          std::vector<Processor> to_delete;
+          for (std::set<Processor>::const_iterator it = procs.begin();
+                it != procs.end(); it++)
+          {
+            if (machine->get_processor_kind(*it) != kind)
+              to_delete.push_back(*it);
+          }
+          for (std::vector<Processor>::const_iterator it = to_delete.begin();
+                it != to_delete.end(); it++)
+          {
+            procs.erase(*it);
+          }
+        }
+      }
+
+      //--------------------------------------------------------------------------------------------
+      const std::set<Memory>& MachineQueryInterface::filter_memories(Memory::Kind kind)
+      //--------------------------------------------------------------------------------------------
+      {
+        std::map<Memory::Kind,std::set<Memory> >::const_iterator finder = mem_kinds.find(kind);
+        if (finder != mem_kinds.end())
+          return finder->second;
+        std::set<Memory> &result = mem_kinds[kind];
+        MachineQueryInterface::filter_memories(machine, kind, result);
+        return result;
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::filter_memories(Machine *machine, Memory::Kind kind,
+                                                                            std::set<Memory> &mems)
+      //--------------------------------------------------------------------------------------------
+      {
+        if (mems.empty())
+        {
+          const std::set<Memory> &all_mems = machine->get_all_memories();
+          for (std::set<Memory>::const_iterator it = all_mems.begin();
+                it != all_mems.end(); it++)
+          {
+            if (machine->get_memory_kind(*it) == kind)
+              mems.insert(*it);
+          }
+        }
+        else
+        {
+          std::vector<Memory> to_delete;
+          for (std::set<Memory>::const_iterator it = mems.begin();
+                it != mems.end(); it++)
+          {
+            if (machine->get_memory_kind(*it) != kind)
+              to_delete.push_back(*it);
+          }
+          for (std::vector<Memory>::const_iterator it = to_delete.begin();
+                it != to_delete.end(); it++)
+          {
+            mems.erase(*it);
+          }
+        }
+      }
+
+      //--------------------------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, Processor proc, 
+                                                        std::vector<Memory> &memories, bool latency)
       //--------------------------------------------------------------------------------------------
       {
         std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > temp_stack;
@@ -224,7 +353,8 @@ namespace LegionRuntime {
       }
 
       //--------------------------------------------------------------------------------------------
-      void MachineQueryInterface::sort_memories(Memory mem, std::vector<Memory> &memories, bool latency)
+      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, Memory mem, 
+                                                        std::vector<Memory> &memories, bool latency)
       //--------------------------------------------------------------------------------------------
       {
         std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > temp_stack;

@@ -706,6 +706,10 @@ namespace LegionRuntime {
       size_t compute_source_copy_instances_return(void);
       void pack_source_copy_instances_return(Serializer &derez);
       static void unpack_source_copy_instances_return(Deserializer &derez, RegionTreeForest *forest, UniqueID uid);
+    public:
+      size_t compute_reference_return(void);
+      void pack_reference_return(Serializer &rez);
+      static void unpack_reference_return(Deserializer &derez, RegionTreeForest *forest, UniqueID uid);
     protected:
       size_t compute_single_task_size(void);
       void pack_single_task(Serializer &rez);

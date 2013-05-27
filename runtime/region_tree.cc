@@ -1790,6 +1790,7 @@ namespace LegionRuntime {
       // Don't need to send the view since we should never need it remotely
       // It certainly can't be removed remotely
       result += sizeof(UniqueManagerID);
+      result += sizeof(LogicalRegion);
       // Check to see if we need to add this manager to the set of managers to be sent
       if (ref.get_manager() != NULL)
       {
@@ -1808,6 +1809,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(lock_held);
       assert(!ref.is_virtual_ref());
+      assert(ref.view != NULL);
 #endif
       rez.serialize(ref.ready_event);
       rez.serialize(ref.required_lock);
@@ -1818,6 +1820,7 @@ namespace LegionRuntime {
         rez.serialize(ref.get_manager()->get_unique_id());
       else
         rez.serialize<UniqueManagerID>(0);
+      rez.serialize(ref.view->logical_region->handle);
     }
 
     //--------------------------------------------------------------------------
@@ -1842,15 +1845,17 @@ namespace LegionRuntime {
       derez.deserialize(copy);
       UniqueManagerID uid;
       derez.deserialize(uid);
+      LogicalRegion handle;
+      derez.deserialize(handle);
       if (uid == 0)
-        return InstanceRef(ready_event, location, inst, NULL, copy, req_lock);
+        return InstanceRef(NULL, handle, ready_event, location, inst, copy, req_lock);
       else
       {
         PhysicalManager *manager = find_manager(uid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(manager != NULL);
 #endif
-        return InstanceRef(manager, ready_event, location, inst, copy, req_lock);
+        return InstanceRef(manager, handle, ready_event, location, inst, copy, req_lock);
       }
     }
 
@@ -1879,11 +1884,20 @@ namespace LegionRuntime {
 #endif
       rez.serialize(ref.ready_event);
       rez.serialize(ref.copy);
+      if (ref.view != NULL)
+      {
+        rez.serialize(ref.view->get_manager()->get_unique_id());
+        rez.serialize(ref.view->logical_region->handle);
+      }
+      else
+      {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(ref.view != NULL);
+        assert(ref.handle != LogicalRegion::NO_REGION);
+        assert(ref.manager != NULL);
 #endif
-      rez.serialize(ref.view->get_manager()->get_unique_id());
-      rez.serialize(ref.view->logical_region->handle);
+        rez.serialize(ref.manager->get_unique_id());
+        rez.serialize(ref.handle);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3381,7 +3395,7 @@ namespace LegionRuntime {
 #endif
         destroy_node(it->second, false/*top*/, finalize, deletion_contexts);
       }
-      // Clear our valid map since we no longer have any valid chlidren
+      // Clear our valid map since we no longer have any valid children
       if (finalize)
       {
         node->valid_map.clear();
@@ -7230,13 +7244,20 @@ namespace LegionRuntime {
       std::map<ContextID,PhysicalState>::iterator finder = physical_states.find(ctx);
       if (finder != physical_states.end())
       {
-        // Always need to correctly invalidate the views so we don't
-        // accidentally leak any references to valid views
-        invalidate_instance_views(finder->second, invalid_mask, false/*clean*/);
-        invalidate_reduction_views(finder->second, invalid_mask);
+        
         // If it's the last use we can delete the context
         if (last_use)
+        {
+          finder->second.clear_state(FieldMask(FIELD_ALL_ONES));
           physical_states.erase(finder);
+        }
+        else
+        {
+          // Always need to correctly invalidate the views so we don't
+          // accidentally leak any references to valid views
+          invalidate_instance_views(finder->second, invalid_mask, false/*clean*/);
+          invalidate_reduction_views(finder->second, invalid_mask);
+        }
         for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
               it != valid_map.end(); it++)
         {
@@ -9970,7 +9991,7 @@ namespace LegionRuntime {
     InstanceView::InstanceView(InstanceManager *man, InstanceView *par, 
                                RegionNode *reg, RegionTreeForest *ctx, bool made_local)
       : PhysicalView(ctx, reg, made_local),
-        manager(man), parent(par), to_be_invalidated(false)
+        manager(man), parent(par), active_children(0), to_be_invalidated(false)
     //--------------------------------------------------------------------------
     { 
     }
@@ -10026,43 +10047,62 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ChildKey key(pc,rc);
-      std::set<InstanceView*> aliased_set;
-      // First go through all our current children and see if any of them alias
-      // with the new child
-      IndexSpaceNode *index_node = logical_region->row_source;
-      for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
+      std::map<ChildKey,InstanceView*>::iterator finder = children.find(key);
+      if (finder == children.end())
       {
-        if (it->first.first != pc)
+        std::set<InstanceView*> aliased_set;
+        // First go through all our current children and see if any of them alias
+        // with the new child
+        IndexSpaceNode *index_node = logical_region->row_source;
+        for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
         {
-          // Different partitions, see if they are disjoint or not
-          if (!index_node->are_disjoint(it->first.first, pc))
+          if (it->first.first != pc)
           {
-            aliased_set.insert(it->second);
-            aliased_children[it->second].insert(child);
+            // Different partitions, see if they are disjoint or not
+            if (!index_node->are_disjoint(it->first.first, pc))
+            {
+              aliased_set.insert(it->second);
+              aliased_children[it->second].insert(child);
+            }
+          }
+          else
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(it->first.second != rc); // should never have the same key
+#endif
+            // Same partition, see if it is disjoint or if siblings are
+            IndexPartNode *index_part = index_node->get_child(pc);
+            if (!index_part->are_disjoint(it->first.second, rc))
+            {
+              aliased_set.insert(it->second);
+              aliased_children[it->second].insert(child);
+            }
           }
         }
-        else
-        {
+        aliased_children[child] = aliased_set;
+        
+        // Then add the child
 #ifdef DEBUG_HIGH_LEVEL
-          assert(it->first.second != rc); // should never have the same key
+        assert(children.find(key) == children.end());
 #endif
-          // Same partition, see if it is disjoint or if siblings are
-          IndexPartNode *index_part = index_node->get_child(pc);
-          if (!index_part->are_disjoint(it->first.second, rc))
-          {
-            aliased_set.insert(it->second);
-            aliased_children[it->second].insert(child);
-          }
+        children[key] = child;
+        active_map[child] = true;
+        active_children++;
+      }
+      else
+      {
+        // Mark the entry as being active again
+        std::map<InstanceView*,bool>::iterator active_finder = active_map.find(finder->second);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(active_finder != active_map.end());
+#endif
+        if (!active_finder->second)
+        {
+          active_children++;
+          active_finder->second = true;
         }
       }
-      aliased_children[child] = aliased_set;
-      
-      // Then add the child
-#ifdef DEBUG_HIGH_LEVEL
-      assert(children.find(key) == children.end());
-#endif
-      children[key] = child;
     }
 
     //--------------------------------------------------------------------------
@@ -10072,19 +10112,15 @@ namespace LegionRuntime {
       std::map<ChildKey,InstanceView*>::iterator finder = children.find(key); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != children.end());
-      assert(aliased_children.find(finder->second) != aliased_children.end());
+      assert(active_children > 0);
 #endif
-      const std::set<InstanceView*> &aliases = aliased_children[finder->second];
-      for (std::set<InstanceView*>::const_iterator it = aliases.begin();
-            it != aliases.end(); it++)
-      {
+      std::map<InstanceView*,bool>::iterator active_finder = active_map.find(finder->second);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(aliased_children.find(*it) != aliased_children.end());
-        assert(aliased_children[*it].find(finder->second) != aliased_children[*it].end());
+      assert(active_finder != active_map.end());
 #endif
-        aliased_children[*it].erase(finder->second);
-      }
-      children.erase(finder);
+      // Mark that the entry as no longer active
+      active_finder->second = false;
+      active_children--;
     }
 
     //--------------------------------------------------------------------------
@@ -10430,15 +10466,16 @@ namespace LegionRuntime {
       // Also check to see if we can remove this instance view from its
       // parent view.  Same condition as garbage collection plus we need
       // to not have any children (who could also still be valid)
-      if (!adding && (parent != NULL) && children.empty())
+      if ((parent != NULL) && (active_children == 0) && (valid_references == 0)
+          && users.empty() && added_users.empty() && copy_users.empty()
+          && added_copy_users.empty())
       {
-        if ((valid_references == 0) && users.empty() && added_users.empty() &&
-            copy_users.empty() && added_copy_users.empty())
-        {
-          ChildKey key(logical_region->parent->row_source->color,
-                       logical_region->row_source->color);
-          parent->remove_child_view(key);
-        }
+        Color pc = logical_region->parent->row_source->color;
+        Color rc = logical_region->row_source->color;
+        if (adding)
+          parent->add_child_view(pc, rc, this);
+        else
+          parent->remove_child_view(ChildKey(pc,rc));
       }
     }
 
@@ -10458,6 +10495,13 @@ namespace LegionRuntime {
       for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
+        std::map<InstanceView*,bool>::const_iterator finder = active_map.find(*it);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != active_map.end());
+#endif
+        // Skip any aliased children that are not active
+        if (!finder->second)
+          continue;
         (*it)->find_dependences_below(wait_on, user);
       }
     }
@@ -10478,6 +10522,13 @@ namespace LegionRuntime {
       for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
+        std::map<InstanceView*,bool>::const_iterator finder = active_map.find(*it);
+        // Skip any aliased children that are not active
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != active_map.end());
+#endif
+        if (!finder->second)
+          continue;
         (*it)->find_dependences_below(wait_on, writing, redop, mask);
       }
     }
@@ -10487,10 +10538,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool all_dominated = find_local_dependences(wait_on, user);
-      for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
+      for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+            it != active_map.end(); it++)
       {
-        bool dominated = it->second->find_dependences_below(wait_on, user);
+        // Skip any children which are not active
+        if (!it->second)
+          continue;
+        bool dominated = it->first->find_dependences_below(wait_on, user);
         all_dominated = all_dominated && dominated;
       }
       return all_dominated;
@@ -10502,10 +10556,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool all_dominated = find_local_dependences(wait_on, writing, redop, mask);
-      for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
+      for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+            it != active_map.end(); it++)
       {
-        bool dominated = it->second->find_dependences_below(wait_on, writing, redop, mask);
+        // Skip any children which are not active
+        if (!it->second)
+          continue;
+        bool dominated = it->first->find_dependences_below(wait_on, writing, redop, mask);
         all_dominated = all_dominated && dominated;
       }
       return all_dominated;
@@ -11004,10 +11061,13 @@ namespace LegionRuntime {
     {
       if (has_local_war_dependence(user))
         return true;
-      for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
+      for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+            it != active_map.end(); it++)
       {
-        if (it->second->has_war_dependence_below(user))
+        // Skip any children which are not active
+        if (!it->second)
+          continue;
+        if (it->first->has_war_dependence_below(user))
           return true;
       }
       return false;
@@ -11091,7 +11151,7 @@ namespace LegionRuntime {
       else
         finder->second |= mask;
 
-      // Do it for all children
+      // Do it for all children regardless of whether they are active or not
       for (std::map<std::pair<Color,Color>,InstanceView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
@@ -11462,6 +11522,13 @@ namespace LegionRuntime {
         for (std::map<ChildKey,InstanceView*>::const_iterator it = children.begin();
               it != children.end(); it++)
         {
+          std::map<InstanceView*,bool>::const_iterator finder = active_map.find(it->second);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != active_map.end());
+#endif
+          // Skip any children which are not active
+          if (!finder->second)
+            continue;
           if (it->first.first == child_filter)
           {
             it->second->find_required_below(unique_views, ordered_views, packing_mask);
@@ -11480,10 +11547,13 @@ namespace LegionRuntime {
       else
       {
         // Get all the children
-        for (std::map<ChildKey,InstanceView*>::const_iterator it = children.begin();
-              it != children.end(); it++)
+        for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+              it != active_map.end(); it++)
         {
-          it->second->find_required_below(unique_views, ordered_views, packing_mask);
+          // Skip any children which are not active
+          if (!it->second)
+            continue;
+          it->first->find_required_below(unique_views, ordered_views, packing_mask);
         }
       }
     }
@@ -11505,10 +11575,13 @@ namespace LegionRuntime {
         ordered_views.push_back(this);
       }
       // Now do any children that we might have
-      for (std::map<ChildKey,InstanceView*>::const_iterator it = children.begin();
-            it != children.end(); it++)
+      for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+            it != active_map.end(); it++)
       {
-        it->second->find_required_below(unique_views, ordered_views, packing_mask);
+        // Skip children which are not active
+        if (!it->second)
+          continue;
+        it->first->find_required_below(unique_views, ordered_views, packing_mask);
       }
     }
 
@@ -11536,6 +11609,13 @@ namespace LegionRuntime {
       for (std::set<InstanceView*>::const_iterator it = aliases.begin();
             it != aliases.end(); it++)
       {
+        std::map<InstanceView*,bool>::const_iterator finder = active_map.find(*it);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != active_map.end());
+#endif
+        // Skip any children which are not active
+        if (!finder->second)
+          continue;
         (*it)->find_aliased_below(add_aliased_users, add_aliased_copies,
                                   add_aliased_events, packing_mask);
       }
@@ -11552,10 +11632,13 @@ namespace LegionRuntime {
       find_aliased_local(add_aliased_users, add_aliased_copies,
                           add_aliased_events, packing_mask);
 
-      for (std::map<ChildKey,InstanceView*>::const_iterator it = children.begin();
-            it != children.end(); it++)
+      for (std::map<InstanceView*,bool>::const_iterator it = active_map.begin();
+            it != active_map.end(); it++)
       {
-        it->second->find_aliased_below(add_aliased_users, add_aliased_copies,
+        // Skip any children which are not active
+        if (!it->second)
+          continue;
+        it->first->find_aliased_below(add_aliased_users, add_aliased_copies,
                                         add_aliased_events, packing_mask);
       }
     }
@@ -13301,7 +13384,7 @@ namespace LegionRuntime {
     InstanceRef::InstanceRef(Event ready, Memory loc, PhysicalInstance inst,
                              PhysicalView *v, bool c /*= false*/, Lock lock /*= Lock::NO_LOCK*/)
       : ready_event(ready), required_lock(lock), location(loc), 
-        instance(inst), copy(c), view(v)
+        instance(inst), copy(c), view(v), handle(LogicalRegion::NO_REGION)
     //--------------------------------------------------------------------------
     {
       if (view == NULL)
@@ -13317,10 +13400,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(PhysicalManager *m, Event ready, Memory loc,
+    InstanceRef::InstanceRef(PhysicalManager *m, LogicalRegion h, Event ready, Memory loc,
                              PhysicalInstance inst, bool c /*= false*/, Lock lock /*= Lock::NO_LOCK*/)
       : ready_event(ready), required_lock(lock), location(loc), instance(inst),
-        copy(c), view(NULL), manager(m)
+        copy(c), view(NULL), handle(h), manager(m)
     //--------------------------------------------------------------------------
     {
       if (manager == NULL)   

@@ -6305,8 +6305,31 @@ namespace LegionRuntime {
 					      fb_mem_size_in_mb << 20);
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
-	    local_util_procs[i % num_util_procs]->add_real_proc(gp);
+          {
+            UtilityProcessor *up = local_util_procs[i % num_util_procs];
+            up->add_real_proc(gp);
+            std::map<Processor, std::set<Processor>*>::iterator finder = proc_groups.find(up->me);
+            if (finder != proc_groups.end())
+            {
+              finder->second->insert(p);
+              proc_groups[p] = it->second;
+            }
+            else
+            {
+              std::set<Processor> *pgptr = new std::set<Processor>();
+              pgptr->insert(p);
+              proc_groups[p] = pgptr;
+              prog_groups[up->me] = pgptr;
+            }
+          }
+          else
 #endif
+          {
+            // This is a GPU processor so make it its own utility processor
+            std::set<Processor> *pgptr = new std::set<Processor>();
+            pgptr->insert(p);
+            proc_groups[p] = pgptr;
+          }
 	  n->processors.push_back(gp);
 	  local_gpus.push_back(gp);
 

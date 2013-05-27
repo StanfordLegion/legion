@@ -3938,6 +3938,7 @@ namespace LegionRuntime {
     {
       if (req.verified)
         return NO_ERROR;
+      std::set<FieldID> checking_fields = req.privilege_fields;
       for (std::vector<RegionRequirement>::const_iterator it = regions.begin();
             it != regions.end(); it++)
       {
@@ -3971,24 +3972,36 @@ namespace LegionRuntime {
           // Now check that the types are subset of the fields
           // Note we can use the parent since all the regions/partitions
           // in the same region tree have the same field space
-          for (std::set<FieldID>::const_iterator fit = req.privilege_fields.begin();
-                fit != req.privilege_fields.end(); fit++)
+          bool has_fields;
           {
-            if ((it->privilege_fields.find(*fit) == it->privilege_fields.end()) &&
-                (!has_created_field(*fit)))
+            std::vector<FieldID> to_delete;
+            for (std::set<FieldID>::const_iterator fit = checking_fields.begin();
+                  fit != checking_fields.end(); fit++)
             {
-              bad_field = *fit;
-              return ERROR_BAD_REGION_TYPE;
+              if ((it->privilege_fields.find(*fit) != it->privilege_fields.end()) ||
+                  (has_created_field(*fit)))
+              {
+                to_delete.push_back(*fit);
+              }
+            }
+            has_fields = !to_delete.empty();
+            for (std::vector<FieldID>::const_iterator fit = to_delete.begin();
+                  fit != to_delete.end(); fit++)
+            {
+              checking_fields.erase(*fit);
             }
           }
-          if (req.privilege & (~(it->privilege)))
+          // Only need to do this check if there were overlapping fields
+          if (has_fields && (req.privilege & (~(it->privilege))))
           {
             if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
               return ERROR_BAD_REGION_PRIVILEGES;
             else
               return ERROR_BAD_PARTITION_PRIVILEGES;
           }
-          return NO_ERROR;
+          // If we've seen all our fields, then we're done
+          if (checking_fields.empty())
+            return NO_ERROR;
         }
       }
       // Also check to see if it was a created region
@@ -4016,9 +4029,14 @@ namespace LegionRuntime {
         }
         unlock_context();
         // No need to check the field privileges since we should have them all
-
+        checking_fields.clear();
         // No need to check the privileges since we know we have them all
         return NO_ERROR;
+      }
+      if (!checking_fields.empty() && (checking_fields.size() < req.privilege_fields.size()))
+      {
+        bad_field = *(checking_fields.begin());
+        return ERROR_BAD_REGION_TYPE;
       }
       return ERROR_BAD_PARENT_REGION;
     }
@@ -4523,10 +4541,68 @@ namespace LegionRuntime {
       {
         forest_ctx->pack_reference_return(source_copy_instances[idx], rez);
       }
+      source_copy_instances.clear();
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void SingleTask::unpack_source_copy_instances_return(Deserializer &derez, RegionTreeForest *forest, UniqueID uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      forest->assert_locked();
+#endif
+      size_t num_refs;
+      derez.deserialize<size_t>(num_refs);
+      for (unsigned idx = 0; idx < num_refs; idx++)
+      {
+        forest->unpack_and_remove_reference(derez, uid);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    size_t SingleTask::compute_reference_return(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert_context_locked();
+      assert(physical_instances.size() == non_virtual_mapped_region.size());
+#endif
+      size_t result = sizeof(size_t); // number of return references
+      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+      {
+        if (non_virtual_mapped_region[idx])
+        {
+          result += forest_ctx->compute_reference_size_return(physical_instances[idx]);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::pack_reference_return(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert_context_locked();
+#endif
+      size_t num_non_virtual = 0;
+      for (unsigned idx = 0; idx < non_virtual_mapped_region.size(); idx++)
+      {
+        if (non_virtual_mapped_region[idx])
+          num_non_virtual++;
+      }
+      rez.serialize<size_t>(num_non_virtual);
+      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+      {
+        if (non_virtual_mapped_region[idx])
+        {
+          forest_ctx->pack_reference_return(physical_instances[idx], rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::unpack_reference_return(Deserializer &derez, RegionTreeForest *forest, UniqueID uid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4758,7 +4834,9 @@ namespace LegionRuntime {
 #endif
         finish_task_unpack();
       }
-      initialize_region_tree_contexts();
+      // Don't need to do this if we're a leaf task
+      if (!is_leaf())
+        initialize_region_tree_contexts();
 
       std::set<Event> wait_on_events = launch_preconditions;
 #ifdef DEBUG_HIGH_LEVEL
@@ -4959,9 +5037,9 @@ namespace LegionRuntime {
           if (IS_WRITE(regions[idx]))
           {
             // This should be our physical context since we mapped the region
-            RegionMapper rm(this, unique_id, ctx_id, idx, regions[idx], NULL/*shouldn't need it*/, mapper_lock,
+            RegionMapper rm(this, unique_id, ctx_id, idx, regions[idx], mapper, mapper_lock,
                             Processor::NO_PROC, single_event, multi_event,
-                            tag, false/*sanitizing*/, false/*inline mapping*/, source_copy_instances);
+                            tag, false/*sanitizing*/, false/*inline mapping*/, close_copy_instances);
             // First remove our reference so we don't accidentally end up waiting on ourself
             InstanceRef clone_ref = clone_instances[idx].first;
             if (clone_instances[idx].second)
@@ -4975,9 +5053,9 @@ namespace LegionRuntime {
           }
           else if (IS_REDUCE(regions[idx]))
           {
-            RegionMapper rm(this, unique_id, ctx_id, idx, regions[idx], NULL/*shouldn't need it*/, mapper_lock,
+            RegionMapper rm(this, unique_id, ctx_id, idx, regions[idx], mapper, mapper_lock,
                             Processor::NO_PROC, single_event, multi_event,
-                            tag, false/*sanitizing*/, false/*inline mapping*/, source_copy_instances);
+                            tag, false/*sanitizing*/, false/*inline mapping*/, close_copy_instances);
             // First remove our reference so we don't accidentally end up waiting on ourself
             InstanceRef clone_ref = clone_instances[idx].first;
             if (clone_instances[idx].second)
@@ -5823,6 +5901,8 @@ namespace LegionRuntime {
       {
         if (locally_mapped)
         {
+          result += sizeof(executing_processor);
+          result += sizeof(low_id);
           if (is_leaf())
           {
             // Don't need to pack the region trees, but still
@@ -5894,6 +5974,8 @@ namespace LegionRuntime {
       {
         if (locally_mapped)
         {
+          rez.serialize<Processor>(executing_processor);
+          rez.serialize<Processor::TaskFuncID>(low_id);
           if (is_leaf())
           {
             for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -5980,6 +6062,8 @@ namespace LegionRuntime {
       lock_context();
       if (locally_mapped)
       {
+        derez.deserialize<Processor>(executing_processor);
+        derez.deserialize<Processor::TaskFuncID>(low_id);
         if (is_leaf())
         {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6815,22 +6899,31 @@ namespace LegionRuntime {
       // we really only need to pack up our information.
       size_t result = 0;
       result += sizeof(index_point);
+      result += sizeof(executing_processor);
+      result += sizeof(low_id);
       result += sizeof(point_termination_event);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(local_point_argument != NULL);
-#endif
       result += sizeof(local_point_argument_len);
       result += local_point_argument_len;
-
 #ifdef DEBUG_HIGH_LEVEL
       assert(non_virtual_mapped_region.size() == regions.size());
       assert(physical_instances.size() == regions.size());
 #endif
+      result += sizeof(size_t); // Number of regions
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        result += regions[idx].compute_size();
+      }
       result += (non_virtual_mapped_region.size() * sizeof(bool));
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (non_virtual_mapped_region[idx])
           result += forest_ctx->compute_reference_size(physical_instances[idx]);
+      }
+      // Also need to pack the source copy instances so we can send them back later
+      result += sizeof(size_t); // number of source copy instances
+      for (unsigned idx = 0; idx < source_copy_instances.size(); idx++)
+      {
+        result += forest_ctx->compute_reference_size(source_copy_instances[idx]);
       }
       return result;
     }
@@ -6840,9 +6933,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       rez.serialize<DomainPoint>(index_point);
+      rez.serialize<Processor>(executing_processor);
+      rez.serialize<Processor::TaskFuncID>(low_id);
       rez.serialize<UserEvent>(point_termination_event);
       rez.serialize<size_t>(local_point_argument_len);
       rez.serialize(local_point_argument,local_point_argument_len);
+      rez.serialize<size_t>(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        regions[idx].pack_requirement(rez);
+      }
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         bool non_virt = non_virtual_mapped_region[idx];
@@ -6853,6 +6953,11 @@ namespace LegionRuntime {
         if (non_virtual_mapped_region[idx])
           forest_ctx->pack_reference(physical_instances[idx], rez);
       }
+      rez.serialize<size_t>(source_copy_instances.size());
+      for (unsigned idx = 0; idx < source_copy_instances.size(); idx++)
+      {
+        forest_ctx->pack_reference(source_copy_instances[idx], rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6860,13 +6965,30 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       derez.deserialize<DomainPoint>(index_point);
+      derez.deserialize<Processor>(executing_processor);
+      derez.deserialize<Processor::TaskFuncID>(low_id);
       derez.deserialize<UserEvent>(point_termination_event);
       derez.deserialize<size_t>(local_point_argument_len);
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_point_argument == NULL);
 #endif
-      local_point_argument = malloc(local_point_argument_len);
-      derez.deserialize(local_point_argument,local_point_argument_len);
+      if (local_point_argument_len > 0)
+      {
+        local_point_argument = malloc(local_point_argument_len);
+        derez.deserialize(local_point_argument,local_point_argument_len);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(regions.empty()); // should be empty
+      assert(physical_instances.empty());
+      assert(physical_contexts.empty());
+#endif
+      size_t num_regions;
+      derez.deserialize<size_t>(num_regions);
+      regions.resize(num_regions);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        regions[idx].unpack_requirement(derez);
+      }
       non_virtual_mapped_region.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -6877,9 +6999,22 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (non_virtual_mapped_region[idx])
+        {
           physical_instances.push_back(forest_ctx->unpack_reference(derez));
+          physical_contexts.push_back(ctx_id);
+        }
         else
+        {
           physical_instances.push_back(InstanceRef()/*virtual ref*/);
+          // Virtual mapping, so use the enclosing slice owner context
+          physical_contexts.push_back(slice_owner->ctx_id);
+        }
+      }
+      size_t num_source;
+      derez.deserialize<size_t>(num_source);
+      for (unsigned idx = 0; idx < num_source; idx++)
+      {
+        source_copy_instances.push_back(forest_ctx->unpack_reference(derez));
       }
     }
 
@@ -6988,12 +7123,12 @@ namespace LegionRuntime {
                                       created_regions,created_fields);
       slice_owner->return_deletions(deleted_regions, deleted_partitions, deleted_fields);
       // If not remote, remove our physical instance usages
+      lock_context();
       if (!slice_owner->remote)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(physical_instances.size() == regions.size());
 #endif
-        lock_context();
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
           if (!physical_instances[idx].is_virtual_ref())
@@ -7001,14 +7136,15 @@ namespace LegionRuntime {
             physical_instances[idx].remove_reference(unique_id, false/*strict*/);
           }
         }
-        for (unsigned idx = 0; idx < close_copy_instances.size(); idx++)
-        {
-          close_copy_instances[idx].remove_reference(unique_id, false/*strict*/);
-        }
-        unlock_context();
         physical_instances.clear();
-        close_copy_instances.clear();
       }
+      // Remove the references for the close copies
+      for (unsigned idx = 0; idx < close_copy_instances.size(); idx++)
+      {
+        close_copy_instances[idx].remove_reference(unique_id, false/*strict*/);
+      }
+      close_copy_instances.clear();
+      unlock_context();
       // Indicate that this point has terminated
       point_termination_event.trigger();
       // notify the slice owner that this task has finished
@@ -7690,6 +7826,8 @@ namespace LegionRuntime {
       Deserializer derez(args,arglen);
       size_t num_points;
       derez.deserialize<size_t>(num_points);
+      bool local_map;
+      derez.deserialize<bool>(local_map);
       if (!is_leaf())
       {
         unpack_privileges_return(derez);
@@ -7705,12 +7843,30 @@ namespace LegionRuntime {
           parent_ctx->unpack_return_created_contexts(derez);
         }
         forest_ctx->end_unpack_region_tree_state_return(derez, true/*created only*/);
+        if (local_map)
+        {
+          for (unsigned idx = 0; idx < num_points; idx++)
+          {
+            SingleTask::unpack_source_copy_instances_return(derez,forest_ctx,unique_id);
+            SingleTask::unpack_reference_return(derez,forest_ctx,unique_id);
+          }
+        }
         forest_ctx->unpack_leaked_return(derez);
         unlock_context();
       }
       else
       {
         lock_context();
+        forest_ctx->begin_unpack_region_tree_state_return(derez, false/*created only*/);
+        forest_ctx->end_unpack_region_tree_state_return(derez, false/*created only*/);
+        if (local_map)
+        {
+          for (unsigned idx = 0; idx < num_points; idx++)
+          {
+            SingleTask::unpack_source_copy_instances_return(derez,forest_ctx,unique_id);
+            SingleTask::unpack_reference_return(derez,forest_ctx,unique_id);
+          }
+        }
         forest_ctx->unpack_leaked_return(derez);
         unlock_context();
       }
@@ -8075,10 +8231,12 @@ namespace LegionRuntime {
       // were met and so we can release all the source copy instances
       if (!source_copy_instances.empty())
       {
+        lock_context();
         for (unsigned idx = 0; idx < source_copy_instances.size(); idx++)
         {
           source_copy_instances[idx].remove_reference(unique_id, false/*strict*/);
         }
+        unlock_context();
         source_copy_instances.clear();
       }
       unlock();
@@ -8524,7 +8682,6 @@ namespace LegionRuntime {
 
           num_unmapped_points = points.size();
           num_unfinished_points = points.size();
-          enumerating = false;
           unlock();
         }
         
@@ -8553,6 +8710,15 @@ namespace LegionRuntime {
             must_barrier.arrive();
           }
           post_slice_start();
+          lock();
+          bool all_mapped = (num_unmapped_points == 0);
+          bool all_finished = (num_unfinished_points == 0);
+          enumerating = false;
+          unlock();
+          if (all_mapped)
+            post_slice_mapped();
+          if (all_finished)
+            post_slice_finished();
         }
       }
       else
@@ -8593,6 +8759,8 @@ namespace LegionRuntime {
 #endif
         finish_task_unpack();
       }
+      // Set the number of unfinished points
+      num_unfinished_points = points.size();
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->launch_task();
@@ -8975,6 +9143,11 @@ namespace LegionRuntime {
               }
             }
           }
+          else
+          {
+            // Still need to do this to pack the needed managers
+            forest_ctx->begin_pack_region_tree_state(rez, temp_split_factor);
+          }
           // Now pack each of the point mappings
           for (unsigned idx = 0; idx < points.size(); idx++)
           {
@@ -9089,6 +9262,10 @@ namespace LegionRuntime {
                   );
             }
           }
+        }
+        else
+        {
+          forest_ctx->begin_unpack_region_tree_state(derez, split_factor);
         }
         for (unsigned idx = 0; idx < num_points; idx++)
         {
@@ -9294,9 +9471,9 @@ namespace LegionRuntime {
     {
       PointTask *result = runtime->get_available_point_task(this);
       result->clone_task_context_from(this);
-      // Clear out the region requirements since we don't actually want that clone
-      result->regions.clear();
       result->slice_owner = this;
+      // Clear out the region requirements since we don't actually want that cloned
+      result->regions.clear();
       if (new_point)
       {
         result->point_termination_event = UserEvent::create_user_event();
@@ -9576,6 +9753,7 @@ namespace LegionRuntime {
         // Need to send back the results to the enclosing context
         size_t buffer_size = sizeof(orig_proc) + sizeof(index_owner);
         buffer_size += sizeof(size_t); // number of points
+        buffer_size += sizeof(bool); // locally mapped
         // Need to send back the tasks for which we have privileges
         lock_context();
         if (!is_leaf())
@@ -9589,6 +9767,21 @@ namespace LegionRuntime {
             buffer_size += (*it)->compute_return_created_contexts();
           }
           buffer_size += forest_ctx->post_compute_region_tree_state_return(true/*created only*/);
+        }
+        else
+        {
+          buffer_size += forest_ctx->post_compute_region_tree_state_return(false/*created only*/);
+        }
+        if (locally_mapped)
+        {
+          // If this is a locally mapped leaf task, then pack up all the
+          // references and state that needs to be sent back
+          for (std::vector<PointTask*>::const_iterator it = points.begin();
+                it != points.end(); it++)
+          {
+            buffer_size += (*it)->compute_source_copy_instances_return();
+            buffer_size += (*it)->compute_reference_return();
+          }
         }
         // Always need to send back the leaked return state
         buffer_size += forest_ctx->compute_leaked_return_size();
@@ -9618,6 +9811,7 @@ namespace LegionRuntime {
         rez.serialize<Processor>(orig_proc);
         rez.serialize<IndexTask*>(index_owner);
         rez.serialize<size_t>(points.size());
+        rez.serialize<bool>(locally_mapped);
         if (!is_leaf())
         {
           pack_privileges_return(rez);
@@ -9630,6 +9824,20 @@ namespace LegionRuntime {
             (*it)->pack_return_created_contexts(rez);
           }
           forest_ctx->end_pack_region_tree_state_return(rez, true/*created only*/);
+        }
+        else
+        {
+          forest_ctx->begin_pack_region_tree_state_return(rez, false/*created only*/);
+          forest_ctx->end_pack_region_tree_state_return(rez, false/*created only*/);
+        }
+        if (locally_mapped)
+        {
+          for (std::vector<PointTask*>::const_iterator it = points.begin();
+                it != points.end(); it++)
+          {
+            (*it)->pack_source_copy_instances_return(rez);
+            (*it)->pack_reference_return(rez);
+          }
         }
         forest_ctx->pack_leaked_return(rez);
         unlock_context();

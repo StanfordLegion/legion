@@ -529,6 +529,12 @@ namespace LegionRuntime {
     protected:
       friend class Task;
       friend class TaskContext;
+      friend class SingleTask;
+      friend class MultiTask;
+      friend class IndividualTask;
+      friend class PointTask;
+      friend class IndexTask;
+      friend class SliceTask;
       size_t compute_size(void) const;
       void pack_requirement(Serializer &rez) const;
       void unpack_requirement(Deserializer &derez);

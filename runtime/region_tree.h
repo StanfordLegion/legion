@@ -1425,7 +1425,11 @@ namespace LegionRuntime {
       friend class ListReductionManager;
       friend class FoldReducitonManager;
       typedef std::pair<Color/*part color*/,Color/*region color*/> ChildKey;
+      // Keep track of all the children and whether or not they are active
       std::map<ChildKey,InstanceView*> children;
+      std::map<InstanceView*,bool> active_map;
+      // Keep track of the number of active children
+      unsigned active_children;
       // For each child keep track of other children with which it aliases
       std::map<InstanceView*,std::set<InstanceView*> > aliased_children;
       // The next four members only deal with garbage collection
@@ -1573,8 +1577,8 @@ namespace LegionRuntime {
       InstanceRef(void);
       InstanceRef(Event ready, Memory loc, PhysicalInstance inst, 
                   PhysicalView *v, bool copy = false, Lock lock = Lock::NO_LOCK);
-      InstanceRef(PhysicalManager *m, Event ready, Memory loc, PhysicalInstance inst,
-                  bool copy = false, Lock lock = Lock::NO_LOCK);
+      InstanceRef(PhysicalManager *m, LogicalRegion handle, Event ready, Memory loc, 
+                  PhysicalInstance inst, bool copy = false, Lock lock = Lock::NO_LOCK);
     public:
       inline bool is_virtual_ref(void) const { return (!location.exists()); }
       inline Event get_ready_event(void) const { return ready_event; }
@@ -1593,7 +1597,10 @@ namespace LegionRuntime {
       PhysicalInstance instance;
       bool copy;
       bool is_reduction;
+      // We either have a view (if the reference was made locally)
       PhysicalView *view;
+      // Or we have both a handle and a manager (if the reference was sent remotely)
+      LogicalRegion handle;
       PhysicalManager *manager;
     };
 
