@@ -6,9 +6,9 @@ Publicly visible repository for the Legion parallel programming project at Stanf
 Overview
 ==================================================================================
 Legion is a programming model and runtime system designed for decoupling the specification
-of parallel algorithms from their mapping onto distributed heterogenous architectures.  Since
+of parallel algorithms from their mapping onto distributed heterogeneous architectures.  Since
 running on the target class of machines requires distributing not just computation but data
-as well, Legion presents the abstraction of logical regions for desribing the structure of
+as well, Legion presents the abstraction of logical regions for describing the structure of
 program data in a machine independent way.  Programmers specify the partitioning of logical
 regions into subregions, which provides a mechanism for communicating both the independence 
 and locality of program data to the programming system.  Since the programming system
@@ -21,7 +21,7 @@ programmer in host of problems that are commonly the burden of the programmer:
     Legion will automatically discover parallelism.  For explicit constructs, Legion will
     notify the programmer if there are potential data races between tasks intended to be
     run in parallel.
-  * Managing communication: when Legion determines that there are data dependences between
+  * Managing communication: when Legion determines that there are data dependencies between
     two tasks run in different locations, Legion will automatically insert the necessary
     copies and apply the necessary constraints so the second task will not run until
     its data is available.  We describe how tasks and data are placed in the next paragraph
@@ -69,7 +69,7 @@ decisions and trying them.
 To make it easy to get a working program, Legion provides a default mapper implementation
 that uses heuristics to make mapping decisions.  In general these decision are good, but
 they are certain to be sub-optimal across all applications and architectures.  All calls
-in the mapping interface are C++ virtual functions that can be overriden, so programmers
+in the mapping interface are C++ virtual functions that can be overridden, so programmers
 can extend the default mapper and only override the mapping calls that are impacting performance.
 Alternatively a program can implement the mapping interface entirely from scratch.
 
@@ -78,7 +78,7 @@ we refer to you to our Supercomputing paper.
 
 http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
-The Legion repository is seperated into directories described below:
+The Legion repository is separated into directories described below:
 
 runtime: The runtime directory contains all of the source code for the Legion runtime
 system.  The primary files that most users will be interested in are 'legion.h' and
@@ -96,7 +96,7 @@ tool that we use for doing correctness and performance debugging in Legion.  We 
 have a 'legion_prof' tool that does performance profiling of Legion application
 runs and can be used for generating both statistics and execution diagrams.
 
-Dependences
+Dependencies
 ==================================================================================
 We have only tested Legion running on Linux based systems.  An implementation of
 the POSIX threads library is required for running all Legion applications.  For
@@ -130,7 +130,7 @@ must be launched using the 'gasnetrun' command (see GASNET documentation).
 Both the low-level and high-level runtime have flags for controlling execution.
 Below are some of the more commonly used flags:
 
--cat <logger_name>[,logger_name]*  restricts logging to the comma seperated list of loggers
+-cat <logger_name>[,logger_name]*  restricts logging to the comma separated list of loggers
 
 -level <int>    dynamically restrict the logging level to all statements at
                    the given level number and above.  See 'runtime/utilities.h' for
@@ -178,7 +178,7 @@ Debugging Programs
 Legion currently has two primary tools for doing debugging.  The first is the 
 'legion_spy' tool contained in the 'tools' directory.  To use legion spy, first
 add the '-DLEGION_SPY' flag to 'CC_FLAGS' in the Makefile of your application
-and recompile in DEBUG mode.  The run your application with the follwing flags
+and recompile in DEBUG mode.  The run your application with the following flags
 '-cat legion_spy -level 1' and dump the results of standard error to a file.  
 Then run legion spy as follows:
 
@@ -187,9 +187,9 @@ python legion_spy -l -p <file>
 The legion spy tool will parse the results of the log file.  The '-l' flag will
 check the results of the logical region dependence analysis.  If there are any 
 errors they should be reported to the Legion developers.  The '-p' file will
-dump event graphs corresponding to all of the low-level runtime event dependences
+dump event graphs corresponding to all of the low-level runtime event dependencies
 between any tasks, copies, reductions, or inline mapping operations.  These graphs
-are useful for illustrating the actual dependences computed in the physical states
+are useful for illustrating the actual dependencies computed in the physical states
 of the region trees.
 
 The other tool available in Legion for debugging is the log files capturing the
