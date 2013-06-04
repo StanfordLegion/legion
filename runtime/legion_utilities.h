@@ -466,11 +466,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ways > 0);
       assert(denominator > 0);
+      assert(numerator > 0);
 #endif
       // Check to see if we have enough parts in the numerator, if not
       // multiply both numerator and denominator by ways
       // and return one over denominator
-      if (ways > numerator)
+      if (ways >= numerator)
       {
         // Check to see if the ways is at least as big as the minimum split factor
         if (ways < MIN_FRACTION_SPLIT)

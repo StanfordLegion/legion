@@ -290,15 +290,18 @@ namespace LegionRuntime {
       std::map<MappingDeserializerFn, int> fns_to_ids;
     };
 
-    template <unsigned IDIM, unsigned ODIM>
+    template <unsigned IDIM_, unsigned ODIM_>
     class Mapping {
     public:
+      static const unsigned IDIM = IDIM_;
+      static const unsigned ODIM = ODIM_;
+
       typedef GenericDenseSubrectIterator<Mapping<IDIM, ODIM> > DenseSubrectIterator;
       typedef GenericLinearSubrectIterator<Mapping<IDIM, ODIM> > LinearSubrectIterator;
       typedef GenericPointInRectIterator<IDIM> PointInInputRectIterator;
       typedef GenericPointInRectIterator<ODIM> PointInOutputRectIterator;
 
-      static MappingRegistry<IDIM, ODIM> registry;
+      static MappingRegistry<IDIM_, ODIM_> registry;
 
       template <class T>
       static void register_mapping(void)

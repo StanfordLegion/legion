@@ -2724,11 +2724,12 @@ namespace LegionRuntime {
         // partition so that it knows that this region is open
         if (top_node->parent != NULL)
         {
-          RegionTreeNode::FieldState new_state(GenericUser(unpacking_mask, RegionUsage(req)), unpacking_mask, top_node->row_source->color);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(top_node->parent->physical_states.find(ctx) != top_node->parent->physical_states.end());
-#endif
-          top_node->parent->upgrade_new_field_state(top_node->parent->physical_states[ctx], new_state, true/*add state*/);
+          std::map<ContextID,RegionTreeNode::PhysicalState>::iterator finder = top_node->parent->physical_states.find(ctx);
+          if (finder != top_node->parent->physical_states.end())
+          {
+            RegionTreeNode::FieldState new_state(GenericUser(unpacking_mask, RegionUsage(req)), unpacking_mask, top_node->row_source->color);
+            top_node->parent->upgrade_new_field_state(finder->second, new_state, true/*add state*/);
+          }
         }
       }
       else
@@ -9315,6 +9316,9 @@ namespace LegionRuntime {
       assert(!to_take.is_empty());
 #endif
       local_frac.subtract(to_take);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!local_frac.is_empty()); // this is really bad if it happens
+#endif
       rez.serialize(to_take);
       rez.serialize(location);
       rez.serialize(instance);

@@ -27,19 +27,33 @@
   } \
 } while(0)
 
+using namespace LegionRuntime::Accessor;
+
 namespace LegionRuntime {
   namespace LowLevel {
 
     Logger::Category log_dma("dma");
 
+    typedef std::pair<Memory, Memory> MemPair;
+    typedef std::pair<RegionInstance, RegionInstance> InstPair;
+    struct OffsetsAndSize {
+      unsigned src_offset, dst_offset, size;
+    };
+    typedef std::vector<OffsetsAndSize> OASVec;
+    typedef std::map<InstPair, OASVec> OASByInst;
+    typedef std::map<MemPair, OASByInst *> OASByMem;
+
+    class MemPairCopier;
+
     class DmaRequest : public Event::Impl::EventWaiter {
     public:
       DmaRequest(const Domain& _domain,
-		 const std::vector<Domain::CopySrcDstField>& _srcs,
-		 const std::vector<Domain::CopySrcDstField>& _dsts,
+		 OASByInst *_oas_by_inst,
 		 ReductionOpID _redop_id, bool _red_fold,
 		 Event _before_copy,
 		 Event _after_copy);
+
+      ~DmaRequest(void);
 
       enum State {
 	STATE_INIT,
@@ -56,14 +70,14 @@ namespace LegionRuntime {
       bool check_readiness(bool just_check);
 
       template <unsigned DIM>
-      void perform_dma_rect(void);
+      void perform_dma_rect(MemPairCopier *mpc);
 
       void perform_dma(void);
 
       bool handler_safe(void) { return(true); }
 
       Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs, dsts;
+      OASByInst *oas_by_inst;
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy;
@@ -77,23 +91,31 @@ namespace LegionRuntime {
     std::queue<DmaRequest *> dma_queue;
     
     DmaRequest::DmaRequest(const Domain& _domain,
-			   const std::vector<Domain::CopySrcDstField>& _srcs,
-			   const std::vector<Domain::CopySrcDstField>& _dsts,
+			   OASByInst *_oas_by_inst,
 			   ReductionOpID _redop_id, bool _red_fold,
 			   Event _before_copy,
 			   Event _after_copy)
-      : domain(_domain), srcs(_srcs), dsts(_dsts),
+      : domain(_domain), oas_by_inst(_oas_by_inst),
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy), after_copy(_after_copy),
 	state(STATE_INIT), current_lock(Lock::NO_LOCK)
     {
-      log_dma.info("dma request %p created - (%x[%d+%d]+%zd)->(%x[%d+%d]+%zd) (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
 		   this,
-		   srcs[0].inst.id, srcs[0].offset, srcs[0].size, srcs.size()-1,
-		   dsts[0].inst.id, dsts[0].offset, dsts[0].size, dsts.size()-1,
+		   oas_by_inst->begin()->first.first.id, 
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id, 
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
+    }
+
+    DmaRequest::~DmaRequest(void)
+    {
+      delete oas_by_inst;
     }
 
     void DmaRequest::event_triggered(void)
@@ -143,57 +165,49 @@ namespace LegionRuntime {
 	  }
 	}
 
-	// now go through all src fields and make sure we have instance metadata
-	for(std::vector<Domain::CopySrcDstField>::const_iterator it = srcs.begin();
-	    it != srcs.end();
-	    it++) {
-	  RegionInstance::Impl *impl = it->inst.impl();
+	// now go through all instance pairs
+	for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+	  RegionInstance::Impl *src_impl = it->first.first.impl();
+	  RegionInstance::Impl *dst_impl = it->first.second.impl();
 
-	  if(!impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->inst.id);
+	  if(!src_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->first.first.id);
 	    if(just_check) return false;
 
-	    Event e = impl->lock.lock(1, false);
+	    Event e = src_impl->lock.lock(1, false);
 	    if(e.has_triggered()) {
 	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
-	      impl->lock.unlock();
+	      src_impl->lock.unlock();
 	    } else {
-	      current_lock = impl->lock.me;
+	      current_lock = src_impl->lock.me;
 	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, current_lock.id);
 	      e.impl()->add_waiter(e, this);
 	      return false;
 	    }
 	  }
-	  if(!impl->linearization.valid()) {
+	  if(!src_impl->linearization.valid()) {
 	    //printf("deserializing linearizer\n");
-	    impl->linearization.deserialize(impl->locked_data.linearization_bits);
+	    src_impl->linearization.deserialize(src_impl->locked_data.linearization_bits);
 	  }
-	}
 
-	// same for dst fields
-	for(std::vector<Domain::CopySrcDstField>::const_iterator it = dsts.begin();
-	    it != dsts.end();
-	    it++) {
-	  RegionInstance::Impl *impl = it->inst.impl();
-
-	  if(!impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, it->inst.id);
+	  if(!dst_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, it->first.second.id);
 	    if(just_check) return false;
 
-	    Event e = impl->lock.lock(1, false);
+	    Event e = dst_impl->lock.lock(1, false);
 	    if(e.has_triggered()) {
 	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
-	      impl->lock.unlock();
+	      dst_impl->lock.unlock();
 	    } else {
-	      current_lock = impl->lock.me;
+	      current_lock = dst_impl->lock.me;
 	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, current_lock.id);
 	      e.impl()->add_waiter(e, this);
 	      return false;
 	    }
 	  }
-	  if(!impl->linearization.valid()) {
+	  if(!dst_impl->linearization.valid()) {
 	    //printf("deserializing linearizer\n");
-	    impl->linearization.deserialize(impl->locked_data.linearization_bits);
+	    dst_impl->linearization.deserialize(dst_impl->locked_data.linearization_bits);
 	  }
 	}
 
@@ -612,24 +626,104 @@ namespace LegionRuntime {
 
     }; // namespace RangeExecutors
 
+    class InstPairCopier {
+    public:
+      virtual void copy_field(int src_index, int dst_index, int elem_count,
+			      unsigned src_offset, unsigned dst_offset, unsigned bytes) = 0;
+      virtual void flush(void) = 0;
+    };
+
+    class DefaultInstPairCopier : public InstPairCopier {
+    public:
+      DefaultInstPairCopier(RegionInstance src_inst, RegionInstance dst_inst)
+	: src_acc(src_inst.get_accessor()), dst_acc(dst_inst.get_accessor())
+      {}
+
+      virtual void copy_field(int src_index, int dst_index, int elem_count,
+			      unsigned src_offset, unsigned dst_offset, unsigned bytes)
+      {
+	char buffer[1024];
+
+	for(int i = 0; i < elem_count; i++) {
+	  src_acc.read_untyped(ptr_t(src_index + i), buffer, bytes, src_offset);
+	  dst_acc.write_untyped(ptr_t(dst_index + i), buffer, bytes, dst_offset);
+	}
+      }
+
+      virtual void flush(void) {}
+
+    protected:
+      RegionAccessor<AccessorType::Generic> src_acc;
+      RegionAccessor<AccessorType::Generic> dst_acc;
+    };
+
+    class MemPairCopier {
+    public:
+      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem);
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst) = 0;
+      virtual void flush(void) = 0;
+    };
+
+    class DefaultMemPairCopier : public MemPairCopier {
+    public:
+      // we don't actually need to know our memories...
+      DefaultMemPairCopier(void) {}
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new DefaultInstPairCopier(src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+    };
+     
+    MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem)
+    {
+      Memory::Impl *src_impl = src_mem.impl();
+      Memory::Impl *dst_impl = dst_mem.impl();
+
+      Memory::Kind src_kind = src_impl->get_kind();
+      Memory::Kind dst_kind = dst_impl->get_kind();
+
+      log_dma.info("copier: %x(%d) -> %x(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
+
+      // try as many things as we can think of
+
+      // fallback
+      return new DefaultMemPairCopier;
+    }
+
     template <unsigned DIM>
-    void DmaRequest::perform_dma_rect(void)
+    void DmaRequest::perform_dma_rect(MemPairCopier *mpc)
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
-      for(Arrays::GenericPointInRectIterator<DIM> pir(orig_rect); pir; pir++) {
-	char buffer[1024];
-	size_t rcount = 0;
-	for(std::vector<Domain::CopySrcDstField>::const_iterator it = srcs.begin(); it != srcs.end(); it++) {
-	  it->inst.get_accessor().read_untyped(DomainPoint::from_point<DIM>(pir.p), &buffer[rcount], it->size, it->offset);
-	  rcount += it->size;
+      // this is the SOA-friendly loop nesting
+      for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+	RegionInstance src_inst = it->first.first;
+	RegionInstance dst_inst = it->first.second;
+	OASVec& oasvec = it->second;
+
+	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst);
+
+	Arrays::Mapping<DIM, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<DIM>();
+	Arrays::Mapping<DIM, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<DIM>();
+
+	for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(orig_rect, *src_linearization); dsi; dsi++) {
+	  // dense subrect in src might not be dense in dst
+	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(dsi.subrect, *dst_linearization); dso; dso++) {
+	    Rect<1> orect = dso.image;
+	    // rectangle in input must be recalculated
+	    Rect<DIM> subrect_check;
+	    Rect<1> irect = src_linearization->image_dense_subrect(dso.subrect, subrect_check);
+	    assert(dso.subrect == subrect_check);
+
+	    for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
+	      ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1,
+			      it2->src_offset, it2->dst_offset, it2->size);
+	  }
 	}
-	size_t wcount = 0;
-	for(std::vector<Domain::CopySrcDstField>::const_iterator it = dsts.begin(); it != dsts.end(); it++) {
-	  it->inst.get_accessor().write_untyped(DomainPoint::from_point<DIM>(pir.p), &buffer[wcount], it->size, it->offset);
-	  wcount += it->size;
-	}
-	assert(rcount == wcount);
       }
     }
 
@@ -638,6 +732,12 @@ namespace LegionRuntime {
       log_dma.info("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
+
+      // create a copier for the memory used by all of these instance pairs
+      Memory src_mem = oas_by_inst->begin()->first.first.impl()->memory;
+      Memory dst_mem = oas_by_inst->begin()->first.second.impl()->memory;
+
+      MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
 
       switch(domain.get_dim()) {
       case 0:
@@ -648,12 +748,15 @@ namespace LegionRuntime {
 	}
 
 	// rectangle cases
-      case 1: perform_dma_rect<1>(); break;
-      case 2: perform_dma_rect<2>(); break;
-      case 3: perform_dma_rect<3>(); break;
+      case 1: perform_dma_rect<1>(mpc); break;
+      case 2: perform_dma_rect<2>(mpc); break;
+      case 3: perform_dma_rect<3>(mpc); break;
 
       default: assert(0);
       };
+
+      mpc->flush();
+      delete mpc;
 
 #ifdef EVEN_MORE_DEAD_DMA_CODE
       RegionInstance::Impl *src_impl = src.impl();
@@ -936,10 +1039,14 @@ namespace LegionRuntime {
 
       log_dma.debug("finished copy %x (%d) -> %x (%d) - %zd bytes (%zd), event=%x/%d", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size, after_copy.id, after_copy.gen);
 #endif
-      log_dma.info("dma request %p finished - (%x[%d+%d]+%zd)->(%x[%d+%d]+%zd) (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
 		   this,
-		   srcs[0].inst.id, srcs[0].offset, srcs[0].size, srcs.size()-1,
-		   dsts[0].inst.id, dsts[0].offset, dsts[0].size, dsts.size()-1,
+		   oas_by_inst->begin()->first.first.id, 
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id, 
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
@@ -1002,8 +1109,7 @@ namespace LegionRuntime {
     }
     
     Event enqueue_dma(const Domain& domain,
-		      const std::vector<Domain::CopySrcDstField>& srcs,
-		      const std::vector<Domain::CopySrcDstField>& dsts,
+		      OASByInst *oas_by_inst,
 		      ReductionOpID redop_id, bool red_fold,
 		      Event before_copy,
 		      Event after_copy /*= Event::NO_EVENT*/)
@@ -1012,7 +1118,7 @@ namespace LegionRuntime {
       //   copy immediately
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
-      DmaRequest *r = new DmaRequest(domain, srcs, dsts, redop_id, red_fold,
+      DmaRequest *r = new DmaRequest(domain, oas_by_inst, redop_id, red_fold,
 				     before_copy, after_copy);
 
       bool ready = r->check_readiness(true);
@@ -1079,32 +1185,39 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
-      Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs(args.num_srcs);
-      std::vector<Domain::CopySrcDstField> dsts(args.num_dsts);
-
       const int *idata = (const int *)data;
+
+      Domain domain;
       idata = domain.deserialize(idata);
 
-      for(int i = 0; i < args.num_srcs; i++) {
-	srcs[i].inst.id = *idata++;
-	srcs[i].offset = *idata++;
-	srcs[i].size = *idata++;
-      }
-      for(int i = 0; i < args.num_dsts; i++) {
-	dsts[i].inst.id = *idata++;
-	dsts[i].offset = *idata++;
-	dsts[i].size = *idata++;
+      OASByInst *oas_by_inst = new OASByInst;
+
+      while(((idata - ((const int *)data))*sizeof(int)) < msglen) {
+	RegionInstance src_inst = ID((unsigned)*idata++).convert<RegionInstance>();
+	RegionInstance dst_inst = ID((unsigned)*idata++).convert<RegionInstance>();
+	InstPair ip(src_inst, dst_inst);
+
+	OASVec& oasvec = (*oas_by_inst)[ip];
+
+	unsigned count = *idata++;
+	for(unsigned i = 0; i < count; i++) {
+	  OffsetsAndSize oas;
+	  oas.src_offset = *idata++;
+	  oas.dst_offset = *idata++;
+	  oas.size = *idata++;
+	  oasvec.push_back(oas);
+	}
       }
 
+      // better have consumed exactly the right amount of data
       assert(((idata - ((const int *)data))*sizeof(int)) == msglen);
 
-      log_dma.info("received remote copy request: srcs=%d tgts=%d before=%x/%d after=%x/%d",
-		   args.num_srcs, args.num_dsts,
+      log_dma.info("received remote copy request: instpairs=%zd(%x->%x) before=%x/%d after=%x/%d",
+		   oas_by_inst->size(), oas_by_inst->begin()->first.first.id, oas_by_inst->begin()->first.second.id,
 		   args.before_copy.id, args.before_copy.gen,
 		   args.after_copy.id, args.after_copy.gen);
 
-      enqueue_dma(domain, srcs, dsts, args.redop_id, args.red_fold, args.before_copy, args.after_copy);
+      enqueue_dma(domain, oas_by_inst, args.redop_id, args.red_fold, args.before_copy, args.after_copy);
 #if 0
       if(args.before_copy.has_triggered()) {
 	RegionInstance::Impl::copy(args.source, args.target,
@@ -1124,83 +1237,127 @@ namespace LegionRuntime {
 #endif
     }
 
+    template <typename T> T min(T a, T b) { return (a < b) ? a : b; }
+
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
 		       const std::vector<CopySrcDstField>& dsts,
 		       Event wait_on,
 		       ReductionOpID redop_id, bool red_fold) const
     {
-      std::set<RegionInstance> src_insts, dst_insts;
-      std::set<Memory> src_mems, dst_mems;
-      
-      for(std::vector<CopySrcDstField>::const_iterator it = srcs.begin(); it != srcs.end(); it++) {
-	if(src_insts.insert(it->inst).second) {
-	  // this was the first time we've seen this instance, so insert the memory too
-	  src_mems.insert(it->inst.impl()->memory);
-	}
-      }
-      for(std::vector<CopySrcDstField>::const_iterator it = dsts.begin(); it != dsts.end(); it++) {
-	if(dst_insts.insert(it->inst).second) {
-	  // this was the first time we've seen this instance, so insert the memory too
-	  dst_mems.insert(it->inst.impl()->memory);
-	}
-      }
+      OASByMem oas_by_mem;
 
-      log_dma.info("copy: %zd src mems, %zd dst mems, is=%x", src_mems.size(), dst_mems.size(), is_id);
+      std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
+      std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
+      unsigned src_suboffset = 0;
+      unsigned dst_suboffset = 0;
+      while((src_it != srcs.end()) && (dst_it != dsts.end())) {
+	InstPair ip(src_it->inst, dst_it->inst);
+	MemPair mp(src_it->inst.impl()->memory, dst_it->inst.impl()->memory);
+
+	printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
+	       ip.first.id, ip.second.id, mp.first.id, mp.second.id,
+	       src_suboffset, dst_suboffset,
+	       src_it->offset, src_it->size, 
+	       dst_it->offset, dst_it->size);
+
+	OASByInst *oas_by_inst;
+	OASByMem::iterator it = oas_by_mem.find(mp);
+	if(it != oas_by_mem.end()) {
+	  oas_by_inst = it->second;
+	} else {
+	  oas_by_inst = new OASByInst;
+	  oas_by_mem[mp] = oas_by_inst;
+	}
+	OASVec& oasvec = (*oas_by_inst)[ip];
+
+	OffsetsAndSize oas;
+	oas.src_offset = src_it->offset + src_suboffset;
+	oas.dst_offset = dst_it->offset + dst_suboffset;
+	oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
+	oasvec.push_back(oas);
+
+	src_suboffset += oas.size;
+	assert(src_suboffset <= src_it->size);
+	if(src_suboffset == src_it->size) {
+	  src_it++;
+	  src_suboffset = 0;
+	}
+	dst_suboffset += oas.size;
+	assert(dst_suboffset <= dst_it->size);
+	if(dst_suboffset == dst_it->size) {
+	  dst_it++;
+	  dst_suboffset = 0;
+	}
+      }
+      // make sure we used up both
+      assert(src_it == srcs.end());
+      assert(dst_it == dsts.end());
+
+      // now do a copy for each memory pair
+      std::set<Event> finish_events;
+
+      log_dma.info("copy: %zd distinct src/dst mem pairs, is=%x", oas_by_mem.size(), is_id);
       assert(redop_id == 0);
 
-      if((src_mems.size() == 1) && (dst_mems.size() == 1)) {
-	Memory src_mem = *(src_mems.begin());
-	Memory dst_mem = *(dst_mems.begin());
+      for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
+	Memory src_mem = it->first.first;
+	Memory dst_mem = it->first.second;
+	OASByInst *oas_by_inst = it->second;
 
 	// ask which node should perform the copy
 	int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
+	log_dma.info("copy: srcmem=%x dstmem=%x node=%d", src_mem.id, dst_mem.id, dma_node);
 
 	if(dma_node == gasnet_mynode()) {
 	  log_dma.info("performing copy on local node");
-	
-	  return enqueue_dma(*this, srcs, dsts, redop_id, red_fold, wait_on, Event::NO_EVENT);
+
+	  Event ev = enqueue_dma(*this, oas_by_inst, redop_id, red_fold, wait_on, Event::NO_EVENT);
+	  finish_events.insert(ev);
 	} else {
 	  // need to send dma to remote node for processing, so we need a completion event
+	  Event ev = Event::Impl::create_event();
+
 	  RemoteCopyArgs args;
-	  args.num_srcs = srcs.size();
-	  args.num_dsts = dsts.size();
 	  args.redop_id = redop_id;
 	  args.red_fold = red_fold;
 	  args.before_copy = wait_on;
-	  args.after_copy = Event::Impl::create_event();
+	  args.after_copy = ev;
 
 	  int msgdata[64];
 
+	  // domain info goes first
 	  int *msgptr = serialize(msgdata);
 
-	  for(std::vector<CopySrcDstField>::const_iterator it = srcs.begin(); it != srcs.end(); it++) {
-	    *msgptr++ = (*it).inst.id;
-	    *msgptr++ = (*it).offset;
-	    *msgptr++ = (*it).size;
+	  // now OAS vectors
+	  for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
+	    RegionInstance src_inst = it2->first.first;
+	    RegionInstance dst_inst = it2->first.second;
+	    OASVec& oasvec = it2->second;
+
+	    *msgptr++ = src_inst.id;
+	    *msgptr++ = dst_inst.id;
+	    *msgptr++ = oasvec.size();
+	    for(OASVec::iterator it3 = oasvec.begin(); it3 != oasvec.end(); it3++) {
+	      *msgptr++ = it3->src_offset;
+	      *msgptr++ = it3->dst_offset;
+	      *msgptr++ = it3->size;
+	    }
 	  }
-	  for(std::vector<CopySrcDstField>::const_iterator it = dsts.begin(); it != dsts.end(); it++) {
-	    *msgptr++ = (*it).inst.id;
-	    *msgptr++ = (*it).offset;
-	    *msgptr++ = (*it).size;
-	  }
+
+	  // we're done with our copy of oas_by_inst now
+	  delete oas_by_inst;
+
 	  size_t msglen = ((const char *)msgptr) - ((const char *)msgdata);
 	  assert(msglen < 256);
 	  log_dma.info("performing copy on remote node (%d), event=%x/%d", dma_node, args.after_copy.id, args.after_copy.gen);
 	  RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
-	  return args.after_copy;
+	  
+	  finish_events.insert(ev);
 	}
-      } else {
-	// multiple source and/or dest memories
-	log_dma.error("not handing multiple src/dst memories yet!");
-	for(std::vector<CopySrcDstField>::const_iterator it = srcs.begin(); it != srcs.end(); it++)
-          log_dma.error("  src: inst=%x offset=%d size=%d",
-                        (*it).inst.id, (*it).offset, (*it).size);
-	for(std::vector<CopySrcDstField>::const_iterator it = dsts.begin(); it != dsts.end(); it++)
-          log_dma.error("  dst: inst=%x offset=%d size=%d",
-                        (*it).inst.id, (*it).offset, (*it).size);
-	assert(0);
-	return Event::NO_EVENT;
       }
+
+      // final event is merge of all individual copies' events
+      return Event::Impl::merge_events(finish_events);
     }
 
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,

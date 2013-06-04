@@ -3056,6 +3056,8 @@ namespace LegionRuntime {
         {
           // This task is still on the processor
           // where it originated, so we have to do the mapping now
+          // First pick the processor on which we want to this task to run
+          this->executing_processor = invoke_mapper_select_target_proc();
           if (perform_mapping())
           {
             if (distribute_task())
@@ -5643,7 +5645,12 @@ namespace LegionRuntime {
       assert(current_proc.exists());
 #endif
       // Allow this to be re-entrant in case sanitization fails
-      Processor target_proc = invoke_mapper_select_target_proc();
+      // Check to see if we've already selected a destination
+      // for this task.
+      Processor target_proc = (is_locally_mapped() ? this->executing_processor : Processor::NO_PROC);
+      // If we haven't already, pick a destination processor
+      if (!target_proc.exists())
+        target_proc = invoke_mapper_select_target_proc();
 #ifdef DEBUG_HIGH_LEVEL
       if (!target_proc.exists())
       {
@@ -5706,7 +5713,9 @@ namespace LegionRuntime {
         unlock_context();
       }
 #endif
-      bool map_success = map_all_regions(current_proc, termination_event, termination_event); 
+      // Use the executing processor if it exists, otherwise use the current processor
+      bool map_success = map_all_regions((executing_processor.exists() ? executing_processor : current_proc), 
+                                          termination_event, termination_event); 
       if (map_success)
       {
         // Mark that we're no longer stealable now that we've been mapped
@@ -5978,6 +5987,7 @@ namespace LegionRuntime {
           rez.serialize<Processor::TaskFuncID>(low_id);
           if (is_leaf())
           {
+            forest_ctx->begin_pack_region_tree_state(rez);
             for (unsigned idx = 0; idx < regions.size(); idx++)
             {
               forest_ctx->pack_reference(physical_instances[idx], rez);
@@ -6069,6 +6079,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(physical_instances.empty());
 #endif
+          forest_ctx->begin_unpack_region_tree_state(derez);
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             physical_instances.push_back(forest_ctx->unpack_reference(derez));
@@ -6102,6 +6113,7 @@ namespace LegionRuntime {
                   );
               physical_instances.push_back(forest_ctx->unpack_reference(derez)); 
             }
+            physical_contexts.push_back(ctx_id);
           }
         }
       }
@@ -6313,6 +6325,10 @@ namespace LegionRuntime {
           buffer_size += compute_return_created_contexts();
           buffer_size += forest_ctx->post_compute_region_tree_state_return(true/*create only*/);
         }
+        else
+        {
+          buffer_size += forest_ctx->post_compute_region_tree_state_return(false/*created only*/);
+        }
         // Always need to send back the leaked references
         buffer_size += forest_ctx->compute_leaked_return_size();
         buffer_size += sizeof(remote_future_len);
@@ -6329,6 +6345,11 @@ namespace LegionRuntime {
           forest_ctx->begin_pack_region_tree_state_return(rez, true/*created only*/);
           pack_return_created_contexts(rez);
           forest_ctx->end_pack_region_tree_state_return(rez, true/*created only*/);
+        }
+        else
+        {
+          forest_ctx->begin_pack_region_tree_state_return(rez, false/*created only*/);
+          forest_ctx->end_pack_region_tree_state_return(rez, false/*created only*/);
         }
         forest_ctx->pack_leaked_return(rez);
         unlock_context();
@@ -6467,6 +6488,10 @@ namespace LegionRuntime {
         }
       }
       forest_ctx->end_unpack_region_tree_state_return(derez, false/*created only*/);
+      // We can also free any source copy instances that we might have
+      // since we know that the task has started at this point.
+      if (!source_copy_instances.empty())
+        release_source_copy_instances();
       unlock_context();
       // Once we've unpacked our information, we can tell people that we've mapped
       lock();
@@ -6589,6 +6614,25 @@ namespace LegionRuntime {
           unpack_return_created_contexts(derez); // only happens if top-level task runs remotely
         forest_ctx->end_unpack_region_tree_state_return(derez, true/*created only*/);
         forest_ctx->unpack_leaked_return(derez);
+        // If we were locally mapped, then we can also remove any references that we had here
+        if (locally_mapped)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions.size() == physical_instances.size());
+          assert(regions.size() == non_virtual_mapped_region.size());
+#endif
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            if (non_virtual_mapped_region[idx])
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!physical_instances[idx].is_virtual_ref());
+#endif
+              physical_instances[idx].remove_reference(unique_id, false/*strict*/);
+            }
+          }
+          physical_instances.clear();
+        }
         unlock_context();
         if (parent_ctx != NULL)
         {
@@ -6605,7 +6649,28 @@ namespace LegionRuntime {
       else
       {
         lock_context();
+        forest_ctx->begin_unpack_region_tree_state_return(derez, false/*created only*/);
+        forest_ctx->end_unpack_region_tree_state_return(derez, false/*created only*/);
         forest_ctx->unpack_leaked_return(derez);
+        // If we were locally mapped, then we can also remove any references that we had here
+        if (locally_mapped)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions.size() == physical_instances.size());
+          assert(regions.size() == non_virtual_mapped_region.size());
+#endif
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            if (non_virtual_mapped_region[idx])
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!physical_instances[idx].is_virtual_ref());
+#endif
+              physical_instances[idx].remove_reference(unique_id, false/*strict*/);
+            }
+          }
+          physical_instances.clear();
+        }
         unlock_context();
       }
       // Now set the future result and trigger the termination event
@@ -6626,6 +6691,8 @@ namespace LegionRuntime {
       if (parent_ctx != NULL)
         runtime->notify_operation_complete(parent_ctx);
       unlock();
+      // Now we can deactivate ourselves
+      deactivate();
     }
 
     //--------------------------------------------------------------------------

@@ -2472,10 +2472,11 @@ namespace LegionRuntime {
         bool is_reduction(void) const { return reduction; }
         bool is_list_reduction(void) const { return list; }
         void* get_base_ptr(void) const { return base_ptr; }
-        void* get_address(int index, size_t field_start, size_t within_field);
+        void* get_address(int index, size_t field_start, size_t field_Size, size_t within_field);
         size_t get_elmt_size(void) const { return elmt_size; }
         const std::vector<size_t>& get_field_sizes(void) const { return field_sizes; }
         size_t get_num_elmts(void) const { return num_elmts; }
+        size_t get_block_size(void) const { return block_size; }
         size_t* get_cur_entry(void) { return &cur_entry; }
         const DomainLinearization& get_linearization(void) const { return linearization; }
     private:
@@ -2906,19 +2907,21 @@ namespace LegionRuntime {
       }
     }
 
-    void* RegionInstance::Impl::get_address(int index, size_t field_start, size_t within_field)
+    void* RegionInstance::Impl::get_address(int index, size_t field_start, size_t field_size,
+					    size_t within_field)
     {
       if(block_size == 1) {
 	// simple AOS case:
 	return (base_ptr + (index * elmt_size) + field_start + within_field);
       } else {
-	//int num_blocks = index / block_size;
-	//int within_block = index % block_size;
+	int num_blocks = index / block_size;
+	int within_block = index % block_size;
 
-	return 0; // SJT: FIX!
-	// return (base_ptr + 
-	// 	(num_blocks * block_size * elmt_size) +
-	// 	(field_start * block_size) +
+	return (base_ptr + 
+	 	(num_blocks * block_size * elmt_size) +
+	 	(field_start * block_size) +
+		(within_block * field_size) +
+		within_field);
       }
     }
 
@@ -3173,6 +3176,8 @@ namespace LegionRuntime {
 	  default: assert(0);
 	  }
 	  IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(get_index_space());
+	  // HACK - override block size to force SOA for now
+	  block_size = inst_extent.volume();
 	  return r->create_instance(memory, field_sizes, block_size, dl, int(inst_extent.hi) + 1, redop_id);
 	} else {
 	  IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(get_index_space());
@@ -3521,7 +3526,7 @@ namespace LegionRuntime {
 
     static size_t find_field(const std::vector<size_t>& field_sizes,
 			     size_t offset, size_t size,
-			     size_t& field_start, size_t& within_field)
+			     size_t& field_start, size_t& field_size, size_t& within_field)
     {
       size_t start = 0;
       for(std::vector<size_t>::const_iterator it = field_sizes.begin();
@@ -3530,6 +3535,7 @@ namespace LegionRuntime {
 	if(offset < *it) {
 	  // we're in this field
 	  field_start = start;
+	  field_size = *it;
 	  within_field = offset;
 	  if((offset + size) <= *it) {
 	    return size;
@@ -3577,16 +3583,16 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, within_field;
+		size_t field_start, field_size, within_field;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					field_start, within_field);
+					  field_start, field_size, within_field);
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
 		assert(bytes > 0);
 		memcpy(buffer + write_offset, 
-		       inst->get_address(index, field_start, within_field),
+		       inst->get_address(index, field_start, field_size, within_field),
 		       bytes);
 		offset += bytes;
 		size -= bytes;
@@ -3601,15 +3607,15 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, within_field;
+		size_t field_start, field_size, within_field;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					  field_start, within_field);
+					  field_start, field_size, within_field);
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
 		assert(bytes > 0);
-		memcpy(inst->get_address(index, field_start, within_field),
+		memcpy(inst->get_address(index, field_start, field_size, within_field),
 		       buffer + read_offset, 
 		       bytes);
 		offset += bytes;
@@ -3632,16 +3638,17 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, within_field;
+		size_t field_start, field_size, within_field;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					field_start, within_field);
+					  field_start, field_size, within_field);
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
 		assert(bytes > 0);
 		memcpy(buffer + write_offset, 
-		       inst->get_address(inst->get_linearization().get_image(dp), field_start, within_field),
+		       inst->get_address(inst->get_linearization().get_image(dp), 
+					 field_start, field_size, within_field),
 		       bytes);
 		offset += bytes;
 		size -= bytes;
@@ -3656,15 +3663,16 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, within_field;
+		size_t field_start, field_size, within_field;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					  field_start, within_field);
+					  field_start, field_size, within_field);
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
 		assert(bytes > 0);
-		memcpy(inst->get_address(inst->get_linearization().get_image(dp), field_start, within_field),
+		memcpy(inst->get_address(inst->get_linearization().get_image(dp),
+					 field_start, field_size, within_field),
 		       buffer + read_offset, 
 		       bytes);
 		offset += bytes;
@@ -4553,42 +4561,46 @@ namespace LegionRuntime {
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      const char *src = (const char *)(impl->get_base_ptr());
-      src += ptr.value * impl->get_elmt_size();
-      src += field_offset;
-      src += offset;
+      size_t field_start, field_size, within_field;
+      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+				 field_start, field_size, within_field);
+      assert(bytes == bytes2);
+      const char *src = (const char *)(impl->get_address(ptr.value, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      const char *src = (const char *)(impl->get_base_ptr());
       int index = impl->get_linearization().get_image(dp);
-      src += index * impl->get_elmt_size();
-      src += field_offset;
-      src += offset;
+      size_t field_start, field_size, within_field;
+      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+				 field_start, field_size, within_field);
+      assert(bytes == bytes2);
+      const char *src = (const char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      char *dst = (char *)(impl->get_base_ptr());
-      dst += ptr.value * impl->get_elmt_size();
-      dst += field_offset;
-      dst += offset;
+      size_t field_start, field_size, within_field;
+      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+				 field_start, field_size, within_field);
+      assert(bytes == bytes2);
+      char *dst = (char *)(impl->get_address(ptr.value, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      char *dst = (char *)(impl->get_base_ptr());
       int index = impl->get_linearization().get_image(dp);
-      dst += index * impl->get_elmt_size();
-      dst += field_offset;
-      dst += offset;
+      size_t field_start, field_size, within_field;
+      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+				 field_start, field_size, within_field);
+      assert(bytes == bytes2);
+      char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
@@ -4596,14 +4608,18 @@ namespace LegionRuntime {
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets)
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      char *dst = (char *)(impl->get_base_ptr());
       Arrays::Mapping<DIM, 1> *mapping = impl->get_linearization().get_mapping<DIM>();
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
-      dst += index * impl->get_elmt_size();
-      dst += field_offset;
+      // TODO: trim subrect in HybridSOA case
+      size_t field_start, field_size, within_field;
+      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset, 1,
+				 field_start, field_size, within_field);
+      assert(bytes2 == 1);
+      char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = strides[i] * impl->get_elmt_size();
+	offsets[i].offset = (strides[i] * 
+			     ((impl->get_block_size() > 1) ? field_size : impl->get_elmt_size()));
       return dst;
     }
 
