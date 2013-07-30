@@ -55,6 +55,13 @@ namespace LegionRuntime {
 	return true; 
       }
 
+      bool operator!=(const Point<DIM>& other) const
+      { 
+	for(unsigned i = 0; i < DIM; i++) 
+	  if(x[i] != other.x[i]) return true; 
+	return false; 
+      }
+
       bool operator<=(const Point<DIM>& other) const
       { 
 	for(unsigned i = 0; i < DIM; i++) 
@@ -204,6 +211,11 @@ namespace LegionRuntime {
 	return ((lo == other.lo) && (hi == other.hi));
       }
 
+      bool operator!=(const Rect<DIM>& other)
+      {
+	return ((lo != other.lo) && (hi != other.hi));
+      }
+
       bool overlaps(const Rect<DIM>& other) const
       {
 	for(unsigned i = 0; i < DIM; i++)
@@ -233,6 +245,13 @@ namespace LegionRuntime {
 	  v *= (hi.x[i] - lo.x[i] + 1);
 	}
 	return v;
+      }
+
+      int dim_size(int dim) const
+      {
+        assert(dim >= 0);
+        assert(dim < int(DIM));
+        return (hi.x[dim] - lo.x[dim] + 1);
       }
 
       Rect<DIM> intersection(const Rect<DIM>& other)
@@ -432,7 +451,7 @@ namespace LegionRuntime {
 	: orig_rect(r), mapping(m)
       {
 	image = m.image_dense_subrect(r, subrect);
-	any_left = true;
+        any_left = true;
       }
 
       Rect<T::IDIM> orig_rect;
@@ -443,9 +462,41 @@ namespace LegionRuntime {
       
       bool step(void)
       {
-	assert(subrect == orig_rect);
-	any_left = false;
-	return false;
+	// to make a step, find the "seam" along which we split last time - first dimension whose
+	//  subrect.hi isn't the edge of the original rect
+	unsigned seam_idx = 0;
+	while(subrect.hi.x[seam_idx] == orig_rect.hi.x[seam_idx]) {
+	  seam_idx++;
+          if(seam_idx >= T::IDIM) {
+            any_left = false;
+            return false;
+          }
+	}
+	// ask for the rest of the original rect along the current split
+	Rect<T::IDIM> newrect;
+	// dimensions below the seam use the original rectangle bounds
+	for(unsigned i = 0; i < seam_idx; i++) {
+	  newrect.lo.x[i] = orig_rect.lo.x[i];
+	  newrect.hi.x[i] = orig_rect.hi.x[i];
+	}
+	// the seam continues where we left off
+	newrect.lo.x[seam_idx] = subrect.hi.x[seam_idx] + 1;
+	newrect.hi.x[seam_idx] = orig_rect.hi.x[seam_idx];
+	// above the seam tries to use the same cross section
+	for(unsigned i = seam_idx + 1; i < T::IDIM; i++) {
+	  newrect.lo.x[i] = subrect.lo.x[i];
+	  newrect.hi.x[i] = subrect.hi.x[i];
+	}
+
+	image = mapping.image_dense_subrect(newrect, subrect);
+
+	// sanity check that dimensions above the current seam didn't further split
+	for(unsigned i = seam_idx + 1; i < T::IDIM; i++) {
+	  assert(newrect.lo.x[i] == subrect.lo.x[i]);
+	  assert(newrect.hi.x[i] == subrect.hi.x[i]);
+	}
+
+	return true;
       }
 
       operator bool(void) const { return any_left; }
@@ -610,6 +661,7 @@ namespace LegionRuntime {
     template <unsigned DIM>
     class FortranArrayLinearization : public Linearization<DIM> {
     public:
+      FortranArrayLinearization(void) {}
       FortranArrayLinearization(Rect<DIM> bounds, int first_index = 1)
       {
 	this->strides.x[0] = 1;

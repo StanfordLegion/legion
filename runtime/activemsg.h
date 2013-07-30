@@ -46,6 +46,7 @@ extern void enqueue_message(gasnet_node_t target, int msgid,
 			    int payload_mode);
 
 extern void handle_long_msgptr(gasnet_node_t source, void *ptr);
+extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
 
 template <class T> struct HandlerReplyFuture {
   gasnet_hsl_t mutex;
@@ -200,8 +201,9 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
       MSGTYPE typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    nbytes = adjust_long_msgsize(src, buf, nbytes);	\
     (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
-    if(nbytes > gasnet_AMMaxMedium()) handle_long_msgptr(src, buf); \
+    /*if(nbytes > gasnet_AMMaxMedium())*/ handle_long_msgptr(src, buf);	\
   } \
 }; \
 \

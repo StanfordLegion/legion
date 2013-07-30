@@ -1220,7 +1220,7 @@ namespace LegionRuntime {
       assert(closer.upper_targets.back()->logical_region == close_node);
       TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
-      close_node->issue_final_close_operation(rm.ctx, user, closer);
+      close_node->issue_final_close_operation(rm, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
       TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
@@ -1246,7 +1246,7 @@ namespace LegionRuntime {
       assert(closer.target->logical_region == close_node);
       TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, true/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
 #endif
-      close_node->issue_final_close_operation(rm.ctx, user, closer);
+      close_node->issue_final_reduction_operation(rm, user, closer);
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.success);
       TreeStateLogger::capture_state(runtime, &rm.req, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id(), close_node, rm.ctx, false/*premap*/, false/*sanitizing*/, true/*closing*/, FIELD_ALL_ONES, field_mask);
@@ -4507,7 +4507,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(fields.find(*it) != fields.end());
 #endif
-        fields.erase(*it);
+        // Let's not actually erase it
+        //fields.erase(*it);
         deleted_fields.push_back(*it);
         // Check to see if we created it
         for (std::list<FieldID>::iterator cit = created_fields.begin();
@@ -4702,7 +4703,7 @@ namespace LegionRuntime {
           max_id = info.idx;
       }
       // Ignore segmentation for now
-      result->total_index_fields = max_id;
+      result->total_index_fields = max_id + 1;
       // No shift since this field space is just returning
       result->shift = 0;
 #ifdef DEBUG_HIGH_LEVEL
@@ -4715,7 +4716,17 @@ namespace LegionRuntime {
     bool FieldSpaceNode::has_modifications(void) const
     //--------------------------------------------------------------------------
     {
-      return (!created_fields.empty() || !deleted_fields.empty());
+      // Has modifications if it has fields that have been created locally
+      // and not destroyed while here.  Fields that were passed here and
+      // then deleted will get passed back by the enclosing task context.
+      std::set<FieldID> del_fields(deleted_fields.begin(),deleted_fields.end());
+      for (std::list<FieldID>::const_iterator it = created_fields.begin();
+            it != created_fields.end(); it++)
+      {
+        if (del_fields.find(*it) == del_fields.end())
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6079,24 +6090,25 @@ namespace LegionRuntime {
     {
       // If we don't even have a logical state then neither 
       // do any of our children so we're done
-      if (logical_states.find(ctx) == logical_states.end())
-        return;
-      const LogicalState &state = logical_states[ctx];
-      for (std::list<LogicalUser>::const_iterator it = state.curr_epoch_users.begin();
-            it != state.curr_epoch_users.end(); it++)
+      if (logical_states.find(ctx) != logical_states.end())
       {
-        // Check for field disjointness
-        if (it->field_mask * deletion_mask)
-          continue;
-        op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
-      }
-      for (std::list<LogicalUser>::const_iterator it = state.prev_epoch_users.begin();
-            it != state.prev_epoch_users.end(); it++)
-      {
-        // Check for field disjointness
-        if (it->field_mask * deletion_mask)
-          continue;
-        op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        const LogicalState &state = logical_states[ctx];
+        for (std::list<LogicalUser>::const_iterator it = state.curr_epoch_users.begin();
+              it != state.curr_epoch_users.end(); it++)
+        {
+          // Check for field disjointness
+          if (it->field_mask * deletion_mask)
+            continue;
+          op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        }
+        for (std::list<LogicalUser>::const_iterator it = state.prev_epoch_users.begin();
+              it != state.prev_epoch_users.end(); it++)
+        {
+          // Check for field disjointness
+          if (it->field_mask * deletion_mask)
+            continue;
+          op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        }
       }
       // Do any children
       for (std::map<Color,PartitionNode*>::const_iterator it = valid_map.begin();
@@ -6878,8 +6890,8 @@ namespace LegionRuntime {
       }
       // Figure out if successfully got an instance that we needed
       // and we still need to issue any copies to get up to date data
-      // for any fields
-      if (result != NULL && !!needed_fields)
+      // for any fields and this isn't a write-only region
+      if (result != NULL && !!needed_fields && (user.usage.privilege != WRITE_ONLY))
         issue_update_copies(result, rm, needed_fields); 
 
       // If the mapper asked to be notified of the result, tell it
@@ -7032,9 +7044,13 @@ namespace LegionRuntime {
         if (!!op_mask)
         {
           InstanceView *src = valid_instances.back().first;
-          src->copy_from(rm, op_mask, preconditions, src_fields);
-          dst->copy_to(rm, op_mask, preconditions, dst_fields);
-          src_instances.push_back(valid_instances.back());
+          // No need to do anything if src and destination are the same
+          if (src != dst)
+          {
+            src->copy_from(rm, op_mask, preconditions, src_fields);
+            dst->copy_to(rm, op_mask, preconditions, dst_fields);
+            src_instances.push_back(valid_instances.back());
+          }
         }
       }
       else if (!valid_instances.empty())
@@ -7071,9 +7087,13 @@ namespace LegionRuntime {
             FieldMask op_mask = copy_mask & it->second;
             if (!!op_mask)
             {
-              it->first->copy_from(rm, op_mask, preconditions, src_fields);
-              dst->copy_to(rm, op_mask, preconditions, dst_fields);
-              src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+              // No need to do anything if they are the same instance
+              if (dst != it->first)
+              {
+                it->first->copy_from(rm, op_mask, preconditions, src_fields);
+                dst->copy_to(rm, op_mask, preconditions, dst_fields);
+                src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+              }
               // update the copy mask
               copy_mask -= op_mask;
               // Check for the fast out
@@ -7105,9 +7125,12 @@ namespace LegionRuntime {
             FieldMask op_mask = copy_mask & it->second;
             if (!!op_mask)
             {
-              it->first->copy_from(rm, op_mask, preconditions, src_fields);
-              dst->copy_to(rm, op_mask, preconditions, dst_fields);
-              src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+              if (dst != it->first)
+              {
+                it->first->copy_from(rm, op_mask, preconditions, src_fields);
+                dst->copy_to(rm, op_mask, preconditions, dst_fields);
+                src_instances.push_back(std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+              }
               // update the copy mask
               copy_mask -= op_mask;
               // Check for the fast out
@@ -7525,13 +7548,47 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::issue_final_close_operation(ContextID ctx, const PhysicalUser &user, TreeCloser &closer)
+    void RegionNode::issue_final_close_operation(RegionMapper &rm, const PhysicalUser &user, PhysicalCloser &closer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(physical_states.find(ctx) != physical_states.end());
+      assert(physical_states.find(rm.ctx) != physical_states.end());
 #endif
-      PhysicalState &state = physical_states[ctx];
+      PhysicalState &state = physical_states[rm.ctx];
+      // First copy any dirty data from instances at this level into the target instances
+      // since they are the only regions that will remain live after this task is finished.
+#ifdef DEBUG_HIGH_LEVEL
+      assert(closer.targets_selected);
+#endif
+      for (std::vector<InstanceView*>::const_iterator it = closer.upper_targets.begin();
+            it != closer.upper_targets.end(); it++)
+      {
+        // Figure out which fields in the target overlap with the dirty data in this state
+        FieldMask dirty_overlap = user.field_mask & state.dirty_mask; 
+        // Remove any fields for which the target instance is already valid
+        std::map<InstanceView*,FieldMask>::const_iterator finder = state.valid_views.find(*it);
+        if (finder != state.valid_views.end())
+          dirty_overlap -= finder->second;
+        // If there are no fields that are dirty than we are done
+        if (!dirty_overlap)
+          continue;
+        // Otherwise issue the copies to update the fields
+        issue_update_copies(*it, rm, dirty_overlap);
+      }
+      // Now close up any open subtrees to the set of target regions
+      siphon_open_children(closer, state, user, user.field_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::issue_final_reduction_operation(RegionMapper &rm, const PhysicalUser &user, ReductionCloser &closer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(physical_states.find(rm.ctx) != physical_states.end());
+#endif
+      PhysicalState &state = physical_states[rm.ctx];
+      // Then issue all the update reductions from the current reduction instances to the target instance
+      issue_update_reductions(closer.target, state.reduction_mask, rm);
       siphon_open_children(closer, state, user, user.field_mask);
     }
 
@@ -8400,24 +8457,25 @@ namespace LegionRuntime {
     {
       // If we don't even have a logical state then neither 
       // do any of our children so we're done
-      if (logical_states.find(ctx) == logical_states.end())
-        return;
-      const LogicalState &state = logical_states[ctx];
-      for (std::list<LogicalUser>::const_iterator it = state.curr_epoch_users.begin();
-            it != state.curr_epoch_users.end(); it++)
+      if (logical_states.find(ctx) != logical_states.end())
       {
-        // Check for field disjointness
-        if (it->field_mask * deletion_mask)
-          continue;
-        op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
-      }
-      for (std::list<LogicalUser>::const_iterator it = state.prev_epoch_users.begin();
-            it != state.prev_epoch_users.end(); it++)
-      {
-        // Check for field disjointness
-        if (it->field_mask * deletion_mask)
-          continue;
-        op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        const LogicalState &state = logical_states[ctx];
+        for (std::list<LogicalUser>::const_iterator it = state.curr_epoch_users.begin();
+              it != state.curr_epoch_users.end(); it++)
+        {
+          // Check for field disjointness
+          if (it->field_mask * deletion_mask)
+            continue;
+          op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        }
+        for (std::list<LogicalUser>::const_iterator it = state.prev_epoch_users.begin();
+              it != state.prev_epoch_users.end(); it++)
+        {
+          // Check for field disjointness
+          if (it->field_mask * deletion_mask)
+            continue;
+          op->add_mapping_dependence(0/*idx*/, *it, TRUE_DEPENDENCE);
+        }
       }
       // Do any children
       for (std::map<Color,RegionNode*>::const_iterator it = valid_map.begin();
@@ -10123,7 +10181,8 @@ namespace LegionRuntime {
       assert(active_finder != active_map.end());
 #endif
       // Mark that the entry as no longer active
-      active_finder->second = false;
+      // TODO: hack for correctness, don't actually mark it as invalid
+      //active_finder->second = false;
       active_children--;
     }
 
@@ -11160,6 +11219,16 @@ namespace LegionRuntime {
             children.begin(); it != children.end(); it++)
       {
         it->second->update_valid_event(new_valid, mask);
+      }
+      
+      // TODO: This is a hack to make sure we get the right answer, but once
+      // we make this child view active it will never be unactive.  This will
+      // always be correct, but at some point we should be able to deactivate it
+      if (parent != NULL)
+      {
+        Color pc = logical_region->parent->row_source->color;
+        Color rc = logical_region->row_source->color;
+        parent->add_child_view(pc, rc, this);
       }
     }
     

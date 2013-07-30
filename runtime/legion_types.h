@@ -208,6 +208,11 @@ namespace LegionRuntime {
     class HighLevelRuntime;
     class Mapper;
 
+    // Forward declarations for compiler level objects
+    // legion.h
+    class ColoringSerializer;
+    class DomainColoringSerializer;
+
     // Forward declarations for runtime level objects
     // legion.h
     class Lockable;

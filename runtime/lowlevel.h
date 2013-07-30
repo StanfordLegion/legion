@@ -27,6 +27,10 @@
 #include "accessor.h"
 #include "arrays.h"
 
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
+
 namespace LegionRuntime {
   namespace LowLevel {
     // forward class declarations because these things all refer to each other

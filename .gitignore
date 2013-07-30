@@ -1,0 +1,14 @@
+
+*~
+\#*#
+.#*
+.DS_Store
+*.o
+core
+*.fluid
+*.pyc
+*.swp
+*.log
+*.bbl
+*.blg
+*.aux

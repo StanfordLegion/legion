@@ -22,6 +22,10 @@
 #include "activemsg.h"
 #include "utilities.h"
 
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_add_and_fetch
+#endif
+
 #include <queue>
 #include <cassert>
 
@@ -41,7 +45,8 @@
   } \
 } while(0)
 
-enum { MSGID_FLIP_REQ = 254,
+enum { MSGID_LONG_EXTENSION = 253,
+       MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
 
 #ifdef DEBUG_MEM_REUSE
@@ -120,7 +125,7 @@ struct OutgoingMessage {
 class ActiveMessageEndpoint {
 public:
   static const int NUM_LMBS = 2;
-  static const size_t LMB_SIZE = (16 << 20);
+  static const size_t LMB_SIZE = (4 << 20);
 
   ActiveMessageEndpoint(gasnet_node_t _peer, const gasnet_seginfo_t *seginfos)
     : peer(_peer)
@@ -131,6 +136,10 @@ public:
     cur_write_lmb = 0;
     cur_write_offset = 0;
     cur_write_count = 0;
+
+    cur_long_ptr = 0;
+    cur_long_chunk_idx = 0;
+    cur_long_size = 0;
 
     for(int i = 0; i < NUM_LMBS; i++) {
       lmb_w_bases[i] = ((char *)(seginfos[peer].addr)) + (seginfos[peer].size - LMB_SIZE * (gasnet_mynode() * NUM_LMBS + i + 1));
@@ -254,7 +263,11 @@ public:
       r_buffer = i;
       break;
     }
-    assert(r_buffer >= 0);
+    if(r_buffer < 0) {
+      // probably a medium message?
+      return;
+    }
+    //assert(r_buffer >= 0);
 
 #ifdef DEBUG_LMB
     printf("LMB: received %p from %d in buffer %d, [%p, %p)\n",
@@ -278,6 +291,75 @@ public:
       // wake up a sender
       gasnett_cond_signal(&cond);
     }
+    gasnet_hsl_unlock(&mutex);
+  }
+
+  size_t adjust_long_msgsize(void *ptr, size_t orig_size)
+  {
+    // can figure out which buffer it is without holding lock
+    int r_buffer = -1;
+    for(int i = 0; i < NUM_LMBS; i++)
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
+      r_buffer = i;
+      break;
+    }
+    if(r_buffer < 0) {
+      // probably a medium message?
+      return orig_size;
+    }
+
+    // need to hold the lock
+    gasnet_hsl_lock(&mutex);
+    size_t adjusted_size = orig_size;
+
+    if(cur_long_ptr != 0) {
+      // pointer had better match and we must have received all the chunks
+      assert(cur_long_ptr == ptr);
+      assert(cur_long_chunk_idx == 1);
+
+      adjusted_size += cur_long_size;
+
+      // printf("%d: adjusting long message size (%p, %d, %zd): %zd -> %zd\n",
+      // 	     gasnet_mynode(), cur_long_ptr, cur_long_chunk_idx, cur_long_size, orig_size, adjusted_size);
+
+      cur_long_ptr = 0;
+      cur_long_chunk_idx = 0;
+      cur_long_size = 0;
+    }
+    gasnet_hsl_unlock(&mutex);
+
+    return adjusted_size;
+  }
+
+  void handle_long_extension(void *ptr, int chunk_idx, int size)
+  {
+    // can figure out which buffer it is without holding lock
+    int r_buffer = -1;
+    for(int i = 0; i < NUM_LMBS; i++)
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
+      r_buffer = i;
+      break;
+    }
+    // not ok for this to be outside an LMB
+    assert(r_buffer >= 0);
+
+    // need to hold the lock
+    gasnet_hsl_lock(&mutex);
+
+    if(cur_long_ptr != 0) {
+      // continuing an extension - this had better be the next index down
+      assert(ptr == cur_long_ptr);
+      assert(chunk_idx == (cur_long_chunk_idx - 1));
+      
+      cur_long_chunk_idx = chunk_idx;
+      cur_long_size += size;
+    } else {
+      // starting a new extension
+      cur_long_ptr = ptr;
+      cur_long_chunk_idx = chunk_idx;
+      cur_long_size = size;
+    }
+
     gasnet_hsl_unlock(&mutex);
   }
 
@@ -461,35 +543,56 @@ protected:
   void send_long(OutgoingMessage *hdr, void *dest_ptr)
   {
     LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+
+    size_t max_long_req = 65000; // gasnet_AMMaxLongRequest();
+
+    size_t msg_size = hdr->payload_size;
+    if(msg_size > max_long_req) {
+      size_t chunks = (hdr->payload_size + max_long_req - 1) / max_long_req;
+
+      gasnet_handlerarg_t dest_ptr_lo = ((uint64_t)dest_ptr) & 0x0FFFFFFFFULL;
+      gasnet_handlerarg_t dest_ptr_hi = ((uint64_t)dest_ptr) >> 32;
+
+      for(unsigned i = chunks-1; i > 0; i--) {
+	size_t size = ((i == (chunks-1)) ? (hdr->payload_size % max_long_req) : max_long_req);
+	gasnet_AMRequestLong3(peer, MSGID_LONG_EXTENSION, 
+			      ((char *)(hdr->payload))+(i * max_long_req), size, 
+			      ((char *)dest_ptr)+(i * max_long_req),
+			      dest_ptr_lo, dest_ptr_hi, i);
+      }
+
+      msg_size = max_long_req;
+    }
+
     switch(hdr->num_args) {
     case 1:
       gasnet_AMRequestLong1(peer, hdr->msgid, 
-			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0]);
       break;
 
     case 2:
       gasnet_AMRequestLong2(peer, hdr->msgid, 
-			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0], hdr->args[1]);
       break;
 
     case 3:
       gasnet_AMRequestLong3(peer, hdr->msgid, 
-			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0], hdr->args[1], hdr->args[2]);
       break;
 
     case 4:
       gasnet_AMRequestLong4(peer, hdr->msgid, 
-			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0], hdr->args[1], hdr->args[2],
 			    hdr->args[3]);
       break;
 
     case 6:
       gasnet_AMRequestLong6(peer, hdr->msgid, 
-			    hdr->payload, hdr->payload_size, dest_ptr,
+			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0], hdr->args[1], hdr->args[2],
 			    hdr->args[3], hdr->args[4], hdr->args[5]);
       break;
@@ -513,19 +616,30 @@ protected:
   char *lmb_r_bases[NUM_LMBS];
   int lmb_r_counts[NUM_LMBS];
   bool lmb_w_avail[NUM_LMBS];
+  void *cur_long_ptr;
+  int cur_long_chunk_idx;
+  size_t cur_long_size;
 };
 
 void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _payload_mode)
 {
   if(_payload_mode != PAYLOAD_NONE) {
     assert(_payload_size <= ActiveMessageEndpoint::LMB_SIZE);
+    //assert(_payload_size <= gasnet_AMMaxLongRequest());
+#ifdef ENFORCE_MPI_CONDUIT_MAX_LONG_REQUEST
+    assert(_payload_size <= 65000); // MPI conduit's max
+#endif
     payload_mode = _payload_mode;
     payload_size = _payload_size;
     if(_payload && (payload_mode == PAYLOAD_COPY)) {
       payload = malloc(payload_size);
       assert(payload != 0);
 #ifdef DEBUG_MEM_REUSE
+#ifdef __GNUC__
       payload_num = __sync_add_and_fetch(&payload_count, 1);
+#else
+      payload_num = LegionRuntime::LowLevel::__sync_add_and_fetch(&payload_count, 1);
+#endif
       printf("%d: copying payload %x = [%p, %p) (%zd)\n",
 	     gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size,
 	     payload_size);
@@ -537,6 +651,16 @@ void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _pay
 }
 
 static ActiveMessageEndpoint **endpoints;
+
+static void handle_long_extension(gasnet_token_t token, void *buf, size_t nbytes,
+				  gasnet_handlerarg_t ptr_lo, gasnet_handlerarg_t ptr_hi, gasnet_handlerarg_t chunk_idx)
+{
+  gasnet_node_t src;
+  gasnet_AMGetMsgSource(token, &src);
+
+  void *dest_ptr = (void *)((((uint64_t)ptr_hi) << 32) | ((uint64_t)(uint32_t)ptr_lo));
+  endpoints[src]->handle_long_extension(dest_ptr, chunk_idx, nbytes);
+}
 
 static void handle_flip_req(gasnet_token_t token,
 		     int flip_buffer, int flip_count)
@@ -563,6 +687,9 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		      ActiveMessageEndpoint::NUM_LMBS *
 		      ActiveMessageEndpoint::LMB_SIZE));
 
+  handlers[hcount].index = MSGID_LONG_EXTENSION;
+  handlers[hcount].fnptr = (void (*)())handle_long_extension;
+  hcount++;
   handlers[hcount].index = MSGID_FLIP_REQ;
   handlers[hcount].fnptr = (void (*)())handle_flip_req;
   hcount++;
@@ -671,4 +798,11 @@ void handle_long_msgptr(gasnet_node_t source, void *ptr)
   assert(source != gasnet_mynode());
 
   endpoints[source]->handle_long_msgptr(ptr);
+}
+
+extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size)
+{
+  assert(source != gasnet_mynode());
+
+  return(endpoints[source]->adjust_long_msgsize(ptr, orig_size));
 }

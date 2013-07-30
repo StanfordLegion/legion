@@ -13,9 +13,14 @@
  * limitations under the License.
  */
 
+
 #include "lowlevel.h"
 #include "lowlevel_impl.h"
 #include "accessor.h"
+
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
 
 using namespace LegionRuntime::Accessor;
 
@@ -96,7 +101,14 @@ namespace LegionRuntime {
 
     gasnet_hsl_t timer_data_mutex = GASNET_HSL_INITIALIZER;
     std::vector<PerThreadTimerData *> timer_data;
-    __thread PerThreadTimerData *thread_timer_data;
+    pthread_key_t thread_timer_key;
+    //__thread PerThreadTimerData *thread_timer_data;
+    static void thread_timer_free(void *arg)
+    {
+      assert(arg != NULL);
+      PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
+      delete ptr;
+    }
 
     struct ClearTimerRequestArgs {
       int sender;
@@ -140,10 +152,13 @@ namespace LegionRuntime {
 
     /*static*/ void DetailedTimer::push_timer(int timer_kind)
     {
+      PerThreadTimerData *thread_timer_data = 
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       if(!thread_timer_data) {
         //printf("creating timer data for thread %lx\n", pthread_self());
         AutoHSLLock l1(timer_data_mutex);
         thread_timer_data = new PerThreadTimerData;
+        CHECK_PTHREAD( pthread_setspecific(thread_timer_key, thread_timer_data) );
         timer_data.push_back(thread_timer_data);
       }
 
@@ -154,17 +169,23 @@ namespace LegionRuntime {
       clock_gettime(CLOCK_MONOTONIC, &ts);
       entry.start_time = (1.0 * ts.tv_sec + 1e-9 * ts.tv_nsec);
       entry.accum_child_time = 0;
+      PerThreadTimerData *thread_timer_data = 
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       thread_timer_data->timer_stack.push_back(entry);
     }
         
     /*static*/ void DetailedTimer::pop_timer(void)
     {
+      PerThreadTimerData *thread_timer_data = 
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       if(!thread_timer_data) {
         printf("got pop without initialized thread data!?\n");
         exit(1);
       }
 
       // no conflicts on stack
+      PerThreadTimerData *thread_timer_data = 
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       TimerStackEntry old_top = thread_timer_data->timer_stack.back();
       thread_timer_data->timer_stack.pop_back();
 
@@ -2826,8 +2847,10 @@ namespace LegionRuntime {
 							off_t list_size,
 							RegionInstance parent_inst)
     {
-      int payload[33];
+      int payload[512];
       payload[0] = field_sizes.size();
+      // Not a precise assertion but close enough for now
+      assert((field_sizes.size()+1) < 512);
       for(unsigned i = 0; i < field_sizes.size(); i++)
 	payload[i + 1] = field_sizes[i];
       memcpy(payload + (field_sizes.size() + 1), linearization_bits, RegionInstance::Impl::MAX_LINEARIZATION_LEN * sizeof(int));
@@ -2843,7 +2866,7 @@ namespace LegionRuntime {
       args.parent_inst = parent_inst;
       log_inst(LEVEL_DEBUG, "creating remote instance: node=%d", ID(me).node());
       CreateInstanceResp resp = CreateInstanceMessage::request(ID(me).node(), args,
-							       payload, 33 * sizeof(int), PAYLOAD_COPY);
+							       payload, 512 * sizeof(int), PAYLOAD_COPY);
       log_inst(LEVEL_DEBUG, "created remote instance: inst=%x offset=%zd", resp.i.id, resp.inst_offset);
 
       DomainLinearization linear;
@@ -3341,7 +3364,7 @@ namespace LegionRuntime {
 	    if(proc->util_proc)
 	      proc->util_proc->wait_for_shutdown();
 
-	    // let go of the lock while we call the init task
+	    // let go of the lock while we call the shutdown task
 	    Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
 	    if(it != task_id_table.end()) {
 	      log_task(LEVEL_INFO, "calling processor shutdown task: proc=%x", proc->me.id);
@@ -3661,6 +3684,9 @@ namespace LegionRuntime {
       //  stack
       gasnett_threadkey_set(cur_preemptable_thread, me);
 
+      // Initialize this value to NULL, it will get filled in the first time it is used
+      CHECK_PTHREAD( pthread_setspecific(thread_timer_key, NULL) );
+
       // and then just call the virtual thread_main
       me->thread_main();
 
@@ -3766,6 +3792,18 @@ namespace LegionRuntime {
 	  proc->run_counter->decrement();
 	gasnett_cond_broadcast(&proc->condvar);
 	gasnet_hsl_unlock(&proc->mutex);
+        // Let go of the lock while holding calling the shutdown task
+        it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+        if(it != task_id_table.end()) {
+          log_task(LEVEL_INFO, "calling processor shutdown task for utility proc: proc=%x", proc->me.id);
+
+          (it->second)(0, 0, proc->me);
+
+          log_task(LEVEL_INFO, "finished processor shutdown task for utility proc: proc=%x", proc->me.id);
+        }
+        if(proc->shutdown_event.exists())
+          proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
+        proc->finished();
       }
 
       UtilityProcessor *proc;
@@ -3775,7 +3813,7 @@ namespace LegionRuntime {
     UtilityProcessor::UtilityProcessor(Processor _me,
 				       int _num_worker_threads /*= 1*/)
       : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
-	num_worker_threads(_num_worker_threads)
+	num_worker_threads(_num_worker_threads), shutdown_event(Event::NO_EVENT)
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
@@ -4298,7 +4336,7 @@ namespace LegionRuntime {
 	switch(get_dim()) {
 	case 1:
 	  {
-	    Arrays::CArrayLinearization<1> cl(get_rect<1>());
+	    Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<1>(Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<1>());
 	    dl.serialize(linearization_bits);
@@ -4307,7 +4345,7 @@ namespace LegionRuntime {
 
 	case 2:
 	  {
-	    Arrays::CArrayLinearization<2> cl(get_rect<2>());
+	    Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<2>(Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<2>());
 	    dl.serialize(linearization_bits);
@@ -4316,7 +4354,7 @@ namespace LegionRuntime {
 
 	case 3:
 	  {
-	    Arrays::CArrayLinearization<3> cl(get_rect<3>());
+	    Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<3>(Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<3>());
 	    dl.serialize(linearization_bits);
@@ -4340,6 +4378,9 @@ namespace LegionRuntime {
 	  printf("WARNING: Creating an instance where first_elmt=%zd\n", data->first_elmt);
 	DomainLinearization().serialize(linearization_bits);
       }
+
+      // HACK: force full SOA by setting block_size == num_elements
+      block_size = num_elements;
 
       if(block_size > 1) {
 	size_t leftover = num_elements % block_size;
@@ -6024,6 +6065,9 @@ namespace LegionRuntime {
       Arrays::Mapping<1,1>::register_mapping<Arrays::CArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::CArrayLinearization<2> >();
       Arrays::Mapping<3,1>::register_mapping<Arrays::CArrayLinearization<3> >();
+      Arrays::Mapping<1,1>::register_mapping<Arrays::FortranArrayLinearization<1> >();
+      Arrays::Mapping<2,1>::register_mapping<Arrays::FortranArrayLinearization<2> >();
+      Arrays::Mapping<3,1>::register_mapping<Arrays::FortranArrayLinearization<3> >();
 
       //GASNetNode::my_node = new GASNetNode(argc, argv, this);
       CHECK_GASNET( gasnet_init(argc, argv) );
@@ -6537,6 +6581,9 @@ namespace LegionRuntime {
 		      const void *args /*= 0*/, size_t arglen /*= 0*/,
                       bool background /*= false*/)
     {
+      // Create the key for the thread local data
+      CHECK_PTHREAD( pthread_key_create(&thread_timer_key,thread_timer_free) );
+
       if(background) {
         log_machine.info("background operation requested\n");
 	fflush(stdout);
@@ -6844,19 +6891,258 @@ namespace LegionRuntime {
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets)
     {
-      return 0;
-#if 0
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      char *dst = (char *)(impl->get_base_ptr());
-      Arrays::Mapping<DIM, 1> *mapping = impl->get_linearization().get_mapping<DIM>();
+      Memory::Impl *mem = impl->memory.impl();
+
+      StaticAccess<RegionInstance::Impl> idata(impl);
+      if(!impl->linearization.valid()) {
+	impl->linearization.deserialize(idata->linearization_bits);
+      }
+      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
-      dst += index * impl->get_elmt_size();
-      dst += field_offset;
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+
+      if(idata->block_size == 1) {
+	offset += index * idata->elmt_size + field_offset;
+	elmt_stride = idata->elmt_size;
+      } else {
+	off_t field_start;
+	int field_size;
+	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+	int block_num = index / idata->block_size;
+	int block_ofs = index % idata->block_size;
+
+	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+		   (field_size * block_ofs) +
+		   (field_offset - field_start));
+	elmt_stride = field_size;
+      }
+
+      char *dst = (char *)(mem->get_direct_ptr(offset, subrect.volume() * elmt_stride));
+      if(!dst) return 0;
+
       for(int i = 0; i < DIM; i++)
-	offsets[i].offset = strides[i] * impl->get_elmt_size();
+	offsets[i].offset = strides[i] * elmt_stride;
+
       return dst;
-#endif
+    }
+
+    template <int DIM>
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets,
+						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+    {
+      if(field_offsets.size() < 1)
+	return 0;
+
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      Memory::Impl *mem = impl->memory.impl();
+
+      StaticAccess<RegionInstance::Impl> idata(impl);
+      if(!impl->linearization.valid()) {
+	impl->linearization.deserialize(idata->linearization_bits);
+      }
+      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+
+      Point<1> strides[DIM];
+      int index = mapping->image_linear_subrect(r, subrect, strides);
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+      off_t fld_stride;
+
+      if(idata->block_size == 1) {
+	offset += index * idata->elmt_size + field_offset;
+	elmt_stride = idata->elmt_size;
+
+	if(field_offsets.size() == 1) {
+	  fld_stride = 0;
+	} else {
+	  fld_stride = field_offsets[1] - field_offsets[0];
+	  for(size_t i = 2; i < field_offsets.size(); i++)
+	    if((field_offsets[i] - field_offsets[i-1]) != fld_stride) {
+	      // fields aren't evenly spaced - abort
+	      return 0;
+	    }
+	}
+      } else {
+	off_t field_start;
+	int field_size;
+	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+	int block_num = index / idata->block_size;
+	int block_ofs = index % idata->block_size;
+
+	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+		   (field_size * block_ofs) +
+		   (field_offset - field_start));
+	elmt_stride = field_size;
+
+	if(field_offsets.size() == 1) {
+	  fld_stride = 0;
+	} else {
+	  off_t field_start2;
+	  int field_size2;
+	  find_field_start(idata->field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
+
+	  // field sizes much match or element stride isn't consistent
+	  if(field_size2 != field_size)
+	    return 0;
+	  
+	  fld_stride = (((field_start2 - field_start) * idata->block_size) + 
+			(field_offsets[1] - field_start2) - (field_offsets[0] - field_start));
+
+	  for(size_t i = 2; i < field_offsets.size(); i++) {
+	    find_field_start(idata->field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
+	    off_t fld_stride2 = (((field_start2 - field_start) * idata->block_size) + 
+			(field_offsets[i] - field_start2) - (field_offsets[0] - field_start));
+	    if(fld_stride2 != fld_stride * i) {
+	      // fields aren't evenly spaced - abort
+	      return 0;
+	    }
+	  }
+	}
+      }
+
+      char *dst = (char *)(mem->get_direct_ptr(offset, subrect.volume() * elmt_stride));
+      if(!dst) return 0;
+
+      for(int i = 0; i < DIM; i++)
+	offsets[i].offset = strides[i] * elmt_stride;
+
+      field_stride.offset = fld_stride;
+
+      return dst;
+    }
+
+    template <int DIM>
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride)
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      Memory::Impl *mem = impl->memory.impl();
+
+      StaticAccess<RegionInstance::Impl> idata(impl);
+      if(!impl->linearization.valid()) {
+	impl->linearization.deserialize(idata->linearization_bits);
+      }
+      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+
+      int index = mapping->image_dense_subrect(r, subrect);
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+
+      if(idata->block_size == 1) {
+	offset += index * idata->elmt_size + field_offset;
+	elmt_stride = idata->elmt_size;
+      } else {
+	off_t field_start;
+	int field_size;
+	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+	int block_num = index / idata->block_size;
+	int block_ofs = index % idata->block_size;
+
+	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+		   (field_size * block_ofs) +
+		   (field_offset - field_start));
+	elmt_stride = field_size;
+      }
+
+      char *dst = (char *)(mem->get_direct_ptr(offset, subrect.volume() * elmt_stride));
+      if(!dst) return 0;
+      
+      elem_stride.offset = elmt_stride;
+
+      return dst;
+    }
+
+    template <int DIM>
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride,
+							const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+    {
+      if(field_offsets.size() < 1)
+	return 0;
+
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      Memory::Impl *mem = impl->memory.impl();
+
+      StaticAccess<RegionInstance::Impl> idata(impl);
+      if(!impl->linearization.valid()) {
+	impl->linearization.deserialize(idata->linearization_bits);
+      }
+      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+
+      int index = mapping->image_dense_subrect(r, subrect);
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+      off_t fld_stride;
+
+      if(idata->block_size == 1) {
+	offset += index * idata->elmt_size + field_offset + field_offsets[0];
+	elmt_stride = idata->elmt_size;
+
+	if(field_offsets.size() == 1) {
+	  fld_stride = 0;
+	} else {
+	  fld_stride = field_offsets[1] - field_offsets[0];
+	  for(size_t i = 2; i < field_offsets.size(); i++)
+	    if((field_offsets[i] - field_offsets[i-1]) != fld_stride) {
+	      // fields aren't evenly spaced - abort
+	      return 0;
+	    }
+	}
+      } else {
+	off_t field_start;
+	int field_size;
+	find_field_start(idata->field_sizes, field_offset + field_offsets[0], 1, field_start, field_size);
+
+	int block_num = index / idata->block_size;
+	int block_ofs = index % idata->block_size;
+
+	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+		   (field_size * block_ofs) +
+		   (field_offset + field_offsets[0] - field_start));
+	elmt_stride = field_size;
+
+	if(field_offsets.size() == 1) {
+	  fld_stride = 0;
+	} else {
+	  off_t field_start2;
+	  int field_size2;
+	  find_field_start(idata->field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
+
+	  // field sizes much match or element stride isn't consistent
+	  if(field_size2 != field_size)
+	    return 0;
+	  
+	  fld_stride = (((field_start2 - field_start) * idata->block_size) + 
+			(field_offsets[1] - field_start2) - (field_offsets[0] - field_start));
+
+	  for(size_t i = 2; i < field_offsets.size(); i++) {
+	    find_field_start(idata->field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
+	    off_t fld_stride2 = (((field_start2 - field_start) * idata->block_size) + 
+			(field_offsets[i] - field_start2) - (field_offsets[0] - field_start));
+	    if(fld_stride2 != fld_stride * i) {
+	      // fields aren't evenly spaced - abort
+	      return 0;
+	    }
+	  }
+	}
+      }
+
+      char *dst = (char *)(mem->get_direct_ptr(offset, subrect.volume() * elmt_stride));
+      if(!dst) return 0;
+      
+      elem_stride.offset = elmt_stride;
+      field_stride.offset = fld_stride;
+
+      return dst;
     }
 
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);

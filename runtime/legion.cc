@@ -1579,6 +1579,159 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // ColoringSerializer 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ColoringSerializer::ColoringSerializer(const Coloring &c)
+      : coloring(c)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ColoringSerializer::legion_buffer_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      size_t result = sizeof(size_t); // number of elements
+      for (Coloring::const_iterator it = coloring.begin();
+            it != coloring.end(); it++)
+      {
+        result += sizeof(Color);
+        result += 2*sizeof(size_t); // number of each kind of pointer
+        result += (it->second.points.size() * sizeof(ptr_t));
+        result += (it->second.ranges.size() * 2 * sizeof(ptr_t));
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ColoringSerializer::legion_serialize(void *buffer) const
+    //--------------------------------------------------------------------------
+    {
+      char *target = (char*)buffer; 
+      *((size_t*)target) = coloring.size();
+      target += sizeof(size_t);
+      for (Coloring::const_iterator it = coloring.begin();
+            it != coloring.end(); it++)
+      {
+        *((Color*)target) = it->first;
+        target += sizeof(it->first);
+        *((size_t*)target) = it->second.points.size();
+        target += sizeof(size_t);
+        for (std::set<ptr_t>::const_iterator ptr_it = it->second.points.begin();
+              ptr_it != it->second.points.end(); ptr_it++)
+        {
+          *((ptr_t*)target) = *ptr_it;
+          target += sizeof(ptr_t);
+        }
+        *((size_t*)target) = it->second.ranges.size();
+        target += sizeof(size_t);
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator range_it = 
+              it->second.ranges.begin(); range_it != it->second.ranges.end();
+              range_it++)
+        {
+          *((ptr_t*)target) = range_it->first;
+          target += sizeof(range_it->first);
+          *((ptr_t*)target) = range_it->second;
+          target += sizeof(range_it->second);
+        }
+      }
+      return (size_t(target) - size_t(buffer));
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ColoringSerializer::legion_deserialize(const void *buffer)
+    //--------------------------------------------------------------------------
+    {
+      const char *source = (const char*)buffer;
+      size_t num_colors = *((const size_t*)source);
+      source += sizeof(num_colors);
+      for (unsigned idx = 0; idx < num_colors; idx++)
+      {
+        Color c = *((const Color*)source);
+        source += sizeof(c);
+        size_t num_points = *((const size_t*)source);
+        source += sizeof(num_points);
+        for (unsigned p = 0; p < num_points; p++)
+        {
+          ptr_t ptr = *((const ptr_t*)source);
+          source += sizeof(ptr);
+          coloring[c].points.insert(ptr);
+        }
+        size_t num_ranges = *((const size_t*)source);
+        source += sizeof(num_ranges);
+        for (unsigned r = 0; r < num_ranges; r++)
+        {
+          ptr_t start = *((const ptr_t*)source);
+          source += sizeof(start);
+          ptr_t stop = *((const ptr_t*)source);
+          source += sizeof(stop);
+          coloring[c].ranges.insert(std::pair<ptr_t,ptr_t>(start,stop));
+        }
+      }
+      // Return the number of bytes consumed
+      return (size_t(source) - size_t(buffer));
+    }
+
+    /////////////////////////////////////////////////////////////
+    // DomainColoringSerializer 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DomainColoringSerializer::DomainColoringSerializer(const DomainColoring &d)
+      : coloring(d)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DomainColoringSerializer::legion_buffer_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      size_t result = sizeof(size_t); // number of elements
+      result += (coloring.size() * (sizeof(Color) + sizeof(Domain)));
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DomainColoringSerializer::legion_serialize(void *buffer) const
+    //--------------------------------------------------------------------------
+    {
+      char *target = (char*)buffer;
+      *((size_t*)target) = coloring.size();
+      target += sizeof(size_t);
+      for (DomainColoring::const_iterator it = coloring.begin();
+            it != coloring.end(); it++)
+      {
+        *((Color*)target) = it->first; 
+        target += sizeof(it->first);
+        *((Domain*)target) = it->second;
+        target += sizeof(it->second);
+      }
+      return (size_t(target) - size_t(buffer));
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DomainColoringSerializer::legion_deserialize(const void *buffer)
+    //--------------------------------------------------------------------------
+    {
+      const char *source = (const char*)buffer;
+      size_t num_elements = *((const size_t*)source);
+      source += sizeof(size_t);
+      for (unsigned idx = 0; idx < num_elements; idx++)
+      {
+        Color c = *((const Color*)source);
+        source += sizeof(c);
+        Domain d = *((const Domain*)source);
+        source += sizeof(d);
+        coloring[c] = d;
+      }
+      // Return the number of bytes consumed
+      return (size_t(source) - size_t(buffer));
+    }
+
+    /////////////////////////////////////////////////////////////
     // Lockable 
     /////////////////////////////////////////////////////////////
 
@@ -1707,6 +1860,7 @@ namespace LegionRuntime {
     {
       // Should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -2968,6 +3122,7 @@ namespace LegionRuntime {
     {
       // This should never be called for custom predicates
       assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -3523,7 +3678,7 @@ namespace LegionRuntime {
       {
         LegionProf::finalize_processor(*it);
       }
-      if (explicit_utility_proc)
+      if (explicit_utility_proc && (local_procs.find(utility_proc) == local_procs.end()))
         LegionProf::finalize_processor(utility_proc);
 #endif
       log_run(LEVEL_SPEW,"Shutting down high-level runtime on processor %x",utility_proc.id);
@@ -4396,18 +4551,7 @@ namespace LegionRuntime {
       else
       {
         // Otherwise we can just do the creation here
-#ifdef LEGION_SPY
-        part_color = 
-#endif
         ctx->create_index_partition(pid, parent, disjoint, part_color, new_index_spaces);
-#ifdef LEGION_SPY
-        LegionSpy::log_index_partition(parent.id, pid, disjoint, part_color);
-        for (std::map<Color,Domain>::const_iterator it = new_index_spaces.begin();
-              it != new_index_spaces.end(); it++)
-        {
-          LegionSpy::log_index_subspace(pid, it->second.get_index_space().id, it->first);
-        }
-#endif
       }
       return pid;
     }
@@ -6786,7 +6930,7 @@ namespace LegionRuntime {
       if (!failed_mappings.empty())
       {
         AutoLock q_lock(queue_lock);
-        for (std::vector<TaskContext*>::const_reverse_iterator it = failed_mappings.rbegin();
+        for (std::vector<TaskContext*>::reverse_iterator it = failed_mappings.rbegin();
               it != failed_mappings.rend(); it++)
         {
           ready_queues[(*it)->map_id].push_front(*it);

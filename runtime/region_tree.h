@@ -769,7 +769,8 @@ namespace LegionRuntime {
       void find_valid_reduction_views(ContextID ctx, std::list<ReductionView*> &valid_views, const FieldMask &valid_mask);
       InstanceView* create_instance(Memory location, RegionMapper &rm, const std::vector<FieldID> &new_fields);
       ReductionView* create_reduction(Memory location, RegionMapper &rm);
-      void issue_final_close_operation(ContextID ctx, const PhysicalUser &user, TreeCloser &closer);
+      void issue_final_close_operation(RegionMapper &rm, const PhysicalUser &user, PhysicalCloser &closer);
+      void issue_final_reduction_operation(RegionMapper &rm, const PhysicalUser &user, ReductionCloser &closer);
       void pull_valid_views(ContextID ctx, const FieldMask &field_mask);
       void flush_reductions(const PhysicalUser &user, RegionMapper &rm);
       void update_top_mask(FieldMask allocated_mask);

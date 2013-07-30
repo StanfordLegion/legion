@@ -1616,6 +1616,47 @@ namespace LegionRuntime {
 
     /////////////////////////////////////////////////////////////////////
     //
+    // Some compiler level objects that are useful to the compiler and
+    // advanced users.
+    //
+    ////////////////////////////////////////////////////////////////////
+
+    /**
+     * A decorator class that helps the compiler with returning colorings
+     */
+    class ColoringSerializer {
+    public:
+      ColoringSerializer(void) { }
+      ColoringSerializer(const Coloring &c);
+    public:
+      size_t legion_buffer_size(void) const;
+      size_t legion_serialize(void *buffer) const;
+      size_t legion_deserialize(const void *buffer);
+    public:
+      inline Coloring& ref(void) { return coloring; }
+    private:
+      Coloring coloring;
+    };
+
+    /**
+     * A decorator class that helps the compiler with returning domain colorings
+     */
+    class DomainColoringSerializer {
+    public:
+      DomainColoringSerializer(void) { }
+      DomainColoringSerializer(const DomainColoring &c);
+    public:
+      size_t legion_buffer_size(void) const;
+      size_t legion_serialize(void *buffer) const;
+      size_t legion_deserialize(const void *buffer);
+    public:
+      inline DomainColoring& ref(void) { return coloring; }
+    private:
+      DomainColoring coloring;
+    };
+
+    /////////////////////////////////////////////////////////////////////
+    //
     // A few implementation classes to make it possible for users to 
     // pass around handles to things without having to worry about
     // copying overheads.  Not available to users.

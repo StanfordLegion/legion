@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Copyright 2013 Stanford University
 #
@@ -15,8 +15,6 @@
 # limitations under the License.
 #
 
-#!/usr/bin/python
-
 import subprocess
 import sys, os, shutil
 import string
@@ -27,7 +25,7 @@ from spy_state import *
 temp_dir = ".cent/"
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -m -k] <file_name>"
+    print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -v] <file_name>"
     sys.exit(1)
 
 def main():

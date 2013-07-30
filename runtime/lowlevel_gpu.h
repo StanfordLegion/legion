@@ -32,6 +32,7 @@ namespace LegionRuntime {
       void start_worker_thread(void);
 
       void *get_zcmem_cpu_base(void);
+      void *get_fbmem_gpu_base(void);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -144,7 +145,7 @@ namespace LegionRuntime {
 
       virtual void *get_direct_ptr(off_t offset, size_t size)
       {
-	return 0;
+	return (base + offset);
       }
 
       virtual int get_home_node(off_t offset, size_t size)

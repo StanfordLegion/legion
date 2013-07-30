@@ -180,6 +180,14 @@ namespace LegionRuntime {
 	}
 
 	log_gpu.info("shutting down");
+        Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+        if(it != task_id_table.end()) {
+          log_gpu(LEVEL_INFO, "calling processor shutdown task: proc=%x", gpu->me.id);
+
+          (it->second)(0, 0, gpu->me);
+
+          log_gpu(LEVEL_INFO, "finished processor shutdown task: proc=%x", gpu->me.id);
+        }
 	gpu->finished();
       }
 
@@ -440,6 +448,11 @@ namespace LegionRuntime {
       return ((char *)internal->zcmem_cpu_base) + internal->zcmem_reserve;
     }
 
+    void *GPUProcessor::get_fbmem_gpu_base(void)
+    {
+      return ((char *)internal->fbmem_gpu_base) + internal->fbmem_reserve;
+    }
+
     void GPUProcessor::spawn_task(Processor::TaskFuncID func_id,
 				  const void *args, size_t arglen,
 				  //std::set<RegionInstanceUntyped> instances_needed,
@@ -591,6 +604,7 @@ namespace LegionRuntime {
       : Memory::Impl(_me, _gpu->internal->fbmem_size, MKIND_GPUFB, 512, Memory::GPU_FB_MEM),
 	gpu(_gpu)
     {
+      base = (char *)(gpu->get_fbmem_gpu_base());
       free_blocks[0] = size;
     }
 

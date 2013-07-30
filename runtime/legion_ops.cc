@@ -428,6 +428,7 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+      return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2753,7 +2754,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF
-      LegionProf::Recorder<PROF_TASK_DEP_ANALYSIS> rec(parent_ctx->task_id, parent_ctx->get_unique_task_id(), parent_ctx->index_point);
+      LegionProf::Recorder<PROF_TASK_DEP_ANALYSIS> rec(task_id, get_unique_task_id(), index_point);
 #endif
       start_analysis();
       lock_context();
@@ -3186,6 +3187,9 @@ namespace LegionRuntime {
     void SingleTask::register_child_task(TaskContext *child)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF
+      LegionProf::register_sub_task(task_id, get_unique_task_id(), index_point, child->get_unique_task_id());
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (is_leaf())
       {
@@ -3609,10 +3613,7 @@ namespace LegionRuntime {
       }
 #endif
       // No need to worry about deferring this, it's already been done
-      // by the DeletionOperation
-      lock_context();
-      forest_ctx->free_fields(space, to_free);
-      unlock_context();
+      // by the DeletionOperation.  DeletionOperation has context lock too.
       std::map<FieldID,FieldSpace> free_fields;
       for (std::set<FieldID,FieldSpace>::const_iterator it = to_free.begin();
             it != to_free.end(); it++)
@@ -3620,6 +3621,7 @@ namespace LegionRuntime {
         free_fields[*it] = space;
       }
       register_deletion(free_fields);
+      forest_ctx->free_fields(space, to_free);
     }
 
     //--------------------------------------------------------------------------
@@ -3974,19 +3976,22 @@ namespace LegionRuntime {
           // Now check that the types are subset of the fields
           // Note we can use the parent since all the regions/partitions
           // in the same region tree have the same field space
-          bool has_fields;
+          bool has_fields = false;
           {
             std::vector<FieldID> to_delete;
             for (std::set<FieldID>::const_iterator fit = checking_fields.begin();
                   fit != checking_fields.end(); fit++)
             {
-              if ((it->privilege_fields.find(*fit) != it->privilege_fields.end()) ||
-                  (has_created_field(*fit)))
+              if ((it->privilege_fields.find(*fit) != it->privilege_fields.end()))
+              {
+                to_delete.push_back(*fit);
+                has_fields = true;
+              }
+              else if (has_created_field(*fit))
               {
                 to_delete.push_back(*fit);
               }
             }
-            has_fields = !to_delete.empty();
             for (std::vector<FieldID>::const_iterator fit = to_delete.begin();
                   fit != to_delete.end(); fit++)
             {
@@ -3996,10 +4001,16 @@ namespace LegionRuntime {
           // Only need to do this check if there were overlapping fields
           if (has_fields && (req.privilege & (~(it->privilege))))
           {
-            if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
-              return ERROR_BAD_REGION_PRIVILEGES;
-            else
-              return ERROR_BAD_PARTITION_PRIVILEGES;
+            // Handle the special case where the parent has WRITE_ONLY privilege and the sub-task
+            // wants READ_WRITE privilege.  This case is ok because the parent could write something
+            // and then hand it off to the child.
+            if ((req.privilege != READ_WRITE) || (it->privilege != WRITE_ONLY))
+            {
+              if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
+                return ERROR_BAD_REGION_PRIVILEGES;
+              else
+                return ERROR_BAD_PARTITION_PRIVILEGES;
+            }
           }
           // If we've seen all our fields, then we're done
           if (checking_fields.empty())
@@ -4104,13 +4115,7 @@ namespace LegionRuntime {
         invoke_mapper_notify_profiling(this->executing_processor, this->exec_profile);
       }
       // Tell the runtime that we're done with this task
-      runtime->decrement_processor_executing(this->executing_processor);
-      // Clean up some of our stuff from the task execution
-      for (unsigned idx = 0; idx < physical_region_impls.size(); idx++)
-      {
-        delete physical_region_impls[idx];
-      }
-      physical_region_impls.clear();
+      runtime->decrement_processor_executing(this->executing_processor); 
       // Handle the future result
       handle_future(result, result_size, get_termination_event(), owner);
 #ifdef LEGION_PROF
@@ -4284,7 +4289,9 @@ namespace LegionRuntime {
     void SingleTask::return_deletions(const std::map<FieldID,FieldSpace> &fields)
     //--------------------------------------------------------------------------
     {
+      lock_context();
       register_deletion(fields);
+      unlock_context();
     }
 
     //--------------------------------------------------------------------------
@@ -4301,9 +4308,8 @@ namespace LegionRuntime {
       }
       if (!matched_fields.empty())
       {
-        lock_context();
+        // We should already be holding the context lock at this point
         forest_ctx->invalidate_physical_context(handle, ctx_id, matched_fields, false/*last use*/);
-        unlock_context();
       }
     }
 
@@ -4919,6 +4925,11 @@ namespace LegionRuntime {
         }
       }
 #ifdef LEGION_SPY
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        LegionSpy::log_task_instance_requirement(this->get_unique_id(), this->ctx_id, 
+          this->get_gen(), runtime->utility_proc.id, idx, regions[idx].region.get_index_space().id); 
+      }
       if (is_index_space)
       {
         switch (index_point.get_dim())
@@ -6444,6 +6455,12 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_task_end_finish(this->task_id, this->get_unique_task_id(), this->index_point);
 #endif
+      // Clean up some of our stuff from the task execution
+      for (unsigned idx = 0; idx < physical_region_impls.size(); idx++)
+      {
+        delete physical_region_impls[idx];
+      }
+      physical_region_impls.clear();
 
       // Now we can deactivate ourselves
       this->deactivate();
@@ -6671,6 +6688,10 @@ namespace LegionRuntime {
           }
           physical_instances.clear();
         }
+        // We can also free any source copy instances that we might have
+        // since we know that the task has started at this point.
+        if (!source_copy_instances.empty())
+          release_source_copy_instances();
         unlock_context();
       }
       // Now set the future result and trigger the termination event
@@ -6915,6 +6936,7 @@ namespace LegionRuntime {
       {
         slice_owner->point_task_mapped(this);
       }
+
       return success;
     }
 
@@ -7214,6 +7236,12 @@ namespace LegionRuntime {
       unlock_context();
       // Indicate that this point has terminated
       point_termination_event.trigger();
+      // Clean up some of our stuff from the task execution
+      for (unsigned idx = 0; idx < physical_region_impls.size(); idx++)
+      {
+        delete physical_region_impls[idx];
+      }
+      physical_region_impls.clear();
       // notify the slice owner that this task has finished
       slice_owner->point_task_finished(this);
 #ifdef LEGION_PROF
@@ -7411,12 +7439,6 @@ namespace LegionRuntime {
           }
         }
       }
-#ifdef LEGION_SPY
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        LegionSpy::log_task_instance_requirement(this->get_unique_id(), this->ctx_id, this->get_gen(), runtime->utility_proc.id, idx, regions[idx].region.get_index_space().id); 
-      }
-#endif
     }
 
     //--------------------------------------------------------------------------

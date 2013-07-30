@@ -633,9 +633,125 @@ namespace LegionRuntime {
       virtual void flush(void) = 0;
     };
 
-    class DefaultInstPairCopier : public InstPairCopier {
+    // helper function to figure out which field we're in
+    static void find_field_start(const int *field_sizes, off_t byte_offset, size_t size, off_t& field_start, int& field_size)
+    {
+      off_t start = 0;
+      for(unsigned i = 0; i < RegionInstance::Impl::MAX_FIELDS_PER_INST; i++) {
+	assert(field_sizes[i] > 0);
+	if(byte_offset < field_sizes[i]) {
+	  assert((int)(byte_offset + size) <= field_sizes[i]);
+	  field_start = start;
+	  field_size = field_sizes[i];
+	  return;
+	}
+	start += field_sizes[i];
+	byte_offset -= field_sizes[i];
+      }
+      assert(0);
+    }
+
+    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
+				     int block_size, int index)
+    {
+      return (alloc_offset +                                      // start address
+	      ((index / block_size) * block_size * elmt_size) +   // full blocks
+	      (field_start * block_size) +                        // skip other fields
+	      ((index % block_size) * field_size));               // some some of our fields within our block
+    }
+
+    static inline int min(int a, int b) { return (a < b) ? a : b; }
+
+    template <typename T>
+    class SpanBasedInstPairCopier : public InstPairCopier {
     public:
-      DefaultInstPairCopier(RegionInstance src_inst, RegionInstance dst_inst)
+      // instead of the accessro, we'll grab the implementation pointers
+      //  and do address calculation ourselves
+      SpanBasedInstPairCopier(T *_span_copier, RegionInstance _src_inst, RegionInstance _dst_inst)
+	: span_copier(_span_copier), src_inst(_src_inst.impl()), dst_inst(_dst_inst.impl())
+      {
+	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
+	assert(src_idata->valid);
+
+	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
+	assert(dst_idata->valid);
+      }
+
+      virtual void copy_field(int src_index, int dst_index, int elem_count,
+			      unsigned src_offset, unsigned dst_offset, unsigned bytes)
+      {
+	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
+	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
+
+	off_t src_field_start, dst_field_start;
+	int src_field_size, dst_field_size;
+
+	find_field_start(src_idata->field_sizes, src_offset, bytes, src_field_start, src_field_size);
+	find_field_start(dst_idata->field_sizes, dst_offset, bytes, dst_field_start, dst_field_size);
+
+	// if both source and dest fill up an entire field, we might be able to copy whole ranges at the same time
+	if((src_field_start == src_offset) && (src_field_size == bytes) &&
+	   (dst_field_start == dst_offset) && (dst_field_size == bytes)) {
+	  // let's see how many we can copy
+	  int done = 0;
+	  while(done < elem_count) {
+	    int src_in_this_block = src_idata->block_size - ((src_index + done) % src_idata->block_size);
+	    int dst_in_this_block = dst_idata->block_size - ((dst_index + done) % dst_idata->block_size);
+	    int todo = min(elem_count - done, min(src_in_this_block, dst_in_this_block));
+
+	    //printf("copying range of %d elements (%d, %d, %d)\n", todo, src_index, dst_index, done);
+
+	    off_t src_start = calc_mem_loc(src_idata->alloc_offset + (src_offset - src_field_start),
+					   src_field_start, src_field_size, src_idata->elmt_size,
+					   src_idata->block_size, src_index + done);
+	    off_t dst_start = calc_mem_loc(dst_idata->alloc_offset + (dst_offset - dst_field_start),
+					   dst_field_start, dst_field_size, dst_idata->elmt_size,
+					   dst_idata->block_size, dst_index + done);
+
+	    // sanity check that the range we calculated really is contiguous
+	    assert(calc_mem_loc(src_idata->alloc_offset + (src_offset - src_field_start),
+				src_field_start, src_field_size, src_idata->elmt_size,
+				src_idata->block_size, src_index + done + todo - 1) == 
+		   (src_start + (todo - 1) * bytes));
+	    assert(calc_mem_loc(dst_idata->alloc_offset + (dst_offset - dst_field_start),
+				dst_field_start, dst_field_size, dst_idata->elmt_size,
+				dst_idata->block_size, dst_index + done + todo - 1) == 
+		   (dst_start + (todo - 1) * bytes));
+
+	    span_copier->copy_span(src_start, dst_start, bytes * todo);
+	    //src_mem->get_bytes(src_start, buffer, bytes * todo);
+	    //dst_mem->put_bytes(dst_start, buffer, bytes * todo);
+
+	    done += todo;
+	  }
+	} else {
+	  // fallback - calculate each address separately
+	  for(int i = 0; i < elem_count; i++) {
+	    off_t src_start = calc_mem_loc(src_idata->alloc_offset + (src_offset - src_field_start),
+					   src_field_start, src_field_size, src_idata->elmt_size,
+					   src_idata->block_size, src_index + i);
+	    off_t dst_start = calc_mem_loc(dst_idata->alloc_offset + (dst_offset - dst_field_start),
+					   dst_field_start, dst_field_size, dst_idata->elmt_size,
+					   dst_idata->block_size, dst_index + i);
+
+	    span_copier->copy_span(src_start, dst_start, bytes);
+	    //src_mem->get_bytes(src_start, buffer, bytes);
+	    //dst_mem->put_bytes(dst_start, buffer, bytes);
+	  }
+	}
+      }
+
+      virtual void flush(void) {}
+
+    protected:
+      T *span_copier;
+      RegionInstance::Impl *src_inst;
+      RegionInstance::Impl *dst_inst;
+    };
+
+    class RemoteWriteInstPairCopier : public InstPairCopier {
+    public:
+      RemoteWriteInstPairCopier(RegionInstance src_inst, RegionInstance dst_inst)
 	: src_acc(src_inst.get_accessor()), dst_acc(dst_inst.get_accessor())
       {}
 
@@ -646,6 +762,13 @@ namespace LegionRuntime {
 
 	for(int i = 0; i < elem_count; i++) {
 	  src_acc.read_untyped(ptr_t(src_index + i), buffer, bytes, src_offset);
+          if(0 && i == 0) {
+            printf("remote write: (%d:%d->%d:%d) %d bytes:",
+                   src_index + i, src_offset, dst_index + i, dst_offset, bytes);
+            for(unsigned j = 0; j < bytes; j++)
+              printf(" %02x", (unsigned char)(buffer[j]));
+            printf("\n");
+          }
 	  dst_acc.write_untyped(ptr_t(dst_index + i), buffer, bytes, dst_offset);
 	}
       }
@@ -665,14 +788,218 @@ namespace LegionRuntime {
       virtual void flush(void) = 0;
     };
 
-    class DefaultMemPairCopier : public MemPairCopier {
+    class BufferedMemPairCopier : public MemPairCopier {
     public:
-      // we don't actually need to know our memories...
-      DefaultMemPairCopier(void) {}
+      BufferedMemPairCopier(Memory _src_mem, Memory _dst_mem, size_t _buffer_size = 32768)
+	: buffer_size(_buffer_size)
+      {
+	src_mem = _src_mem.impl();
+	dst_mem = _dst_mem.impl();
+	buffer = new char[buffer_size];
+      }
+
+      ~BufferedMemPairCopier(void)
+      {
+	delete[] buffer;
+      }
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
       {
-	return new DefaultInstPairCopier(src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<BufferedMemPairCopier>(this, src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("buffered copy of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+	while(bytes > buffer_size) {
+	  src_mem->get_bytes(src_offset, buffer, buffer_size);
+	  dst_mem->put_bytes(dst_offset, buffer, buffer_size);
+	  src_offset += buffer_size;
+	  dst_offset += buffer_size;
+	  bytes -= buffer_size;
+	}
+	if(bytes > 0) {
+	  src_mem->get_bytes(src_offset, buffer, bytes);
+	  dst_mem->put_bytes(dst_offset, buffer, bytes);
+	}
+      }
+
+    protected:
+      size_t buffer_size;
+      Memory::Impl *src_mem, *dst_mem;
+      char *buffer;
+    };
+     
+    class MemcpyMemPairCopier : public MemPairCopier {
+    public:
+      MemcpyMemPairCopier(Memory _src_mem, Memory _dst_mem)
+      {
+	Memory::Impl *src_impl = _src_mem.impl();
+	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
+	assert(src_base);
+
+	Memory::Impl *dst_impl = _dst_mem.impl();
+	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+	assert(dst_base);
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new SpanBasedInstPairCopier<MemcpyMemPairCopier>(this, src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("memcpy of %zd bytes\n", bytes);
+	memcpy(dst_base + dst_offset, src_base + src_offset, bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     size_t lines, off_t src_stride, off_t dst_stride)
+      {
+	for(size_t i = 0; i < lines; i++) {
+	  memcpy(dst_base + dst_offset, src_base + src_offset, bytes);
+	  dst_offset += dst_stride;
+	  src_offset += src_stride;
+	}
+      }
+
+    protected:
+      const char *src_base;
+      char *dst_base;
+    };
+
+    class GPUtoFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
+	: gpu(_gpu)
+      {
+	Memory::Impl *src_impl = _src_mem.impl();
+	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
+	assert(src_base);
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	Event e = Event::Impl::create_event();
+	//printf("gpu write of %zd bytes\n", bytes);
+	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes, Event::NO_EVENT, e);
+	// TODO: return event for correctness
+	e.wait(true);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     size_t lines, off_t src_stride, off_t dst_stride)
+      {
+	for(size_t i = 0; i < lines; i++) {
+	  copy_span(dst_offset, src_offset, bytes);
+	  dst_offset += dst_stride;
+	  src_offset += src_stride;
+	}
+      }
+
+    protected:
+      const char *src_base;
+      GPUProcessor *gpu;
+    };
+     
+    class GPUfromFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
+	: gpu(_gpu)
+      {
+	Memory::Impl *dst_impl = _dst_mem.impl();
+	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+	assert(dst_base);
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	Event e = Event::Impl::create_event();
+	//printf("gpu read of %zd bytes\n", bytes);
+	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes, Event::NO_EVENT, e);
+	// TODO: return event for correctness
+	e.wait(true);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     size_t lines, off_t src_stride, off_t dst_stride)
+      {
+	for(size_t i = 0; i < lines; i++) {
+	  copy_span(dst_offset, src_offset, bytes);
+	  dst_offset += dst_stride;
+	  src_offset += src_stride;
+	}
+      }
+
+    protected:
+      char *dst_base;
+      GPUProcessor *gpu;
+    };
+     
+    class GPUinFBMemPairCopier : public MemPairCopier {
+    public:
+      GPUinFBMemPairCopier(GPUProcessor *_gpu)
+	: gpu(_gpu)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, dst_inst);
+      }
+
+      virtual void flush(void) {}
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	Event e = Event::Impl::create_event();
+	//printf("gpu write of %zd bytes\n", bytes);
+	gpu->copy_within_fb(dst_offset, src_offset, bytes, Event::NO_EVENT, e);
+	// TODO: return event for correctness
+	e.wait(true);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     size_t lines, off_t src_stride, off_t dst_stride)
+      {
+	for(size_t i = 0; i < lines; i++) {
+	  copy_span(dst_offset, src_offset, bytes);
+	  dst_offset += dst_stride;
+	  src_offset += src_stride;
+	}
+      }
+
+    protected:
+      GPUProcessor *gpu;
+    };
+     
+    class RemoteWriteMemPairCopier : public MemPairCopier {
+    public:
+      // we don't actually need to know our memories...
+      RemoteWriteMemPairCopier(void) {}
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      {
+	return new RemoteWriteInstPairCopier(src_inst, dst_inst);
       }
 
       virtual void flush(void) {}
@@ -683,15 +1010,48 @@ namespace LegionRuntime {
       Memory::Impl *src_impl = src_mem.impl();
       Memory::Impl *dst_impl = dst_mem.impl();
 
-      Memory::Kind src_kind = src_impl->get_kind();
-      Memory::Kind dst_kind = dst_impl->get_kind();
+      Memory::Impl::MemoryKind src_kind = src_impl->kind;
+      Memory::Impl::MemoryKind dst_kind = dst_impl->kind;
 
       log_dma.info("copier: %x(%d) -> %x(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
+      // can we perform simple memcpy's?
+      if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+	 ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+	return new MemcpyMemPairCopier(src_mem, dst_mem);
+      }
+
+      // copy to a framebuffer
+      if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+	 (dst_kind == Memory::Impl::MKIND_GPUFB)) {
+	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+	return new GPUtoFBMemPairCopier(src_mem, dst_gpu);
+      }
+
+      // copy from a framebuffer
+      if((src_kind == Memory::Impl::MKIND_GPUFB) &&
+	 ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
+	return new GPUfromFBMemPairCopier(src_gpu, dst_mem);
+      }
+
+      // copy within a framebuffer
+      if((src_kind == Memory::Impl::MKIND_GPUFB) &&
+         (dst_kind == Memory::Impl::MKIND_GPUFB)) {
+	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
+	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+        assert(src_gpu == dst_gpu);
+	return new GPUinFBMemPairCopier(src_gpu);
+      }
+
       // try as many things as we can think of
+      if(dst_kind == Memory::Impl::MKIND_REMOTE) {
+        assert(src_kind != Memory::Impl::MKIND_REMOTE);
+        //return new RemoteWriteMemPairCopier;
+      }
 
       // fallback
-      return new DefaultMemPairCopier;
+      return new BufferedMemPairCopier(src_mem, dst_mem);
     }
 
     template <unsigned DIM>
@@ -1254,11 +1614,11 @@ namespace LegionRuntime {
 	InstPair ip(src_it->inst, dst_it->inst);
 	MemPair mp(src_it->inst.impl()->memory, dst_it->inst.impl()->memory);
 
-	printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
-	       ip.first.id, ip.second.id, mp.first.id, mp.second.id,
-	       src_suboffset, dst_suboffset,
-	       src_it->offset, src_it->size, 
-	       dst_it->offset, dst_it->size);
+	// printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
+	//        ip.first.id, ip.second.id, mp.first.id, mp.second.id,
+	//        src_suboffset, dst_suboffset,
+	//        src_it->offset, src_it->size, 
+	//        dst_it->offset, dst_it->size);
 
 	OASByInst *oas_by_inst;
 	OASByMem::iterator it = oas_by_mem.find(mp);

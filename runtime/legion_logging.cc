@@ -27,7 +27,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       char file_name[100];
-      sprintf(file_name,"region_tree_state_log_%d.log",local_proc.id);
+      sprintf(file_name,"region_tree_state_log_%x.log",local_proc.id);
       tree_state_log = fopen(file_name,"w");
       assert(tree_state_log != NULL);
       log("");

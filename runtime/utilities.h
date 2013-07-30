@@ -38,6 +38,10 @@
 #include <mach/mach.h>
 #endif
 
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
+
 // outside of namespace because 50-letter-long enums are annoying
 enum {
   TIME_NONE,

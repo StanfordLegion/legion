@@ -24,6 +24,10 @@
 
 #include "arrays.h"
 
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
+
 using namespace LegionRuntime::Arrays;
 
 namespace LegionRuntime {
@@ -49,6 +53,9 @@ namespace LegionRuntime {
       explicit ByteOffset(off_t _offset) : offset(_offset) { assert(offset == _offset); }
       explicit ByteOffset(int _offset) : offset(_offset) {}
 
+      template <typename T1, typename T2>
+      ByteOffset(T1 *p1, T2 *p2) : offset(((char *)p1) - ((char *)p2)) {}
+
       template <typename T>
       T *add_to_pointer(T *ptr) const
       {
@@ -56,6 +63,7 @@ namespace LegionRuntime {
       }
 
       bool operator==(const ByteOffset rhs) const { return offset == rhs.offset; }
+      bool operator!=(const ByteOffset rhs) const { return offset != rhs.offset; }
 
       ByteOffset& operator+=(ByteOffset rhs) { offset += rhs.offset; return *this; }
       ByteOffset& operator*=(int scale) { offset *= scale; return *this; }
@@ -165,6 +173,17 @@ namespace LegionRuntime {
 	  template <int DIM>
 	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets);
 
+	  template <int DIM>
+	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
+			     const std::vector<off_t> &field_offsets, ByteOffset &field_stride);
+
+	  template <int DIM>
+	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride);
+
+	  template <int DIM>
+	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride,
+			      const std::vector<off_t> &field_offsets, ByteOffset &field_stride);
+
 	  void *internal;
 	  off_t field_offset;
 #ifdef PRIVILEGE_CHECKS
@@ -218,10 +237,18 @@ namespace LegionRuntime {
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
 
-	  // no way to get a direct element pointer
 	  template <int DIM>
 	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets)
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets)); }
+
+	  template <int DIM>
+	    T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
+			    const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets, field_offsets, field_stride)); }
+
+	  template <int DIM>
+	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride)
+	  { return (T*)(Untyped::raw_dense_ptr<DIM>(r, subrect, elem_stride)); }
 
 	  template<typename REDOP>
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
@@ -833,7 +860,11 @@ namespace LegionRuntime {
 	  inline ptr_t get_next(void) const
 	  {
 	    ptr_t n;
+#ifdef __GNUC__
 	    n.value = __sync_fetch_and_add(&(next_entry->value), 1);
+#else
+            n.value = LowLevel::__sync_fetch_and_add(&(next_entry->value), 1); 
+#endif
 	    return n;
 	  }
 

@@ -17,6 +17,10 @@
 #include "lowlevel.h"
 #include "accessor.h"
 
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
+
 using namespace LegionRuntime::Accessor;
 
 #include <cstdio>
@@ -29,7 +33,7 @@ using namespace LegionRuntime::Accessor;
 #include <list>
 #include <vector>
 
-#include "pthread.h"
+#include <pthread.h>
 #include <errno.h>
 
 #define BASE_EVENTS	1024	
@@ -99,7 +103,15 @@ pthread_mutex_t debug_mutex;
 #endif // DEBUG_PRINT
 
 // Local processor id
-__thread unsigned local_proc_id;
+// Instead of using __thread, we'll try and make this
+// code more portable by using pthread thread local storage
+//__thread unsigned local_proc_id;
+pthread_key_t local_proc_key;
+static void thread_proc_free(void *arg)
+{
+  assert(arg != NULL);
+  free(arg);
+}
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -185,7 +197,8 @@ namespace LegionRuntime {
     public:
       PerThreadTimerData(void)
       {
-        thread = local_proc_id; 
+        unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
+        thread = *local_proc_id; 
         mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
         PTHREAD_SAFE_CALL(pthread_mutex_init(mutex,NULL));
       }
@@ -203,7 +216,14 @@ namespace LegionRuntime {
 
     pthread_mutex_t global_timer_mutex = PTHREAD_MUTEX_INITIALIZER;
     std::vector<PerThreadTimerData*> timer_data;
-    __thread PerThreadTimerData *thread_timer_data;
+    //__thread PerThreadTimerData *thread_timer_data;
+    pthread_key_t thread_timer_key;
+    static void thread_timer_free(void *arg)
+    {
+      assert(arg != NULL);
+      PerThreadTimerData *ptr = (PerThreadTimerData*)arg;
+      delete ptr;
+    }
 
 #ifdef DETAILED_TIMING
     /*static*/ void DetailedTimer::clear_timers(bool all_nodes /*=true*/)
@@ -222,10 +242,13 @@ namespace LegionRuntime {
 
     /*static*/ void DetailedTimer::push_timer(int timer_kind)
     {
+      PerThreadTimerData *thread_timer_data = 
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       if (!thread_timer_data)
       {
         PTHREAD_SAFE_CALL(pthread_mutex_lock(&global_timer_mutex));
         thread_timer_data = new PerThreadTimerData();
+        PTHREAD_SAFE_CALL(pthread_setspecific(thread_timer_key,thread_timer_data));
         timer_data.push_back(thread_timer_data);
         PTHREAD_SAFE_CALL(pthread_mutex_unlock(&global_timer_mutex));
       }
@@ -242,6 +265,8 @@ namespace LegionRuntime {
 
     /*static*/ void DetailedTimer::pop_timer(void)
     {
+      PerThreadTimerData *thread_timer_data =
+        (PerThreadTimerData*) pthread_getspecific(thread_timer_key);
       if (!thread_timer_data)
       {
         printf("Got pop without initialized thread data !?\n");
@@ -657,7 +682,8 @@ namespace LegionRuntime {
         else
         {
             // Try preempting the process
-            Processor local = { local_proc_id };
+            unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
+            Processor local = { *local_proc_id };
             ProcessorImpl *impl = Runtime::get_runtime()->get_processor_impl(local);
             // This call will only return once the event has triggered
             impl->preempt(this,needed_gen);
@@ -1825,7 +1851,14 @@ namespace LegionRuntime {
     {
 	ProcessorImpl *proc = (ProcessorImpl*)p;
 	// Set the thread local variable processor id
-	local_proc_id = proc->proc.id;
+	//local_proc_id = proc->proc.id;
+        {
+          unsigned *thread_id = (unsigned*)malloc(sizeof(unsigned));
+          *thread_id = proc->proc.id;
+          PTHREAD_SAFE_CALL( pthread_setspecific(local_proc_key, thread_id) );
+        }
+        // Also set the value of thread timer key
+        PTHREAD_SAFE_CALL( pthread_setspecific(thread_timer_key, NULL) );
 	// Will never return from this call
 	proc->run();
         if (!proc->return_on_finish)
@@ -3689,21 +3722,145 @@ namespace LegionRuntime {
 	size_t elem_size;
 	char *buffer;
       };
+
+      class ReductionFold {
+      public:
+        ReductionFold(const std::vector<Domain::CopySrcDstField>& _srcs,
+		      const std::vector<Domain::CopySrcDstField>& _dsts,
+                      const ReductionOpUntyped *_redop)
+	  : srcs(_srcs), dsts(_dsts), redop(_redop) 
+        { 
+          // Assume reductions can only be applied to a single field at a time
+          assert(srcs.size() == 1);
+          assert(dsts.size() == 1);
+        }
+      public:
+        void do_span(int start, int count)
+        {
+          RegionInstance::Impl *src_inst = Runtime::get_runtime()->get_instance_impl(srcs[0].inst);
+          RegionInstance::Impl *dst_inst = Runtime::get_runtime()->get_instance_impl(dsts[0].inst);
+          // This should be from one reduction fold instance to another
+          for (int index = start; index < (start+count); index++)
+          {
+            // Assume that there is only one field and they are contiguous
+            void *src_ptr = src_inst->get_address(index, 0, redop->sizeof_rhs, 0);
+            void *dst_ptr = dst_inst->get_address(index, 0, redop->sizeof_rhs, 0);
+            redop->fold(dst_ptr, src_ptr, 1, false/*exclusive*/);
+          }
+        }
+        void do_domain(const Domain domain)
+        {
+          RegionInstance::Impl *src_inst = Runtime::get_runtime()->get_instance_impl(srcs[0].inst);
+          RegionInstance::Impl *dst_inst = Runtime::get_runtime()->get_instance_impl(dsts[0].inst);
+          for(Domain::DomainPointIterator dpi(domain); dpi; dpi++) {
+	    DomainPoint dp = dpi.p;
+            void *src_ptr = src_inst->get_address(src_inst->get_linearization().get_image(dp), 0, redop->sizeof_rhs, 0);
+            void *dst_ptr = dst_inst->get_address(dst_inst->get_linearization().get_image(dp), 0, redop->sizeof_rhs, 0);
+            redop->fold(dst_ptr, src_ptr, 1, false/*exclusive*/);
+          }
+        }
+      protected:
+        std::vector<Domain::CopySrcDstField> srcs;
+        std::vector<Domain::CopySrcDstField> dsts;
+        const ReductionOpUntyped *redop;
+      };
+
+      class ReductionApply {
+      public:
+        ReductionApply(const std::vector<Domain::CopySrcDstField>& _srcs,
+		       const std::vector<Domain::CopySrcDstField>& _dsts,
+                       const ReductionOpUntyped *_redop)
+	  : srcs(_srcs), dsts(_dsts), redop(_redop) 
+        { 
+          // Assume reductions can only be applied to a single field at a time
+          assert(srcs.size() == 1);
+          assert(dsts.size() == 1);
+        }
+      public:
+        void do_span(int start, int count)
+        {
+          RegionInstance::Impl *src_inst = Runtime::get_runtime()->get_instance_impl(srcs[0].inst);
+          RegionInstance::Impl *dst_inst = Runtime::get_runtime()->get_instance_impl(dsts[0].inst);
+          size_t offset = dsts[0].offset;
+          size_t size = dsts[0].size;
+          size_t field_start, field_size, within_field;
+          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
+                                    field_start, field_size, within_field);
+          for (int index = start; index < (start+count); index++)
+          {
+            void *src_ptr = src_inst->get_address(index, 0, redop->sizeof_rhs, 0);  
+            void *dst_ptr = dst_inst->get_address(index, field_start, field_size, within_field);
+            redop->apply(dst_ptr, src_ptr, 1, false/*exclusive*/);
+          }
+        }
+        void do_domain(const Domain domain)
+        {
+          RegionInstance::Impl *src_inst = Runtime::get_runtime()->get_instance_impl(srcs[0].inst);
+          RegionInstance::Impl *dst_inst = Runtime::get_runtime()->get_instance_impl(dsts[0].inst);
+          size_t offset = dsts[0].offset;
+          size_t size = dsts[0].size;
+          size_t field_start, field_size, within_field;
+          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
+                                    field_start, field_size, within_field);
+          for (Domain::DomainPointIterator dpi(domain); dpi; dpi++) {
+            DomainPoint dp = dpi.p;
+            void *src_ptr = src_inst->get_address(src_inst->get_linearization().get_image(dp), 0, redop->sizeof_rhs, 0);
+            void *dst_ptr = dst_inst->get_address(dst_inst->get_linearization().get_image(dp),
+                                                  field_start, field_size, within_field);
+            redop->apply(dst_ptr, src_ptr, 1, false/*exclusive*/);
+          }
+        }
+      protected:
+        std::vector<Domain::CopySrcDstField> srcs;
+        std::vector<Domain::CopySrcDstField> dsts;
+        const ReductionOpUntyped *redop;
+      };
     };
 
     void IndexSpace::Impl::CopyOperation::perform_copy_operation(void)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY); 
 
-      RangeExecutors::GatherScatter rexec(srcs, dsts);
+      if (redop_id == 0)
+      {
+        RangeExecutors::GatherScatter rexec(srcs, dsts);
 
-      if(domain.get_dim() == 0) {
-	// This is an index space copy
-	IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(domain.get_index_space());
-	const ElementMask& mask = r->get_element_mask();
-	ElementMask::forall_ranges(rexec, mask, mask);
-      } else {
-	rexec.do_domain(domain);
+        if(domain.get_dim() == 0) {
+          // This is an index space copy
+          IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(domain.get_index_space());
+          const ElementMask& mask = r->get_element_mask();
+          ElementMask::forall_ranges(rexec, mask, mask);
+        } else {
+          rexec.do_domain(domain);
+        }
+      }
+      else // This is a reduction operation
+      {
+        // Get the reduction operation that we are doing
+        const ReductionOpUntyped *redop = Runtime::get_runtime()->get_reduction_op(redop_id);
+        // See if we're doing a fold or not 
+        if (red_fold)
+        {
+          RangeExecutors::ReductionFold rexec(srcs,dsts,redop);
+          if (domain.get_dim() == 0) {
+            IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(domain.get_index_space());
+            const ElementMask& mask = r->get_element_mask();
+            ElementMask::forall_ranges(rexec, mask, mask);
+          } else {
+            rexec.do_domain(domain);
+          }
+        }
+        else
+        {
+          RangeExecutors::ReductionApply rexec(srcs,dsts,redop);
+          if (domain.get_dim() == 0) {
+            IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(domain.get_index_space());
+            const ElementMask& mask = r->get_element_mask();
+            ElementMask::forall_ranges(rexec, mask, mask);
+          } else {
+            rexec.do_domain(domain);
+          }
+        }
       }
     }
 
@@ -3772,6 +3929,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_PRINT
 	PTHREAD_SAFE_CALL(pthread_mutex_init(&debug_mutex,NULL));
 #endif
+        // Create the pthread keys for thread local data
+        PTHREAD_SAFE_CALL( pthread_key_create(&local_proc_key, thread_proc_free) );
+        PTHREAD_SAFE_CALL( pthread_key_create(&thread_timer_key, thread_timer_free) );
 
         for (int i=1; i < *argc; i++)
         {
@@ -3996,7 +4156,10 @@ namespace LegionRuntime {
 		impl->start((void*)impl);
 	}
 	// Finally do the initialization for thread 0
-	local_proc_id = 1;
+        unsigned *local_proc_id = (unsigned*)malloc(sizeof(unsigned));
+	*local_proc_id = 1;
+        PTHREAD_SAFE_CALL( pthread_setspecific(local_proc_key, local_proc_id) );
+        PTHREAD_SAFE_CALL( pthread_setspecific(thread_timer_key, NULL) );
     }
 
     Machine::~Machine()
@@ -4026,7 +4189,8 @@ namespace LegionRuntime {
 		      RunStyle style /*= ONE_TASK_ONLY*/,
 		      const void *args /*= 0*/, size_t arglen /*= 0*/,
                       bool background /*= false*/)
-    {
+    { 
+
       if(background) {
         log_machine.info("background operation requested\n");
 	fflush(stdout);
@@ -4123,7 +4287,8 @@ namespace LegionRuntime {
 
     /*static*/ Processor Machine::get_executing_processor(void)
     {
-      Processor local = { local_proc_id };
+      unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
+      Processor local = { *local_proc_id };
       return local;
     }
     
@@ -4506,8 +4671,9 @@ namespace LegionRuntime {
   /*static*/ void Logger::logvprintf(LogLevel level, int category, const char *fmt, va_list args)
   {
     char buffer[200];
+    unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
     sprintf(buffer, "[%d - %lx] {%s}{%s}: ",
-            0, /*pthread_self()*/long(local_proc_id), Logger::stringify(level), Logger::get_categories_by_id()[category].c_str());
+            0, /*pthread_self()*/long(*local_proc_id), Logger::stringify(level), Logger::get_categories_by_id()[category].c_str());
     int len = strlen(buffer);
     vsnprintf(buffer+len, 199-len, fmt, args);
     strcat(buffer, "\n");

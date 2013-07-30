@@ -363,6 +363,17 @@ namespace LegionRuntime {
         {
           std::vector<Machine::MemoryMemoryAffinity> affinity; 
           int size = machine->get_mem_mem_affinity(affinity, mem, *it);
+	  if(size == 0) {
+	    // insert a dummy (bad) affinity for when two memories don't actually have affinity
+	    // (i.e. a multi-hop copy would be necessary)
+	    Machine::MemoryMemoryAffinity mma;
+	    mma.m1 = mem;
+	    mma.m2 = *it;
+	    mma.latency = 1000000;
+	    mma.bandwidth = 0;
+	    affinity.push_back(mma);
+	    size++;
+	  }
           assert(size == 1);
           bool inserted = false;
           if (latency)

@@ -120,7 +120,7 @@ namespace LegionRuntime {
         END_TASK_CHILDREN_MAPPED = 53,
         BEGIN_TASK_FINISH = 54,
         END_TASK_FINISH = 55,
-        TASK_LAUNCH = 56, // should always be last
+        TASK_LAUNCH = 56, // this should always be last
       }; 
 
       struct ProfilingEvent {
@@ -154,6 +154,17 @@ namespace LegionRuntime {
         std::map<unsigned,size_t> field_infos;
       };
 
+      struct TaskInstance {
+      public:
+        TaskInstance(void) { }
+        TaskInstance(unsigned tid, unsigned uid, const DomainPoint &p)
+          : task_id(tid), unique_id(uid), point(p) { }
+      public:
+        unsigned task_id;
+        unsigned unique_id;
+        DomainPoint point;
+      };
+
       struct ProcessorProfiler {
       public:
         ProcessorProfiler(void)
@@ -164,6 +175,7 @@ namespace LegionRuntime {
       public:
         void add_event(const ProfilingEvent &event) { proc_events.push_back(event); }
         void add_event(const MemoryEvent &event) { mem_events.push_back(event); }
+        void add_subtask(unsigned suid, const TaskInstance &inst) { sub_tasks[suid] = inst; }
       public:
         Processor proc;
         bool utility;
@@ -171,6 +183,7 @@ namespace LegionRuntime {
         unsigned long long init_time;
         std::vector<ProfilingEvent> proc_events;
         std::vector<MemoryEvent> mem_events;
+        std::map<unsigned,TaskInstance> sub_tasks;
       };
 
       extern Logger::Category log_prof;
@@ -248,6 +261,14 @@ namespace LegionRuntime {
             log_prof(LEVEL_INFO,"Prof Destroy Instance %d %lld", event.unique_id, (event.time - prof.init_time));
           }
         }
+        for (std::map<unsigned,TaskInstance>::const_iterator it = prof.sub_tasks.begin();
+              it != prof.sub_tasks.end(); it++)
+        {
+          log_prof(LEVEL_INFO,"Prof Subtask %d %d %d %d %d %d %d",
+              it->first, it->second.task_id, it->second.unique_id, it->second.point.get_dim(),
+              it->second.point.point_data[0], it->second.point.point_data[1],
+              it->second.point.point_data[2]);
+        }
       }
 
       static inline void register_task_begin_run(unsigned task_id, unsigned unique_id, const DomainPoint &point)
@@ -269,6 +290,14 @@ namespace LegionRuntime {
         unsigned long long time = TimeStamp::get_current_time_in_micros();
         Processor proc = Machine::get_executing_processor();
         get_profiler(proc).add_event(ProfilingEvent(TASK_LAUNCH,task_id,unique_id,point,time));
+      }
+
+      static inline void register_sub_task(unsigned task_id, unsigned unique_id, const DomainPoint &point, unsigned sub_unique_id)
+      {
+        // Kind of tricky here, we actually just need the sub-task relationship, so we'll
+        // pass the sub-task's unique id where the timing information normally goes.
+        Processor proc = Machine::get_executing_processor();
+        get_profiler(proc).add_subtask(sub_unique_id,TaskInstance(task_id,unique_id,point));
       }
 
       static inline void register_task_begin_children_mapped(unsigned task_id, unsigned unique_id, const DomainPoint &point)

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # Copyright 2013 Stanford University
 #
@@ -15,8 +15,6 @@
 # limitations under the License.
 #
 
-#!/usr/bin/python
-
 import sys, os, shutil
 import string, re
 from getopt import getopt
@@ -30,6 +28,7 @@ memory_pat        = re.compile(prefix+"Prof Memory (?P<mem>[0-9a-f]+) (?P<kind>[
 create_pat        = re.compile(prefix+"Prof Create Instance (?P<iid>[0-9a-f]+) (?P<uid>[0-9]+) (?P<mem>[0-9a-f]+) (?P<redop>[0-9]+) (?P<factor>[0-9]+) (?P<time>[0-9]+)")
 destroy_pat       = re.compile(prefix+"Prof Destroy Instance (?P<uid>[0-9]+) (?P<time>[0-9]+)")
 field_pat         = re.compile(prefix+"Prof Instance Field (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
+sub_task_pat      = re.compile(prefix+"Prof Subtask (?P<suid>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<p0>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+)")
 
 BEGIN_INDEX_SPACE_CREATE = 0
 END_INDEX_SPACE_CREATE = 1
@@ -93,6 +92,8 @@ TASK_LAUNCH = 56
 US_PER_PIXEL = 1000
 # Pixels per level of the picture
 PIXELS_PER_LEVEL = 40
+# Pixels per tick mark
+PIXELS_PER_TICK = 200
 
 # Helper function for computing nice colors
 def color_helper(step, num_steps):
@@ -170,6 +171,12 @@ class Point(object):
             result = result + "," + str(self.indexes[2])
         result = result + ")"
         return result
+
+    def __repr__(self):
+        return "Point: "+self.to_string()
+
+    def __str__(self):
+        return self.to_string()
 
 class TaskInstance(object):
     def __init__(self, unique_task, point):
@@ -250,13 +257,14 @@ class TaskInstance(object):
         self.inline_unmap = None
         # Task dependence analysis
         self.task_dep_analysis = dict()
-        self.task_dep = None
         # Mapping dependence analysis
         self.map_dep_analysis = dict()
         self.map_dep = None
         # Deletion dependence anlaysis
         self.del_dep_analysis = dict()
         self.del_dep = None
+        # Keep track of our set of subtasks
+        self.subtasks = set()
 
     def add_task_event(self, processor, kind, event):
         if kind == BEGIN_TASK_MAP:
@@ -482,8 +490,18 @@ class TaskInstance(object):
             time_range = DelDepRange(self,self.del_dep,event)
             self.del_dep_analysis[time_range] = processor
             self.del_dep = None
+        else:
+            # These are handled at the granularity of UniqueTasks
+            assert kind <> BEGIN_TASK_DEP_ANALYSIS
+            assert kind <> END_TASK_DEP_ANALYSIS
+
+    def add_subtask(self, subtask):
+        assert subtask not in self.subtasks 
+        self.subtasks.add(subtask)
+        subtask.add_parent(self)
 
     def add_time_ranges(self):
+        # Might not have a map processor if it is the top level task
         assert self.map_processor <> None
         assert self.begin_map <> None
         assert self.end_map <> None
@@ -564,15 +582,44 @@ class UniqueTask(object):
         self.variant = variant
         self.unique_id = unique_id
         self.points = dict()
+        # Mapping analysis is done at the granularity of unique
+        # tasks and not individual points so keep track of it here
+        # and ignore the point values.  We'll accumulate this
+        # into the enclosing parent task's dependence analysis
+        # cost during add_time_ranges
+        self.dep_analysis = None
+        self.dep_processor = None
+        # The parent task is a variant
+        self.parent_task = None
 
     def add_task_event(self, processor, kind, point, event):
-        if point not in self.points:
-            self.points[point] = TaskInstance(self, point)
-        self.points[point].add_task_event(processor, kind, event)
+        if kind == BEGIN_TASK_DEP_ANALYSIS:
+            assert self.dep_analysis == None
+            assert self.dep_processor == None
+            self.dep_analysis = event
+            self.dep_processor = processor
+        elif kind == END_TASK_DEP_ANALYSIS:
+            assert self.dep_analysis <> None 
+            assert self.dep_processor == processor
+            dep_range = TaskDepRange(self,self.dep_analysis,event)
+            self.dep_analysis = dep_range
+        else:
+            # Do the normal thing here
+            if point not in self.points:
+                self.points[point] = TaskInstance(self, point)
+            self.points[point].add_task_event(processor, kind, event)
+
+    def add_parent(self, parent):
+        assert self.parent_task == None
+        self.parent_task = parent
 
     def add_time_ranges(self):
         for p,t in self.points.iteritems():
             t.add_time_ranges()
+        # Also put our dependence analysis range in
+        if self.dep_analysis <> None:
+            assert self.dep_processor <> None
+            self.dep_processor.add_range(self.dep_analysis)
 
     def get_title(self):
         return self.variant.get_title()+" (UID "+str(self.unique_id)+")" 
@@ -582,6 +629,11 @@ class UniqueTask(object):
 
     def get_variant(self):
         return self.variant
+
+    def add_subtask(self, point, subtask):
+        if point not in self.points:
+            self.points[point] = TaskInstance(self, point)
+        self.points[point].add_subtask(subtask)
 
 class TaskVariant(object):
     def __init__(self, task_id, leaf, name):
@@ -612,6 +664,16 @@ class TaskVariant(object):
 
     def get_task_id(self):
         return self.task_id
+
+    def has_unique_task(self, uid):
+        if uid in self.unique_tasks:
+            return self.unique_tasks[uid]
+        return None
+
+    def add_subtask(self, uid, point, subtask):
+        if uid not in self.unique_tasks:
+            self.unique_tasks[uid] = UniqueTask(self, uid)
+        self.unique_tasks[uid].add_subtask(point, subtask)
 
 class ScheduleInstance(object):
     def __init__(self):
@@ -1467,6 +1529,7 @@ class InlineUnmapRange(TimeRange):
 class TaskDepRange(TimeRange):
     def __init__(self, inst, begin, end):
         TimeRange.__init__(self, begin, end)
+        # This is actually a UniqueTask
         self.inst = inst
 
     def is_app_range(self):
@@ -1808,6 +1871,7 @@ class SVGPrinter(object):
         self.max_height = 0
 
     def close(self):
+        self.emit_time_scale()
         self.target.write('</svg>\n')
         self.target.close()
         # Round up the max width and max height to a multiple of 100
@@ -1851,6 +1915,23 @@ class SVGPrinter(object):
         if (y_start+y_length) > self.max_height:
             self.max_height = y_start + y_length
 
+    def emit_time_scale(self):
+        x_end = self.max_width 
+        y_val = int(float(self.offset + 1.5)*PIXELS_PER_LEVEL)
+        self.target.write('    <line x1="'+str(0)+'" y1="'+str(y_val)+'" x2="'+str(x_end)+'" y2="'+str(y_val)+'" stroke-width="2" stroke="black" />\n')
+        y_tick_max = y_val + int(0.2*PIXELS_PER_LEVEL)
+        y_tick_min = y_val - int(0.2*PIXELS_PER_LEVEL)
+        us_per_tick  = US_PER_PIXEL * PIXELS_PER_TICK
+        # Compute the number of tick marks 
+        for idx in range(x_end // PIXELS_PER_TICK):
+            x_tick = idx*PIXELS_PER_TICK
+            self.target.write('    <line x1="'+str(x_tick)+'" y1="'+str(y_tick_min)+'" x2="'+str(x_tick)+'" y2="'+str(y_tick_max)+'" stroke-width="2" stroke="black" />\n')
+            title = "%d us" % (idx*us_per_tick)
+            self.target.write('    <text x="'+str(x_tick)+'" y="'+str(y_tick_max+int(0.2*PIXELS_PER_LEVEL))+'" fill="black">'+title+'</text>\n')
+        if (y_val+PIXELS_PER_LEVEL) > self.max_height:
+            self.max_height = y_val + PIXELS_PER_LEVEL
+          
+
     def emit_time_line(self, level, start, finish, title):
         x_start = start//US_PER_PIXEL
         x_end = finish//US_PER_PIXEL
@@ -1876,8 +1957,11 @@ class CallTracker(object):
 
     def print_stats(self, total_time):
         print "                Total Invocations: "+str(self.invocations)
-        print "                Cummulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
-        print "                Non-Cummulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
+        if self.invocations > 0:
+            print "                Cummulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
+            print "                Non-Cummulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
+            print "                Average Cum Time: %.3f us" % (float(self.cum_time)/float(self.invocations))
+            print "                Average Non-Cum Time: %.3f us" % (float(self.non_cum_time)/float(self.invocations))
 
 class StatVariant(object):
     def __init__(self, var):
@@ -2335,6 +2419,21 @@ class State(object):
         self.instances[uid].add_field(fid, size)
         return True
 
+    def set_subtask(self, suid, tid, uid, dim, p0, p1, p2):
+        if tid not in self.task_variants:
+            return False
+        # See if we can find the UniqueTask
+        sub_task = None
+        for v,var in self.task_variants.iteritems():
+            sub_task = var.has_unique_task(suid)
+            if sub_task <> None:
+                break
+        if sub_task == None:
+            return False
+        point = self.find_point(dim, p0, p1, p2)
+        self.task_variants[tid].add_subtask(uid, point, sub_task)
+        return True
+
     def find_point(self, dim, p0, p1, p2):
         for p in self.points:
             if p.matches(dim, p0, p1, p2):
@@ -2466,6 +2565,12 @@ def parse_log_file(file_name, state):
             if not state.add_instance_field(int(m.group('uid')), int(m.group('fid')), int(m.group('size'))):
                 replay_lines.append(line)
             continue
+        m = sub_task_pat.match(line)
+        if m <> None:
+            if not state.set_subtask(int(m.group('suid')), int(m.group('tid')), int(m.group('uid')), int(m.group('dim')),
+                                      int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):
+                replay_lines.append(line)
+            continue
         #If we made it here, then we failed to match
         matches = matches - 1
     log.close()
@@ -2501,6 +2606,12 @@ def parse_log_file(file_name, state):
                 if state.add_instance_field(int(m.group('uid')), int(m.group('fid')), int(m.group('size'))):
                     to_delete.add(line)
                 continue
+            m = sub_task_pat.match(line)
+            if m <> None:
+                if state.set_subtask(int(m.group('suid')), int(m.group('tid')), int(m.group('uid')), int(m.group('dim')),
+                                      int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):
+                    to_delete.add(line)
+                continue;
         if len(to_delete) == 0:
             print "ERROR: NO FORWARD PROGRESS ON REPLAY LINES!  BAD LEGION PROF ASSUMPTION!"
             assert False
@@ -2511,10 +2622,14 @@ def parse_log_file(file_name, state):
 
 def usage():
     print "Usage: "+sys.argv[0]+" [-c] [-p] [-v] <file_name>"
+    print "  -c : perform cummulative analysis"
+    print "  -p : generate HTML and SVG files for pictures"
+    print "  -v : print verbose profiling information"
+    print "  -m <ppm> : set the pixels per micro-second for images"
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'cpv')
+    opts, args = getopt(sys.argv[1:],'cpvm:')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -2528,6 +2643,9 @@ def main():
         generate_pictures = True
     if '-v' in opts:
         verbose = True
+    if '-m' in opts:
+        global US_PER_PIXEL
+        US_PER_PIXEL = int(opts['-m'])
     svg_file_name = "legion_prof.svg"
     html_file_name = "legion_prof.html"
     mem_file_name = "legion_prof_mem.svg"
