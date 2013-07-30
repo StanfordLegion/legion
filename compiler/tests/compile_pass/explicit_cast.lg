@@ -1,0 +1,32 @@
+/* Copyright 2013 Stanford University and Los Alamos National Security, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+task main() {}
+
+task foo(x: int, y: int): int
+{
+  let a = int8(x);
+  let b = int16(y);
+  let c = int16(a) + b;
+  let d = int32(x);
+  let e = int64(y);
+  let f = d + int32(e);
+  return int(int32(c) + f);
+}
+
+task bar(x: int, y: int): int
+{
+  return int(int32(int16(int8(x)) + int16(y)) + int32(x) + int32(int64(y)));
+}

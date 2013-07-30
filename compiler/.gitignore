@@ -1,0 +1,7 @@
+
+*.pyc
+*.out
+*.pdf
+parsetab*.py
+*.o
+*.f90

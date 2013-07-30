@@ -1,0 +1,98 @@
+/* Copyright 2013 Stanford University and Los Alamos National Security, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+struct vec3
+{
+  x: float,
+  y: float,
+  z: float,
+}
+
+struct particle
+{
+  p: vec3,
+  hv: vec3,
+  v: vec3,
+  a: vec3,
+  density: float,
+}
+
+task init_simulation(is: ispace<int>, a: array<is, particle>)
+  , writes(a)
+{
+  for i in is {
+    let zero = {x: float(0.0), y: float(0.0), z: float(0.0)};
+    a[i] = {p: zero, hv: zero, v: zero, a: zero, density: float(0.0)};
+  }
+}
+
+task init_step(is: ispace<int>, a: array<is, particle>), reads(a), writes(a) {}
+task rebuild_reduce(is: ispace<int>, a: array<is, particle>), reads(a), writes(a) {}
+task scatter_densities(is: ispace<int>, a: array<is, particle>), reads(a), writes(a) {}
+task gather_forces(is: ispace<int>, a: array<is, particle>), reads(a), writes(a) {}
+
+task fluid(nx: int, nbx: int, steps: int)
+{
+  assert nx % nbx == 0;
+
+  let ncx = nx + (nbx + 1)*2;
+
+  let cells_ispace = ispace<int>(ncx);
+  let cells = array<cells_ispace, particle>();
+
+  var owned_coloring = coloring<cells_ispace>();
+  let colorspace = ispace<int>(nbx);
+  let blocksize = nx/nbx + 2;
+  let blockspace = ispace<int>(blocksize);
+  for c in colorspace {
+    for i in blockspace {
+      owned_coloring = color(owned_coloring, i + c*blocksize, c);
+    }
+  }
+  let owned_part = partition<cells_ispace, disjoint>(owned_coloring);
+
+  for c in colorspace {
+    let owned = owned_part[c];
+    init_simulation(owned, cells[owned]);
+  }
+
+  let steps_ispace = ispace<int>(steps);
+  for step in steps_ispace {
+    for c in colorspace {
+      let owned = owned_part[c];
+      init_step(owned, cells[owned]);
+    }
+    for c in colorspace {
+      let owned = owned_part[c];
+      rebuild_reduce(owned, cells[owned]);
+    }
+    for c in colorspace {
+      let owned = owned_part[c];
+      scatter_densities(owned, cells[owned]);
+    }
+    for c in colorspace {
+      let owned = owned_part[c];
+      gather_forces(owned, cells[owned]);
+    }
+  }
+}
+
+task main()
+{
+  fluid(10, 2, 1);
+  fluid(20, 2, 1);
+  fluid(20, 4, 1);
+  fluid(20, 5, 1);
+}

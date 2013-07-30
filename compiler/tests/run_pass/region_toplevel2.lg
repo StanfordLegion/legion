@@ -1,0 +1,40 @@
+/* Copyright 2013 Stanford University and Los Alamos National Security, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+task foo(r: region<int>, x: int@r)
+  , reads(r), writes(r)
+{
+  *x = *x + 10;
+}
+
+task bar(r: region<int>, x: int@r)
+  , reads(r), writes(r)
+{
+  // Even when a region is not used in a function, the mapper may
+  // choose to provide a physical instance anyway. When this is the
+  // case, the compiler must unmap the instance even though it is
+  // never accessed within the function.
+  foo(r, x);
+}
+
+task main()
+{
+  let r = region<int>(1);
+  let x = new<int@r>();
+  *x = 0;
+  bar(r, x);
+  *x = *x + 1;
+  assert *x == 11;
+}

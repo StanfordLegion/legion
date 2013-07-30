@@ -1,0 +1,50 @@
+/* Copyright 2013 Stanford University and Los Alamos National Security, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+task leaf_task(is: ispace<int>, a: array<is, int>)
+  : int
+  , reads(a)
+{
+  var sum = 0;
+  for i in is {
+    sum += a[i];
+  }
+  return sum;
+}
+
+task make_partition(is: ispace<int>, a: array<is, int>, i: int, j: int)
+  : int
+  , reads(a), writes(a)
+{
+  a[0] = i;
+  a[1] = j;
+
+  let c = color(color(coloring<is>(), 0, 0), 1, 1);
+  let p = partition<is, disjoint>(c);
+
+  var sum = 0;
+  for i in is {
+    let isi = p[i];
+    sum += leaf_task(isi, a[isi]);
+  }
+  return sum;
+}
+
+task main()
+{
+  let is = ispace<int>(2);
+  let a = array<is, int>();
+  assert make_partition(is, a, 3, 4) == 7;
+}
