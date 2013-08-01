@@ -264,6 +264,8 @@ def region_analysis_helper(node, context):
         return Value()
     if isinstance(node, ast.ExprConstDouble):
         return Value()
+    if isinstance(node, ast.ExprConstFloat):
+        return Value()
     if isinstance(node, ast.ExprConstInt):
         return Value()
     if isinstance(node, ast.ExprConstUInt):

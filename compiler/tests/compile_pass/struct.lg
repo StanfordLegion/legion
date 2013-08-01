@@ -36,7 +36,7 @@ task bar(x: foo): int
 
 task baz(x: foo): foo
 {
-  return x{x: x.x + 5, z: 17};
+  return x{x: x.x + 5, z: 17 % 2};
 }
 
 task bba(x: foo): foo
@@ -48,5 +48,5 @@ task bba(x: foo): foo
 
 task bab(): foo
 {
-  return {x: 1, y: 2, z: 3};
+  return {x: 1, y: 2, z: 3 % 5};
 }

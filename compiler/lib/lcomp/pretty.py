@@ -410,6 +410,8 @@ def pretty_print_node(node, indent):
         return str(node.value).lower()
     if isinstance(node, ast.ExprConstDouble):
         return node.value
+    if isinstance(node, ast.ExprConstFloat):
+        return '%sf' % node.value
     if isinstance(node, ast.ExprConstInt):
         return str(node.value)
     if isinstance(node, ast.ExprConstUInt):

@@ -365,7 +365,13 @@ def check_top_level_task(task_list, cx):
 def trans_header():
     return '''
 #include <cassert>
-#include <cstdint>
+// Clang 3.2 as distributed with Xcode 4.2 on Mac OS X is unable to
+// include stdint.h as cstdint.
+#ifdef __APPLE__
+#  include "stdint.h"
+#else
+#  include <cstdint>
+#endif
 
 #include "legion.h"
 
@@ -2092,8 +2098,8 @@ def trans_node(node, cx):
         field_value = trans_node(node.value_expr, cx).read(cx)
         return Expr(
             '%%s.%s = %s;' % (
-                node.field_name,
-                field_value.value),
+                node.field_name.replace('%', '%%'),
+                field_value.value.replace('%', '%%')),
             field_value.actions)
     if isinstance(node, ast.ExprFieldUpdates):
         cx = cx.increase_indent()
@@ -2128,8 +2134,8 @@ def trans_node(node, cx):
         field_update = trans_node(node.update_expr, cx).read(cx)
         return Expr(
             '%%s.%s = %s;' % (
-                node.field_name,
-                field_update.value),
+                node.field_name.replace('%', '%%'),
+                field_update.value.replace('%', '%%')),
             field_update.actions)
     if isinstance(node, ast.ExprColoring):
         ll_coloring_type = trans_type(cx.type_map[node], cx)
@@ -2266,6 +2272,11 @@ def trans_node(node, cx):
         return Value(node, Expr(str(node.value).lower(), []), cx.type_map[node])
     if isinstance(node, ast.ExprConstDouble):
         return Value(node, Expr(node.value, []), cx.type_map[node])
+    if isinstance(node, ast.ExprConstFloat):
+        return Value(
+            node,
+            Expr('%sf' % node.value, []),
+            cx.type_map[node])
     if isinstance(node, ast.ExprConstInt):
         return Value(
             node,

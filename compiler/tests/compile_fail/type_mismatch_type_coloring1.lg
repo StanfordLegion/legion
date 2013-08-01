@@ -13,20 +13,13 @@
  * limitations under the License.
  */
 
-import "math.h";
+#line 0
 
-task quadratic(a: double, b: double, c: double): double
-{
-  let r0 = (-b + sqrt(b*b - 4.0*a*c))/(2.0*a);
-  let r1 = (-b - sqrt(b*b - 4.0*a*c))/(2.0*a);
-  return r0;
-}
-
-task quadraticf(a: float, b: float, c: float): float
-{
-  let r0 = (-b + sqrtf(b*b - 4.0f*a*c))/(2.0f*a);
-  let r1 = (-b - sqrtf(b*b - 4.0f*a*c))/(2.0f*a);
-  return r0;
-}
+// fails-with:
+// TypeError:
+// tests/compile_fail/type_mismatch_type_coloring1.lg:8:20:
+// Type mismatch in type coloring: expected a region or ispace but got int
 
 task main() {}
+
+task foo(x: int, c: coloring<x>) {}

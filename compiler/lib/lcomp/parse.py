@@ -1185,6 +1185,12 @@ class Parser:
             span = ast.Span.from_slice(p),
             value = p[1])
 
+    def p_expr_const_float(self, p):
+        'expr : FLOAT_VALUE'
+        p[0] = ast.ExprConstFloat(
+            span = ast.Span.from_slice(p),
+            value = p[1][:-1])
+
     def p_expr_const_int_hex(self, p):
         'expr : HEX_VALUE'
         p[0] = ast.ExprConstInt(

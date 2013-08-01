@@ -38,8 +38,8 @@ class Lexer:
     tokens = [
         'ARROW', 'BITWISE_AND_EQUALS', 'BITWISE_OR_EQUALS',
         'BITWISE_XOR_EQUALS', 'DIVIDE_EQUALS', 'DOUBLE_VALUE',
-        'EQUALS', 'GREATER_EQUALS', 'HEX_VALUE', 'ID', 'INT_VALUE',
-        'LEFT_SHIFT', 'LEFT_SHIFT_EQUALS', 'LESS_EQUALS',
+        'EQUALS', 'FLOAT_VALUE', 'GREATER_EQUALS', 'HEX_VALUE', 'ID',
+        'INT_VALUE', 'LEFT_SHIFT', 'LEFT_SHIFT_EQUALS', 'LESS_EQUALS',
         'LOGICAL_AND', 'LOGICAL_OR', 'MINUS_EQUALS', 'MODULUS_EQUALS',
         'NOT_EQUALS', 'PLUS_EQUALS', 'RIGHT_SHIFT',
         'RIGHT_SHIFT_EQUALS', 'STRING_VALUE', 'TIMES_EQUALS',
@@ -160,6 +160,10 @@ class Lexer:
 
     def t_LEFT_SHIFT(self, t):
         r'<<'
+        return t
+
+    def t_FLOAT_VALUE(self, t):
+        r'[0-9]+\.[0-9]*f'
         return t
 
     def t_DOUBLE_VALUE(self, t):

@@ -290,7 +290,9 @@ def type_check_node(node, cx):
         return types.Kind(types.UInt64())
     if isinstance(node, ast.TypeColoring):
         region = type_check_helper(node.region, cx)
-        assert types.is_region(region)
+        if not (types.is_region(region) or types.is_ispace(region)):
+            raise types.TypeError(node, 'Type mismatch in type %s: expected %s but got %s' % (
+                    'coloring', 'a region or ispace', region))
         return types.Kind(types.Coloring(region))
     if isinstance(node, ast.TypeColoringRegion):
         return cx.lookup(node, node.name)
@@ -1102,6 +1104,8 @@ def type_check_node(node, cx):
         return types.Bool()
     if isinstance(node, ast.ExprConstDouble):
         return types.Double()
+    if isinstance(node, ast.ExprConstFloat):
+        return types.Float()
     if isinstance(node, ast.ExprConstInt):
         return types.Int()
     if isinstance(node, ast.ExprConstUInt):

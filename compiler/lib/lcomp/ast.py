@@ -681,6 +681,11 @@ class ExprConstDouble(ASTNode):
         ASTNode.__init__(self, span)
         self.value = value
 
+class ExprConstFloat(ASTNode):
+    def __init__(self, span, value):
+        ASTNode.__init__(self, span)
+        self.value = value
+
 class ExprConstInt(ASTNode):
     def __init__(self, span, value):
         ASTNode.__init__(self, span)

@@ -13,20 +13,22 @@
  * limitations under the License.
  */
 
-import "math.h";
-
-task quadratic(a: double, b: double, c: double): double
-{
-  let r0 = (-b + sqrt(b*b - 4.0*a*c))/(2.0*a);
-  let r1 = (-b - sqrt(b*b - 4.0*a*c))/(2.0*a);
-  return r0;
-}
-
-task quadraticf(a: float, b: float, c: float): float
-{
-  let r0 = (-b + sqrtf(b*b - 4.0f*a*c))/(2.0f*a);
-  let r1 = (-b - sqrtf(b*b - 4.0f*a*c))/(2.0f*a);
-  return r0;
-}
-
 task main() {}
+
+task foo(r: region<int>, c: coloring<r>)
+  : coloring<r>
+{
+  for p in r {
+    c = color(c, p, 0);
+  }
+  return c;
+}
+
+task bar(is: ispace<int>, c: coloring<is>)
+  : coloring<is>
+{
+  for i in is {
+    c = color(c, i, 0);
+  }
+  return c;
+}
