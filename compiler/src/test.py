@@ -16,8 +16,9 @@
 #
 
 import os, sys
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib'))
-sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib'))
+_root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(_root_dir)
+sys.path.append(os.path.join(_root_dir, 'lib'))
 
 from lcomp import test
 

@@ -19,7 +19,7 @@
 ### Parser
 ###
 
-import ply, ply.yacc, sys
+import os, ply, ply.yacc, sys
 from . import ast, lex
 
 class ParseError (Exception):
@@ -1220,7 +1220,25 @@ class Parser:
 
     def __init__(self, tabmodule = 'parsetab_lcomp', **kwargs):
         self.lexer = lex.Lexer()
-        self.parser = ply.yacc.yacc(module = self, tabmodule = tabmodule, **kwargs)
+
+        # Hide the output files from parsing so they don't litter the
+        # current directory.
+        output_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+        # Make sure the output directory is on path, otherwise PLY
+        # will fail to see the cached file.
+        if output_dir not in sys.path:
+            sys.path.append(output_dir)
+
+        # Change to the output directory. This is necessary, in
+        # addition to the outputdir parameter, because PLY does not
+        # respect outputdir for the parser.out file.
+        current_dir = os.getcwd()
+        try:
+            os.chdir(output_dir)
+            self.parser = ply.yacc.yacc(module = self, tabmodule = tabmodule, outputdir = output_dir, **kwargs)
+        finally:
+            os.chdir(current_dir)
 
     def parse(self, source, **kwargs):
         self.lexer.input(source)
