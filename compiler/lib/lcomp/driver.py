@@ -31,6 +31,8 @@ def platform_cxxflags():
     # Currently all platforms need c++11. For backwards compatibility
     # with versions before c++11 was finalized, the c++0x flag is used
     # instead.
+    if platform.system() == 'Darwin':
+        return ['-std=c++0x', '-stdlib=libc++']
     return ['-std=c++0x']
 
 def platform_ldflags():

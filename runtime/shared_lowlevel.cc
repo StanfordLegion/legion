@@ -1384,7 +1384,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOWL_LEVEL
         assert(index != 0);
 #endif
-	Lock l = { index };
+	Lock l = { static_cast<id_t>(index) };
 	return l;
     }
 
@@ -3492,7 +3492,7 @@ namespace LegionRuntime {
 	}
 
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-	IndexSpace r = { index };
+	IndexSpace r = { static_cast<id_t>(index) };
 	RegionInstance::Impl* impl = Runtime::get_runtime()->get_free_instance(r, m,
 									       num_elements, 
 									       field_sizes,
@@ -4213,7 +4213,7 @@ namespace LegionRuntime {
 
       if(task_id != 0) { // no need to check ONE_TASK_ONLY here, since 1 node
 	for(int id = 1; id <= NUM_PROCS; id++) {
-	  Processor p = { id };
+	  Processor p = { static_cast<id_t>(id) };
 	  p.spawn(task_id,args,arglen);
 	  if(style != ONE_TASK_PER_PROC) break;
 	}

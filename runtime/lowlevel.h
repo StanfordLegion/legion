@@ -728,7 +728,7 @@ namespace LegionRuntime {
       LegionRuntime::LowLevel::IndexSpace get_index_space(void) const
       {
 	assert(is_id);
-	IndexSpace is = { is_id };
+	IndexSpace is = { static_cast<id_t>(is_id) };
 	return is;
       }
 

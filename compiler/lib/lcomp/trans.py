@@ -365,13 +365,7 @@ def check_top_level_task(task_list, cx):
 def trans_header():
     return '''
 #include <cassert>
-// Clang 3.2 as distributed with Xcode 4.2 on Mac OS X is unable to
-// include stdint.h as cstdint.
-#ifdef __APPLE__
-#  include "stdint.h"
-#else
-#  include <cstdint>
-#endif
+#include <cstdint>
 
 #include "legion.h"
 
