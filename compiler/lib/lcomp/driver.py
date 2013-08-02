@@ -37,7 +37,7 @@ def platform_cxxflags():
 
 def platform_ldflags():
     if platform.system() == 'Darwin':
-        return ['-lpthread']
+        return ['-stdlib=libc++', '-lpthread']
     return ['-lrt', '-lpthread']
 
 def compile_to_cpp(input_filename, output_filename, search_path):
