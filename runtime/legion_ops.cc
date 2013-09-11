@@ -1920,6 +1920,52 @@ namespace LegionRuntime {
       }
       return false;
     }
+
+    //--------------------------------------------------------------------------
+    bool CreationOperation::get_index_space_color(Context ctx, IndexSpace handle, int &result)
+    //--------------------------------------------------------------------------
+    {
+      if (parent_ctx != ctx)
+        return false;
+      if (creation_kind == CREATE_INDEX_SPACE)
+      {
+        if (handle == index_space)
+        {
+          result = 0;
+          return true;
+        }
+      }
+      else if (creation_kind == CREATE_INDEX_PARTITION)
+      {
+        for (std::map<Color,Domain>::const_iterator it = new_subspaces.begin();
+              it != new_subspaces.end(); it++)
+        {
+          if (it->second.get_index_space() == handle)
+          {
+            result = it->first;
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CreationOperation::get_index_partition_color(Context ctx, IndexPartition handle, int &result)
+    //--------------------------------------------------------------------------
+    {
+      if (parent_ctx != ctx)
+        return false;
+      if (creation_kind == CREATE_INDEX_PARTITION)
+      {
+        if (handle == index_part)
+        {
+          result = part_color;
+          return true;
+        }
+      }
+      return false;
+    }
     
     //--------------------------------------------------------------------------
     void CreationOperation::perform_deferred(void)
@@ -3512,6 +3558,48 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int SingleTask::get_index_space_color(IndexSpace handle, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get index space color in leaf task %s (ID %d)",
+                              this->variants->name, get_unique_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      if (can_create)
+        lock_context();
+      int result = forest_ctx->get_index_space_color(handle, can_create);
+      if (can_create)
+        unlock_context();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    int SingleTask::get_index_partition_color(IndexPartition handle, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get index partition color in leaf task %s (ID %d)",
+                              this->variants->name, get_unique_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      if (can_create)
+        lock_context();
+      int result = forest_ctx->get_index_partition_color(handle, can_create);
+      if (can_create)
+        unlock_context();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::create_field_space(FieldSpace space)
     //--------------------------------------------------------------------------
     {
@@ -4701,6 +4789,7 @@ namespace LegionRuntime {
         {
           // Check to make sure that this premapped region is visible
           // to the target processor
+          if (!premapped.is_virtual_ref())
           {
             Machine *machine = Machine::get_machine();
             const std::set<Memory> &visible_memories = machine->get_visible_memories(target);
@@ -7450,7 +7539,8 @@ namespace LegionRuntime {
 #endif
       // If at any point the interface to DomainPoint changes
       // then we need to change this as well
-      AnyPoint point(index_point.point_data, sizeof(int), index_point.dim); 
+      AnyPoint point(index_point.point_data, sizeof(int), 
+          (index_point.dim > 0 ? index_point.dim : 1)); 
       TaskArgument local_arg = impl->find_point(point);
       // Note we don't need to clone the data since we know the ArgumentMapImpl
       // owns it and the ArgumentMapImpl won't be reclaimed until after the

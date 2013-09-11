@@ -930,6 +930,11 @@ namespace LegionRuntime {
       LogicalRegion get_logical_subregion_by_color(Context ctx, LogicalPartition parent, Color c);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, IndexSpace handle, FieldSpace fspace, RegionTreeID tid);
 
+      Color get_index_space_color(Context ctx, IndexSpace handle);
+      Color get_index_partition_color(Context ctx, IndexPartition handle);
+      Color get_logical_region_color(Context ctx, LogicalRegion handle);
+      Color get_logical_partition_color(Context ctx, LogicalPartition handle);
+
       //////////////////////////////
       // Functions for ArgumentMaps
       //////////////////////////////

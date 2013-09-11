@@ -26,6 +26,11 @@ temp_dir = ".cent/"
 
 def usage():
     print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -v] <file_name>"
+    print "  -l : perform logical analyses"
+    print "  -c : perform physical analyses"
+    print "  -p : make task pictures"
+    print "  -k : keep temporary files"
+    print "  -v : verbose"
     sys.exit(1)
 
 def main():
@@ -101,7 +106,7 @@ def main():
         print "Making memory graphs..."
         state.print_memory_graphs(temp_dir)
     if verbose:
-        state.print_instances()
+        state.print_instances(temp_dir)
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:

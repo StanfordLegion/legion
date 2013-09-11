@@ -104,8 +104,10 @@ namespace LegionRuntime {
     class Barrier : public Event {
     public:
       static Barrier create_barrier(unsigned expected_arrivals);
+      void destroy_barrier(void);
 
-      void alter_arrival_count(int delta) const;
+      Barrier advance_barrier(void) const;
+      Barrier alter_arrival_count(int delta) const;
 
       void arrive(unsigned count = 1) const;
     };

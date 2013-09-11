@@ -23,6 +23,7 @@
 #include "legion_utilities.h"
 
 #include <cassert>
+#include <deque>
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -176,13 +177,17 @@ namespace LegionRuntime {
         void add_event(const ProfilingEvent &event) { proc_events.push_back(event); }
         void add_event(const MemoryEvent &event) { mem_events.push_back(event); }
         void add_subtask(unsigned suid, const TaskInstance &inst) { sub_tasks[suid] = inst; }
+      private:
+	// no copy constructor or assignment
+	ProcessorProfiler(const ProcessorProfiler& copy_from) {}
+	ProcessorProfiler& operator=(const ProcessorProfiler& copy_from) {}
       public:
         Processor proc;
         bool utility;
         Processor::Kind kind;
         unsigned long long init_time;
-        std::vector<ProfilingEvent> proc_events;
-        std::vector<MemoryEvent> mem_events;
+        std::deque<ProfilingEvent> proc_events;
+        std::deque<MemoryEvent> mem_events;
         std::map<unsigned,TaskInstance> sub_tasks;
       };
 
@@ -202,7 +207,12 @@ namespace LegionRuntime {
 
       static inline void initialize_processor(Processor proc, bool util, Processor::Kind kind)
       {
-        get_profiler(proc) = ProcessorProfiler(proc, util, kind);
+	ProcessorProfiler &p = get_profiler(proc);
+	p.proc = proc;
+	p.utility = util;
+	p.kind = kind;
+	p.init_time = TimeStamp::get_current_time_in_micros();
+        //get_profiler(proc) = ProcessorProfiler(proc, util, kind);
       }
 
       static inline void initialize_memory(Memory mem, Memory::Kind kind)

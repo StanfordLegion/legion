@@ -355,7 +355,7 @@ class TaskInstance(object):
             self.name = str(self.enclosing.name)+" UID:"+str(self.enclosing.uid)
 
     def uses_memory(self, mem):
-        for idx,man in self.managers:
+        for idx,man in self.managers.iteritems():
             if man.inst.memory == mem:
                 return True
         return False
@@ -483,8 +483,13 @@ class TaskInstance(object):
         index_string = ""
         if self.index_space:
             index_string = '\\nIndex\ Space\ Point\ '+self.point.to_string()
-        printer.println(self.node_name+' [style=filled,label="'+str(self.enclosing.name)+index_string+ 
-            '\\nUnique\ ID\ '+str(self.handle.uid)+'",fillcolor=lightskyblue,fontsize=14,fontcolor=black,shape=record,penwidth=2];')
+        label_string = str(self.enclosing.name)+index_string+'\\nUnique\ ID\ '+str(self.handle.uid)
+        for idx,man in self.managers.iteritems():
+            assert idx in self.requirements
+            req = self.requirements[idx] 
+            label_string = label_string+'\\nInst\ '+hex(man.inst.uid)+'\ '+req.dot_requirement() 
+        printer.println(self.node_name+' [style=filled,label="'+label_string+ 
+            '",fillcolor=lightskyblue,fontsize=14,fontcolor=black,shape=record,penwidth=2];')
 
     def set_manager(self, idx, manager):
         assert idx not in self.managers
@@ -981,6 +986,33 @@ class Requirement(object):
             result = result + str(f) + " "
         return result
 
+    def dot_requirement(self):
+        result = ''
+        if self.priv == NO_ACCESS:
+            result = result + "NA"
+        elif self.priv == READ_ONLY:
+            result = result + "RO"
+        elif self.priv == READ_WRITE:
+            result = result + "RW"
+        elif self.priv == WRITE_ONLY:
+            result = result + "WO"
+        else:
+            assert self.priv == REDUCE
+            result = result + "Red"+str(self.redop)+'-'
+        if self.coher == EXCLUSIVE:
+            result = result + "E"
+        elif self.coher == ATOMIC:
+            result = result + "A"
+        elif self.coher == SIMULTANEOUS:
+            result = result + "S"
+        else:
+            assert self.coher == RELAXED
+            result = result + "R"
+        result = result + '\ Fields:'
+        for f in self.fields:
+            result = result + str(f) + ','
+        return result
+
 
 class MappingDependence(object):
     def __init__(self, ctx, op1, op2, idx1, idx2, dtype):
@@ -1359,7 +1391,7 @@ class InstanceManager(object):
                     continue
                 if (r2.op,u1.task_inst) in self.dependences:
                     continue
-                self.task_reduce_analsysis(u1,r2)
+                self.task_reduce_analysis(u1,r2)
         for h1,m1 in self.map_users.iteritems():
             for h2,m2 in self.map_users.iteritems():
                 if m1 == m2:

@@ -62,6 +62,8 @@ namespace LegionRuntime {
       IndexSpace get_index_subspace(IndexPartition p, Color color, bool can_create);
       Domain get_index_space_domain(IndexSpace handle, bool can_create);
       Domain get_index_partition_color_space(IndexPartition p, bool can_create);
+      int get_index_space_color(IndexSpace handle, bool can_create);
+      int get_index_partition_color(IndexPartition handle, bool can_create);
     public:
       // Field Space operations
       void create_field_space(FieldSpace space);

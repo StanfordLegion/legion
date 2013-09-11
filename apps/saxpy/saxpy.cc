@@ -316,6 +316,7 @@ void init_vectors_task(const void *global_args, size_t global_arglen,
   RegionAccessor<AccessorType::Generic, Entry> a_x = r_x.get_accessor().typeify<Entry>();
   RegionAccessor<AccessorType::Generic, Entry> a_y = r_y.get_accessor().typeify<Entry>();
 
+  assert(local_args != NULL);
   Block *block = (Block *)local_args;
   for (unsigned i = 0; i < BLOCK_SIZE; i++) {
     Entry entry_x;

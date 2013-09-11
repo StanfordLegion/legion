@@ -1424,10 +1424,11 @@ namespace LegionRuntime {
       return result;
     }
 
-    void Barrier::alter_arrival_count(int delta) const
+    Barrier Barrier::alter_arrival_count(int delta) const
     {
       // TODO: Implement this
       assert(false);
+      return *this;
     }
 
     void Barrier::arrive(unsigned count /*= 1*/) const
@@ -6547,9 +6548,9 @@ namespace LegionRuntime {
 	  it != mem_mem_affinities.end();
 	  it++) {
 	if(restrict_mem1.exists() && 
-	   ((*it).m1 != restrict_mem1) && ((*it).m2 != restrict_mem1)) continue;
+	   ((*it).m1 != restrict_mem1)) continue;
 	if(restrict_mem2.exists() && 
-	   ((*it).m1 != restrict_mem2) && ((*it).m2 != restrict_mem2)) continue;
+	   ((*it).m2 != restrict_mem2)) continue;
 	result.push_back(*it);
 	count++;
       }

@@ -297,7 +297,7 @@ namespace LegionRuntime {
         if (it != thread_timer_data->timer_accum.end())
           it->second += elapsed;
         else
-          thread_timer_data->timer_accum.insert(std::make_pair<int,double>(old_top.timer_kind,elapsed));
+          thread_timer_data->timer_accum.insert(std::make_pair(old_top.timer_kind,elapsed));
 
         PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_timer_data->mutex));
       }
@@ -905,12 +905,25 @@ namespace LegionRuntime {
       return impl->get_barrier(expected_arrivals);
     }
 
-    void Barrier::alter_arrival_count(int delta) const
+    void Barrier::destroy_barrier(void)
+    {
+      // do nothing for now
+    }
+
+    Barrier Barrier::advance_barrier(void) const
+    {
+      Barrier next(*this);
+      next.gen++;
+      return next;
+    }
+
+    Barrier Barrier::alter_arrival_count(int delta) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      if (!id) return;
+      if (!id) return *this;
       EventImpl *impl = Runtime::get_runtime()->get_event_impl(*this);
       impl->alter_arrival_count(delta);
+      return *this;
     }
 
     void Barrier::arrive(unsigned count /*=1*/) const
@@ -2936,7 +2949,7 @@ namespace LegionRuntime {
       if (!mask.is_set(ptr))
       {
         fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region %d\n",ptr,index);
-        exit(1);
+	assert(0);
       }
     }
 
@@ -4320,9 +4333,9 @@ namespace LegionRuntime {
             mem_mem_affinities.begin(); it != mem_mem_affinities.end(); it++)
       {
         if (restrict_mem1.exists() &&
-            ((*it).m1 != restrict_mem1) && ((*it).m2 != restrict_mem1)) continue;
+            ((*it).m1 != restrict_mem1)) continue;
         if (restrict_mem2.exists() &&
-            ((*it).m1 != restrict_mem2) && ((*it).m2 != restrict_mem2)) continue;
+            ((*it).m2 != restrict_mem2)) continue;
         result.push_back(*it);
         count++;
       }
@@ -4843,6 +4856,14 @@ namespace LegionRuntime {
       assert(impl_ptr != NULL);
       RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
       impl->verify_access(ptr);
+    }
+
+    void AccessorType::verify_access(void *impl_ptr, const LowLevel::DomainPoint& dp)
+    {
+        assert(impl_ptr != NULL);
+        RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
+	int index = impl->get_linearization().get_image(dp);
+	impl->verify_access(index);
     }
 #endif
   };

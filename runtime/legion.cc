@@ -22,6 +22,8 @@
 #include "region_tree.h"
 #include "default_mapper.h"
 
+#include <cstring>
+
 // The maximum number of proces on a node
 #define MAX_NUM_PROCS           1024
 #define DEFAULT_MAPPER_SLOTS    8
@@ -51,8 +53,7 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
     namespace LegionProf {
       Logger::Category log_prof("legion_prof");
-      ProcessorProfiler *legion_prof_table = 
-        (ProcessorProfiler*)malloc((MAX_NUM_PROCS+1)*sizeof(ProcessorProfiler));
+      ProcessorProfiler *legion_prof_table = new ProcessorProfiler[MAX_NUM_PROCS + 1];
     };
 #endif
 
@@ -3829,7 +3830,7 @@ namespace LegionRuntime {
       // Now see if an entry already exists in the attribute table for this uid
       if (table.find(uid) == table.end())
       {
-        TaskVariantCollection *collec = new TaskVariantCollection(uid, name, leaf);
+        TaskVariantCollection *collec = new TaskVariantCollection(uid, strdup(name), leaf);
 #ifdef DEBUG_HIGH_LEVEL
         assert(collec != NULL);
 #endif
@@ -4109,7 +4110,7 @@ namespace LegionRuntime {
       m->run(0, Machine::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded
       assert(background);
-      return -1;
+      return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -4794,6 +4795,80 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------------------------
+    Color HighLevelRuntime::get_index_space_color(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------------------------
+    {
+      if (explicit_utility_proc)
+      {
+        // See comments in get_index_partition about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        int result = ctx->get_index_space_color(handle, false/*can create*/);
+        if (result == -1)
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_index_space_color(ctx, handle, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result >= 0);
+#endif
+        return Color(result);
+      }
+      else
+      {
+        int result = ctx->get_index_space_color(handle, true/*can create*/); 
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result >= 0);
+#endif
+        return Color(result);
+      }
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Color HighLevelRuntime::get_index_partition_color(Context ctx, IndexPartition handle)
+    //--------------------------------------------------------------------------------------------
+    {
+      if (explicit_utility_proc)
+      {
+        // See comments in get_index_partition about what is going on here
+        ProcessorManager *manager = find_manager(ctx->get_executing_processor());
+        manager->lock_dependence_queue();
+        int result = ctx->get_index_partition_color(handle, false/*can create*/);
+        if (result == -1)
+        {
+          const std::list<GeneralizedOperation*> &dependence_queue = manager->get_dependence_queue();
+          for (std::list<GeneralizedOperation*>::const_reverse_iterator it = dependence_queue.rbegin();
+                it != dependence_queue.rend(); it++)
+          {
+            CreationOperation *op = dynamic_cast<CreationOperation*>(*it);
+            if ((op != NULL) && op->get_index_partition_color(ctx, handle, result))
+              break;
+          }
+        }
+        manager->unlock_dependence_queue();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result >= 0);
+#endif
+        return Color(result);
+      }
+      else
+      {
+        int result = ctx->get_index_partition_color(handle, true/*can create*/); 
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result >= 0);
+#endif
+        return Color(result);
+      }
+    }
+
+    //--------------------------------------------------------------------------------------------
     ptr_t HighLevelRuntime::safe_cast(Context ctx, ptr_t pointer, LogicalRegion region)
     //--------------------------------------------------------------------------------------------
     {
@@ -5262,6 +5337,22 @@ namespace LegionRuntime {
       }
       else
         return ctx->get_region_subtree(handle, space, tid);
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Color HighLevelRuntime::get_logical_region_color(Context ctx, LogicalRegion handle)
+    //--------------------------------------------------------------------------------------------
+    {
+      // We can do this using the same runtime call for index spaces
+      return get_index_space_color(ctx, handle.get_index_space());
+    }
+
+    //--------------------------------------------------------------------------------------------
+    Color HighLevelRuntime::get_logical_partition_color(Context ctx, LogicalPartition handle)
+    //--------------------------------------------------------------------------------------------
+    {
+      // We can do this using the same runtime call for index partitions
+      return get_index_partition_color(ctx, handle.get_index_partition());
     }
 
     //--------------------------------------------------------------------------------------------
@@ -6993,11 +7084,11 @@ namespace LegionRuntime {
       // Need read-write access to the ready queue to try stealing
       {
         AutoLock q_lock(queue_lock);
-        for (std::vector<MapperID>::const_iterator it = thieves.begin();
-              it != thieves.end(); it++)
+        for (std::vector<MapperID>::const_iterator steal_it = thieves.begin();
+              steal_it != thieves.end(); steal_it++)
         {
           // Get the mapper id out of the buffer
-          MapperID stealer = *it;
+          MapperID stealer = *steal_it;
           
           // Handle a race condition here where some processors can issue steal
           // requests to another processor before the mappers have been initialized

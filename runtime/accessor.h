@@ -142,7 +142,7 @@ namespace LegionRuntime {
 #ifdef POINTER_CHECKS
       // TODO: Make this function work for GPUs
       void verify_access(void *impl_ptr, unsigned ptr);
-      void verify_access(void *impl_ptr, const DomainPoint& dp);
+      void verify_access(void *impl_ptr, const LowLevel::DomainPoint& dp);
 #endif
 
       struct Generic {
@@ -220,7 +220,7 @@ namespace LegionRuntime {
             assert(priv & ACCESSOR_READ);
 #endif
 #ifdef POINTER_CHECKS
-            verify_access(internal, ptr.value);
+            verify_access(internal, ptr);
 #endif
             T val; read_untyped(ptr, &val, sizeof(val)); return val; 
           }
@@ -232,7 +232,7 @@ namespace LegionRuntime {
             assert(priv & ACCESSOR_WRITE);
 #endif
 #ifdef POINTER_CHECKS
-            verify_access(internal, ptr.value);
+            verify_access(internal, ptr);
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }

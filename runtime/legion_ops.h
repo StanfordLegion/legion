@@ -363,6 +363,8 @@ namespace LegionRuntime {
       bool get_index_partition_color_space(Context ctx, IndexPartition p, Domain &result);
       bool get_logical_partition_by_color(Context ctx, LogicalRegion parent, Color c, LogicalPartition &result);
       bool get_logical_subregion_by_color(Context ctx, LogicalPartition parent, Color c, LogicalRegion &result);
+      bool get_index_space_color(Context ctx, IndexSpace handle, int &result);
+      bool get_index_partition_color(Context ctx, IndexPartition handle, int &result);
     protected:
       virtual void perform_deferred(void);
     private:
@@ -640,6 +642,8 @@ namespace LegionRuntime {
       IndexSpace get_index_subspace(IndexPartition p, Color color, bool can_create);
       Domain get_index_space_domain(IndexSpace handle, bool can_create);
       Domain get_index_partition_color_space(IndexPartition p, bool can_create);
+      int get_index_space_color(IndexSpace handle, bool can_create);
+      int get_index_partition_color(IndexPartition handle, bool can_create);
     public:
       // Operations on field spaces
       void create_field_space(FieldSpace space);

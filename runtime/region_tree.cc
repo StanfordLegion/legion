@@ -698,6 +698,52 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int RegionTreeForest::get_index_space_color(IndexSpace handle, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (can_create)
+        assert(lock_held);
+#endif
+      if (can_create)
+      {
+        IndexSpaceNode *index_node = get_node(handle);
+        return index_node->color;
+      }
+      else
+      {
+        AutoLock c_lock(creation_lock);
+        if (!has_node(handle))
+          return -1;
+        IndexSpaceNode *index_node = get_node(handle);
+        return index_node->color;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    int RegionTreeForest::get_index_partition_color(IndexPartition handle, bool can_create)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (can_create)
+        assert(lock_held);
+#endif
+      if (can_create)
+      {
+        IndexPartNode *index_node = get_node(handle);
+        return index_node->color;
+      }
+      else
+      {
+        AutoLock c_lock(creation_lock);
+        if (!has_node(handle))
+          return -1;
+        IndexPartNode *index_node = get_node(handle);
+        return index_node->color;
+      }
+    }
+    
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace space)
     //--------------------------------------------------------------------------
     {
@@ -4216,6 +4262,8 @@ namespace LegionRuntime {
     bool IndexPartNode::are_disjoint(Color c1, Color c2)
     //--------------------------------------------------------------------------
     {
+      if (c1 == c2)
+        return false;
       if (disjoint)
         return true;
       if (disjoint_subspaces.find(std::pair<Color,Color>(c1,c2)) !=
@@ -5262,7 +5310,7 @@ namespace LegionRuntime {
     void RegionTreeNode::sanity_check_field_states(const GenericState &gstate) 
     //--------------------------------------------------------------------------
     {
-      // For every child and every field, it should only be open one in one mode
+      // For every child and every field, it should only be open in one mode
       std::map<Color,FieldMask> previous_children;
       for (std::list<FieldState>::const_iterator fit = gstate.field_states.begin();
             fit != gstate.field_states.end(); fit++)
@@ -5446,6 +5494,9 @@ namespace LegionRuntime {
           const GenericUser &user, const FieldMask &current_mask, int next_child /*= -1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_field_states(state);
+#endif
       FieldMask open_mask = current_mask;
       std::vector<FieldState> new_states;
 
@@ -5623,13 +5674,17 @@ namespace LegionRuntime {
               // See if this is a reduction of the same kind
               if (IS_REDUCE(user.usage) && (user.usage.redop == it->redop))
               {
-                // See if the partition that we want is already open
-                if ((next_child >= 0) &&
-                    (it->open_children.find(unsigned(next_child)) != it->open_children.end()))
+                if (next_child >= 0)
                 {
-                  // Remove the overlap fields from that partition that
-                  // overlap with our own from the open mask
-                  open_mask -= (it->open_children[unsigned(next_child)] & current_mask);
+                  std::map<Color,FieldMask>::const_iterator finder = 
+                          it->open_children.find(unsigned(next_child));
+                  if (finder != it->open_children.end())
+                  {
+                    // Remove the overlap fields from that partition that
+                    // overlap with our own from the open mask
+                    FieldMask child_open_mask = finder->second;
+                    open_mask -= (child_open_mask & current_mask);
+                  }
                 }
                 it++;
               }
@@ -5730,8 +5785,9 @@ namespace LegionRuntime {
         assert((open_state == OPEN_SINGLE_REDUCE) || (open_state == OPEN_MULTI_REDUCE));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) || (rhs.open_state == OPEN_MULTI_REDUCE));
 #endif
-        // Handle the case where we need to merge reduction modes
-        return true;
+        // Only support merging reduction fields with exactly the same masks
+        // which should be single fields for reductions
+        return (valid_fields == rhs.valid_fields);
       }
     }
 
@@ -6326,22 +6382,27 @@ namespace LegionRuntime {
             std::list<std::pair<InstanceView*,FieldMask> > valid_views;
             find_valid_instance_views(rm.ctx, valid_views, user.field_mask, 
                                       user.field_mask, true/*needs space*/);
+#if 0
             if (valid_views.empty())
             {
               log_inst(LEVEL_ERROR,"Reduction operation %d on region %d of task %s (ID %d) is not fully initialized",
                                     user.usage.redop, rm.idx, rm.task->variants->name, rm.task->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
               exit(ERROR_UNINITIALIZED_REDUCTION);
             }
+#endif
             PhysicalCloser closer(user, rm, this, false/*keep open*/);
-            for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it = valid_views.begin();
-                  it != valid_views.end(); it++)
+            if (!valid_views.empty())
             {
-              closer.add_upper_target(it->first);
+              for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it = valid_views.begin();
+                    it != valid_views.end(); it++)
+              {
+                closer.add_upper_target(it->first);
+              }
+              closer.targets_selected = true;
             }
-            closer.targets_selected = true;
             // This will update the valid instances with the new views
             siphon_open_children(closer, state, user, user.field_mask);
 #ifdef DEBUG_HIGH_LEVEL
@@ -7023,7 +7084,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!!copy_mask);
       assert(dst->logical_region == this);
-      assert(rm.req.redop == 0); // better not be any reductions that need copies
 #endif
       // Get the list of valid regions for all the fields we need to do the copy for
       std::list<std::pair<InstanceView*,FieldMask> > valid_instances;
@@ -7173,7 +7233,7 @@ namespace LegionRuntime {
           for (std::vector<std::pair<InstanceView*,FieldMask> >::const_iterator it = src_instances.begin();
                 it != src_instances.end(); it++)
           {
-            rm.source_copy_instances.push_back(it->first->add_copy_user(rm.req.redop, copy_post, it->second, true/*reading*/));
+            rm.source_copy_instances.push_back(it->first->add_copy_user(0/*redop*/, copy_post, it->second, true/*reading*/));
           }
         }
 #ifdef LEGION_SPY
@@ -7182,6 +7242,12 @@ namespace LegionRuntime {
           UserEvent new_copy_post = UserEvent::create_user_event();
           new_copy_post.trigger();
           copy_post = new_copy_post;
+          // If we're doing legion spy add the references anyway
+          for (std::vector<std::pair<InstanceView*,FieldMask> >::const_iterator it = src_instances.begin();
+                it != src_instances.end(); it++)
+          {
+            rm.source_copy_instances.push_back(it->first->add_copy_user(0/*redop*/, copy_post, it->second, true/*reading*/));
+          }
         }
 #endif
         FieldMask update_mask;
@@ -7617,51 +7683,51 @@ namespace LegionRuntime {
 #endif
       PhysicalState &state = physical_states[rm.ctx];
       // Go through the list of reduction views and see if there are any
-      // that don't mesh with current user
+      // that don't mesh with current user and therefore need to be flushed
       FieldMask flush_mask;
       for (std::map<ReductionView*,FieldMask>::const_iterator it = state.reduction_views.begin();
             it != state.reduction_views.end(); it++)
       {
-        // See if the fields are disjoint
-        if (!(user.field_mask * it->second))
+        // Skip reductions that have already been flushed
+        if (!(it->second - flush_mask))
+          continue;
+        FieldMask reduc_mask = user.field_mask & it->second;
+        if (!!reduc_mask)
         {
-          // Check to see if the reduction operations are different
-          // (Recall that ReductionOpID 0 is no reduction
-          if (user.usage.redop != it->first->manager->redop)
-            flush_mask |= it->second;
-        }
-      }
-      // If we have fields that need to be flushed
-      if (!!flush_mask)
-      {
-        // Get the list of valid physical instances for which we need to issue reductions
-        std::list<std::pair<InstanceView*,FieldMask> > valid_views;
-        find_valid_instance_views(rm.ctx, valid_views, user.field_mask, user.field_mask, true/*need space*/);
-        // Go through the list of valid instances and find the ones that have all
-        // the required fields for the flush mask
-        std::vector<InstanceView*> update_views;
-        for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it = valid_views.begin();
-              it != valid_views.end(); it++)
-        {
-          FieldMask remaining = flush_mask - it->second;
-          if (!remaining)
+         // Get the list of valid physical instances for which we need to issue reductions
+          std::list<std::pair<InstanceView*,FieldMask> > valid_views;
+          find_valid_instance_views(rm.ctx, valid_views, reduc_mask, reduc_mask, true/*need space*/);
+          // Go through the list of valid instances and find the ones that have all
+          // the required fields for the reduction mask
+          std::vector<InstanceView*> update_views;
+          for (std::list<std::pair<InstanceView*,FieldMask> >::const_iterator it = valid_views.begin();
+                it != valid_views.end(); it++)
           {
-            issue_update_reductions(it->first, flush_mask, rm);
-            // Add it to the list of updated views
-            update_views.push_back(it->first);
+            FieldMask remaining = reduc_mask - it->second;
+            if (!remaining)
+            {
+              issue_update_reductions(it->first, reduc_mask, rm);
+              // Add it to the list of updated views
+              update_views.push_back(it->first);
+            }
           }
-        }
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!update_views.empty()); // should have issued our updates to some place
-        // Note this might not be the case if none of our targets all the needed fields
-        // A TODO in the future might be to fix this if we every encounter it
+          assert(!update_views.empty()); // should have issued our updates to some place
+          // Note this might not be the case if none of our targets all the needed fields
+          // A TODO in the future might be to fix this if we ever encounter it
 #endif
-        // Update the valid instance views, mark that they are dirty since we
-        // performed reductions to the flush fields
-        update_valid_views(rm.ctx, flush_mask, flush_mask, update_views);
-        // Now we also have to invalidate the reduction views that we just flushed
-        invalidate_reduction_views(state, flush_mask);
+          // Update the valid instance views, mark that they are dirty since we
+          // performed reductions to the flush fields
+          update_valid_views(rm.ctx, reduc_mask, reduc_mask, update_views);
+          // We'll invalidate the reduction views after we've done
+          // iterating over all the reduction views since we don't 
+          // want to mess up our iterator here.
+          // Now we also have to invalidate the reduction views that we just flushed
+          flush_mask |= reduc_mask;
+        }
       }
+      if (!!flush_mask)
+        invalidate_reduction_views(state, flush_mask);
     } 
 
     //--------------------------------------------------------------------------
@@ -8728,6 +8794,8 @@ namespace LegionRuntime {
     bool PartitionNode::are_children_disjoint(Color c1, Color c2)
     //--------------------------------------------------------------------------
     {
+      if (c1 == c2)
+        return false;
       return (disjoint || row_source->are_disjoint(c1, c2));
     }
 
@@ -10183,7 +10251,7 @@ namespace LegionRuntime {
       // Mark that the entry as no longer active
       // TODO: hack for correctness, don't actually mark it as invalid
       //active_finder->second = false;
-      active_children--;
+      //active_children--;
     }
 
     //--------------------------------------------------------------------------
@@ -12608,7 +12676,7 @@ namespace LegionRuntime {
       // a field if two people in read-only mode issue the same copy to update a field
       // in parallel.  All the rest of the code for finding valid events will record
       // all the valid events for a field as a prerequisite.
-#if 1
+#if 0
       FieldMask valid_shadow;
       for (std::map<Event,FieldMask>::const_iterator it = valid_events.begin();
             it != valid_events.end(); it++)

@@ -34,53 +34,53 @@ endif
 # Handle some of the common machines we frequent
 
 ifeq ($(shell uname -n),sapling-head)
-GASNET = /usr/local/gasnet-1.20.0-openmpi
-MPI = /usr/local/openmpi-1.6.4
-CUDA = /usr/local/cuda-5.0
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/usr/local/gasnet-1.20.0-openmpi
+MPI=/usr/local/openmpi-1.6.4
+CUDA=/usr/local/cuda-5.0
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0000)
-GASNET = /usr/local/gasnet-1.20.0-openmpi
-MPI = /usr/local/openmpi-1.6.4
-CUDA = /usr/local/cuda-5.0
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/usr/local/gasnet-1.20.0-openmpi
+MPI=/usr/local/openmpi-1.6.4
+CUDA=/usr/local/cuda-5.0
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0001)
-GASNET = /usr/local/gasnet-1.20.0-openmpi
-MPI = /usr/local/openmpi-1.6.4
-CUDA = /usr/local/cuda-5.0
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/usr/local/gasnet-1.20.0-openmpi
+MPI=/usr/local/openmpi-1.6.4
+CUDA=/usr/local/cuda-5.0
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0002)
-GASNET = /usr/local/gasnet-1.20.0-openmpi
-MPI = /usr/local/openmpi-1.6.4
-CUDA = /usr/local/cuda-5.0
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/usr/local/gasnet-1.20.0-openmpi
+MPI=/usr/local/openmpi-1.6.4
+CUDA=/usr/local/cuda-5.0
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0003)
-GASNET = /usr/local/gasnet-1.20.0-openmpi
-MPI = /usr/local/openmpi-1.6.4
-CUDA = /usr/local/cuda-5.0
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/usr/local/gasnet-1.20.0-openmpi
+MPI=/usr/local/openmpi-1.6.4
+CUDA=/usr/local/cuda-5.0
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
-GASNET = /nics/d/home/sequoia/gasnet-1.20.2-openmpi
-MPI = /sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
-CUDA = /sw/kfs/cuda/4.2/linux_binary
-CONDUIT = ibv
-GPU_ARCH = fermi
+GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
+MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
+CUDA=/sw/kfs/cuda/4.2/linux_binary
+CONDUIT=ibv
+GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
-#GASNET = /sw/xk6/gasnet/1.20.2/cle4.1_gnu4.7.2_gnumpi_fast
-GASNET = /ccs/home/mebauer/gasnet-1.20.2-build
-CUDA = /opt/nvidia/cudatoolkit/5.0.35.102
-CONDUIT = gemini
-GPU_ARCH = k20
+GASNET = /sw/xk6/gasnet/1.20.2/cle4.1_gnu4.7.2_gnumpi_fast
+#GASNET=/ccs/home/mebauer/gasnet-1.20.2-build
+CUDA=/opt/nvidia/cudatoolkit/5.0.35.102
+CONDUIT=gemini
+GPU_ARCH=k20
 LD_FLAGS += -L/opt/cray/ugni/4.0-1.0401.5928.9.5.gem/lib64/ 
 LD_FLAGS += -L/opt/cray/pmi/4.0.1-1.0000.9421.73.3.gem/lib64/
 endif
@@ -89,7 +89,7 @@ INC_FLAGS	+= -I$(LG_RT_DIR)
 LD_FLAGS	+= -lrt -lpthread
 
 # Falgs for running in the general low-level runtime
-ifndef SHARED_LOWLEVEL
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
 ifndef CUDA
 $(error CUDA variable is not defined, aborting build)
@@ -101,7 +101,7 @@ endif
 
 # General CUDA variables
 INC_FLAGS	+= -I$(CUDA)/include 
-ifdef DEBUG
+ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 #NVCC_FLAGS	+= -G
 else
@@ -109,15 +109,15 @@ NVCC_FLAGS	+= -O2
 endif
 LD_FLAGS	+= -L$(CUDA)/lib64 -lcudart -Xlinker -rpath=$(CUDA)/lib64
 # CUDA arch variables
-ifeq ($(GPU_ARCH),fermi)
+ifeq ($(strip $(GPU_ARCH)),fermi)
 NVCC_FLAGS	+= -arch=compute_20 -code=sm_20
 NVCC_FLAGS	+= -DFERMI_ARCH
 endif
-ifeq ($(GPU_ARCH),kepler)
+ifeq ($(strip $(GPU_ARCH)),kepler)
 NVCC_FLAGS	+= -arch=compute_30 -code=sm_30
 NVCC_FLAGS	+= -DKEPLER_ARCH
 endif
-ifeq ($(GPU_ARCH),k20)
+ifeq ($(strip $(GPU_ARCH)),k20)
 NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
@@ -127,22 +127,22 @@ NVCC_FLAGS	+= -Xptxas "-v -abi=no"
 INC_FLAGS	+= -I$(GASNET)/include
 LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
 # GASNET conduit variables
-ifeq ($(CONDUIT),ibv)
+ifeq ($(strip $(CONDUIT)),ibv)
 INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
 CC_FLAGS	+= -DGASNET_CONDUIT_IBV
 LD_FLAGS	+= -lgasnet-ibv-par -libverbs
 endif
-ifeq ($(CONDUIT),gemini)
+ifeq ($(strip $(CONDUIT)),gemini)
 INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
 CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
 LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
 endif
-ifeq ($(CONDUIT),mpi)
+ifeq ($(strip $(CONDUIT)),mpi)
 INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
 CC_FLAGS	+= -DGASNET_CONDUIT_MPI
 LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
 endif
-ifeq ($(CONDUIT),udp)
+ifeq ($(strip $(CONDUIT)),udp)
 INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
 CC_FLAGS	+= -DGASNET_CONDUIT_UDP
 LD_FLAGS	+= -lgasnet-udp-par -lamudp
@@ -156,10 +156,10 @@ GCC	:= $(CXX)
 LD_FLAGS+= -L$(MPI)/lib -lmpi
 endif
 
-endif # ifndef SHARED_LOWLEVEL
+endif # ifeq SHARED_LOWLEVEL
 
 
-ifdef DEBUG
+ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 
@@ -172,7 +172,7 @@ CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
 # Set the source files
-ifndef SHARED_LOWLEVEL
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_gpu.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc $(LG_RT_DIR)/lowlevel_dma.cc
 GPU_RUNTIME_SRC +=
@@ -185,7 +185,7 @@ endif
 # and uncomment the one after that
 MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc $(LG_RT_DIR)/mapping_utilities.cc
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
-ifdef ALT_MAPPERS
+ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc
 endif
 

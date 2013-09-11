@@ -151,15 +151,15 @@ class Point(object):
             self.indexes.append(p2)
 
     def matches(self, dim, p0, p1, p2):
-        if self.dim <> dim:
+        if self.dim != dim:
             return False
-        if self.indexes[0] <> p0:
+        if self.indexes[0] != p0:
             return False
         if dim > 1:
-            if self.indexes[1] <> p1:
+            if self.indexes[1] != p1:
                 return False
         if dim > 2:
-            if self.indexes[2] <> p2:
+            if self.indexes[2] != p2:
                 return False
         return True
 
@@ -268,232 +268,232 @@ class TaskInstance(object):
 
     def add_task_event(self, processor, kind, event):
         if kind == BEGIN_TASK_MAP:
-            assert self.begin_map == None
-            assert self.map_processor == None
+            assert self.begin_map is None
+            assert self.map_processor is None
             self.begin_map = event
             self.map_processor = processor
         elif kind == END_TASK_MAP:
-            assert self.end_map == None
+            assert self.end_map is None
             assert self.map_processor == processor
             self.end_map = event
         elif kind == TASK_LAUNCH:
-            assert self.launch == None
+            assert self.launch is None
             self.launch = event
         elif kind == BEGIN_TASK_RUN:
-            assert self.begin_run == None
-            assert self.run_processor == None
+            assert self.begin_run is None
+            assert self.run_processor is None
             self.begin_run = event
             self.run_processor = processor
         elif kind == END_TASK_RUN:
-            assert self.end_run == None
+            assert self.end_run is None
             assert self.run_processor == processor
             self.end_run = event
         elif kind == BEGIN_TASK_CHILDREN_MAPPED:
-            assert self.begin_children_mapped == None
-            assert self.children_processor == None
+            assert self.begin_children_mapped is None
+            assert self.children_processor is None
             self.begin_children_mapped = event
             self.children_processor = processor
         elif kind == END_TASK_CHILDREN_MAPPED:
-            assert self.end_children_mapped == None
+            assert self.end_children_mapped is None
             assert self.children_processor == processor
             self.end_children_mapped = event
         elif kind == BEGIN_TASK_FINISH:
-            assert self.begin_task_finish == None
-            assert self.finish_processor == None
+            assert self.begin_task_finish is None
+            assert self.finish_processor is None
             self.begin_task_finish = event
             self.finish_processor = processor
         elif kind == END_TASK_FINISH:
-            assert self.end_task_finish == None
+            assert self.end_task_finish is None
             assert self.finish_processor == processor
             self.end_task_finish = event
         elif kind == BEGIN_INDEX_SPACE_CREATE:
-            assert self.index_space_create == None
+            assert self.index_space_create is None
             self.index_space_create = event
         elif kind == END_INDEX_SPACE_CREATE:
-            assert self.index_space_create <> None
+            assert self.index_space_create is not None
             time_range = CreateIndexSpaceRange(self,self.index_space_create,event)
             self.create_index_spaces[time_range] = processor
             self.index_space_create = None
         elif kind == BEGIN_INDEX_SPACE_DESTROY:
-            assert self.index_space_destroy == None
+            assert self.index_space_destroy is None
             self.index_space_destroy = event
         elif kind == END_INDEX_SPACE_DESTROY:
-            assert self.index_space_destroy <> None
+            assert self.index_space_destroy is not None
             time_range = DestroyIndexSpaceRange(self,self.index_space_destroy,event)
             self.destroy_index_spaces[time_range] = processor
             self.index_space_destroy = None
         elif kind == BEGIN_INDEX_PARTITION_CREATE:
-            assert self.index_partition_create == None
+            assert self.index_partition_create is None
             self.index_partition_create = event
         elif kind == END_INDEX_PARTITION_CREATE:
-            assert self.index_partition_create <> None
+            assert self.index_partition_create is not None
             time_range = CreateIndexPartitionRange(self,self.index_partition_create,event)
             self.create_index_partitions[time_range] = processor
             self.index_partition_create = None
         elif kind == BEGIN_INDEX_PARTITION_DESTROY:
-            assert self.index_partition_destroy == None
+            assert self.index_partition_destroy is None
             self.index_partition_destroy = event
         elif kind == END_INDEX_PARTITION_DESTROY:
-            assert self.index_partition_destroy <> None
+            assert self.index_partition_destroy is not None
             time_range = DestroyIndexPartitionRange(self,self.index_partition_destroy,event)
             self.destroy_index_partitions[time_range] = processor
             self.index_partition_destroy = None
         elif kind == BEGIN_GET_INDEX_PARTITION:
-            assert self.get_index_part == None
+            assert self.get_index_part is None
             self.get_index_part = event
         elif kind == END_GET_INDEX_PARTITION:
-            assert self.get_index_part <> None
+            assert self.get_index_part is not None
             time_range = GetIndexPartitionRange(self,self.get_index_part,event)
             self.get_index_partitions[time_range] = processor
             self.get_index_part = None
         elif kind == BEGIN_GET_INDEX_SUBSPACE:
-            assert self.get_index_sub == None
+            assert self.get_index_sub is None
             self.get_index_sub = event
         elif kind == END_GET_INDEX_SUBSPACE:
-            assert self.get_index_sub <> None
+            assert self.get_index_sub is not None
             time_range = GetIndexSubspaceRange(self,self.get_index_sub,event)
             self.get_index_subspaces[time_range] = processor
             self.get_index_sub = None
         elif kind == BEGIN_GET_INDEX_DOMAIN:
-            assert self.get_index_dom == None
+            assert self.get_index_dom is None
             self.get_index_dom = event
         elif kind == END_GET_INDEX_DOMAIN:
-            assert self.get_index_dom <> None
+            assert self.get_index_dom is not None
             time_range = GetIndexDomainRange(self,self.get_index_dom,event)
             self.get_index_domains[time_range] = processor
             self.get_index_dom = None
         elif kind == BEGIN_GET_INDEX_PARTITION_COLOR_SPACE:
-            assert self.get_index_color == None
+            assert self.get_index_color is None
             self.get_index_color = event
         elif kind == END_GET_INDEX_PARTITION_COLOR_SPACE:
-            assert self.get_index_color <> None
+            assert self.get_index_color is not None
             time_range = GetIndexColorSpaceRange(self,self.get_index_color,event)
             self.get_index_partition_color_spaces[time_range] = processor
             self.get_index_color = None
         elif kind == BEGIN_SAFE_CAST:
-            assert self.cast == None
+            assert self.cast is None
             self.cast = event
         elif kind == END_SAFE_CAST:
-            assert self.cast <> None
+            assert self.cast is not None
             time_range = SafeCastRange(self,self.cast,event)
             self.safe_casts[time_range] = processor
             self.cast = None
         elif kind == BEGIN_CREATE_FIELD_SPACE:
-            assert self.field_space_create == None
+            assert self.field_space_create is None
             self.field_space_create = event
         elif kind == END_CREATE_FIELD_SPACE:
-            assert self.field_space_create <> None
+            assert self.field_space_create is not None
             time_range = CreateFieldSpaceRange(self,self.field_space_create,event)
             self.create_field_spaces[time_range] = processor
             self.field_space_create = None
         elif kind == BEGIN_DESTROY_FIELD_SPACE:
-            assert self.field_space_destroy == None
+            assert self.field_space_destroy is None
             self.field_space_destroy = event
         elif kind == END_DESTROY_FIELD_SPACE:
-            assert self.field_space_destroy <> None
+            assert self.field_space_destroy is not None
             time_range = DestroyFieldSpaceRange(self,self.field_space_destroy,event)
             self.destroy_field_spaces[time_range] = processor
             self.field_space_destroy = None
         elif kind == BEGIN_ALLOCATE_FIELDS:
-            assert self.alloc_fields == None
+            assert self.alloc_fields is None
             self.alloc_fields = event
         elif kind == END_ALLOCATE_FIELDS:
-            assert self.alloc_fields <> None
+            assert self.alloc_fields is not None
             time_range = AllocFieldRange(self,self.alloc_fields,event)
             self.allocate_fields[time_range] = processor
             self.alloc_fields = None
         elif kind == BEGIN_FREE_FIELDS:
-            assert self.free_fs == None
+            assert self.free_fs is None
             self.free_fs = event
         elif kind == END_FREE_FIELDS:
-            assert self.free_fs <> None
+            assert self.free_fs is not None
             time_range = FreeFieldsRange(self,self.free_fs,event)
             self.free_fields[time_range] = processor
             self.free_fs = None
         elif kind == BEGIN_CREATE_REGION:
-            assert self.create_reg == None
+            assert self.create_reg is None
             self.create_reg = event
         elif kind == END_CREATE_REGION:
-            assert self.create_reg <> None
+            assert self.create_reg is not None
             time_range = CreateRegionRange(self,self.create_reg,event)
             self.create_regions[time_range] = processor
             self.create_reg = None
         elif kind == BEGIN_DESTROY_REGION:
-            assert self.region_destroy == None
+            assert self.region_destroy is None
             self.region_destroy = event
         elif kind == END_DESTROY_REGION:
-            assert self.region_destroy <> None
+            assert self.region_destroy is not None
             time_range = DestroyRegionRange(self,self.region_destroy,event)
             self.destroy_regions[time_range] = processor
             self.region_destroy = None
         elif kind == BEGIN_DESTROY_PARTITION:
-            assert self.partition_destroy == None
+            assert self.partition_destroy is None
             self.partition_destroy = event
         elif kind == END_DESTROY_PARTITION:
-            assert self.partition_destroy <> None
+            assert self.partition_destroy is not None
             time_range = DestroyPartitionRange(self,self.partition_destroy,event)
             self.destroy_partitions[time_range] = processor
             self.partition_destroy = None
         elif kind == BEGIN_GET_LOGICAL_PARTITION:
-            assert self.get_logical_part == None
+            assert self.get_logical_part is None
             self.get_logical_part = event
         elif kind == END_GET_LOGICAL_PARTITION:
-            assert self.get_logical_part <> None
+            assert self.get_logical_part is not None
             time_range = GetLogicalPartitionRange(self,self.get_logical_part,event)
             self.get_logical_partitions[time_range] = processor
             self.get_logical_part = None
         elif kind == BEGIN_GET_LOGICAL_SUBREGION:
-            assert self.get_logical_sub == None
+            assert self.get_logical_sub is None
             self.get_logical_sub = event
         elif kind == END_GET_LOGICAL_SUBREGION:
-            assert self.get_logical_sub <> None
+            assert self.get_logical_sub is not None
             time_range = GetLogicalSubregionRange(self,self.get_logical_sub,event)
             self.get_logical_subregions[time_range] = processor
             self.get_logical_sub = None
         elif kind == BEGIN_MAP_REGION:
-            assert self.inline_map == None
+            assert self.inline_map is None
             self.inline_map = event
         elif kind == END_MAP_REGION:
-            assert self.inline_map <> None
+            assert self.inline_map is not None
             time_range = InlineMapRange(self,self.inline_map,event)
             self.map_regions[time_range] = processor
             self.inline_map = None
         elif kind == BEGIN_UNMAP_REGION:
-            assert self.inline_unmap == None
+            assert self.inline_unmap is None
             self.inline_unmap = event
         elif kind == END_UNMAP_REGION:
-            assert self.inline_unmap <> None
+            assert self.inline_unmap is not None
             time_range = InlineUnmapRange(self,self.inline_unmap,event)
             self.unmap_regions[time_range] = processor
             self.inline_unmap = None
         elif kind == BEGIN_TASK_DEP_ANALYSIS:
-            assert self.task_dep == None
+            assert self.task_dep is None
             self.task_dep = event
         elif kind == END_TASK_DEP_ANALYSIS:
-            assert self.task_dep <> None
+            assert self.task_dep is not None
             time_range = TaskDepRange(self,self.task_dep,event)
             self.task_dep_analysis[time_range] = processor
             self.task_dep = None
         elif kind == BEGIN_MAP_DEP_ANALYSIS:
-            assert self.map_dep == None
+            assert self.map_dep is None
             self.map_dep = event
         elif kind == END_MAP_DEP_ANALYSIS:
-            assert self.map_dep <> None
+            assert self.map_dep is not None
             time_range = MapDepRange(self,self.map_dep,event)
             self.map_dep_analysis[time_range] = processor
             self.map_dep = None
         elif kind == BEGIN_DEL_DEP_ANALYSIS:
-            assert self.del_dep == None
+            assert self.del_dep is None
             self.del_dep = event
         elif kind == END_DEL_DEP_ANALYSIS:
-            assert self.del_dep <> None
+            assert self.del_dep is not None
             time_range = DelDepRange(self,self.del_dep,event)
             self.del_dep_analysis[time_range] = processor
             self.del_dep = None
         else:
             # These are handled at the granularity of UniqueTasks
-            assert kind <> BEGIN_TASK_DEP_ANALYSIS
-            assert kind <> END_TASK_DEP_ANALYSIS
+            assert kind != BEGIN_TASK_DEP_ANALYSIS
+            assert kind != END_TASK_DEP_ANALYSIS
 
     def add_subtask(self, subtask):
         assert subtask not in self.subtasks 
@@ -502,21 +502,21 @@ class TaskInstance(object):
 
     def add_time_ranges(self):
         # Might not have a map processor if it is the top level task
-        assert self.map_processor <> None
-        assert self.begin_map <> None
-        assert self.end_map <> None
+        assert self.map_processor is not None
+        assert self.begin_map is not None
+        assert self.end_map is not None
         self.map_processor.add_range(TaskMapRange(self,self.begin_map,self.end_map))
-        assert self.run_processor <> None
-        assert self.begin_run <> None
-        assert self.end_run <> None
+        assert self.run_processor is not None
+        assert self.begin_run is not None
+        assert self.end_run is not None
         self.run_processor.add_range(TaskRunRange(self,self.begin_run,self.end_run))
-        if self.children_processor <> None:
-            assert self.begin_children_mapped <> None
-            assert self.end_children_mapped <> None
+        if self.children_processor is not None:
+            assert self.begin_children_mapped is not None
+            assert self.end_children_mapped is not None
             self.children_processor.add_range(TaskChildRange(self,self.begin_children_mapped,self.end_children_mapped))
-        assert self.finish_processor <> None
-        assert self.begin_task_finish <> None
-        assert self.end_task_finish <> None
+        assert self.finish_processor is not None
+        assert self.begin_task_finish is not None
+        assert self.end_task_finish is not None
         self.finish_processor.add_range(TaskFinishRange(self,self.begin_task_finish,self.end_task_finish))
         for r,proc in self.create_index_spaces.iteritems():
             proc.add_range(r)
@@ -594,12 +594,12 @@ class UniqueTask(object):
 
     def add_task_event(self, processor, kind, point, event):
         if kind == BEGIN_TASK_DEP_ANALYSIS:
-            assert self.dep_analysis == None
-            assert self.dep_processor == None
+            assert self.dep_analysis is None
+            assert self.dep_processor is None
             self.dep_analysis = event
             self.dep_processor = processor
         elif kind == END_TASK_DEP_ANALYSIS:
-            assert self.dep_analysis <> None 
+            assert self.dep_analysis is not None
             assert self.dep_processor == processor
             dep_range = TaskDepRange(self,self.dep_analysis,event)
             self.dep_analysis = dep_range
@@ -610,15 +610,15 @@ class UniqueTask(object):
             self.points[point].add_task_event(processor, kind, event)
 
     def add_parent(self, parent):
-        assert self.parent_task == None
+        assert self.parent_task is None
         self.parent_task = parent
 
     def add_time_ranges(self):
         for p,t in self.points.iteritems():
             t.add_time_ranges()
         # Also put our dependence analysis range in
-        if self.dep_analysis <> None:
-            assert self.dep_processor <> None
+        if self.dep_analysis is not None:
+            assert self.dep_processor is not None
             self.dep_processor.add_range(self.dep_analysis)
 
     def get_title(self):
@@ -656,7 +656,7 @@ class TaskVariant(object):
         return "Task ID "+str(self.task_id)+" "+str(self.name)
 
     def compute_color(self, step, num_steps):
-        assert self.color == None
+        assert self.color is None
         self.color = color_helper(step, num_steps)
 
     def get_color(self):
@@ -684,7 +684,7 @@ class ScheduleInstance(object):
     def add_scheduling_event(self, processor, kind, event):
         assert kind == BEGIN_SCHEDULER or kind == END_SCHEDULER
         if kind == BEGIN_SCHEDULER:
-            assert self.schedule_processor == None
+            assert self.schedule_processor is None
             self.begin_schedule = event
             self.schedule_processor = processor
         else:
@@ -698,7 +698,7 @@ class Event(object):
 
     def __cmp__(self, other):
         if other is None:
-            return -1
+             return -1
         if self.abs_time < other.abs_time:
             return -1
         elif self.abs_time == other.abs_time:
@@ -756,12 +756,29 @@ class TimeRange(object):
     is_meta_range = AbstractMethod('is_meta_range')
     emit_svg = AbstractMethod('emit_svg')
     def __init__(self, start_event, end_event):
-        assert start_event <> None
-        assert end_event <> None
+        assert start_event is not None
+        assert end_event is not None
         assert start_event <= end_event
         self.start_event = start_event
         self.end_event = end_event
         self.subranges = list()
+
+    def __cmp__(self, other):
+        # The order chosen here is critical for sort_range. Ranges are
+        # sorted by start_event first, and then by *reversed*
+        # end_event, so that each range will precede any ranges they
+        # contain in the order.
+        if self.start_event < other.start_event:
+            return -1
+        if self.start_event > other.start_event:
+            return 1
+
+        if self.end_event > other.end_event:
+            return -1
+        if self.end_event < other.end_event:
+            return 1
+
+        return 0
 
     def contains(self, other_range):
         if self.start_event > other_range.end_event:
@@ -780,27 +797,19 @@ class TimeRange(object):
         self.subranges.append(other_range)
 
     def sort_range(self):
-        cur_idx = 0
-        while cur_idx < len(self.subranges):
-            cur_range = self.subranges[cur_idx]
-            # Try adding it to any of the other ranges
-            added = False
-            for idx in range(len(self.subranges)):
-                if idx == cur_idx:
-                    continue
-                if self.subranges[idx].contains(cur_range):
-                    self.subranges[idx].add_range(cur_range)
-                    added = True
-                    break
-            if added:
-                # Remove this entry from the list, keep the same cur_idx
-                self.subranges.remove(cur_range)
-            else:
-                # Didn't add it, so go onto the next range
-                cur_idx = cur_idx + 1
-        # Now recursively sort all of our subranges
-        for idx in range(len(self.subranges)):
-            self.subranges[idx].sort_range()
+        self.subranges.sort()
+
+        removed = set()
+        stack = []
+        for subrange in self.subranges:
+            while len(stack) > 0 and not stack[-1].contains(subrange):
+                stack.pop()
+            if len(stack) > 0:
+                stack[-1].add_range(subrange)
+                removed.add(subrange)
+            stack.append(subrange)
+
+        self.subranges = [s for s in self.subranges if s not in removed]
 
     def get_app_range(self):
         return self.is_app_range()
@@ -1649,7 +1658,7 @@ class Processor(object):
         self.full_range = None
 
     def add_scheduling_event(self, kind, event):
-        if self.current_scheduling <> None:
+        if self.current_scheduling is not None:
             assert kind == END_SCHEDULER
             self.current_scheduling.add_scheduling_event(self, kind, event)
             self.sched_instances.append(self.current_scheduling)
@@ -1762,7 +1771,7 @@ class Memory(object):
                     continue
                 elif inst in live_instances:
                     # Look at its destruction time
-                    if next_time == None:
+                    if next_time is None:
                         next_time = inst.destroy_time
                         creation = False
                         target_inst = inst
@@ -1772,7 +1781,7 @@ class Memory(object):
                         target_inst = inst
                 else:
                     # Look at its creation time
-                    if next_time == None:
+                    if next_time is None:
                         next_time = inst.create_time
                         creation = True
                         target_inst = inst
@@ -1781,7 +1790,7 @@ class Memory(object):
                         creation = True
                         target_inst = inst
             # Should have found something
-            assert next_time <> None
+            assert next_time is not None
             self.time_points.append((next_time,creation,target_inst))
             if creation:
                 assert target_inst not in live_instances
@@ -1803,11 +1812,11 @@ class Memory(object):
                 # Find a level to place the instance at
                 level = None
                 for lev,lev_inst in levels.iteritems():
-                    if lev_inst == None:
+                    if lev_inst is None:
                         level = lev
                         break
                 # If we didn't find a level, make a new one
-                if level == None:
+                if level is None:
                     level = len(levels)+1
                     assert len(levels) <= self.max_live_instances
                 levels[level] = inst
@@ -1837,7 +1846,7 @@ class Instance(object):
         self.fields = dict()
 
     def set_destroy(self, time):
-        assert self.destroy_time == None
+        assert self.destroy_time is None
         self.destroy_time = time
 
     def add_field(self, fid, size):
@@ -1845,7 +1854,7 @@ class Instance(object):
         self.fields[fid] = size
 
     def compute_color(self, step, num_steps):
-        assert self.color == None
+        assert self.color is None
         self.color = color_helper(step, num_steps)
 
     def get_title(self):
@@ -1856,7 +1865,7 @@ class Instance(object):
         return title
 
     def emit_svg(self, printer, level):
-        assert self.color <> None
+        assert self.color is not None
         printer.emit_timing_range(self.color, level, self.create_time, self.destroy_time, self.get_title())
 
 class SVGPrinter(object):
@@ -1864,7 +1873,7 @@ class SVGPrinter(object):
         self.target = open(file_name,'w')
         self.file_name = file_name
         self.html_file = html_file
-        assert self.target <> None
+        assert self.target is not None
         self.offset = 0
         self.target.write('<svg xmlns="http://www.w3.org/2000/svg">\n')
         self.max_width = 0
@@ -1875,9 +1884,9 @@ class SVGPrinter(object):
         self.target.write('</svg>\n')
         self.target.close()
         # Round up the max width and max height to a multiple of 100
-        while ((self.max_width % 100) <> 0):
+        while ((self.max_width % 100) != 0):
             self.max_width = self.max_width + 1
-        while ((self.max_height % 100) <> 0):
+        while ((self.max_height % 100) != 0):
             self.max_height = self.max_height + 1
         # Also emit the html file
         html_target = open(self.html_file,'w')
@@ -2426,9 +2435,9 @@ class State(object):
         sub_task = None
         for v,var in self.task_variants.iteritems():
             sub_task = var.has_unique_task(suid)
-            if sub_task <> None:
+            if sub_task is not None:
                 break
-        if sub_task == None:
+        if sub_task is None:
             return False
         point = self.find_point(dim, p0, p1, p2)
         self.task_variants[tid].add_subtask(uid, point, sub_task)
@@ -2444,7 +2453,7 @@ class State(object):
         return point
 
     def build_time_ranges(self):
-        assert self.last_time <> None # should have been set by now
+        assert self.last_time is not None # should have been set by now
         for p,proc in self.processors.iteritems():
             proc.init_time_range(self.last_time)
         # Now have each of the objects add their time ranges
@@ -2515,15 +2524,15 @@ def parse_log_file(file_name, state):
     for line in log:
         matches = matches + 1
         m = variant_pat.match(line)
-        if m <> None:
+        if m is not None:
             state.create_variant(int(m.group('tid')),True if (int(m.group('leaf'))) == 1 else False, m.group('name'))
             continue
         m = processor_pat.match(line)
-        if m <> None:
+        if m is not None:
             state.create_processor(int(m.group('proc'),16),True if (int(m.group('utility'))) == 1 else False,int(m.group('kind')))
             continue
         m = task_event_pat.match(line)
-        if m <> None:
+        if m is not None:
             time = long(m.group('time'))
             if not state.create_task_event(int(m.group('proc'),16), int(m.group('kind')), int(m.group('tid')), int(m.group('uid')),
                                               time, int(m.group('dim')), int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):  
@@ -2532,7 +2541,7 @@ def parse_log_file(file_name, state):
                 last_time = time
             continue
         m = scheduler_pat.match(line)
-        if m <> None:
+        if m is not None:
             time = long(m.group('time'))
             if not state.create_scheduler_event(int(m.group('proc'),16), int(m.group('kind')), time):
                 replay_lines.append(line)
@@ -2540,11 +2549,11 @@ def parse_log_file(file_name, state):
                 last_time = time
             continue
         m = memory_pat.match(line)
-        if m <> None:
+        if m is not None:
             state.add_memory(int(m.group('mem'),16), int(m.group('kind')))
             continue
         m = create_pat.match(line)
-        if m <> None:
+        if m is not None:
             time = long(m.group('time'))
             if not state.add_instance_creation(int(m.group('iid'),16),int(m.group('uid')),
                                         int(m.group('mem'),16),int(m.group('redop')),int(m.group('factor')),time):
@@ -2553,7 +2562,7 @@ def parse_log_file(file_name, state):
                 last_time = time
             continue
         m = destroy_pat.match(line)
-        if m <> None:
+        if m is not None:
             time = long(m.group('time'))
             if not state.add_instance_destroy(int(m.group('uid')), time):
                 replay_lines.append(line)
@@ -2561,12 +2570,12 @@ def parse_log_file(file_name, state):
                 last_time = time
             continue
         m = field_pat.match(line)
-        if m <> None:
+        if m is not None:
             if not state.add_instance_field(int(m.group('uid')), int(m.group('fid')), int(m.group('size'))):
                 replay_lines.append(line)
             continue
         m = sub_task_pat.match(line)
-        if m <> None:
+        if m is not None:
             if not state.set_subtask(int(m.group('suid')), int(m.group('tid')), int(m.group('uid')), int(m.group('dim')),
                                       int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):
                 replay_lines.append(line)
@@ -2578,36 +2587,36 @@ def parse_log_file(file_name, state):
         to_delete = set()
         for line in replay_lines:
             m = task_event_pat.match(line)
-            if m <> None:
+            if m is not None:
                 if state.create_task_event(int(m.group('proc'),16), int(m.group('kind')), int(m.group('tid')), int(m.group('uid')),
                                            time, int(m.group('dim')), int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):  
                     to_delete.add(line)
                 continue
             m = scheduler_pat.match(line)
-            if m <> None:
+            if m is not None:
                 if state.create_scheduler_event(int(m.group('proc'),16), int(m.group('kind')), time):
                     to_delete.add(line)   
                 continue   
             m = create_pat.match(line)
-            if m <> None:
+            if m is not None:
                 time = long(m.group('time'))
                 if state.add_instance_creation(int(m.group('iid'),16),int(m.group('uid')),int(m.group('mem'),16),
                                                     int(m.group('redop')),int(m.group('factor')),time):
                     to_delete.add(line)
                 continue
             m = destroy_pat.match(line)
-            if m <> None:
+            if m is not None:
                 time = long(m.group('time'))
                 if state.add_instance_destroy(int(m.group('uid')), time):
                     to_delete.add(line)
                 continue
             m = field_pat.match(line)
-            if m <> None:
+            if m is not None:
                 if state.add_instance_field(int(m.group('uid')), int(m.group('fid')), int(m.group('size'))):
                     to_delete.add(line)
                 continue
             m = sub_task_pat.match(line)
-            if m <> None:
+            if m is not None:
                 if state.set_subtask(int(m.group('suid')), int(m.group('tid')), int(m.group('uid')), int(m.group('dim')),
                                       int(m.group('p0')), int(m.group('p1')), int(m.group('p2'))):
                     to_delete.add(line)
@@ -2631,7 +2640,7 @@ def usage():
 def main():
     opts, args = getopt(sys.argv[1:],'cpvm:')
     opts = dict(opts)
-    if len(args) <> 1:
+    if len(args) != 1:
         usage()
     file_name = args[0]
     cummulative = False
