@@ -62,6 +62,11 @@ class Typedef(ASTNode):
         self.name = name
         self.type = type
 
+class Struct(ASTNode):
+    def __init__(self, name, type):
+        self.name = name
+        self.type = type
+
 # machine-dependent signed integers
 class TypeChar(ASTNode): pass
 class TypeShort(ASTNode): pass
@@ -105,5 +110,10 @@ class TypeFunction(ASTNode):
 class TypePointer(ASTNode):
     def __init__(self, points_to_type):
         self.points_to_type = points_to_type
+
+class TypeStruct(ASTNode):
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields
 
 class TypeVoid(ASTNode): pass

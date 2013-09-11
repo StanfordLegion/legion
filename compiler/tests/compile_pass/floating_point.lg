@@ -15,6 +15,31 @@
 
 import "math.h";
 
+task constants()
+{
+  let k0: double = 1.0;
+  let k1: double = 1.;
+  let k2: double = .1;
+  let k3: double = 1.0e2;
+  let k4: double = 1.0e+2;
+  let k5: double = 1.0e-2;
+  let k6: double = 1.e2;
+  let k7: double = .1e2;
+  let k8: double = 1e2;
+  let k9: double = 1E2;
+
+  let f0: float = 1.0f;
+  let f1: float = 1.f;
+  let f2: float = .1f;
+  let f3: float = 1.0e2f;
+  let f4: float = 1.0e+2f;
+  let f5: float = 1.0e-2f;
+  let f6: float = 1.e2f;
+  let f7: float = .1e2f;
+  let f8: float = 1e2f;
+  let f9: float = 1E2f;
+}
+
 task quadratic(a: double, b: double, c: double): double
 {
   let r0 = (-b + sqrt(b*b - 4.0*a*c))/(2.0*a);

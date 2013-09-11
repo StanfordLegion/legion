@@ -26,7 +26,7 @@ except ImportError:
     from ordereddict import OrderedDict
 import json, os, subprocess, tempfile
 from cStringIO import StringIO
-from . import passes
+from . import passes, style_check
 
 def extract_code(doc, language):
     code = {}
@@ -42,7 +42,7 @@ def extract_code(doc, language):
                 code[identifier].append(block[1])
     return [str('\n\n'.join(section)) for section in code.itervalues()]
 
-def doc_check(source, search_path):
+def doc_check(opts, source):
     doc = json.loads(
         subprocess.check_output(['pandoc', '--to', 'json'],
                                 stdin = source))
@@ -51,6 +51,7 @@ def doc_check(source, search_path):
     result = []
     for section in code:
         program = passes.parse(StringIO(section))
-        type_map, constraints = passes.check(program, search_path)
-        result.append((type_map, constraints))
+        style_check.style_check(program)
+        type_map, constraints, foreign_types = passes.check(program, opts)
+        result.append((type_map, constraints, foreign_types))
     return result

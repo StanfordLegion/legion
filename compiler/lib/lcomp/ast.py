@@ -35,6 +35,8 @@ def equivalent(a, b):
         return True
     if isinstance(a, Span) and isinstance(b, Span):
         return True
+    if isinstance(a, Program) and isinstance(b, Program):
+        return equivalent(a.definitions, b.definitions)
     if isinstance(a, ASTNode) and isinstance(b, ASTNode):
         if a.__class__ is not b.__class__:
             return False
@@ -109,10 +111,24 @@ class ASTNode:
                 if not key.startswith('_')))
 
 class Program(ASTNode):
-    def __init__(self, span, program = None, definition = None):
+    def __init__(self, span, full_text, line_resets, definitions):
         ASTNode.__init__(self, span)
-        self.defs = program.defs if program is not None else []
-        self.defs += [definition] if definition is not None else []
+        self.full_text = full_text
+        self.line_resets = line_resets
+        self.definitions = definitions
+    def __repr__(self):
+        return '%s(%s)' % (
+            self.__class__.__name__,
+            ', '.join(
+                '%s: %s' % (key, value)
+                for key, value in self.__dict__.iteritems()
+                if not key.startswith('_') and key not in ('full_text', 'line_resets')))
+
+class Definitions(ASTNode):
+    def __init__(self, span, definitions = None, definition = None):
+        ASTNode.__init__(self, span)
+        self.definitions = definitions.definitions if definitions is not None else []
+        self.definitions += [definition] if definition is not None else []
 
 class Import(ASTNode):
     def __init__(self, span, filename):
@@ -128,6 +144,11 @@ class Struct(ASTNode):
         self.regions = regions
         self.constraints = constraints
         self.field_decls = field_decls
+
+class StructName(ASTNode):
+    def __init__(self, span, name):
+        ASTNode.__init__(self, span)
+        self.name = name
 
 class StructParams(ASTNode):
     def __init__(self, span, params = None, param = None):
@@ -192,54 +213,38 @@ class Function(ASTNode):
         self.privileges = privileges
         self.block = block
 
-class Params(ASTNode):
+class FunctionName(ASTNode):
+    def __init__(self, span, name):
+        ASTNode.__init__(self, span)
+        self.name = name
+
+class FunctionParams(ASTNode):
     def __init__(self, span, params = None, param = None):
         ASTNode.__init__(self, span)
         self.params = params.params if params is not None else []
         self.params += [param] if param is not None else []
 
-class Param(ASTNode):
+class FunctionParam(ASTNode):
     def __init__(self, span, name, declared_type):
         ASTNode.__init__(self, span)
         self.name = name
         self.declared_type = declared_type
 
-class Privileges(ASTNode):
+class FunctionReturnType(ASTNode):
+    def __init__(self, span, declared_type):
+        ASTNode.__init__(self, span)
+        self.declared_type = declared_type
+
+class FunctionPrivileges(ASTNode):
     def __init__(self, span, privileges = None, privilege = None):
         ASTNode.__init__(self, span)
         self.privileges = privileges.privileges if privileges is not None else []
         self.privileges += [privilege] if privilege is not None else []
 
-class Privilege(ASTNode):
-    def __init__(self, span, privilege, regions, op = None):
+class FunctionPrivilege(ASTNode):
+    def __init__(self, span, privilege):
         ASTNode.__init__(self, span)
         self.privilege = privilege
-        self.regions = regions
-        self.op = op
-
-class PrivilegeRegions(ASTNode):
-    def __init__(self, span, regions = None, region = None):
-        ASTNode.__init__(self, span)
-        self.regions = regions.regions if regions is not None else []
-        self.regions += [region] if region is not None else []
-
-class PrivilegeRegion(ASTNode):
-    def __init__(self, span, name, fields):
-        ASTNode.__init__(self, span)
-        self.name = name
-        self.fields = fields
-
-class PrivilegeRegionFields(ASTNode):
-    def __init__(self, span, fields = None, field = None):
-        ASTNode.__init__(self, span)
-        self.fields = fields.fields if fields is not None else []
-        self.fields += [field] if field is not None else []
-
-class PrivilegeRegionField(ASTNode):
-    def __init__(self, span, name, fields):
-        ASTNode.__init__(self, span)
-        self.name = name
-        self.fields = fields
 
 class TypeVoid(ASTNode): pass
 class TypeBool(ASTNode): pass
@@ -326,6 +331,37 @@ class TypeIspaceKind(ASTNode):
     def __init__(self, span, index_type):
         ASTNode.__init__(self, span)
         self.index_type = index_type
+
+class Privilege(ASTNode):
+    def __init__(self, span, privilege, regions, op = None):
+        ASTNode.__init__(self, span)
+        self.privilege = privilege
+        self.regions = regions
+        self.op = op
+
+class PrivilegeRegions(ASTNode):
+    def __init__(self, span, regions = None, region = None):
+        ASTNode.__init__(self, span)
+        self.regions = regions.regions if regions is not None else []
+        self.regions += [region] if region is not None else []
+
+class PrivilegeRegion(ASTNode):
+    def __init__(self, span, name, fields):
+        ASTNode.__init__(self, span)
+        self.name = name
+        self.fields = fields
+
+class PrivilegeRegionFields(ASTNode):
+    def __init__(self, span, fields = None, field = None):
+        ASTNode.__init__(self, span)
+        self.fields = fields.fields if fields is not None else []
+        self.fields += [field] if field is not None else []
+
+class PrivilegeRegionField(ASTNode):
+    def __init__(self, span, name, fields):
+        ASTNode.__init__(self, span)
+        self.name = name
+        self.fields = fields
 
 class Block(ASTNode):
     def __init__(self, span, block = None, statement = None):

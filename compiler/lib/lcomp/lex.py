@@ -57,6 +57,7 @@ class Lexer:
     def t_ANY_ignore_multiline_comment(self, t):
         r'/\*([^*]+|(\*[^\/]))*\*/'
         t.lexer.lineno += t.value.count('\n')
+        self.abslineno += t.value.count('\n')
         last_newline = t.value.rfind('\n')
         if last_newline > 0:
             self.line_start = t.lexpos + last_newline + len('\n')
@@ -73,11 +74,14 @@ class Lexer:
         start_line, re_whitespace, re_whitespace, re_whitespace, end_line)
     @TOKEN(reset_line)
     def t_reset_line(self, t):
-        t.lexer.lineno = int(self.lexer.lexmatch.group('line')) - 1
+        new_lineno = int(t.lexer.lexmatch.group('line')) - 1
+        self.line_resets[self.abslineno] = new_lineno
+        t.lexer.lineno = new_lineno
 
     def t_ANY_ignore_newlines(self, t):
         r'\n+'
         t.lexer.lineno += len(t.value)
+        self.abslineno += len(t.value)
         self.line_start = t.lexpos + len(t.value)
 
     @TOKEN(identifier)
@@ -162,12 +166,14 @@ class Lexer:
         r'<<'
         return t
 
+    re_double = r'[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+'
+    re_float = r'(%s)[fF]' % re_double
+    @TOKEN(re_float)
     def t_FLOAT_VALUE(self, t):
-        r'[0-9]+\.[0-9]*f'
         return t
 
+    @TOKEN(re_double)
     def t_DOUBLE_VALUE(self, t):
-        r'[0-9]+\.[0-9]*'
         return t
 
     def t_UHEX_VALUE(self, t):
@@ -195,13 +201,17 @@ class Lexer:
 
     def __init__(self, source = None, **kwargs):
         self.lexer = ply.lex.lex(module = self, **kwargs)
+        self.abslineno = 1
         self.line_start = 0
+        self.full_text = None
         if source is not None:
             self.input(source)
 
     def input(self, source):
         self.source = source.name if hasattr(source, 'name') else '<unknown>'
-        self.lexer.input(source.read())
+        self.full_text = source.read()
+        self.line_resets = {}
+        self.lexer.input(self.full_text)
 
     def token(self, **kwargs):
         t = self.lexer.token(**kwargs)

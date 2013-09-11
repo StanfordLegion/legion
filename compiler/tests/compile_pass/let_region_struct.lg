@@ -13,18 +13,21 @@
  * limitations under the License.
  */
 
-struct foo {
+struct foo
+{
   x: int,
   y: float,
   z: double,
 }
 
-struct bar {
+struct bar
+{
   a: bool,
   b: foo,
   c: foo,
 }
 
-task main() {
+task main()
+{
   let r = region<bar>(1);
 }

@@ -15,5 +15,14 @@
 
 #include "stdint.h"
 
+struct point
+{
+  point();
+
+  intptr_t x;
+  intptr_t y;
+};
+
 extern double add_double(double x, double y);
 extern intptr_t add_int(intptr_t x, intptr_t y);
+extern point add_point(point a, point b);

@@ -19,14 +19,14 @@
 ### Test suite
 ###
 
-import json, multiprocessing, optparse, os, re, subprocess, sys, tempfile, traceback
+import json, multiprocessing, optparse, os, re, shutil, subprocess, sys, tempfile, traceback
 from cStringIO import StringIO
 # Work around for OrderedDict missing in Python 2.6.
 try:
     from collections import OrderedDict
 except ImportError:
     from ordereddict import OrderedDict
-from . import ast, doc_check, driver, passes, pretty
+from . import ast, doc_check, driver, options, passes, pretty, style_check
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -43,10 +43,10 @@ def precompile_runtime(thread_count, clean_first, verbose):
         os.close(fd_source)
         os.close(fd_binary)
         driver.driver(
-            ['./driver.py', temp_source, '-o', temp_binary] +
+            ['./driver.py', '-g', temp_source, '-o', temp_binary] +
             (['-j', str(thread_count)] if thread_count is not None else []) +
-            (['--clean'] if clean_first else []),
-            verbose = verbose)
+            (['--clean'] if clean_first else []) +
+            (['-v'] if verbose else ['-q']))
     finally:
         os.remove(temp_source)
         os.remove(temp_binary)
@@ -64,7 +64,40 @@ def test_pretty(filename, verbose):
         if not ast.equivalent(program1, program2):
             raise Exception('Programs differ:\n\n%s\n\n%s' % (original, pretty1))
 
-def test_compile_pass(filename, verbose):
+def test_style_pass(filename, verbose):
+    with open(filename, 'rb') as f:
+        program = passes.parse(f)
+        style_check.style_check(program)
+
+_re_expected_failure = re.compile(r'^//\s+fails-with:$\s*((^//.*$\s*)+)', re.MULTILINE)
+def test_style_fail(filename, verbose):
+    # Search for the expected failure in the program
+    with open(filename, 'rb') as f:
+        program_text = f.read()
+    expected_failure_match = re.search(_re_expected_failure, program_text)
+    if expected_failure_match is None:
+        raise Exception('No fails-with declaration in style_fail testcase')
+    expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
+    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+
+    # Check that the program fails to compile
+    try:
+        with open(filename, 'rb') as f:
+            program = passes.parse(f)
+        style_check.style_check(program)
+    except KeyboardInterrupt:
+        raise
+    except:
+        failure_lines = traceback.format_exception_only(*sys.exc_info()[:2])
+        if len(failure_lines) != 1:
+            raise Exception('Expecting failure with one line, got:\n%s' % ''.join(failure_lines))
+        failure = '\n'.join(line.strip() for line in failure_lines[0].strip().split('\n'))
+        if failure != expected_failure:
+            raise Exception('Expecting failure:\n%s\nInstead got:\n%s' % (expected_failure, failure))
+    else:
+        raise Exception('Expecting failure, style checker returned successfully')
+
+def test_compile_pass(filename, verbose, flags):
     env_needs_cleanup = False
     if 'LG_RT_DIR' not in os.environ:
         os.environ['LG_RT_DIR'] = os.path.join(
@@ -77,13 +110,24 @@ def test_compile_pass(filename, verbose):
     else:
         stdout, stderr = subprocess.PIPE, subprocess.STDOUT
 
-    (fd, temp_obj) = tempfile.mkstemp(suffix = '.o')
+    (fd, temp_obj) = tempfile.mkstemp(suffix = '.lg.o')
     try:
         os.close(fd)
-        driver.driver(
-            ['./driver.py', '-c', filename, '-o', temp_obj],
-            verbose = verbose)
+        saved_temps = driver.driver(
+            ['./driver.py', '-g', '-c', filename, '-o', temp_obj, '--save-temps'] +
+            (['-v'] if verbose else ['-q']))
+    except:
+        # On failure, keep saved temporaries so that the user can
+        # inspect the failure.
+        raise
+    else:
+        # On success, clean up the saved temporaries.
+        for saved_temp in saved_temps:
+            shutil.rmtree(saved_temp)
     finally:
+        # Always remove the output file, as it will not be valid on
+        # failure anyway.
+        os.remove(options.with_ext(temp_obj, '.h'))
         os.remove(temp_obj)
         if env_needs_cleanup:
             del os.environ['LG_RT_DIR']
@@ -103,8 +147,8 @@ def test_compile_fail(filename, verbose):
     try:
         with open(filename, 'rb') as f:
             program = passes.parse(f)
-        search_path = (os.path.abspath(os.path.dirname(filename)),)
-        type_map, constraints = passes.check(program, search_path)
+        opts = options.build_fake_options(filename, verbose)
+        type_map, constraints = passes.check(program, opts)
         program_type = type_map[program]
     except KeyboardInterrupt:
         raise
@@ -118,7 +162,7 @@ def test_compile_fail(filename, verbose):
     else:
         raise Exception('Expecting failure, type checker returned successfully:\n%s' % program_type)
 
-def test_run_pass(filename, verbose):
+def test_run_pass(filename, verbose, flags):
     if 'LG_RT_DIR' not in os.environ:
         raise Exception('LG_RT_DIR variable is not defined')
 
@@ -135,38 +179,145 @@ def test_run_pass(filename, verbose):
     (fd, temp_binary) = tempfile.mkstemp()
     try:
         os.close(fd)
-        driver.driver(
-            ['./driver.py'] + input_filenames + ['-o', temp_binary, '-j', '1'],
-            verbose = verbose)
+        saved_temps = driver.driver(
+            ['./driver.py', '-g'] +
+            input_filenames +
+            ['-o', temp_binary, '-j', '1', '--save-temps'] +
+            (['-v'] if verbose else ['-q']) +
+            flags)
         proc = subprocess.Popen(
             [temp_binary],
+            cwd = os.path.dirname(os.path.realpath(filename)),
             stdout = stdout, stderr = stderr)
         output, errors = proc.communicate()
         if proc.returncode != 0:
-            raise Exception(output, errors)
+            raise driver.CompilerException(output, errors, saved_temps)
+    except:
+        # On failure, keep saved temporaries so that the user can
+        # inspect the failure.
+        raise
+    else:
+        # On success, clean up the saved temporaries.
+        for saved_temp in saved_temps:
+            shutil.rmtree(saved_temp)
     finally:
+        # Always remove the output file, as it will not be valid on
+        # failure anyway.
         os.remove(temp_binary)
+
+def test_run_fail(filename, verbose, flags):
+    # Search for the expected failure in the program
+    with open(filename, 'rb') as f:
+        program_text = f.read()
+    expected_failure_match = re.search(_re_expected_failure, program_text)
+    if expected_failure_match is None:
+        raise Exception('No fails-with declaration in run_fail testcase')
+    expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
+    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+
+    if 'LG_RT_DIR' not in os.environ:
+        raise Exception('LG_RT_DIR variable is not defined')
+
+    if verbose:
+        stdout, stderr = None, subprocess.PIPE
+    else:
+        stdout, stderr = subprocess.PIPE, subprocess.PIPE
+
+    input_filenames = [filename]
+    cpp_filename = ''.join([os.path.splitext(filename)[0], '.cc'])
+    if os.path.exists(cpp_filename):
+        input_filenames.append(cpp_filename)
+
+    (fd, temp_binary) = tempfile.mkstemp()
+    try:
+        os.close(fd)
+        saved_temps = driver.driver(
+            ['./driver.py', '-g'] +
+            input_filenames +
+            ['-o', temp_binary, '-j', '1', '--save-temps'] +
+            (['-v'] if verbose else ['-q']) +
+            flags)
+        proc = subprocess.Popen(
+            [temp_binary],
+            cwd = os.path.dirname(os.path.realpath(filename)),
+            stdout = stdout, stderr = stderr)
+        output, errors = proc.communicate()
+        if proc.returncode == 0:
+            raise Exception('Expecting failure, program returned successfully')
+        else:
+            if errors.find(expected_failure) < 0:
+                raise Exception('Expected failure not found in program stderr')
+    except KeyboardInterrupt:
+        raise
+    except driver.CompilerException:
+        # Clean up the saved temporaries.
+        for saved_temp in saved_temps:
+            shutil.rmtree(saved_temp)
+        raise
+    else:
+        # Clean up the saved temporaries.
+        for saved_temp in saved_temps:
+            shutil.rmtree(saved_temp)
+    finally:
+        # Always remove the output file.
+        os.remove(temp_binary)
+
+_re_expected_failure = re.compile(r'^//\s+fails-with:$\s*((^//.*$\s*)+)', re.MULTILINE)
+def test_compile_fail(filename, verbose):
+    # Search for the expected failure in the program
+    with open(filename, 'rb') as f:
+        program_text = f.read()
+    expected_failure_match = re.search(_re_expected_failure, program_text)
+    if expected_failure_match is None:
+        raise Exception('No fails-with declaration in compile_fail testcase')
+    expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
+    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+
+    # Check that the program fails to compile
+    try:
+        with open(filename, 'rb') as f:
+            program = passes.parse(f)
+        opts = options.build_fake_options(filename, verbose)
+        type_map, constraints = passes.check(program, opts)
+        program_type = type_map[program]
+    except KeyboardInterrupt:
+        raise
+    except:
+        failure_lines = traceback.format_exception_only(*sys.exc_info()[:2])
+        if len(failure_lines) != 1:
+            raise Exception('Expecting failure with one line, got:\n%s' % ''.join(failure_lines))
+        failure = '\n'.join(line.strip() for line in failure_lines[0].strip().split('\n'))
+        if failure != expected_failure:
+            raise Exception('Expecting failure:\n%s\nInstead got:\n%s' % (expected_failure, failure))
+    else:
+        raise Exception('Expecting failure, type checker returned successfully:\n%s' % program_type)
 
 def test_doc(filename, verbose):
     with open(filename) as source:
-        search_path = (os.path.abspath(os.path.dirname(filename)),)
-        doc_check.doc_check(source, search_path)
+        opts = options.build_fake_options(filename, verbose)
+        doc_check.doc_check(opts, source)
 
 PASS = 'pass'
 FAIL = 'fail'
 INTERRUPT = 'interrupt'
 
-def test_runner(test_name, test_fn, verbose, filename):
+def test_runner(test_name, test_closure, verbose, filename):
+    test_fn, test_args = test_closure
+    saved_temps = []
     try:
-        test_fn(filename, verbose)
+        test_fn(filename, verbose, *test_args)
     except KeyboardInterrupt:
-        return test_name, filename, INTERRUPT, None
+        return test_name, filename, [], INTERRUPT, None
+    except driver.CompilerException as e:
+        if verbose:
+            return test_name, filename, e.saved_temps, FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, e.saved_temps, FAIL, None
     except Exception as e:
         if verbose:
-            return test_name, filename, FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
-        return test_name, filename, FAIL, None
+            return test_name, filename, [], FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
+        return test_name, filename, [], FAIL, None
     else:
-        return test_name, filename, PASS, None
+        return test_name, filename, [], PASS, None
 
 class Counter:
     def __init__(self):
@@ -174,16 +325,32 @@ class Counter:
         self.failed = 0
 
 tests = [
-    ('compile_fail', test_compile_fail, (os.path.join('tests', 'compile_fail'),)),
-    ('compile_pass', test_compile_pass, (os.path.join('tests', 'compile_pass'),
-                                         os.path.join('tests', 'run_pass'),
-                                         os.path.join('examples'))),
-    ('pretty',       test_pretty,       (os.path.join('tests', 'compile_pass'),
-                                         os.path.join('tests', 'run_pass'),
-                                         os.path.join('examples'))),
-    ('doc',          test_doc,          ('README.md', 'doc')),
-    ('run_pass',     test_run_pass,     (os.path.join('tests', 'run_pass'),
-                                         os.path.join('examples'))),
+    ('pretty', (test_pretty, ()),
+     (os.path.join('tests', 'compile_pass'),
+      os.path.join('tests', 'run_pass'),
+      os.path.join('examples'))),
+    ('style_fail', (test_style_fail, ()),
+     (os.path.join('tests', 'style_fail'),)),
+    ('style_pass', (test_style_pass, ()),
+     (os.path.join('tests', 'compile_pass'),
+      os.path.join('tests', 'run_pass'),
+      os.path.join('examples'))),
+    ('compile_fail', (test_compile_fail, ()),
+     (os.path.join('tests', 'compile_fail'),)),
+    ('compile_pass', (test_compile_pass, ([],)),
+     (os.path.join('tests', 'style_fail'),
+      os.path.join('tests', 'compile_pass'),
+      os.path.join('tests', 'run_pass'),
+      os.path.join('examples'))),
+    ('doc', (test_doc, ()),
+     ('README.md', 'doc')),
+    ('run_pass', (test_run_pass, ([],)),
+     (os.path.join('tests', 'run_pass'),
+      os.path.join('examples'))),
+    ('run_pass_dcheck', (test_run_pass, (['--pointer-checks'],)),
+     (os.path.join('tests', 'run_pass'),)),
+    ('run_fail_dcheck', (test_run_fail, (['--pointer-checks'],)),
+     (os.path.join('tests', 'run_fail'),)),
     ]
 
 def run_all_tests(thread_count, clean_first, verbose):
@@ -218,9 +385,12 @@ def run_all_tests(thread_count, clean_first, verbose):
         test_counter = Counter()
         test_counters[test_name] = test_counter
 
+    all_saved_temps = []
     try:
         for result in results:
-            test_name, filename, outcome, output = result.get()
+            test_name, filename, saved_temps, outcome, output = result.get()
+            if len(saved_temps) > 0:
+                all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
                 print '[%sPASS%s] (%s) %s' % (green, clear, test_name, filename)
                 if output is not None: print output
@@ -238,32 +408,44 @@ def run_all_tests(thread_count, clean_first, verbose):
     for test_counter in test_counters.itervalues():
         global_counter.passed += test_counter.passed
         global_counter.failed += test_counter.failed
-
     global_total = global_counter.passed + global_counter.failed
+
+    if len(all_saved_temps) > 0:
+        print
+        print 'The following temporary files have been saved:'
+        print
+        for test_name, filename, saved_temps in all_saved_temps:
+            print '[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename)
+            for saved_temp in saved_temps:
+                print '  %s' % saved_temp
+
     if global_total > 0:
         print
         print 'Summary of test results by category:'
         for test_name, test_counter in test_counters.iteritems():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
-                print '%16s: Passed %3d of %3d tests (%5.1f%%)' % (
+                print '%24s: Passed %3d of %3d tests (%5.1f%%)' % (
                     '%s' % test_name, test_counter.passed, test_total,
                     float(100*test_counter.passed)/test_total)
-        print '    ' + '~'*46
-        print '%16s: Passed %3d of %3d tests (%5.1f%%)' % (
+        print '    ' + '~'*54
+        print '%24s: Passed %3d of %3d tests (%5.1f%%)' % (
             'total', global_counter.passed, global_total,
             (float(100*global_counter.passed)/global_total))
 
-        if not verbose and global_counter.failed > 0:
-            print
-            print 'For detailed information on test failures, run:'
-            print '    ./test.py -j1 -v'
+    if not verbose and global_counter.failed > 0:
+        print
+        print 'For detailed information on test failures, run:'
+        print '    ./test.py -j1 -v'
 
-def test_driver(argv):
-    parser = optparse.OptionParser(description = 'Compiles a Legion source file.')
-    parser.add_option('-v', dest = 'verbose', action = 'store_true', default = False)
-    parser.add_option('-j', dest = 'thread_count', default = None, type = int)
-    parser.add_option('--clean', dest = 'clean_first', action = 'store_true', default = False)
+def test_driver(argv = None):
+    if argv is None:
+        argv = sys.argv
+
+    parser = optparse.OptionParser(description = 'Legion compiler test suite')
+    parser.add_option('-v', dest = 'verbose', action = 'store_true', default = False, help = 'display verbose output')
+    parser.add_option('-j', dest = 'thread_count', default = None, type = int, help = 'number of threads used to run test suite')
+    parser.add_option('--clean', dest = 'clean_first', action = 'store_true', default = False, help = 'recompile the Legion runtime')
     (options, args) = parser.parse_args(argv[1:])
     if len(args) != 0:
         parser.error('Incorrect number of arguments')

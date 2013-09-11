@@ -30,28 +30,39 @@ except ImportError:
             raise Exception('Unable to find Clang bindings for Python')
     clang = ClangMissingGuard()
 
-import os
+import os, sys
 from . import ast
 
 class ForeignParseException(Exception):
     pass
 
-def parse_translation_unit(node):
+def parse_translation_unit(node, opts):
     definitions = []
-    for child in node.get_children():
+    for definition in node.get_children():
         try:
-            if child.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-                definitions.append(parse_function_decl(child))
-            elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                definitions.append(parse_typedef_decl(child))
+            if definition.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+                definitions.append(parse_function_decl(definition))
+            elif definition.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                definitions.append(parse_typedef_decl(definition))
+            elif definition.kind == clang.cindex.CursorKind.STRUCT_DECL:
+                definitions.append(parse_struct_decl(definition))
+            else:
+                raise ForeignParseException('Failed to parse %s' % definition.spelling)
         except ForeignParseException as e:
             # skip any definitions that cannot be parsed
-            pass
+            name = definition.spelling
+            if opts.allow_warning() and len(name) > 0 and not name.startswith('_'):
+                sys.stderr.write('WARNING: Skipping import of %s\n' % name)
+                sys.stderr.flush()
     return ast.Program(definitions = definitions)
 
 def parse_function_decl(node):
     function_type = parse_type(node.type)
     return ast.Function(name = node.spelling, type = function_type)
+
+def parse_struct_decl(node):
+    struct_type = parse_type(node.type)
+    return ast.Struct(name = node.spelling, type = struct_type)
 
 def parse_typedef_decl(node):
     typedef_type = parse_type(node.type)
@@ -163,16 +174,32 @@ def parse_type(node):
                 return ast.TypeUInt64()
 
         return parse_type(node.get_canonical())
+    if node.kind == clang.cindex.TypeKind.RECORD:
+        return parse_type_struct(node.get_declaration())
+    if node.kind == clang.cindex.TypeKind.UNEXPOSED:
+        # For some reason Clang seems to have multiple ways of
+        # declaring struct types, one of which results in an UNEXPOSED
+        # type. If the definition looks like a struct, parse it as a
+        # struct.
+        definition = node.get_declaration()
+        if definition.kind == clang.cindex.CursorKind.STRUCT_DECL:
+            return parse_type_struct(node.get_declaration())
 
     # miscellaneous
     if node.kind == clang.cindex.TypeKind.VOID:
         return ast.TypeVoid()
     raise ForeignParseException('Failed to parse %s' % node.kind)
 
+def parse_type_struct(node):
+    fields = []
+    for field in node.get_children():
+        fields.append((field.spelling, parse_type(field.type)))
+    return ast.TypeStruct(node.spelling, fields)
+
 class Parser:
     def __init__(self):
         self.index = clang.cindex.Index.create()
 
-    def parse(self, src):
+    def parse(self, src, opts):
         translation_unit = self.index.parse(src)
-        return parse_translation_unit(translation_unit.cursor)
+        return parse_translation_unit(translation_unit.cursor, opts)

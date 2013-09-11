@@ -1,0 +1,3294 @@
+/* Copyright 2013 Stanford University and Los Alamos National Security, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Inspired by https://github.com/losalamos/SNAP
+
+import "math.h";
+
+///
+/// Configuration
+///
+
+struct config
+{
+  nt:     int,  // number of time steps
+
+  ndim:   int,  // number of dimensions
+  ndir:   int,  // 3^(number of dimensions)
+  dshift: int,  // (3^(number of dimensions) - 1)/2
+
+  ng:     int,  // number of energy groups
+  nx:     int,  // number of real cells in x
+  ny:     int,  // number of real cells in y
+  nz:     int,  // number of real cells in z
+  noct:   int,  // number of octancts
+  nang:   int,  // number of discrete angles per cell per octant
+
+  nex:    int,  // number of edge cells in x (per side)
+  ney:    int,  // number of edge cells in y (per side)
+  nez:    int,  // number of edge cells in z (per side)
+
+  ntx:    int,  // total number of cells in x (including edges)
+  nty:    int,  // total number of cells in y (including edges)
+  ntz:    int,  // total number of cells in z (including edges)
+
+  nbx:    int,  // number of real blocks in x
+  nby:    int,  // number of real blocks in y
+  nbz:    int,  // number of real blocks in z
+
+  nebx:   int,  // number of edge blocks in x (per side)
+  neby:   int,  // number of edge blocks in x (per side)
+  nebz:   int,  // number of edge blocks in x (per side)
+
+  ntbx:   int,  // total number of blocks in x (including edges)
+  ntby:   int,  // total number of blocks in x (including edges)
+  ntbz:   int,  // total number of blocks in x (including edges)
+
+  ncx:    int,  // number of cells in a block of x
+  ncy:    int,  // number of cells in a block of y
+  ncz:    int,  // number of cells in a block of z
+}
+
+///
+/// Block Coordinates, Linearization
+///
+
+struct block_id
+{
+  g:   int,     // energy group
+  bx:  int,     // x coordinate
+  by:  int,     // y coordinate
+  bz:  int,     // z coordinate
+  dir: int,     // direction
+}
+
+task block_id_stride_g(cfg: config): int
+{
+  return cfg.ndir*cfg.ntbx*cfg.ntby*cfg.ntbz;
+}
+
+task block_id_stride_bz(cfg: config): int
+{
+  return cfg.ndir*cfg.ntbx*cfg.ntby;
+}
+
+task block_id_stride_by(cfg: config): int
+{
+  return cfg.ndir*cfg.ntbx;
+}
+
+task block_id_stride_bx(cfg: config): int
+{
+  return cfg.ndir;
+}
+
+task block_id_stride_dir(cfg: config): int
+{
+  return 1;
+}
+
+task block_id_to_int(p: block_id, cfg: config): int
+{
+  let bx = p.bx + cfg.nebx;
+  let by = p.by + cfg.neby;
+  let bz = p.bz + cfg.nebz;
+  let dir = p.dir + cfg.dshift;
+  return p.g*block_id_stride_g(cfg) +
+         bx*block_id_stride_bx(cfg) +
+         by*block_id_stride_by(cfg) +
+         bz*block_id_stride_bz(cfg) +
+         dir*block_id_stride_dir(cfg);
+}
+
+task int_to_block_id(i: int, cfg: config): block_id
+{
+  return {
+    g:   (i/block_id_stride_g(cfg))%cfg.ng,
+    bx:  (i/block_id_stride_bx(cfg))%cfg.ntbx - cfg.nebx,
+    by:  (i/block_id_stride_by(cfg))%cfg.ntby - cfg.neby,
+    bz:  (i/block_id_stride_bz(cfg))%cfg.ntbz - cfg.nebz,
+    dir: (i/block_id_stride_dir(cfg))%cfg.ndir - cfg.dshift,
+  };
+}
+
+///
+/// Cell Coordinates, Linearization
+///
+
+struct cell_id
+{
+  g: int,       // energy group
+  x: int,       // global x coordinate
+  y: int,       // global y coordinate
+  z: int,       // global z coordinate
+  n: int,       // octant
+  m: int,       // angle within octant
+}
+
+task cell_id_stride_g(cfg: config): int
+{
+  return cfg.nang*cfg.noct*cfg.ntx*cfg.nty*cfg.ntz;
+}
+
+task cell_id_stride_z(cfg: config): int
+{
+  return cfg.nang*cfg.noct*cfg.ntx*cfg.nty;
+}
+
+task cell_id_stride_y(cfg: config): int
+{
+  return cfg.nang*cfg.noct*cfg.ntx;
+}
+
+task cell_id_stride_x(cfg: config): int
+{
+  return cfg.nang*cfg.noct;
+}
+
+task cell_id_stride_n(cfg: config): int
+{
+  return cfg.nang;
+}
+
+task cell_id_stride_m(cfg: config): int
+{
+  return 1;
+}
+
+task cell_id_to_int(p: cell_id, cfg: config): int
+{
+  let x = p.x + cfg.nex;
+  let y = p.y + cfg.ney;
+  let z = p.z + cfg.nez;
+  return p.g*cell_id_stride_g(cfg) +
+         x*cell_id_stride_x(cfg) +
+         y*cell_id_stride_y(cfg) +
+         z*cell_id_stride_z(cfg) +
+         p.n*cell_id_stride_n(cfg) +
+         p.m*cell_id_stride_m(cfg);
+}
+
+task int_to_cell_id(i: int, cfg: config): cell_id
+{
+  return {
+    g: (i/cell_id_stride_g(cfg))%cfg.ng,
+    x: (i/cell_id_stride_x(cfg))%cfg.ntx - cfg.nex,
+    y: (i/cell_id_stride_y(cfg))%cfg.nty - cfg.ney,
+    z: (i/cell_id_stride_z(cfg))%cfg.ntz - cfg.nez,
+    n: (i/cell_id_stride_n(cfg))%cfg.noct,
+    m: (i/cell_id_stride_m(cfg))%cfg.nang,
+  };
+}
+
+task direction(dx: int, dy: int, dz: int): int
+{
+  return dx + 3*(dy + 3*dz);
+}
+
+task mux_direction(pos: int, low: int, high: int): int
+{
+  if (pos <= low) {
+    return -1;
+  }
+  if (pos >= high) {
+    return 1;
+  }
+  return 0;
+}
+
+task demux_direction(dir: int, low: int, mid: int, high: int): int
+{
+  if (dir == -1) {
+    return low;
+  }
+  if (dir == 1) {
+    return high;
+  }
+  return mid;
+}
+
+task cell_block_id(c: cell_id, cfg: config): block_id
+{
+  let g = c.g;
+
+  let bx = int(floor(double(c.x)/double(cfg.ncx)));
+  let by = int(floor(double(c.y)/double(cfg.ncy)));
+  let bz = int(floor(double(c.z)/double(cfg.ncz)));
+
+  let local_x = (c.x + cfg.ncx)%cfg.ncx;
+  let local_y = (c.y + cfg.ncy)%cfg.ncy;
+  let local_z = (c.z + cfg.ncz)%cfg.ncz;
+
+  let dx = mux_direction(local_x, 0, cfg.ncx - 1);
+
+  var dy = 0;
+  if (cfg.ndim >= 2) {
+    dy = mux_direction(local_y, 0, cfg.ncy - 1);
+  }
+
+  var dz = 0;
+  if (cfg.ndim >= 3) {
+    dz = mux_direction(local_z, 0, cfg.ncz - 1);
+  }
+
+  let dir = direction(dx, dy, dz);
+
+  return {
+    g: g,
+    bx: bx,
+    by: by,
+    bz: bz,
+    dir: dir,
+  };
+}
+
+task block_start_cell_id(b: block_id, cfg: config): cell_id
+{
+  let d = b.dir + cfg.dshift;
+  let dx = d%3 - 1;
+  let dy = (d/3)%3 - 1;
+  let dz = (d/3/3)%3 - 1;
+
+  let x = demux_direction(dx, 0, 1, cfg.ncx - 1);
+  let y = demux_direction(dy, 0, 1, cfg.ncy - 1);
+  let z = demux_direction(dz, 0, 1, cfg.ncz - 1);
+
+  return {
+    g: b.g,
+    x: b.bx*cfg.ncx + x,
+    y: b.by*cfg.ncy + y,
+    z: b.bz*cfg.ncz + z,
+    n: 0,
+    m: 0,
+  };
+}
+
+///
+/// Cell Contents
+///
+
+struct cell
+{
+  x: double,
+}
+
+///
+/// Initialization
+///
+
+task initialize(is: ispace<int>, cells: array<is, cell>)
+  , writes(cells)
+{
+  for i in is {
+    cells[i].x = 1.0;
+  }
+}
+
+///
+/// Sweep
+///
+
+task sweep1d(b1: block_id,
+             is_b0: ispace<int>, cells_b0: array<is_b0, cell>,
+             is_b1: ispace<int>, cells_b1: array<is_b1, cell>,
+             is_b2: ispace<int>, cells_b2: array<is_b2, cell>,
+             is_b3: ispace<int>, cells_b3: array<is_b3, cell>,
+             dx: int,
+             cfg: config)
+  , reads(cells_b0, cells_b1, cells_b2, cells_b3)
+  , writes(cells_b1, cells_b2, cells_b3)
+{
+  var n = 0;
+  if (dx < 0) {
+    n = 1;
+  }
+
+  let c1 = block_start_cell_id(b1, cfg){n: n};
+
+  let sx = dx*cell_id_stride_x(cfg);    // stride in x
+  let sm = cell_id_stride_m(cfg);       // stride in m
+
+  // update b1
+  var col = cell_id_to_int(c1, cfg);
+  let last = col - sx;
+  var m = 0;
+  while (m < cfg.nang) {
+    cells_b1[col + m].x += cells_b0[last + m].x;
+    m += sm;
+  }
+
+  // update first cell of b2
+  col += sx;
+  let last = col - sx;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b2[col + m].x += cells_b1[last + m].x;
+    m += sm;
+  }
+
+  // update rest of b2
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last = col - sx;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b2[col + m].x += cells_b2[last + m].x;
+      m += sm;
+    }
+  }
+
+  // update b3
+  col += sx;
+  let last = col - sx;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b3[col + m].x += cells_b2[last + m].x;
+    m += sm;
+  }
+}
+
+task sweep2d(b05: block_id,
+             is_b00: ispace<int>, cells_b00: array<is_b00, cell>,
+             is_b01: ispace<int>, cells_b01: array<is_b01, cell>,
+             is_b02: ispace<int>, cells_b02: array<is_b02, cell>,
+             is_b03: ispace<int>, cells_b03: array<is_b03, cell>,
+             is_b04: ispace<int>, cells_b04: array<is_b04, cell>,
+             is_b05: ispace<int>, cells_b05: array<is_b05, cell>,
+             is_b06: ispace<int>, cells_b06: array<is_b06, cell>,
+             is_b07: ispace<int>, cells_b07: array<is_b07, cell>,
+             is_b08: ispace<int>, cells_b08: array<is_b08, cell>,
+             is_b09: ispace<int>, cells_b09: array<is_b09, cell>,
+             is_b10: ispace<int>, cells_b10: array<is_b10, cell>,
+             is_b11: ispace<int>, cells_b11: array<is_b11, cell>,
+             is_b12: ispace<int>, cells_b12: array<is_b12, cell>,
+             is_b13: ispace<int>, cells_b13: array<is_b13, cell>,
+             is_b14: ispace<int>, cells_b14: array<is_b14, cell>,
+             is_b15: ispace<int>, cells_b15: array<is_b15, cell>,
+             dx: int, dy: int,
+             cfg: config)
+  , reads(cells_b00, cells_b01, cells_b02, cells_b03,
+          cells_b04, cells_b05, cells_b06, cells_b07,
+          cells_b08, cells_b09, cells_b10, cells_b11,
+          cells_b12, cells_b13, cells_b14, cells_b15)
+  , writes(cells_b05, cells_b06, cells_b07,
+           cells_b09, cells_b10, cells_b11,
+           cells_b13, cells_b14, cells_b15)
+{
+  var n = 0;
+  if (dx < 0) {
+    n += 1;
+  }
+  if (dy < 0) {
+    n += 2;
+  }
+
+  let c05 = block_start_cell_id(b05, cfg){n: n};
+
+  let sx = dx*cell_id_stride_x(cfg);    // stride in x
+  let sy = dy*cell_id_stride_y(cfg);    // stride in y
+  let sm = cell_id_stride_m(cfg);       // stride in m
+
+  /// first row
+  ///
+
+  // update b05
+  var row = cell_id_to_int(c05, cfg);
+  var col = row;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  var m = 0;
+  while (m < cfg.nang) {
+    cells_b05[col + m].x +=
+      cells_b00[last11 + m].x +
+      cells_b01[last10 + m].x +
+      cells_b04[last01 + m].x;
+    m += sm;
+  }
+
+  // update first col of b06
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b06[col + m].x +=
+      cells_b01[last11 + m].x +
+      cells_b02[last10 + m].x +
+      cells_b05[last01 + m].x;
+    m += sm;
+  }
+
+  // update rest of b06
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b06[col + m].x +=
+        cells_b02[last11 + m].x +
+        cells_b02[last10 + m].x +
+        cells_b06[last01 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b07
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b07[col + m].x +=
+      cells_b02[last11 + m].x +
+      cells_b03[last10 + m].x +
+      cells_b06[last01 + m].x;
+    m += sm;
+  }
+
+  /// second row
+  ///
+
+  // update first row of b09
+  row += sy;
+  col = row;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b09[col + m].x +=
+      cells_b04[last11 + m].x +
+      cells_b05[last10 + m].x +
+      cells_b08[last01 + m].x;
+    m += sm;
+  }
+
+  // update first col of first row of b10
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b10[col + m].x +=
+      cells_b05[last11 + m].x +
+      cells_b06[last10 + m].x +
+      cells_b09[last01 + m].x;
+    m += sm;
+  }
+
+  // update rest of first row of b10
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b10[col + m].x +=
+        cells_b06[last11 + m].x +
+        cells_b06[last10 + m].x +
+        cells_b10[last01 + m].x;
+      m += sm;
+    }
+  }
+
+  // update first row of b11
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b11[col + m].x +=
+      cells_b06[last11 + m].x +
+      cells_b07[last10 + m].x +
+      cells_b10[last01 + m].x;
+    m += sm;
+  }
+
+  /// rows 3 .. (n - 1)
+  ///
+
+  let stoprow = row + (cfg.ncy - 3) * sy;
+  while (row != stoprow) {
+    row += sy;
+
+    // update b09
+    col = row;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b09[col + m].x +=
+        cells_b08[last11 + m].x +
+        cells_b09[last10 + m].x +
+        cells_b08[last01 + m].x;
+      m += sm;
+    }
+
+    // update first col of b10
+    col += sx;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b10[col + m].x +=
+        cells_b09[last11 + m].x +
+        cells_b10[last10 + m].x +
+        cells_b09[last01 + m].x;
+      m += sm;
+    }
+
+    // update rest of b10
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last01 = col - sx;
+      let last10 = col - sy;
+      let last11 = col - sx - sy;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b10[col + m].x +=
+          cells_b10[last11 + m].x +
+          cells_b10[last10 + m].x +
+          cells_b10[last01 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b11
+    col += sx;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b11[col + m].x +=
+        cells_b10[last11 + m].x +
+        cells_b11[last10 + m].x +
+        cells_b10[last01 + m].x;
+      m += sm;
+    }
+  }
+
+  /// last row
+  ///
+
+  // update b13
+  row += sy;
+  col = row;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b13[col + m].x +=
+      cells_b08[last11 + m].x +
+      cells_b09[last10 + m].x +
+      cells_b12[last01 + m].x;
+    m += sm;
+  }
+
+  // update first col of b14
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b14[col + m].x +=
+      cells_b09[last11 + m].x +
+      cells_b10[last10 + m].x +
+      cells_b13[last01 + m].x;
+    m += sm;
+  }
+
+  // update rest of b14
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last01 = col - sx;
+    let last10 = col - sy;
+    let last11 = col - sx - sy;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b14[col + m].x +=
+        cells_b10[last11 + m].x +
+        cells_b10[last10 + m].x +
+        cells_b14[last01 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b15
+  col += sx;
+  let last01 = col - sx;
+  let last10 = col - sy;
+  let last11 = col - sx - sy;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b15[col + m].x +=
+      cells_b10[last11 + m].x +
+      cells_b11[last10 + m].x +
+      cells_b14[last01 + m].x;
+    m += sm;
+  }
+
+}
+
+task sweep3d(b21: block_id,
+             is_b00: ispace<int>, cells_b00: array<is_b00, cell>,
+             is_b01: ispace<int>, cells_b01: array<is_b01, cell>,
+             is_b02: ispace<int>, cells_b02: array<is_b02, cell>,
+             is_b03: ispace<int>, cells_b03: array<is_b03, cell>,
+             is_b04: ispace<int>, cells_b04: array<is_b04, cell>,
+             is_b05: ispace<int>, cells_b05: array<is_b05, cell>,
+             is_b06: ispace<int>, cells_b06: array<is_b06, cell>,
+             is_b07: ispace<int>, cells_b07: array<is_b07, cell>,
+             is_b08: ispace<int>, cells_b08: array<is_b08, cell>,
+             is_b09: ispace<int>, cells_b09: array<is_b09, cell>,
+             is_b10: ispace<int>, cells_b10: array<is_b10, cell>,
+             is_b11: ispace<int>, cells_b11: array<is_b11, cell>,
+             is_b12: ispace<int>, cells_b12: array<is_b12, cell>,
+             is_b13: ispace<int>, cells_b13: array<is_b13, cell>,
+             is_b14: ispace<int>, cells_b14: array<is_b14, cell>,
+             is_b15: ispace<int>, cells_b15: array<is_b15, cell>,
+             is_b16: ispace<int>, cells_b16: array<is_b16, cell>,
+             is_b17: ispace<int>, cells_b17: array<is_b17, cell>,
+             is_b18: ispace<int>, cells_b18: array<is_b18, cell>,
+             is_b19: ispace<int>, cells_b19: array<is_b19, cell>,
+             is_b20: ispace<int>, cells_b20: array<is_b20, cell>,
+             is_b21: ispace<int>, cells_b21: array<is_b21, cell>,
+             is_b22: ispace<int>, cells_b22: array<is_b22, cell>,
+             is_b23: ispace<int>, cells_b23: array<is_b23, cell>,
+             is_b24: ispace<int>, cells_b24: array<is_b24, cell>,
+             is_b25: ispace<int>, cells_b25: array<is_b25, cell>,
+             is_b26: ispace<int>, cells_b26: array<is_b26, cell>,
+             is_b27: ispace<int>, cells_b27: array<is_b27, cell>,
+             is_b28: ispace<int>, cells_b28: array<is_b28, cell>,
+             is_b29: ispace<int>, cells_b29: array<is_b29, cell>,
+             is_b30: ispace<int>, cells_b30: array<is_b30, cell>,
+             is_b31: ispace<int>, cells_b31: array<is_b31, cell>,
+             is_b32: ispace<int>, cells_b32: array<is_b32, cell>,
+             is_b33: ispace<int>, cells_b33: array<is_b33, cell>,
+             is_b34: ispace<int>, cells_b34: array<is_b34, cell>,
+             is_b35: ispace<int>, cells_b35: array<is_b35, cell>,
+             is_b36: ispace<int>, cells_b36: array<is_b36, cell>,
+             is_b37: ispace<int>, cells_b37: array<is_b37, cell>,
+             is_b38: ispace<int>, cells_b38: array<is_b38, cell>,
+             is_b39: ispace<int>, cells_b39: array<is_b39, cell>,
+             is_b40: ispace<int>, cells_b40: array<is_b40, cell>,
+             is_b41: ispace<int>, cells_b41: array<is_b41, cell>,
+             is_b42: ispace<int>, cells_b42: array<is_b42, cell>,
+             is_b43: ispace<int>, cells_b43: array<is_b43, cell>,
+             is_b44: ispace<int>, cells_b44: array<is_b44, cell>,
+             is_b45: ispace<int>, cells_b45: array<is_b45, cell>,
+             is_b46: ispace<int>, cells_b46: array<is_b46, cell>,
+             is_b47: ispace<int>, cells_b47: array<is_b47, cell>,
+             is_b48: ispace<int>, cells_b48: array<is_b48, cell>,
+             is_b49: ispace<int>, cells_b49: array<is_b49, cell>,
+             is_b50: ispace<int>, cells_b50: array<is_b50, cell>,
+             is_b51: ispace<int>, cells_b51: array<is_b51, cell>,
+             is_b52: ispace<int>, cells_b52: array<is_b52, cell>,
+             is_b53: ispace<int>, cells_b53: array<is_b53, cell>,
+             is_b54: ispace<int>, cells_b54: array<is_b54, cell>,
+             is_b55: ispace<int>, cells_b55: array<is_b55, cell>,
+             is_b56: ispace<int>, cells_b56: array<is_b56, cell>,
+             is_b57: ispace<int>, cells_b57: array<is_b57, cell>,
+             is_b58: ispace<int>, cells_b58: array<is_b58, cell>,
+             is_b59: ispace<int>, cells_b59: array<is_b59, cell>,
+             is_b60: ispace<int>, cells_b60: array<is_b60, cell>,
+             is_b61: ispace<int>, cells_b61: array<is_b61, cell>,
+             is_b62: ispace<int>, cells_b62: array<is_b62, cell>,
+             is_b63: ispace<int>, cells_b63: array<is_b63, cell>,
+             dx: int, dy: int, dz: int,
+             cfg: config)
+  , reads(cells_b00, cells_b01, cells_b02, cells_b03,
+          cells_b04, cells_b05, cells_b06, cells_b07,
+          cells_b08, cells_b09, cells_b10, cells_b11,
+          cells_b12, cells_b13, cells_b14, cells_b15,
+          cells_b16, cells_b17, cells_b18, cells_b19,
+          cells_b20, cells_b21, cells_b22, cells_b23,
+          cells_b24, cells_b25, cells_b26, cells_b27,
+          cells_b28, cells_b29, cells_b30, cells_b31,
+          cells_b32, cells_b33, cells_b34, cells_b35,
+          cells_b36, cells_b37, cells_b38, cells_b39,
+          cells_b40, cells_b41, cells_b42, cells_b43,
+          cells_b44, cells_b45, cells_b46, cells_b47,
+          cells_b48, cells_b49, cells_b50, cells_b51,
+          cells_b52, cells_b53, cells_b54, cells_b55,
+          cells_b56, cells_b57, cells_b58, cells_b59,
+          cells_b60, cells_b61, cells_b62, cells_b63)
+  , writes(cells_b05, cells_b06, cells_b07,
+           cells_b09, cells_b10, cells_b11,
+           cells_b13, cells_b14, cells_b15,
+           cells_b21, cells_b22, cells_b23,
+           cells_b25, cells_b26, cells_b27,
+           cells_b29, cells_b30, cells_b31,
+           cells_b37, cells_b38, cells_b39,
+           cells_b41, cells_b42, cells_b43,
+           cells_b45, cells_b46, cells_b47,
+           cells_b53, cells_b54, cells_b55,
+           cells_b57, cells_b58, cells_b59,
+           cells_b61, cells_b62, cells_b63)
+{
+  var n = 0;
+  if (dx < 0) {
+    n += 1;
+  }
+  if (dy < 0) {
+    n += 2;
+  }
+  if (dz < 0) {
+    n += 4;
+  }
+
+  let c21 = block_start_cell_id(b21, cfg){n: n};
+
+  let sx = dx*cell_id_stride_x(cfg);    // stride in x
+  let sy = dy*cell_id_stride_y(cfg);    // stride in y
+  let sz = dz*cell_id_stride_z(cfg);    // stride in z
+  let sm = cell_id_stride_m(cfg);       // stride in m
+
+  ////
+  //// first plane
+  ////
+
+  /// first row
+  ///
+
+  // update b21
+  var plane = cell_id_to_int(c21, cfg);
+  var row = plane;
+  var col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  var m = 0;
+  while (m < cfg.nang) {
+    cells_b21[col + m].x +=
+      cells_b00[last111 + m].x +
+      cells_b01[last110 + m].x +
+      cells_b04[last101 + m].x +
+      cells_b05[last100 + m].x +
+      cells_b16[last011 + m].x +
+      cells_b17[last010 + m].x +
+      cells_b20[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b22
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b22[col + m].x +=
+      cells_b01[last111 + m].x +
+      cells_b02[last110 + m].x +
+      cells_b05[last101 + m].x +
+      cells_b06[last100 + m].x +
+      cells_b17[last011 + m].x +
+      cells_b18[last010 + m].x +
+      cells_b21[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b22
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b22[col + m].x +=
+        cells_b02[last111 + m].x +
+        cells_b02[last110 + m].x +
+        cells_b06[last101 + m].x +
+        cells_b06[last100 + m].x +
+        cells_b18[last011 + m].x +
+        cells_b18[last010 + m].x +
+        cells_b22[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b23
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b23[col + m].x +=
+      cells_b02[last111 + m].x +
+      cells_b03[last110 + m].x +
+      cells_b06[last101 + m].x +
+      cells_b07[last100 + m].x +
+      cells_b18[last011 + m].x +
+      cells_b19[last010 + m].x +
+      cells_b22[last001 + m].x;
+    m += sm;
+  }
+
+  /// second row
+  ///
+
+  // update first row of b25
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b25[col + m].x +=
+      cells_b04[last111 + m].x +
+      cells_b05[last110 + m].x +
+      cells_b08[last101 + m].x +
+      cells_b09[last100 + m].x +
+      cells_b20[last011 + m].x +
+      cells_b21[last010 + m].x +
+      cells_b24[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of first row of b26
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b26[col + m].x +=
+      cells_b05[last111 + m].x +
+      cells_b06[last110 + m].x +
+      cells_b09[last101 + m].x +
+      cells_b10[last100 + m].x +
+      cells_b21[last011 + m].x +
+      cells_b22[last010 + m].x +
+      cells_b25[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of first row of b26
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b26[col + m].x +=
+        cells_b06[last111 + m].x +
+        cells_b06[last110 + m].x +
+        cells_b10[last101 + m].x +
+        cells_b10[last100 + m].x +
+        cells_b22[last011 + m].x +
+        cells_b22[last010 + m].x +
+        cells_b26[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update first row of b27
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b27[col + m].x +=
+      cells_b06[last111 + m].x +
+      cells_b07[last110 + m].x +
+      cells_b10[last101 + m].x +
+      cells_b11[last100 + m].x +
+      cells_b22[last011 + m].x +
+      cells_b23[last010 + m].x +
+      cells_b26[last001 + m].x;
+    m += sm;
+  }
+
+  /// rows 3 .. (n - 1)
+  ///
+
+  let stoprow = row + (cfg.ncy - 3) * sy;
+  while (row != stoprow) {
+    row += sy;
+
+    // update b25
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b25[col + m].x +=
+        cells_b08[last111 + m].x +
+        cells_b09[last110 + m].x +
+        cells_b08[last101 + m].x +
+        cells_b09[last100 + m].x +
+        cells_b24[last011 + m].x +
+        cells_b25[last010 + m].x +
+        cells_b24[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of b26
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b26[col + m].x +=
+        cells_b09[last111 + m].x +
+        cells_b10[last110 + m].x +
+        cells_b09[last101 + m].x +
+        cells_b10[last100 + m].x +
+        cells_b25[last011 + m].x +
+        cells_b26[last010 + m].x +
+        cells_b25[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of b26
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b26[col + m].x +=
+          cells_b10[last111 + m].x +
+          cells_b10[last110 + m].x +
+          cells_b10[last101 + m].x +
+          cells_b10[last100 + m].x +
+          cells_b26[last011 + m].x +
+          cells_b26[last010 + m].x +
+          cells_b26[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b27
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b27[col + m].x +=
+        cells_b10[last111 + m].x +
+        cells_b11[last110 + m].x +
+        cells_b10[last101 + m].x +
+        cells_b11[last100 + m].x +
+        cells_b26[last011 + m].x +
+        cells_b27[last010 + m].x +
+        cells_b26[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  /// last row
+  ///
+
+  // update b29
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b29[col + m].x +=
+      cells_b08[last111 + m].x +
+      cells_b09[last110 + m].x +
+      cells_b12[last101 + m].x +
+      cells_b13[last100 + m].x +
+      cells_b24[last011 + m].x +
+      cells_b25[last010 + m].x +
+      cells_b28[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b30
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b30[col + m].x +=
+      cells_b09[last111 + m].x +
+      cells_b10[last110 + m].x +
+      cells_b13[last101 + m].x +
+      cells_b14[last100 + m].x +
+      cells_b25[last011 + m].x +
+      cells_b26[last010 + m].x +
+      cells_b29[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b30
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b30[col + m].x +=
+        cells_b10[last111 + m].x +
+        cells_b10[last110 + m].x +
+        cells_b14[last101 + m].x +
+        cells_b14[last100 + m].x +
+        cells_b26[last011 + m].x +
+        cells_b26[last010 + m].x +
+        cells_b30[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b31
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b31[col + m].x +=
+      cells_b10[last111 + m].x +
+      cells_b11[last110 + m].x +
+      cells_b14[last101 + m].x +
+      cells_b15[last100 + m].x +
+      cells_b26[last011 + m].x +
+      cells_b27[last010 + m].x +
+      cells_b30[last001 + m].x;
+    m += sm;
+  }
+
+  ////
+  //// second plane
+  ////
+
+  /// first row
+  ///
+
+  // update b37
+  plane += sz;
+  row = plane;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  var m = 0;
+  while (m < cfg.nang) {
+    cells_b37[col + m].x +=
+      cells_b16[last111 + m].x +
+      cells_b17[last110 + m].x +
+      cells_b20[last101 + m].x +
+      cells_b21[last100 + m].x +
+      cells_b32[last011 + m].x +
+      cells_b33[last010 + m].x +
+      cells_b36[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b38
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b38[col + m].x +=
+      cells_b17[last111 + m].x +
+      cells_b18[last110 + m].x +
+      cells_b21[last101 + m].x +
+      cells_b22[last100 + m].x +
+      cells_b33[last011 + m].x +
+      cells_b34[last010 + m].x +
+      cells_b37[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b38
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b38[col + m].x +=
+        cells_b18[last111 + m].x +
+        cells_b18[last110 + m].x +
+        cells_b22[last101 + m].x +
+        cells_b22[last100 + m].x +
+        cells_b34[last011 + m].x +
+        cells_b34[last010 + m].x +
+        cells_b38[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b39
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b39[col + m].x +=
+      cells_b18[last111 + m].x +
+      cells_b19[last110 + m].x +
+      cells_b22[last101 + m].x +
+      cells_b23[last100 + m].x +
+      cells_b34[last011 + m].x +
+      cells_b35[last010 + m].x +
+      cells_b38[last001 + m].x;
+    m += sm;
+  }
+
+  /// second row
+  ///
+
+  // update first row of b41
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b41[col + m].x +=
+      cells_b20[last111 + m].x +
+      cells_b21[last110 + m].x +
+      cells_b24[last101 + m].x +
+      cells_b25[last100 + m].x +
+      cells_b36[last011 + m].x +
+      cells_b37[last010 + m].x +
+      cells_b40[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of first row of b42
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b42[col + m].x +=
+      cells_b21[last111 + m].x +
+      cells_b22[last110 + m].x +
+      cells_b25[last101 + m].x +
+      cells_b26[last100 + m].x +
+      cells_b37[last011 + m].x +
+      cells_b38[last010 + m].x +
+      cells_b41[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of first row of b42
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b42[col + m].x +=
+        cells_b22[last111 + m].x +
+        cells_b22[last110 + m].x +
+        cells_b26[last101 + m].x +
+        cells_b26[last100 + m].x +
+        cells_b38[last011 + m].x +
+        cells_b38[last010 + m].x +
+        cells_b42[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update first row of b43
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b43[col + m].x +=
+      cells_b22[last111 + m].x +
+      cells_b23[last110 + m].x +
+      cells_b26[last101 + m].x +
+      cells_b27[last100 + m].x +
+      cells_b38[last011 + m].x +
+      cells_b39[last010 + m].x +
+      cells_b42[last001 + m].x;
+    m += sm;
+  }
+
+  /// rows 3 .. (n - 1)
+  ///
+
+  let stoprow = row + (cfg.ncy - 3) * sy;
+  while (row != stoprow) {
+    row += sy;
+
+    // update b41
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b41[col + m].x +=
+        cells_b24[last111 + m].x +
+        cells_b25[last110 + m].x +
+        cells_b24[last101 + m].x +
+        cells_b25[last100 + m].x +
+        cells_b40[last011 + m].x +
+        cells_b41[last010 + m].x +
+        cells_b40[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of b42
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b42[col + m].x +=
+        cells_b25[last111 + m].x +
+        cells_b26[last110 + m].x +
+        cells_b25[last101 + m].x +
+        cells_b26[last100 + m].x +
+        cells_b41[last011 + m].x +
+        cells_b42[last010 + m].x +
+        cells_b41[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of b42
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b42[col + m].x +=
+          cells_b26[last111 + m].x +
+          cells_b26[last110 + m].x +
+          cells_b26[last101 + m].x +
+          cells_b26[last100 + m].x +
+          cells_b42[last011 + m].x +
+          cells_b42[last010 + m].x +
+          cells_b42[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b43
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b43[col + m].x +=
+        cells_b26[last111 + m].x +
+        cells_b27[last110 + m].x +
+        cells_b26[last101 + m].x +
+        cells_b27[last100 + m].x +
+        cells_b42[last011 + m].x +
+        cells_b43[last010 + m].x +
+        cells_b42[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  /// last row
+  ///
+
+  // update b45
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b45[col + m].x +=
+      cells_b24[last111 + m].x +
+      cells_b25[last110 + m].x +
+      cells_b28[last101 + m].x +
+      cells_b29[last100 + m].x +
+      cells_b40[last011 + m].x +
+      cells_b41[last010 + m].x +
+      cells_b44[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b46
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b46[col + m].x +=
+      cells_b25[last111 + m].x +
+      cells_b26[last110 + m].x +
+      cells_b29[last101 + m].x +
+      cells_b30[last100 + m].x +
+      cells_b41[last011 + m].x +
+      cells_b42[last010 + m].x +
+      cells_b45[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b46
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b46[col + m].x +=
+        cells_b26[last111 + m].x +
+        cells_b26[last110 + m].x +
+        cells_b30[last101 + m].x +
+        cells_b30[last100 + m].x +
+        cells_b42[last011 + m].x +
+        cells_b42[last010 + m].x +
+        cells_b46[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b47
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b47[col + m].x +=
+      cells_b26[last111 + m].x +
+      cells_b27[last110 + m].x +
+      cells_b30[last101 + m].x +
+      cells_b31[last100 + m].x +
+      cells_b42[last011 + m].x +
+      cells_b43[last010 + m].x +
+      cells_b46[last001 + m].x;
+    m += sm;
+  }
+
+  ////
+  //// planes 3 .. (n - 1)
+  ////
+
+  let stopplane = plane + (cfg.ncz - 3) * sz;
+  while (plane != stopplane) {
+    plane += sz;
+
+    /// first row
+    ///
+
+    // update b37
+    row = plane;
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    var m = 0;
+    while (m < cfg.nang) {
+      cells_b37[col + m].x +=
+        cells_b32[last111 + m].x +
+        cells_b33[last110 + m].x +
+        cells_b36[last101 + m].x +
+        cells_b37[last100 + m].x +
+        cells_b32[last011 + m].x +
+        cells_b33[last010 + m].x +
+        cells_b36[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of b38
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b38[col + m].x +=
+        cells_b33[last111 + m].x +
+        cells_b34[last110 + m].x +
+        cells_b37[last101 + m].x +
+        cells_b38[last100 + m].x +
+        cells_b33[last011 + m].x +
+        cells_b34[last010 + m].x +
+        cells_b37[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of b38
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b38[col + m].x +=
+          cells_b34[last111 + m].x +
+          cells_b34[last110 + m].x +
+          cells_b38[last101 + m].x +
+          cells_b38[last100 + m].x +
+          cells_b34[last011 + m].x +
+          cells_b34[last010 + m].x +
+          cells_b38[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b39
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b39[col + m].x +=
+        cells_b34[last111 + m].x +
+        cells_b35[last110 + m].x +
+        cells_b38[last101 + m].x +
+        cells_b39[last100 + m].x +
+        cells_b34[last011 + m].x +
+        cells_b35[last010 + m].x +
+        cells_b38[last001 + m].x;
+      m += sm;
+    }
+
+    /// second row
+    ///
+
+    // update first row of b41
+    row += sy;
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b41[col + m].x +=
+        cells_b36[last111 + m].x +
+        cells_b37[last110 + m].x +
+        cells_b40[last101 + m].x +
+        cells_b41[last100 + m].x +
+        cells_b36[last011 + m].x +
+        cells_b37[last010 + m].x +
+        cells_b40[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of first row of b42
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b42[col + m].x +=
+        cells_b37[last111 + m].x +
+        cells_b38[last110 + m].x +
+        cells_b41[last101 + m].x +
+        cells_b42[last100 + m].x +
+        cells_b37[last011 + m].x +
+        cells_b38[last010 + m].x +
+        cells_b41[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of first row of b42
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b42[col + m].x +=
+          cells_b38[last111 + m].x +
+          cells_b38[last110 + m].x +
+          cells_b42[last101 + m].x +
+          cells_b42[last100 + m].x +
+          cells_b38[last011 + m].x +
+          cells_b38[last010 + m].x +
+          cells_b42[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update first row of b43
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b43[col + m].x +=
+        cells_b38[last111 + m].x +
+        cells_b39[last110 + m].x +
+        cells_b42[last101 + m].x +
+        cells_b43[last100 + m].x +
+        cells_b38[last011 + m].x +
+        cells_b39[last010 + m].x +
+        cells_b42[last001 + m].x;
+      m += sm;
+    }
+
+    /// rows 3 .. (n - 1)
+    ///
+
+    let stoprow = row + (cfg.ncy - 3) * sy;
+    while (row != stoprow) {
+      row += sy;
+
+      // update b41
+      col = row;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b41[col + m].x +=
+          cells_b40[last111 + m].x +
+          cells_b41[last110 + m].x +
+          cells_b40[last101 + m].x +
+          cells_b41[last100 + m].x +
+          cells_b40[last011 + m].x +
+          cells_b41[last010 + m].x +
+          cells_b40[last001 + m].x;
+        m += sm;
+      }
+
+      // update first col of b42
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b42[col + m].x +=
+          cells_b41[last111 + m].x +
+          cells_b42[last110 + m].x +
+          cells_b41[last101 + m].x +
+          cells_b42[last100 + m].x +
+          cells_b41[last011 + m].x +
+          cells_b42[last010 + m].x +
+          cells_b41[last001 + m].x;
+        m += sm;
+      }
+
+      // update rest of b42
+      let stopcol = col + (cfg.ncx - 3)*sx;
+      while (col != stopcol) {
+        col += sx;
+        let last001 = col - sx;
+        let last010 = col      - sy;
+        let last011 = col - sx - sy;
+        let last100 = col           - sz;
+        let last101 = col - sx      - sz;
+        let last110 = col      - sy - sz;
+        let last111 = col - sx - sy - sz;
+        m = 0;
+        while (m < cfg.nang) {
+          cells_b42[col + m].x +=
+            cells_b42[last111 + m].x +
+            cells_b42[last110 + m].x +
+            cells_b42[last101 + m].x +
+            cells_b42[last100 + m].x +
+            cells_b42[last011 + m].x +
+            cells_b42[last010 + m].x +
+            cells_b42[last001 + m].x;
+          m += sm;
+        }
+      }
+
+      // update b43
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b43[col + m].x +=
+          cells_b42[last111 + m].x +
+          cells_b43[last110 + m].x +
+          cells_b42[last101 + m].x +
+          cells_b43[last100 + m].x +
+          cells_b42[last011 + m].x +
+          cells_b43[last010 + m].x +
+          cells_b42[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    /// last row
+    ///
+
+    // update b45
+    row += sy;
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b45[col + m].x +=
+        cells_b40[last111 + m].x +
+        cells_b41[last110 + m].x +
+        cells_b44[last101 + m].x +
+        cells_b45[last100 + m].x +
+        cells_b40[last011 + m].x +
+        cells_b41[last010 + m].x +
+        cells_b44[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of b46
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b46[col + m].x +=
+        cells_b41[last111 + m].x +
+        cells_b42[last110 + m].x +
+        cells_b45[last101 + m].x +
+        cells_b46[last100 + m].x +
+        cells_b41[last011 + m].x +
+        cells_b42[last010 + m].x +
+        cells_b45[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of b46
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b46[col + m].x +=
+          cells_b42[last111 + m].x +
+          cells_b42[last110 + m].x +
+          cells_b46[last101 + m].x +
+          cells_b46[last100 + m].x +
+          cells_b42[last011 + m].x +
+          cells_b42[last010 + m].x +
+          cells_b46[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b47
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b47[col + m].x +=
+        cells_b42[last111 + m].x +
+        cells_b43[last110 + m].x +
+        cells_b46[last101 + m].x +
+        cells_b47[last100 + m].x +
+        cells_b42[last011 + m].x +
+        cells_b43[last010 + m].x +
+        cells_b46[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  ////
+  //// last plane
+  ////
+
+  /// first row
+  ///
+
+  // update b53
+  plane += sz;
+  row = plane;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  var m = 0;
+  while (m < cfg.nang) {
+    cells_b53[col + m].x +=
+      cells_b32[last111 + m].x +
+      cells_b33[last110 + m].x +
+      cells_b36[last101 + m].x +
+      cells_b37[last100 + m].x +
+      cells_b48[last011 + m].x +
+      cells_b49[last010 + m].x +
+      cells_b52[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b54
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b54[col + m].x +=
+      cells_b33[last111 + m].x +
+      cells_b34[last110 + m].x +
+      cells_b37[last101 + m].x +
+      cells_b38[last100 + m].x +
+      cells_b49[last011 + m].x +
+      cells_b50[last010 + m].x +
+      cells_b53[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b54
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b54[col + m].x +=
+        cells_b34[last111 + m].x +
+        cells_b34[last110 + m].x +
+        cells_b38[last101 + m].x +
+        cells_b38[last100 + m].x +
+        cells_b50[last011 + m].x +
+        cells_b50[last010 + m].x +
+        cells_b54[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b55
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b55[col + m].x +=
+      cells_b34[last111 + m].x +
+      cells_b35[last110 + m].x +
+      cells_b38[last101 + m].x +
+      cells_b39[last100 + m].x +
+      cells_b50[last011 + m].x +
+      cells_b51[last010 + m].x +
+      cells_b54[last001 + m].x;
+    m += sm;
+  }
+
+  /// second row
+  ///
+
+  // update first row of b57
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b57[col + m].x +=
+      cells_b36[last111 + m].x +
+      cells_b37[last110 + m].x +
+      cells_b40[last101 + m].x +
+      cells_b41[last100 + m].x +
+      cells_b52[last011 + m].x +
+      cells_b53[last010 + m].x +
+      cells_b56[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of first row of b58
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b58[col + m].x +=
+      cells_b37[last111 + m].x +
+      cells_b38[last110 + m].x +
+      cells_b41[last101 + m].x +
+      cells_b42[last100 + m].x +
+      cells_b53[last011 + m].x +
+      cells_b54[last010 + m].x +
+      cells_b57[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of first row of b58
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b58[col + m].x +=
+        cells_b38[last111 + m].x +
+        cells_b38[last110 + m].x +
+        cells_b42[last101 + m].x +
+        cells_b42[last100 + m].x +
+        cells_b54[last011 + m].x +
+        cells_b54[last010 + m].x +
+        cells_b58[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update first row of b59
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b59[col + m].x +=
+      cells_b38[last111 + m].x +
+      cells_b39[last110 + m].x +
+      cells_b42[last101 + m].x +
+      cells_b43[last100 + m].x +
+      cells_b54[last011 + m].x +
+      cells_b55[last010 + m].x +
+      cells_b58[last001 + m].x;
+    m += sm;
+  }
+
+  /// rows 3 .. (n - 1)
+  ///
+
+  let stoprow = row + (cfg.ncy - 3) * sy;
+  while (row != stoprow) {
+    row += sy;
+
+    // update b57
+    col = row;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b57[col + m].x +=
+        cells_b40[last111 + m].x +
+        cells_b41[last110 + m].x +
+        cells_b40[last101 + m].x +
+        cells_b41[last100 + m].x +
+        cells_b56[last011 + m].x +
+        cells_b57[last010 + m].x +
+        cells_b56[last001 + m].x;
+      m += sm;
+    }
+
+    // update first col of b58
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b58[col + m].x +=
+        cells_b41[last111 + m].x +
+        cells_b42[last110 + m].x +
+        cells_b41[last101 + m].x +
+        cells_b42[last100 + m].x +
+        cells_b57[last011 + m].x +
+        cells_b58[last010 + m].x +
+        cells_b57[last001 + m].x;
+      m += sm;
+    }
+
+    // update rest of b58
+    let stopcol = col + (cfg.ncx - 3)*sx;
+    while (col != stopcol) {
+      col += sx;
+      let last001 = col - sx;
+      let last010 = col      - sy;
+      let last011 = col - sx - sy;
+      let last100 = col           - sz;
+      let last101 = col - sx      - sz;
+      let last110 = col      - sy - sz;
+      let last111 = col - sx - sy - sz;
+      m = 0;
+      while (m < cfg.nang) {
+        cells_b58[col + m].x +=
+          cells_b42[last111 + m].x +
+          cells_b42[last110 + m].x +
+          cells_b42[last101 + m].x +
+          cells_b42[last100 + m].x +
+          cells_b58[last011 + m].x +
+          cells_b58[last010 + m].x +
+          cells_b58[last001 + m].x;
+        m += sm;
+      }
+    }
+
+    // update b59
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b59[col + m].x +=
+        cells_b42[last111 + m].x +
+        cells_b43[last110 + m].x +
+        cells_b42[last101 + m].x +
+        cells_b43[last100 + m].x +
+        cells_b58[last011 + m].x +
+        cells_b59[last010 + m].x +
+        cells_b58[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  /// last row
+  ///
+
+  // update b61
+  row += sy;
+  col = row;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b61[col + m].x +=
+      cells_b40[last111 + m].x +
+      cells_b41[last110 + m].x +
+      cells_b44[last101 + m].x +
+      cells_b45[last100 + m].x +
+      cells_b56[last011 + m].x +
+      cells_b57[last010 + m].x +
+      cells_b60[last001 + m].x;
+    m += sm;
+  }
+
+  // update first col of b62
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b62[col + m].x +=
+      cells_b41[last111 + m].x +
+      cells_b42[last110 + m].x +
+      cells_b45[last101 + m].x +
+      cells_b46[last100 + m].x +
+      cells_b57[last011 + m].x +
+      cells_b58[last010 + m].x +
+      cells_b61[last001 + m].x;
+    m += sm;
+  }
+
+  // update rest of b62
+  let stopcol = col + (cfg.ncx - 3)*sx;
+  while (col != stopcol) {
+    col += sx;
+    let last001 = col - sx;
+    let last010 = col      - sy;
+    let last011 = col - sx - sy;
+    let last100 = col           - sz;
+    let last101 = col - sx      - sz;
+    let last110 = col      - sy - sz;
+    let last111 = col - sx - sy - sz;
+    m = 0;
+    while (m < cfg.nang) {
+      cells_b62[col + m].x +=
+        cells_b42[last111 + m].x +
+        cells_b42[last110 + m].x +
+        cells_b46[last101 + m].x +
+        cells_b46[last100 + m].x +
+        cells_b58[last011 + m].x +
+        cells_b58[last010 + m].x +
+        cells_b62[last001 + m].x;
+      m += sm;
+    }
+  }
+
+  // update b63
+  col += sx;
+  let last001 = col - sx;
+  let last010 = col      - sy;
+  let last011 = col - sx - sy;
+  let last100 = col           - sz;
+  let last101 = col - sx      - sz;
+  let last110 = col      - sy - sz;
+  let last111 = col - sx - sy - sz;
+  m = 0;
+  while (m < cfg.nang) {
+    cells_b63[col + m].x +=
+      cells_b42[last111 + m].x +
+      cells_b43[last110 + m].x +
+      cells_b46[last101 + m].x +
+      cells_b47[last100 + m].x +
+      cells_b58[last011 + m].x +
+      cells_b59[last010 + m].x +
+      cells_b62[last001 + m].x;
+    m += sm;
+  }
+
+}
+
+///
+/// Validation
+///
+
+task validate_dir(is_all: ispace<int>, cells: array<is_all, cell>,
+                  g: int, dx: int, dy: int, dz: int,
+                  cfg: config)
+  , reads(cells)
+{
+  var sx = 0;
+  if (dx < 0) {
+    sx = cfg.nx - 1;
+  }
+  var sy = 0;
+  if (dy < 0) {
+    sy = cfg.ny - 1;
+  }
+  var sz = 0;
+  if (dz < 0) {
+    sz = cfg.nz - 1;
+  }
+
+  var n = 0;
+  if (dx < 0) {
+    n += 1;
+  }
+  if (dy < 0) {
+    n += 2;
+  }
+  if (dz < 0) {
+    n += 4;
+  }
+
+  var x = sx;
+  var y = sy;
+  var z = sz;
+  var m = 0;
+
+  while (x >= 0 && x < cfg.nx) {
+    if (cfg.ndim < 2) {
+      m = 0;
+      while (m < cfg.nang) {
+        let c0 = cell_id_to_int({g: g, x: x,      y: y, z: z, n: n, m: m}, cfg);
+        let c1 = cell_id_to_int({g: g, x: x - dx, y: y, z: z, n: n, m: m}, cfg);
+        assert cells[c0].x == cells[c1].x + 1.0;
+        m += 1;
+      }
+    } else {
+      y = sy;
+      while (y >= 0 && y < cfg.ny) {
+        if (cfg.ndim < 3) {
+          m = 0;
+          while (m < cfg.nang) {
+            let c0 = cell_id_to_int({g: g, x: x,      y: y,      z: z, n: n, m: m}, cfg);
+            let c1 = cell_id_to_int({g: g, x: x - dx, y: y,      z: z, n: n, m: m}, cfg);
+            let c2 = cell_id_to_int({g: g, x: x,      y: y - dy, z: z, n: n, m: m}, cfg);
+            let c3 = cell_id_to_int({g: g, x: x - dx, y: y - dy, z: z, n: n, m: m}, cfg);
+            assert cells[c0].x == cells[c1].x + cells[c2].x + cells[c3].x + 1.0;
+            m += 1;
+          }
+        } else {
+          z = sz;
+          while (z >= 0 && z < cfg.nz) {
+            m = 0;
+            while (m < cfg.nang) {
+              let c0 = cell_id_to_int({g: g, x: x,      y: y,      z: z,      n: n, m: m}, cfg);
+              let c1 = cell_id_to_int({g: g, x: x - dx, y: y,      z: z,      n: n, m: m}, cfg);
+              let c2 = cell_id_to_int({g: g, x: x,      y: y - dy, z: z,      n: n, m: m}, cfg);
+              let c3 = cell_id_to_int({g: g, x: x - dx, y: y - dy, z: z,      n: n, m: m}, cfg);
+              let c4 = cell_id_to_int({g: g, x: x,      y: y,      z: z - dz, n: n, m: m}, cfg);
+              let c5 = cell_id_to_int({g: g, x: x - dx, y: y,      z: z - dz, n: n, m: m}, cfg);
+              let c6 = cell_id_to_int({g: g, x: x,      y: y - dy, z: z - dz, n: n, m: m}, cfg);
+              let c7 = cell_id_to_int({g: g, x: x - dx, y: y - dy, z: z - dz, n: n, m: m}, cfg);
+              assert cells[c0].x == cells[c1].x + cells[c2].x + cells[c3].x + cells[c4].x + cells[c5].x + cells[c6].x + cells[c7].x + 1.0;
+              m += 1;
+            }
+            z += dz;
+          }
+        }
+        y += dy;
+      }
+    }
+    x += dx;
+  }
+}
+
+task validate(is_all: ispace<int>, cells: array<is_all, cell>, cfg: config)
+  , reads(cells)
+{
+  var g = 0;
+  while (g < cfg.ng) {
+    if (cfg.ndim == 1) {
+      validate_dir(is_all, cells, g,  1,  0,  0, cfg);
+      validate_dir(is_all, cells, g, -1,  0,  0, cfg);
+    }
+    if (cfg.ndim == 2) {
+      validate_dir(is_all, cells, g,  1,  1,  0, cfg);
+      validate_dir(is_all, cells, g,  1, -1,  0, cfg);
+      validate_dir(is_all, cells, g, -1,  1,  0, cfg);
+      validate_dir(is_all, cells, g, -1, -1,  0, cfg);
+    }
+    if (cfg.ndim == 3) {
+      validate_dir(is_all, cells, g,  1,  1,  1, cfg);
+      validate_dir(is_all, cells, g,  1,  1, -1, cfg);
+      validate_dir(is_all, cells, g,  1, -1,  1, cfg);
+      validate_dir(is_all, cells, g,  1, -1, -1, cfg);
+      validate_dir(is_all, cells, g, -1,  1,  1, cfg);
+      validate_dir(is_all, cells, g, -1,  1, -1, cfg);
+      validate_dir(is_all, cells, g, -1, -1,  1, cfg);
+      validate_dir(is_all, cells, g, -1, -1, -1, cfg);
+    }
+    g += 1;
+  }
+}
+
+///
+/// Colorings, Array Layout
+///
+
+task build_slices(is_all: ispace<int>, cfg: config): coloring<is_all>
+{
+  var result = coloring<is_all>();
+
+  assert cfg.nx % cfg.nbx == 0;
+  assert cfg.ny % cfg.nby == 0;
+  assert cfg.nz % cfg.nbz == 0;
+
+  let ngs = ispace<int>(cfg.ng);
+  let ntzs = ispace<int>(cfg.ntz);
+  let ntys = ispace<int>(cfg.nty);
+  let ntxs = ispace<int>(cfg.ntx);
+  let nocts = ispace<int>(cfg.noct);
+  let nangs = ispace<int>(cfg.nang);
+
+  // energy group
+  for g in ngs {
+    // cells coordinates
+    for z in ntzs {
+      let z = z - cfg.nez;
+      for y in ntys {
+        let y = y - cfg.ney;
+        for x in ntxs {
+          let x = x - cfg.nex;
+          let c0 = {g: g, x: x, y: y, z: z, n: 0, m: 0};
+
+          // block ID
+          let b = cell_block_id(c0, cfg);
+          let bi = block_id_to_int(b, cfg);
+
+          // angular coordinates
+          for n in nocts {
+            for m in nangs {
+              // cell ID
+              let c = {g: g, x: x, y: y, z: z, n: n, m: m};
+              let ci = cell_id_to_int(c, cfg);
+              result = color(result, ci, bi);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+///
+/// Simulation Main Loop
+///
+
+task simulate(cfg: config)
+{
+  if (cfg.ndim == 1) {
+    assert cfg.ndir == 3;
+    assert cfg.dshift == 1;
+    assert cfg.noct == 2;
+  }
+  if (cfg.ndim == 2) {
+    assert cfg.ndir == 9;
+    assert cfg.dshift == 4;
+    assert cfg.noct == 4;
+  }
+  if (cfg.ndim == 3) {
+    assert cfg.ndir == 27;
+    assert cfg.dshift == 13;
+    assert cfg.noct == 8;
+  }
+
+  if (cfg.ndim < 3) {
+    assert cfg.nz == 1;
+    assert cfg.nez == 0;
+    assert cfg.nbz == 1;
+    assert cfg.nebz == 0;
+    assert cfg.ncz == 1;
+  }
+  if (cfg.ndim < 2) {
+    assert cfg.ny == 1;
+    assert cfg.ney == 0;
+    assert cfg.nby == 1;
+    assert cfg.neby == 0;
+    assert cfg.ncy == 1;
+  }
+  assert cfg.nx % cfg.nbx == 0;
+  assert cfg.ny % cfg.nby == 0;
+  assert cfg.nz % cfg.nbz == 0;
+  assert cfg.nx == cfg.nbx * cfg.ncx;
+  assert cfg.ny == cfg.nby * cfg.ncy;
+  assert cfg.nz == cfg.nbz * cfg.ncz;
+  assert cfg.ntx == cfg.nx + 2*cfg.nex;
+  assert cfg.nty == cfg.ny + 2*cfg.ney;
+  assert cfg.ntz == cfg.nz + 2*cfg.nez;
+  assert cfg.ntbx == cfg.nbx + 2*cfg.nebx;
+  assert cfg.ntby == cfg.nby + 2*cfg.neby;
+  assert cfg.ntbz == cfg.nbz + 2*cfg.nebz;
+
+  let is_all = ispace<int>(cfg.ng*cfg.ntx*cfg.nty*cfg.ntz*cfg.noct*cfg.nang);
+  let is_all_c = build_slices(is_all, cfg);
+  let is_all_p = partition<is_all, disjoint>(is_all_c);
+  let cells = array<is_all, cell>();
+
+  // initialization
+  // TODO: initialize locally on each node
+  initialize(is_all, cells);
+
+  let nts = ispace<int>(cfg.nt);
+  let ngs = ispace<int>(cfg.ng);
+  let nocts = ispace<int>(cfg.noct);
+  let nbzs = ispace<int>(cfg.nbz);
+  let nbys = ispace<int>(cfg.nby);
+  let nbxs = ispace<int>(cfg.nbx);
+
+  // main loop
+  for t in nts {
+    // for all energy groups
+    for g in ngs {
+      // for all octants
+      for oct in nocts {
+        // determine directions for each octant
+        var dx = 0;
+        if (oct%2 == 0) {
+          dx = 1;
+        } else {
+          dx = -1;
+        }
+
+        var dy = 0;
+        if (cfg.ndim >= 2) {
+          if ((oct/2)%2 == 0) {
+            dy = 1;
+          } else {
+            dy = -1;
+          }
+        }
+
+        var dz = 0;
+        if (cfg.ndim >= 3) {
+          if ((oct/2/2)%2 == 0) {
+            dz = 1;
+          } else {
+            dz = -1;
+          }
+        }
+
+        // complete cube of encoded directions
+        let dir000 = direction(-dx, -dy, -dz);
+        let dir001 = direction(  0, -dy, -dz);
+        let dir002 = direction( dx, -dy, -dz);
+        let dir010 = direction(-dx,   0, -dz);
+        let dir011 = direction(  0,   0, -dz);
+        let dir012 = direction( dx,   0, -dz);
+        let dir020 = direction(-dx,  dy, -dz);
+        let dir021 = direction(  0,  dy, -dz);
+        let dir022 = direction( dx,  dy, -dz);
+        let dir100 = direction(-dx, -dy,   0);
+        let dir101 = direction(  0, -dy,   0);
+        let dir102 = direction( dx, -dy,   0);
+        let dir110 = direction(-dx,   0,   0);
+        let dir111 = direction(  0,   0,   0);
+        let dir112 = direction( dx,   0,   0);
+        let dir120 = direction(-dx,  dy,   0);
+        let dir121 = direction(  0,  dy,   0);
+        let dir122 = direction( dx,  dy,   0);
+        let dir200 = direction(-dx, -dy,  dz);
+        let dir201 = direction(  0, -dy,  dz);
+        let dir202 = direction( dx, -dy,  dz);
+        let dir210 = direction(-dx,   0,  dz);
+        let dir211 = direction(  0,   0,  dz);
+        let dir212 = direction( dx,   0,  dz);
+        let dir220 = direction(-dx,  dy,  dz);
+        let dir221 = direction(  0,  dy,  dz);
+        let dir222 = direction( dx,  dy,  dz);
+
+        // iterate spacial chunks from initial to opposite corner
+        for bz in nbzs {
+          var bz = bz;
+          if (dz < 0) {
+            bz = cfg.nbz - bz - 1;
+          }
+          for by in nbys {
+            var by = by;
+            if (dy < 0) {
+              by = cfg.nby - by - 1;
+            }
+            for bx in nbxs {
+              var bx = bx;
+              if (dx < 0) {
+                bx = cfg.nbx - bx - 1;
+              }
+
+              // sweep each block
+              if (cfg.ndim == 1) {
+                let b0 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir112};
+                let bi0 = block_id_to_int(b0, cfg);
+                let is_all_b0 = is_all_p[bi0];
+                let cells_b0 = cells[is_all_b0];
+
+                let b1 = {g: g, bx: bx, by: by, bz: bz, dir: dir110};
+                let bi1 = block_id_to_int(b1, cfg);
+                let is_all_b1 = is_all_p[bi1];
+                let cells_b1 = cells[is_all_b1];
+
+                let b2 = {g: g, bx: bx, by: by, bz: bz, dir: dir111};
+                let bi2 = block_id_to_int(b2, cfg);
+                let is_all_b2 = is_all_p[bi2];
+                let cells_b2 = cells[is_all_b2];
+
+                let b3 = {g: g, bx: bx, by: by, bz: bz, dir: dir112};
+                let bi3 = block_id_to_int(b3, cfg);
+                let is_all_b3 = is_all_p[bi3];
+                let cells_b3 = cells[is_all_b3];
+
+                sweep1d(b1,
+                        is_all_b0, cells_b0,
+                        is_all_b1, cells_b1,
+                        is_all_b2, cells_b2,
+                        is_all_b3, cells_b3,
+                        dx,
+                        cfg);
+              }
+              if (cfg.ndim == 2) {
+                let b00 = {g: g, bx: bx - dx, by: by - dy, bz: bz, dir: dir122};
+                let bi00 = block_id_to_int(b00, cfg);
+                let is_all_b00 = is_all_p[bi00];
+                let cells_b00 = cells[is_all_b00];
+
+                let b01 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir120};
+                let bi01 = block_id_to_int(b01, cfg);
+                let is_all_b01 = is_all_p[bi01];
+                let cells_b01 = cells[is_all_b01];
+
+                let b02 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir121};
+                let bi02 = block_id_to_int(b02, cfg);
+                let is_all_b02 = is_all_p[bi02];
+                let cells_b02 = cells[is_all_b02];
+
+                let b03 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir122};
+                let bi03 = block_id_to_int(b03, cfg);
+                let is_all_b03 = is_all_p[bi03];
+                let cells_b03 = cells[is_all_b03];
+
+                let b04 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir102};
+                let bi04 = block_id_to_int(b04, cfg);
+                let is_all_b04 = is_all_p[bi04];
+                let cells_b04 = cells[is_all_b04];
+
+                let b05 = {g: g, bx: bx, by: by, bz: bz, dir: dir100};
+                let bi05 = block_id_to_int(b05, cfg);
+                let is_all_b05 = is_all_p[bi05];
+                let cells_b05 = cells[is_all_b05];
+
+                let b06 = {g: g, bx: bx, by: by, bz: bz, dir: dir101};
+                let bi06 = block_id_to_int(b06, cfg);
+                let is_all_b06 = is_all_p[bi06];
+                let cells_b06 = cells[is_all_b06];
+
+                let b07 = {g: g, bx: bx, by: by, bz: bz, dir: dir102};
+                let bi07 = block_id_to_int(b07, cfg);
+                let is_all_b07 = is_all_p[bi07];
+                let cells_b07 = cells[is_all_b07];
+
+                let b08 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir112};
+                let bi08 = block_id_to_int(b08, cfg);
+                let is_all_b08 = is_all_p[bi08];
+                let cells_b08 = cells[is_all_b08];
+
+                let b09 = {g: g, bx: bx, by: by, bz: bz, dir: dir110};
+                let bi09 = block_id_to_int(b09, cfg);
+                let is_all_b09 = is_all_p[bi09];
+                let cells_b09 = cells[is_all_b09];
+
+                let b10 = {g: g, bx: bx, by: by, bz: bz, dir: dir111};
+                let bi10 = block_id_to_int(b10, cfg);
+                let is_all_b10 = is_all_p[bi10];
+                let cells_b10 = cells[is_all_b10];
+
+                let b11 = {g: g, bx: bx, by: by, bz: bz, dir: dir112};
+                let bi11 = block_id_to_int(b11, cfg);
+                let is_all_b11 = is_all_p[bi11];
+                let cells_b11 = cells[is_all_b11];
+
+                let b12 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir122};
+                let bi12 = block_id_to_int(b12, cfg);
+                let is_all_b12 = is_all_p[bi12];
+                let cells_b12 = cells[is_all_b12];
+
+                let b13 = {g: g, bx: bx, by: by, bz: bz, dir: dir120};
+                let bi13 = block_id_to_int(b13, cfg);
+                let is_all_b13 = is_all_p[bi13];
+                let cells_b13 = cells[is_all_b13];
+
+                let b14 = {g: g, bx: bx, by: by, bz: bz, dir: dir121};
+                let bi14 = block_id_to_int(b14, cfg);
+                let is_all_b14 = is_all_p[bi14];
+                let cells_b14 = cells[is_all_b14];
+
+                let b15 = {g: g, bx: bx, by: by, bz: bz, dir: dir122};
+                let bi15 = block_id_to_int(b15, cfg);
+                let is_all_b15 = is_all_p[bi15];
+                let cells_b15 = cells[is_all_b15];
+
+                sweep2d(b05,
+                        is_all_b00, cells_b00,
+                        is_all_b01, cells_b01,
+                        is_all_b02, cells_b02,
+                        is_all_b03, cells_b03,
+                        is_all_b04, cells_b04,
+                        is_all_b05, cells_b05,
+                        is_all_b06, cells_b06,
+                        is_all_b07, cells_b07,
+                        is_all_b08, cells_b08,
+                        is_all_b09, cells_b09,
+                        is_all_b10, cells_b10,
+                        is_all_b11, cells_b11,
+                        is_all_b12, cells_b12,
+                        is_all_b13, cells_b13,
+                        is_all_b14, cells_b14,
+                        is_all_b15, cells_b15,
+                        dx, dy,
+                        cfg);
+              }
+              if (cfg.ndim == 3) {
+                let b00 = {g: g, bx: bx - dx, by: by - dy, bz: bz - dz, dir: dir222};
+                let bi00 = block_id_to_int(b00, cfg);
+                let is_all_b00 = is_all_p[bi00];
+                let cells_b00 = cells[is_all_b00];
+
+                let b01 = {g: g, bx: bx, by: by - dy, bz: bz - dz, dir: dir220};
+                let bi01 = block_id_to_int(b01, cfg);
+                let is_all_b01 = is_all_p[bi01];
+                let cells_b01 = cells[is_all_b01];
+
+                let b02 = {g: g, bx: bx, by: by - dy, bz: bz - dz, dir: dir221};
+                let bi02 = block_id_to_int(b02, cfg);
+                let is_all_b02 = is_all_p[bi02];
+                let cells_b02 = cells[is_all_b02];
+
+                let b03 = {g: g, bx: bx, by: by - dy, bz: bz - dz, dir: dir222};
+                let bi03 = block_id_to_int(b03, cfg);
+                let is_all_b03 = is_all_p[bi03];
+                let cells_b03 = cells[is_all_b03];
+
+                let b04 = {g: g, bx: bx - dx, by: by, bz: bz - dz, dir: dir202};
+                let bi04 = block_id_to_int(b04, cfg);
+                let is_all_b04 = is_all_p[bi04];
+                let cells_b04 = cells[is_all_b04];
+
+                let b05 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir200};
+                let bi05 = block_id_to_int(b05, cfg);
+                let is_all_b05 = is_all_p[bi05];
+                let cells_b05 = cells[is_all_b05];
+
+                let b06 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir201};
+                let bi06 = block_id_to_int(b06, cfg);
+                let is_all_b06 = is_all_p[bi06];
+                let cells_b06 = cells[is_all_b06];
+
+                let b07 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir202};
+                let bi07 = block_id_to_int(b07, cfg);
+                let is_all_b07 = is_all_p[bi07];
+                let cells_b07 = cells[is_all_b07];
+
+                let b08 = {g: g, bx: bx - dx, by: by, bz: bz - dz, dir: dir212};
+                let bi08 = block_id_to_int(b08, cfg);
+                let is_all_b08 = is_all_p[bi08];
+                let cells_b08 = cells[is_all_b08];
+
+                let b09 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir210};
+                let bi09 = block_id_to_int(b09, cfg);
+                let is_all_b09 = is_all_p[bi09];
+                let cells_b09 = cells[is_all_b09];
+
+                let b10 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir211};
+                let bi10 = block_id_to_int(b10, cfg);
+                let is_all_b10 = is_all_p[bi10];
+                let cells_b10 = cells[is_all_b10];
+
+                let b11 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir212};
+                let bi11 = block_id_to_int(b11, cfg);
+                let is_all_b11 = is_all_p[bi11];
+                let cells_b11 = cells[is_all_b11];
+
+                let b12 = {g: g, bx: bx - dx, by: by, bz: bz - dz, dir: dir222};
+                let bi12 = block_id_to_int(b12, cfg);
+                let is_all_b12 = is_all_p[bi12];
+                let cells_b12 = cells[is_all_b12];
+
+                let b13 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir220};
+                let bi13 = block_id_to_int(b13, cfg);
+                let is_all_b13 = is_all_p[bi13];
+                let cells_b13 = cells[is_all_b13];
+
+                let b14 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir221};
+                let bi14 = block_id_to_int(b14, cfg);
+                let is_all_b14 = is_all_p[bi14];
+                let cells_b14 = cells[is_all_b14];
+
+                let b15 = {g: g, bx: bx, by: by, bz: bz - dz, dir: dir222};
+                let bi15 = block_id_to_int(b15, cfg);
+                let is_all_b15 = is_all_p[bi15];
+                let cells_b15 = cells[is_all_b15];
+
+                let b16 = {g: g, bx: bx - dx, by: by - dy, bz: bz, dir: dir022};
+                let bi16 = block_id_to_int(b16, cfg);
+                let is_all_b16 = is_all_p[bi16];
+                let cells_b16 = cells[is_all_b16];
+
+                let b17 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir020};
+                let bi17 = block_id_to_int(b17, cfg);
+                let is_all_b17 = is_all_p[bi17];
+                let cells_b17 = cells[is_all_b17];
+
+                let b18 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir021};
+                let bi18 = block_id_to_int(b18, cfg);
+                let is_all_b18 = is_all_p[bi18];
+                let cells_b18 = cells[is_all_b18];
+
+                let b19 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir022};
+                let bi19 = block_id_to_int(b19, cfg);
+                let is_all_b19 = is_all_p[bi19];
+                let cells_b19 = cells[is_all_b19];
+
+                let b20 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir002};
+                let bi20 = block_id_to_int(b20, cfg);
+                let is_all_b20 = is_all_p[bi20];
+                let cells_b20 = cells[is_all_b20];
+
+                let b21 = {g: g, bx: bx, by: by, bz: bz, dir: dir000};
+                let bi21 = block_id_to_int(b21, cfg);
+                let is_all_b21 = is_all_p[bi21];
+                let cells_b21 = cells[is_all_b21];
+
+                let b22 = {g: g, bx: bx, by: by, bz: bz, dir: dir001};
+                let bi22 = block_id_to_int(b22, cfg);
+                let is_all_b22 = is_all_p[bi22];
+                let cells_b22 = cells[is_all_b22];
+
+                let b23 = {g: g, bx: bx, by: by, bz: bz, dir: dir002};
+                let bi23 = block_id_to_int(b23, cfg);
+                let is_all_b23 = is_all_p[bi23];
+                let cells_b23 = cells[is_all_b23];
+
+                let b24 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir012};
+                let bi24 = block_id_to_int(b24, cfg);
+                let is_all_b24 = is_all_p[bi24];
+                let cells_b24 = cells[is_all_b24];
+
+                let b25 = {g: g, bx: bx, by: by, bz: bz, dir: dir010};
+                let bi25 = block_id_to_int(b25, cfg);
+                let is_all_b25 = is_all_p[bi25];
+                let cells_b25 = cells[is_all_b25];
+
+                let b26 = {g: g, bx: bx, by: by, bz: bz, dir: dir011};
+                let bi26 = block_id_to_int(b26, cfg);
+                let is_all_b26 = is_all_p[bi26];
+                let cells_b26 = cells[is_all_b26];
+
+                let b27 = {g: g, bx: bx, by: by, bz: bz, dir: dir012};
+                let bi27 = block_id_to_int(b27, cfg);
+                let is_all_b27 = is_all_p[bi27];
+                let cells_b27 = cells[is_all_b27];
+
+                let b28 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir022};
+                let bi28 = block_id_to_int(b28, cfg);
+                let is_all_b28 = is_all_p[bi28];
+                let cells_b28 = cells[is_all_b28];
+
+                let b29 = {g: g, bx: bx, by: by, bz: bz, dir: dir020};
+                let bi29 = block_id_to_int(b29, cfg);
+                let is_all_b29 = is_all_p[bi29];
+                let cells_b29 = cells[is_all_b29];
+
+                let b30 = {g: g, bx: bx, by: by, bz: bz, dir: dir021};
+                let bi30 = block_id_to_int(b30, cfg);
+                let is_all_b30 = is_all_p[bi30];
+                let cells_b30 = cells[is_all_b30];
+
+                let b31 = {g: g, bx: bx, by: by, bz: bz, dir: dir022};
+                let bi31 = block_id_to_int(b31, cfg);
+                let is_all_b31 = is_all_p[bi31];
+                let cells_b31 = cells[is_all_b31];
+
+                let b32 = {g: g, bx: bx - dx, by: by - dy, bz: bz, dir: dir122};
+                let bi32 = block_id_to_int(b32, cfg);
+                let is_all_b32 = is_all_p[bi32];
+                let cells_b32 = cells[is_all_b32];
+
+                let b33 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir120};
+                let bi33 = block_id_to_int(b33, cfg);
+                let is_all_b33 = is_all_p[bi33];
+                let cells_b33 = cells[is_all_b33];
+
+                let b34 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir121};
+                let bi34 = block_id_to_int(b34, cfg);
+                let is_all_b34 = is_all_p[bi34];
+                let cells_b34 = cells[is_all_b34];
+
+                let b35 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir122};
+                let bi35 = block_id_to_int(b35, cfg);
+                let is_all_b35 = is_all_p[bi35];
+                let cells_b35 = cells[is_all_b35];
+
+                let b36 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir102};
+                let bi36 = block_id_to_int(b36, cfg);
+                let is_all_b36 = is_all_p[bi36];
+                let cells_b36 = cells[is_all_b36];
+
+                let b37 = {g: g, bx: bx, by: by, bz: bz, dir: dir100};
+                let bi37 = block_id_to_int(b37, cfg);
+                let is_all_b37 = is_all_p[bi37];
+                let cells_b37 = cells[is_all_b37];
+
+                let b38 = {g: g, bx: bx, by: by, bz: bz, dir: dir101};
+                let bi38 = block_id_to_int(b38, cfg);
+                let is_all_b38 = is_all_p[bi38];
+                let cells_b38 = cells[is_all_b38];
+
+                let b39 = {g: g, bx: bx, by: by, bz: bz, dir: dir102};
+                let bi39 = block_id_to_int(b39, cfg);
+                let is_all_b39 = is_all_p[bi39];
+                let cells_b39 = cells[is_all_b39];
+
+                let b40 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir112};
+                let bi40 = block_id_to_int(b40, cfg);
+                let is_all_b40 = is_all_p[bi40];
+                let cells_b40 = cells[is_all_b40];
+
+                let b41 = {g: g, bx: bx, by: by, bz: bz, dir: dir110};
+                let bi41 = block_id_to_int(b41, cfg);
+                let is_all_b41 = is_all_p[bi41];
+                let cells_b41 = cells[is_all_b41];
+
+                let b42 = {g: g, bx: bx, by: by, bz: bz, dir: dir111};
+                let bi42 = block_id_to_int(b42, cfg);
+                let is_all_b42 = is_all_p[bi42];
+                let cells_b42 = cells[is_all_b42];
+
+                let b43 = {g: g, bx: bx, by: by, bz: bz, dir: dir112};
+                let bi43 = block_id_to_int(b43, cfg);
+                let is_all_b43 = is_all_p[bi43];
+                let cells_b43 = cells[is_all_b43];
+
+                let b44 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir122};
+                let bi44 = block_id_to_int(b44, cfg);
+                let is_all_b44 = is_all_p[bi44];
+                let cells_b44 = cells[is_all_b44];
+
+                let b45 = {g: g, bx: bx, by: by, bz: bz, dir: dir120};
+                let bi45 = block_id_to_int(b45, cfg);
+                let is_all_b45 = is_all_p[bi45];
+                let cells_b45 = cells[is_all_b45];
+
+                let b46 = {g: g, bx: bx, by: by, bz: bz, dir: dir121};
+                let bi46 = block_id_to_int(b46, cfg);
+                let is_all_b46 = is_all_p[bi46];
+                let cells_b46 = cells[is_all_b46];
+
+                let b47 = {g: g, bx: bx, by: by, bz: bz, dir: dir122};
+                let bi47 = block_id_to_int(b47, cfg);
+                let is_all_b47 = is_all_p[bi47];
+                let cells_b47 = cells[is_all_b47];
+
+                let b48 = {g: g, bx: bx - dx, by: by - dy, bz: bz, dir: dir222};
+                let bi48 = block_id_to_int(b48, cfg);
+                let is_all_b48 = is_all_p[bi48];
+                let cells_b48 = cells[is_all_b48];
+
+                let b49 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir220};
+                let bi49 = block_id_to_int(b49, cfg);
+                let is_all_b49 = is_all_p[bi49];
+                let cells_b49 = cells[is_all_b49];
+
+                let b50 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir221};
+                let bi50 = block_id_to_int(b50, cfg);
+                let is_all_b50 = is_all_p[bi50];
+                let cells_b50 = cells[is_all_b50];
+
+                let b51 = {g: g, bx: bx, by: by - dy, bz: bz, dir: dir222};
+                let bi51 = block_id_to_int(b51, cfg);
+                let is_all_b51 = is_all_p[bi51];
+                let cells_b51 = cells[is_all_b51];
+
+                let b52 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir202};
+                let bi52 = block_id_to_int(b52, cfg);
+                let is_all_b52 = is_all_p[bi52];
+                let cells_b52 = cells[is_all_b52];
+
+                let b53 = {g: g, bx: bx, by: by, bz: bz, dir: dir200};
+                let bi53 = block_id_to_int(b53, cfg);
+                let is_all_b53 = is_all_p[bi53];
+                let cells_b53 = cells[is_all_b53];
+
+                let b54 = {g: g, bx: bx, by: by, bz: bz, dir: dir201};
+                let bi54 = block_id_to_int(b54, cfg);
+                let is_all_b54 = is_all_p[bi54];
+                let cells_b54 = cells[is_all_b54];
+
+                let b55 = {g: g, bx: bx, by: by, bz: bz, dir: dir202};
+                let bi55 = block_id_to_int(b55, cfg);
+                let is_all_b55 = is_all_p[bi55];
+                let cells_b55 = cells[is_all_b55];
+
+                let b56 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir212};
+                let bi56 = block_id_to_int(b56, cfg);
+                let is_all_b56 = is_all_p[bi56];
+                let cells_b56 = cells[is_all_b56];
+
+                let b57 = {g: g, bx: bx, by: by, bz: bz, dir: dir210};
+                let bi57 = block_id_to_int(b57, cfg);
+                let is_all_b57 = is_all_p[bi57];
+                let cells_b57 = cells[is_all_b57];
+
+                let b58 = {g: g, bx: bx, by: by, bz: bz, dir: dir211};
+                let bi58 = block_id_to_int(b58, cfg);
+                let is_all_b58 = is_all_p[bi58];
+                let cells_b58 = cells[is_all_b58];
+
+                let b59 = {g: g, bx: bx, by: by, bz: bz, dir: dir212};
+                let bi59 = block_id_to_int(b59, cfg);
+                let is_all_b59 = is_all_p[bi59];
+                let cells_b59 = cells[is_all_b59];
+
+                let b60 = {g: g, bx: bx - dx, by: by, bz: bz, dir: dir222};
+                let bi60 = block_id_to_int(b60, cfg);
+                let is_all_b60 = is_all_p[bi60];
+                let cells_b60 = cells[is_all_b60];
+
+                let b61 = {g: g, bx: bx, by: by, bz: bz, dir: dir220};
+                let bi61 = block_id_to_int(b61, cfg);
+                let is_all_b61 = is_all_p[bi61];
+                let cells_b61 = cells[is_all_b61];
+
+                let b62 = {g: g, bx: bx, by: by, bz: bz, dir: dir221};
+                let bi62 = block_id_to_int(b62, cfg);
+                let is_all_b62 = is_all_p[bi62];
+                let cells_b62 = cells[is_all_b62];
+
+                let b63 = {g: g, bx: bx, by: by, bz: bz, dir: dir222};
+                let bi63 = block_id_to_int(b63, cfg);
+                let is_all_b63 = is_all_p[bi63];
+                let cells_b63 = cells[is_all_b63];
+
+                sweep3d(b21,
+                        is_all_b00, cells_b00,
+                        is_all_b01, cells_b01,
+                        is_all_b02, cells_b02,
+                        is_all_b03, cells_b03,
+                        is_all_b04, cells_b04,
+                        is_all_b05, cells_b05,
+                        is_all_b06, cells_b06,
+                        is_all_b07, cells_b07,
+                        is_all_b08, cells_b08,
+                        is_all_b09, cells_b09,
+                        is_all_b10, cells_b10,
+                        is_all_b11, cells_b11,
+                        is_all_b12, cells_b12,
+                        is_all_b13, cells_b13,
+                        is_all_b14, cells_b14,
+                        is_all_b15, cells_b15,
+                        is_all_b16, cells_b16,
+                        is_all_b17, cells_b17,
+                        is_all_b18, cells_b18,
+                        is_all_b19, cells_b19,
+                        is_all_b20, cells_b20,
+                        is_all_b21, cells_b21,
+                        is_all_b22, cells_b22,
+                        is_all_b23, cells_b23,
+                        is_all_b24, cells_b24,
+                        is_all_b25, cells_b25,
+                        is_all_b26, cells_b26,
+                        is_all_b27, cells_b27,
+                        is_all_b28, cells_b28,
+                        is_all_b29, cells_b29,
+                        is_all_b30, cells_b30,
+                        is_all_b31, cells_b31,
+                        is_all_b32, cells_b32,
+                        is_all_b33, cells_b33,
+                        is_all_b34, cells_b34,
+                        is_all_b35, cells_b35,
+                        is_all_b36, cells_b36,
+                        is_all_b37, cells_b37,
+                        is_all_b38, cells_b38,
+                        is_all_b39, cells_b39,
+                        is_all_b40, cells_b40,
+                        is_all_b41, cells_b41,
+                        is_all_b42, cells_b42,
+                        is_all_b43, cells_b43,
+                        is_all_b44, cells_b44,
+                        is_all_b45, cells_b45,
+                        is_all_b46, cells_b46,
+                        is_all_b47, cells_b47,
+                        is_all_b48, cells_b48,
+                        is_all_b49, cells_b49,
+                        is_all_b50, cells_b50,
+                        is_all_b51, cells_b51,
+                        is_all_b52, cells_b52,
+                        is_all_b53, cells_b53,
+                        is_all_b54, cells_b54,
+                        is_all_b55, cells_b55,
+                        is_all_b56, cells_b56,
+                        is_all_b57, cells_b57,
+                        is_all_b58, cells_b58,
+                        is_all_b59, cells_b59,
+                        is_all_b60, cells_b60,
+                        is_all_b61, cells_b61,
+                        is_all_b62, cells_b62,
+                        is_all_b63, cells_b63,
+                        dx, dy, dz,
+                        cfg);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  validate(is_all, cells, cfg);
+}
+
+///
+/// Test Harness
+///
+
+task test1d(nt: int, ng: int, nx: int, nang: int, nbx: int)
+{
+  let cfg: config = {
+    nt: nt,
+    ndim: 1,
+    ndir: 3,
+    dshift: 1,
+    ng:   ng,
+    nx:   nx,
+    ny:   1,
+    nz:   1,
+    noct: 2,
+    nang: nang,
+    nex:  1,
+    ney:  0,
+    nez:  0,
+    ntx:  nx + 2,
+    nty:  1,
+    ntz:  1,
+    nbx:  nbx,
+    nby:  1,
+    nbz:  1,
+    nebx: 1,
+    neby: 0,
+    nebz: 0,
+    ntbx: nbx + 2,
+    ntby: 1,
+    ntbz: 1,
+    ncx:  nx / nbx,
+    ncy:  1,
+    ncz:  1,
+  };
+
+  simulate(cfg);
+}
+
+task test2d(nt: int, ng: int, nx: int, ny: int, nang: int, nbx: int, nby: int)
+{
+  let cfg: config = {
+    nt: nt,
+    ndim: 2,
+    ndir: 9,
+    dshift: 4,
+    ng:   ng,
+    nx:   nx,
+    ny:   ny,
+    nz:   1,
+    noct: 4,
+    nang: nang,
+    nex:  1,
+    ney:  1,
+    nez:  0,
+    ntx:  nx + 2,
+    nty:  ny + 2,
+    ntz:  1,
+    nbx:  nbx,
+    nby:  nby,
+    nbz:  1,
+    nebx: 1,
+    neby: 1,
+    nebz: 0,
+    ntbx: nbx + 2,
+    ntby: nby + 2,
+    ntbz: 1,
+    ncx:  nx / nbx,
+    ncy:  ny / nby,
+    ncz:  1,
+  };
+
+  simulate(cfg);
+}
+
+task test3d(nt: int, ng: int, nx: int, ny: int, nz: int, nang: int, nbx: int, nby: int, nbz: int)
+{
+  let cfg: config = {
+    nt: nt,
+    ndim: 3,
+    ndir: 27,
+    dshift: 13,
+    ng:   ng,
+    nx:   nx,
+    ny:   ny,
+    nz:   nz,
+    noct: 8,
+    nang: nang,
+    nex:  1,
+    ney:  1,
+    nez:  1,
+    ntx:  nx + 2,
+    nty:  ny + 2,
+    ntz:  nz + 2,
+    nbx:  nbx,
+    nby:  nby,
+    nbz:  nbz,
+    nebx: 1,
+    neby: 1,
+    nebz: 1,
+    ntbx: nbx + 2,
+    ntby: nby + 2,
+    ntbz: nbz + 2,
+    ncx:  nx / nbx,
+    ncy:  ny / nby,
+    ncz:  nz / nbz,
+  };
+
+  simulate(cfg);
+}
+
+task main()
+{
+  test1d(1, 4, 8, 16, 2);
+  test2d(1, 4, 8, 8, 4, 2, 2);
+  test3d(1, 1, 8, 8, 8, 2, 2, 2, 2);
+}

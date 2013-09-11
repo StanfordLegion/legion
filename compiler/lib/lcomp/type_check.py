@@ -27,6 +27,7 @@ except ImportError:
 from . import ast, types
 from .clang import types as ctypes
 
+def is_eq(t): return types.is_POD(t) or types.is_pointer(t)
 def returns_same_type(*ts): return ts[0]
 def returns_bool(*_ignored): return types.Bool()
 unary_operator_table = {
@@ -46,8 +47,8 @@ binary_operator_table = {
     '<=': (types.is_numeric, returns_bool),
     '>':  (types.is_numeric, returns_bool),
     '>=': (types.is_numeric, returns_bool),
-    '==': (types.is_POD, returns_bool),
-    '!=': (types.is_POD, returns_bool),
+    '==': (is_eq, returns_bool),
+    '!=': (is_eq, returns_bool),
     '&':  (types.is_integral, returns_same_type),
     '^':  (types.is_integral, returns_same_type),
     '|':  (types.is_integral, returns_same_type),
@@ -76,22 +77,25 @@ def type_check_helper(node, cx):
 def type_check_node(node, cx):
     if isinstance(node, ast.Program):
         cx = cx.new_global_scope()
-
-        def_types = []
-        for definition in node.defs:
-            def_types.append(type_check_helper(definition, cx))
+        def_types = type_check_helper(node.definitions, cx)
         return types.Program(def_types)
+    if isinstance(node, ast.Definitions):
+        def_types = []
+        for definition in node.definitions:
+            def_types.append(type_check_helper(definition, cx))
+        return def_types
     if isinstance(node, ast.Import):
-        module_type = ctypes.foreign_type(node.ast)
+        module_type = ctypes.foreign_type(node.ast, cx.opts)
         for foreign_name, foreign_type in module_type.def_types.iteritems():
             cx.insert(node, foreign_name, foreign_type)
+            cx.foreign_types.append(foreign_type)
         return module_type
     if isinstance(node, ast.Struct):
         original_cx = cx
         cx = cx.new_struct_scope()
 
         # Initially create empty struct type.
-        struct_name = node.name
+        struct_name = type_check_helper(node.name, cx)
         param_types = [
             cx.region_forest.add(
                 types.Region(param.name, types.RegionKind(None, None)))
@@ -134,6 +138,8 @@ def type_check_node(node, cx):
                 raise types.TypeError(node, 'Struct may not contain itself')
 
         return def_struct_type
+    if isinstance(node, ast.StructName):
+        return node.name
     if isinstance(node, ast.StructConstraints):
         return [type_check_helper(constraint, cx) for constraint in node.constraints]
     if isinstance(node, ast.StructConstraint):
@@ -159,7 +165,7 @@ def type_check_node(node, cx):
         original_cx = cx
         cx = cx.new_function_scope()
 
-        fn_name = node.name
+        fn_name = type_check_helper(node.name, cx)
         param_types = type_check_helper(node.params, cx)
         cx.privileges = type_check_helper(node.privileges, cx)
         return_kind = type_check_helper(node.return_type, cx)
@@ -175,10 +181,12 @@ def type_check_node(node, cx):
         type_check_helper(node.block, cx.with_return_type(return_type))
 
         return fn_type
-    if isinstance(node, ast.Params):
+    if isinstance(node, ast.FunctionName):
+        return node.name
+    if isinstance(node, ast.FunctionParams):
         return [type_check_helper(param, cx)
                 for param in node.params]
-    if isinstance(node, ast.Param):
+    if isinstance(node, ast.FunctionParam):
         if isinstance(node.declared_type, ast.TypeRegionKind):
             # Region types may be self-referential. Insert regions
             # into scope early to handle recursive types.
@@ -222,44 +230,15 @@ def type_check_node(node, cx):
         cx.insert(node, node.name, reference_type)
 
         return declared_type
-    if isinstance(node, ast.Privileges):
+    if isinstance(node, ast.FunctionReturnType):
+        return type_check_helper(node.declared_type, cx)
+    if isinstance(node, ast.FunctionPrivileges):
         return cx.privileges | set(
             privilege
             for privilege_node in node.privileges
             for privilege in type_check_helper(privilege_node, cx))
-    if isinstance(node, ast.Privilege):
-        if node.privilege == 'reads':
-            privilege = types.Privilege.READ
-        elif node.privilege == 'writes':
-            privilege = types.Privilege.WRITE
-        elif node.privilege == 'reduces':
-            privilege = types.Privilege.REDUCE
-        else:
-            assert False
-        regions = type_check_helper(node.regions, cx)
-        return [
-            types.Privilege(privilege, node.op, region, field_path)
-            for region, field_path in regions]
-    if isinstance(node, ast.PrivilegeRegions):
-        return [
-            region
-            for region_node in node.regions
-            for region in type_check_helper(region_node, cx)]
-    if isinstance(node, ast.PrivilegeRegion):
-        region = cx.lookup(node, node.name)
-        field_paths = type_check_helper(node.fields, cx)
-        return [(region, field_path) for field_path in field_paths]
-    if isinstance(node, ast.PrivilegeRegionFields):
-        if len(node.fields) == 0:
-            return [()]
-        return [
-            field_path
-            for field_node in node.fields
-            for field_path in type_check_helper(field_node, cx)]
-    if isinstance(node, ast.PrivilegeRegionField):
-        prefix = (node.name,)
-        field_paths = type_check_helper(node.fields, cx)
-        return [prefix + field_path for field_path in field_paths]
+    if isinstance(node, ast.FunctionPrivilege):
+        return type_check_helper(node.privilege, cx)
     if isinstance(node, ast.TypeVoid):
         return types.Kind(types.Void())
     if isinstance(node, ast.TypeBool):
@@ -380,6 +359,39 @@ def type_check_node(node, cx):
     if isinstance(node, ast.TypeIspaceKind):
         index_type = type_check_helper(node.index_type, cx).type
         return types.IspaceKind(index_type)
+    if isinstance(node, ast.Privilege):
+        if node.privilege == 'reads':
+            privilege = types.Privilege.READ
+        elif node.privilege == 'writes':
+            privilege = types.Privilege.WRITE
+        elif node.privilege == 'reduces':
+            privilege = types.Privilege.REDUCE
+        else:
+            assert False
+        regions = type_check_helper(node.regions, cx)
+        return [
+            types.Privilege(privilege, node.op, region, field_path)
+            for region, field_path in regions]
+    if isinstance(node, ast.PrivilegeRegions):
+        return [
+            region
+            for region_node in node.regions
+            for region in type_check_helper(region_node, cx)]
+    if isinstance(node, ast.PrivilegeRegion):
+        region = cx.lookup(node, node.name)
+        field_paths = type_check_helper(node.fields, cx)
+        return [(region, field_path) for field_path in field_paths]
+    if isinstance(node, ast.PrivilegeRegionFields):
+        if len(node.fields) == 0:
+            return [()]
+        return [
+            field_path
+            for field_node in node.fields
+            for field_path in type_check_helper(field_node, cx)]
+    if isinstance(node, ast.PrivilegeRegionField):
+        prefix = (node.name,)
+        field_paths = type_check_helper(node.fields, cx)
+        return [prefix + field_path for field_path in field_paths]
     if isinstance(node, ast.Block):
         cx = cx.new_block_scope()
         for expr in node.block:
@@ -392,7 +404,7 @@ def type_check_node(node, cx):
                     types.Bool(), expr_type))
         return types.Void()
     if isinstance(node, ast.StatementExpr):
-        type_check_helper(node.expr, cx)
+        type_check_helper(node.expr, cx).check_read(node.expr, cx)
         return types.Void()
     if isinstance(node, ast.StatementIf):
         condition_type = type_check_helper(node.condition, cx).check_read(node.condition, cx)
@@ -771,7 +783,11 @@ def type_check_node(node, cx):
         return pointer_type
     if isinstance(node, ast.ExprRead):
         pointer_type = type_check_helper(node.pointer_expr, cx).check_read(node.pointer_expr, cx)
-        assert types.is_pointer(pointer_type)
+
+        if not types.is_pointer(pointer_type):
+            raise types.TypeError(node, 'Type mismatch in read: expected a pointer but got %s' % (
+                    pointer_type))
+
         privileges_requested = [
             types.Privilege(types.Privilege.READ, None, region, ())
             for region in pointer_type.regions]
@@ -783,7 +799,14 @@ def type_check_node(node, cx):
     if isinstance(node, ast.ExprWrite):
         pointer_type = type_check_helper(node.pointer_expr, cx).check_read(node.pointer_expr, cx)
         value_type = type_check_helper(node.value_expr, cx).check_read(node.value_expr, cx)
-        assert types.is_pointer(pointer_type) and pointer_type.points_to_type == value_type
+
+        if not types.is_pointer(pointer_type):
+            raise types.TypeError(node, 'Type mismatch in write: expected a pointer but got %s' % (
+                    pointer_type))
+        if pointer_type.points_to_type != value_type:
+            raise types.TypeError(node, 'Type mismatch in write: expected %s but got %s' % (
+                    value_type, pointer_type.points_to_type))
+
         privileges_requested = [
             types.Privilege(types.Privilege.WRITE, None, region, ())
             for region in pointer_type.regions]
@@ -794,16 +817,18 @@ def type_check_node(node, cx):
     if isinstance(node, ast.ExprReduce):
         pointer_type = type_check_helper(node.pointer_expr, cx).check_read(node.pointer_expr, cx)
         value_type = type_check_helper(node.value_expr, cx).check_read(node.value_expr, cx)
-        assert types.is_pointer(pointer_type)
 
+        if not types.is_pointer(pointer_type):
+            raise types.TypeError(node, 'Type mismatch in reduce: expected a pointer but got %s' % (
+                    pointer_type))
         if pointer_type.points_to_type != value_type:
-            raise types.TypeError(node, 'Type mismatch in operands to reduce: %s and %s' % (
+            raise types.TypeError(node, 'Type mismatch in reduce: %s and %s' % (
                     pointer_type.points_to_type, value_type))
         if not reduce_operator_table[node.op](pointer_type.points_to_type):
-            raise types.TypeError(node, 'Type mismatch in operand to reduce: %s' % (
+            raise types.TypeError(node, 'Type mismatch in reduce: %s' % (
                     pointer_type.points_to_type))
         if not reduce_operator_table[node.op](value_type):
-            raise types.TypeError(node, 'Type mismatch in operand to reduce: %s' % (
+            raise types.TypeError(node, 'Type mismatch in reduce: %s' % (
                     value_type))
 
         privileges_requested = [
@@ -926,7 +951,9 @@ def type_check_node(node, cx):
     if isinstance(node, ast.ExprFieldUpdates):
         struct_type = type_check_helper(node.struct_expr, cx).check_read(node.struct_expr, cx)
         field_updates = type_check_helper(node.field_updates, cx)
-        assert types.is_struct(struct_type)
+        if not types.is_struct(struct_type):
+            raise types.TypeError(node, 'Type mismatch in struct field updates: expected a struct but got %s' % (
+                struct_type))
 
         all_fields_match = True
         for field_name, update_type in field_updates:
@@ -1112,7 +1139,7 @@ def type_check_node(node, cx):
         return types.UInt()
     raise Exception('Type checking failed at %s' % node)
 
-def type_check(node):
-    cx = types.Context()
-    type_check_helper(node, cx)
-    return cx.type_map, cx.constraints
+def type_check(program, opts):
+    cx = types.Context(opts)
+    type_check_helper(program, cx)
+    return cx.type_map, cx.constraints, cx.foreign_types

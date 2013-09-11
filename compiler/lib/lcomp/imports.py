@@ -23,23 +23,26 @@ import os
 from . import ast
 from .clang import parse
 
-def augment_node(node, search_path):
+def augment_node(node, opts):
     if isinstance(node, ast.Program):
-        for definition in node.defs:
-            augment_node(definition, search_path)
+        augment_node(node.definitions, opts)
+        return
+    if isinstance(node, ast.Definitions):
+        for definition in node.definitions:
+            augment_node(definition, opts)
         return
     if isinstance(node, ast.Import):
         filename = None
-        for search_dir in search_path:
+        for search_dir in opts.search_path:
             test = os.path.join(search_dir, node.filename)
             if os.path.exists(test):
                 filename = test
                 break
         if filename is None:
             raise Exception('Failed to locate file %s in search path %s' % (
-                    node.filename, search_path))
+                    node.filename, opts.search_path))
         parser = parse.Parser()
-        node.ast = parser.parse(filename)
+        node.ast = parser.parse(filename, opts)
         return
     if isinstance(node, ast.Struct):
         return
@@ -47,5 +50,5 @@ def augment_node(node, search_path):
         return
     raise Exception('Failed to augment imports for %s' % node)
 
-def augment_imports(node, search_path):
-    augment_node(node, search_path)
+def augment_imports(program, opts):
+    augment_node(program, opts)

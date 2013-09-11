@@ -23,4 +23,4 @@ sys.path.append(os.path.join(_root_dir, 'lib'))
 from lcomp import test
 
 if __name__ == '__main__':
-    test.test_driver(sys.argv)
+    test.test_driver()

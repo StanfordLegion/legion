@@ -1,4 +1,3 @@
-
 # Legion Language Compiler
 
 This directory contains the compiler for the Legion
@@ -137,19 +136,30 @@ following options:
 
 `-h`: Prints a help message.
 
-`-c`: Compiles to an object file.
-
 `-S`: Compiles to a C++ source file.
 
-Note: Without either `-c` or `-S` the compiler compiles to an
-executable binary, built with debugging enabled and linked against the
-shared low-level runtime.
+`-c`: Compiles to an object file.
+
+Note: Without either `-S` or `-c` the compiler compiles to an
+executable binary, linked against the shared low-level runtime.
 
 `-o`: Specifies the name of the output file.
 
-`-j`: Specifies the number of threads to use.
+`-g`: Enables debugging.
 
-`--clean`: Rebuild the Legion runtime.
+`--pointer-checks`: Enables dynamic pointer checks.
+
+`-j`: Specifies the number of threads to use. Default is to compile
+with a number of threads equal to the number of processors on the
+system.
+
+`--clean`: Rebuild the Legion runtime before compiling.
+
+`--save-temps`: Saves any temporary files produced by the compiler.
+
+`-v`: Display verbose output.
+
+`-q`: Display no output.
 
 ## Running the Testsuite
 

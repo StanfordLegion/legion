@@ -29,7 +29,8 @@ task bar(r: region<int>, p: int@r)
   return (*p) + 10;
 }
 
-task main() {
+task main()
+{
   let r = region<int>(5);
   let p = new<int@r>();
   assert foo(r, p, 100) == 101;

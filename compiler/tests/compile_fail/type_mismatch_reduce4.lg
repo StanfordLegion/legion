@@ -18,7 +18,7 @@
 // fails-with:
 // TypeError:
 // tests/compile_fail/type_mismatch_reduce4.lg:11:2:
-// Type mismatch in operands to reduce: int and float
+// Type mismatch in reduce: int and float
 
 task main() {}
 

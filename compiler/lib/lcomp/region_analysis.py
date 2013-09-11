@@ -93,7 +93,10 @@ class Reference:
 def region_analysis_helper(node, context):
     type_map, access_modes = context
     if isinstance(node, ast.Program):
-        for definition in node.defs:
+        region_analysis_helper(node.definitions, context)
+        return
+    if isinstance(node, ast.Definitions):
+        for definition in node.definitions:
             region_analysis_helper(definition, context)
         return
     if isinstance(node, ast.Import):
@@ -111,7 +114,7 @@ def region_analysis_helper(node, context):
         region_analysis_helper(node.expr, context).read(context)
         return
     if isinstance(node, ast.StatementExpr):
-        region_analysis_helper(node.expr, context)
+        region_analysis_helper(node.expr, context).read(context)
         return
     if isinstance(node, ast.StatementIf):
         region_analysis_helper(node.condition, context).read(context)
@@ -272,7 +275,7 @@ def region_analysis_helper(node, context):
         return Value()
     raise Exception('Region analysis failed at %s' % node)
 
-def region_analysis(program, type_map):
+def region_analysis(program, opts, type_map):
     access_modes = {}
     context = type_map, access_modes
     region_analysis_helper(program, context)

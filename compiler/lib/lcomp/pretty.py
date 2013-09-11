@@ -23,16 +23,20 @@ from . import ast, parse
 
 def pretty_print_node(node, indent):
     if isinstance(node, ast.Program):
-        return '\n\n'.join(pretty_print_node(definition, indent) for definition in node.defs)
+        return pretty_print_node(node.definitions, indent)
+    if isinstance(node, ast.Definitions):
+        return '\n\n'.join(pretty_print_node(definition, indent) for definition in node.definitions)
     if isinstance(node, ast.Import):
         return 'import "%s";' % node.filename
     if isinstance(node, ast.Struct):
         return 'struct %s%s%s%s %s' % (
-            node.name,
+            pretty_print_node(node.name, indent),
             pretty_print_node(node.params, indent),
             pretty_print_node(node.regions, indent),
             pretty_print_node(node.constraints, indent),
             pretty_print_node(node.field_decls, indent))
+    if isinstance(node, ast.StructName):
+        return node.name
     if isinstance(node, ast.StructParams):
         if len(node.params) == 0:
             return ''
@@ -68,38 +72,26 @@ def pretty_print_node(node, indent):
             pretty_print_node(node.field_type, indent)
             )
     if isinstance(node, ast.Function):
-        return 'task %s%s: %s%s %s' % (
-            node.name,
+        return 'task %s%s%s%s %s' % (
+            pretty_print_node(node.name, indent),
             pretty_print_node(node.params, indent),
             pretty_print_node(node.return_type, indent),
             pretty_print_node(node.privileges, indent),
             pretty_print_node(node.block, indent))
-    if isinstance(node, ast.Params):
+    if isinstance(node, ast.FunctionName):
+        return node.name
+    if isinstance(node, ast.FunctionParams):
         return '(%s)' % ', '.join(pretty_print_node(param, indent) for param in node.params)
-    if isinstance(node, ast.Param):
+    if isinstance(node, ast.FunctionParam):
         return '%s: %s' % (node.name, pretty_print_node(node.declared_type, indent))
-    if isinstance(node, ast.Privileges):
-        if len(node.privileges) == 0:
+    if isinstance(node, ast.FunctionReturnType):
+        if isinstance(node.declared_type, ast.TypeVoid):
             return ''
-        return ', %s' % ', '.join(pretty_print_node(privilege, indent) for privilege in node.privileges)
-    if isinstance(node, ast.Privilege):
-        if node.op is not None:
-            return '%s<%s>(%s)' % (node.privilege, node.op, pretty_print_node(node.regions, indent))
-        return '%s(%s)' % (node.privilege, pretty_print_node(node.regions, indent))
-    if isinstance(node, ast.PrivilegeRegions):
-        return ', '.join(pretty_print_node(region, indent) for region in node.regions)
-    if isinstance(node, ast.PrivilegeRegion):
-        return '%s%s' % (node.name, pretty_print_node(node.fields, indent))
-    if isinstance(node, ast.PrivilegeRegionFields):
-        if len(node.fields) == 0:
-            return ''
-        if len(node.fields) == 1:
-            return '.%s' % pretty_print_node(node.fields[0], indent)
-        return '.{%s}' % ', '.join(pretty_print_node(field, indent) for field in node.fields)
-    if isinstance(node, ast.PrivilegeRegionField):
-        if node.fields is None:
-            return node.name
-        return '%s%s' % (node.name, pretty_print_node(node.fields, indent))
+        return ': %s' % pretty_print_node(node.declared_type, indent)
+    if isinstance(node, ast.FunctionPrivileges):
+        return ''.join(pretty_print_node(privilege, indent) for privilege in node.privileges)
+    if isinstance(node, ast.FunctionPrivilege):
+        return ', %s' % pretty_print_node(node.privilege, indent)
     if isinstance(node, ast.TypeVoid):
         return 'void'
     if isinstance(node, ast.TypeBool):
@@ -168,6 +160,24 @@ def pretty_print_node(node, indent):
         return node.name
     if isinstance(node, ast.TypeIspaceKind):
         return 'ispace<%s>' % pretty_print_node(node.index_type, indent)
+    if isinstance(node, ast.Privilege):
+        if node.op is not None:
+            return '%s<%s>(%s)' % (node.privilege, node.op, pretty_print_node(node.regions, indent))
+        return '%s(%s)' % (node.privilege, pretty_print_node(node.regions, indent))
+    if isinstance(node, ast.PrivilegeRegions):
+        return ', '.join(pretty_print_node(region, indent) for region in node.regions)
+    if isinstance(node, ast.PrivilegeRegion):
+        return '%s%s' % (node.name, pretty_print_node(node.fields, indent))
+    if isinstance(node, ast.PrivilegeRegionFields):
+        if len(node.fields) == 0:
+            return ''
+        if len(node.fields) == 1:
+            return '.%s' % pretty_print_node(node.fields[0], indent)
+        return '.{%s}' % ', '.join(pretty_print_node(field, indent) for field in node.fields)
+    if isinstance(node, ast.PrivilegeRegionField):
+        if node.fields is None:
+            return node.name
+        return '%s%s' % (node.name, pretty_print_node(node.fields, indent))
     if isinstance(node, ast.Block):
         return '{\n%s\n%s}' % (
             '\n'.join('  '*(indent + 1) + pretty_print_node(statement, indent + 1)

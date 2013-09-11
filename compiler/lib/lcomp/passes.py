@@ -28,16 +28,17 @@ def parse(input_file):
     program = parser.parse(input_file)
     return program
 
-def check(program, search_path):
-    imports.augment_imports(program, _default_search_path + search_path)
-    type_map, constraints = type_check.type_check(program)
-    return type_map, constraints
+def check(program, opts):
+    opts = opts.with_search_path(_default_search_path + opts.search_path)
+    imports.augment_imports(program, opts)
+    type_map, constraints, foreign_types = type_check.type_check(program, opts)
+    return type_map, constraints, foreign_types
 
-def lower(program, search_path):
-    type_map, constraints = check(program, search_path)
-    return lower_expressions.lower(program, type_map)
+def lower(program, opts):
+    type_map, constraints, foreign_types = check(program, opts)
+    return lower_expressions.lower(program, opts, type_map)
 
-def compile(program, search_path):
-    type_map, constraints = check(program, search_path)
-    region_usage = region_analysis.region_analysis(program, type_map)
-    return trans.trans(program, type_map, constraints, region_usage)
+def compile(program, opts):
+    type_map, constraints, foreign_types = check(program, opts)
+    region_usage = region_analysis.region_analysis(program, opts, type_map)
+    return trans.trans(program, opts, type_map, constraints, foreign_types, region_usage)

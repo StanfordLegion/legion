@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import "math.h";
+//import "math.h";
 import "foreign_cpp.h";
 
 task main()
@@ -22,10 +22,14 @@ task main()
 
   let x = 3.14;
   let y = 2.71;
-
-  assert fabs(add_double(x, y) - (x + y)) <= epsilon;
+  // assert fabs(add_double(x, y) - (x + y)) <= epsilon;
 
   let i = 4;
   let j = 5;
   assert add_int(i, j) == i + j;
+
+  let a: point = {x: 3, y: 4};
+  let b: point = {x: 5, y: 6};
+  let c = add_point(a, b);
+  assert c.x == 8 && c.y == 10;
 }

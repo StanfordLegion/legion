@@ -18,7 +18,7 @@ struct point
   x: int,
 }
 
-task read_write_aliased(r0: region<point>, r1: region<point>,
+task reduce_aliased(r0: region<point>, r1: region<point>,
                         x0: point@r0, x1: point@r1)
   , reduces<+>(r0.x, r1.x)
 {
@@ -36,6 +36,6 @@ task main()
   let r0 = p0[0];
   let r1 = p1[0];
   x->x = 0;
-  read_write_aliased(r0, r1, downregion<r0>(x), downregion<r1>(x));
+  reduce_aliased(r0, r1, downregion<r0>(x), downregion<r1>(x));
   assert x->x == 2;
 }

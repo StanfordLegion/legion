@@ -1,4 +1,3 @@
-
 % A Tutorial for the Legion Language
 
 <!--
@@ -759,7 +758,10 @@ only takes field `x`:
 
 ```legion
 task takes_point_x(r: region<point>, p: point@r)
-  , reads(r.x), writes(r.x) { /*...*/ }
+  , reads(r.x), writes(r.x)
+{
+  // ...
+}
 ```
 
 If you need access to two or more fields in the same struct, you can
@@ -767,7 +769,10 @@ put them in `{}`.
 
 ```legion
 task takes_point_yz(r: region<point>, p: point@r)
-  , reads(r.{y, z}), writes(r.{y, z}) { /*...*/ }
+  , reads(r.{y, z}), writes(r.{y, z})
+{
+  // ...
+}
 ```
 
 Now, `takes_point_x` and `takes_point_yz` can run in parallel, even on

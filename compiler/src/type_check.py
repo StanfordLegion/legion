@@ -20,9 +20,10 @@ _root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(_root_dir)
 sys.path.append(os.path.join(_root_dir, 'lib'))
 
-from lcomp import passes, types
+from lcomp import options, passes, types
 
 if __name__ == '__main__':
+    opts = options.build_fake_options(None, True)
     program = passes.parse(sys.stdin)
-    type_map, constraints = passes.check(program, (os.getcwd(),))
+    type_map, constraints, foreign_types = passes.check(program, opts)
     print type_map[program]

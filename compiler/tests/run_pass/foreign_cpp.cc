@@ -15,6 +15,8 @@
 
 #include "foreign_cpp.h"
 
+point::point(): x(0.0), y(0.0) {}
+
 double add_double(double x, double y)
 {
   return x + y;
@@ -23,4 +25,12 @@ double add_double(double x, double y)
 intptr_t add_int(intptr_t x, intptr_t y)
 {
   return x + y;
+}
+
+point add_point(point a, point b)
+{
+  point sum;
+  sum.x = a.x + b.x;
+  sum.y = a.y + b.y;
+  return sum;
 }

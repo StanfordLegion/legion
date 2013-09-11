@@ -19,8 +19,15 @@
 ### Driver
 ###
 
-import itertools, optparse, os, platform, shutil, subprocess, sys, tempfile
-from . import passes
+import itertools, multiprocessing, os, platform, shutil, subprocess, sys, tempfile
+from . import options, passes
+
+class CompilerException (Exception):
+    def __init__(self, stdout, stderr, saved_temps):
+        Exception.__init__(self, stdout, stderr)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.saved_temps = saved_temps
 
 def platform_cxx():
     if platform.system() == 'Darwin':
@@ -40,36 +47,61 @@ def platform_ldflags():
         return ['-stdlib=libc++', '-lpthread']
     return ['-lrt', '-lpthread']
 
-def compile_to_cpp(input_filename, output_filename, search_path):
-    with open(input_filename, 'rb') as input_file:
-        program = passes.parse(input_file)
-    cpp_result_text = passes.compile(program, search_path)
-    with open(output_filename, 'wb') as output_file:
-        output_file.write(cpp_result_text)
+def compile_to_cpp(opts):
+    assert len(opts.input_filenames) == 1
+    input_path = opts.input_filenames[0]
+    output_h_path, output_cpp_path = opts.output_filename
 
-def compile_to_obj(input_filename, output_filename, search_path,
-                   legion_runtime_dir, stdout, stderr):
+    with open(input_path, 'rb') as input_file:
+        program = passes.parse(input_file)
+    cpp_header, cpp_source = passes.compile(program, opts)
+    with open(output_h_path, 'wb') as output_file:
+        output_file.write(cpp_header)
+    with open(output_cpp_path, 'wb') as output_file:
+        output_file.write(cpp_source)
+    return []
+
+def compile_to_obj(opts, stdout, stderr):
+    assert len(opts.input_filenames) == 1
+    input_path = opts.input_filenames[0]
+    output_h_path, output_obj_path = opts.output_filename
+
     # Dump C++ to a temp directory, and build
     temp_dir = tempfile.mkdtemp()
-    temp_cpp_basename = 'input.cc'
+    temp_cpp_basename = options.with_ext(os.path.basename(output_obj_path), '.cc')
     temp_cpp_path = os.path.join(temp_dir, temp_cpp_basename)
+    temp_h_path = os.path.join(temp_dir, os.path.basename(output_h_path))
+
+    # If the compiler failed to produce any temporary files, no reason
+    # to keep around the temporary directory.
     try:
-        compile_to_cpp(input_filename, temp_cpp_path, search_path)
+        compile_to_cpp(opts.with_single_source(
+                input_path, (temp_h_path, temp_cpp_path), options.TARGET_CPP))
+    except:
+        shutil.rmtree(temp_dir)
+        raise
+
+    try:
         proc = subprocess.Popen(
             [platform_cxx()] +
             platform_cxxflags() +
-            ['-I', legion_runtime_dir] +
+            (['-g'] if opts.debug else []) +
+            ['-I', opts.legion_runtime_dir] +
             [option
-             for path in search_path
+             for path in opts.search_path
              for option in ('-I', path)] +
             ['-c', temp_cpp_path,
-             '-o', output_filename],
+             '-o', output_obj_path],
             stdout = stdout, stderr = stderr)
         output, errors = proc.communicate()
         if proc.returncode != 0:
-            raise Exception(output, errors)
+            raise CompilerException(output, errors, [temp_dir] if opts.save_temps else [])
+        os.rename(temp_h_path, output_h_path)
     finally:
-        shutil.rmtree(temp_dir)
+        if not opts.save_temps:
+            shutil.rmtree(temp_dir)
+            temp_dir = None
+    return [temp_dir] if temp_dir is not None else []
 
 _legion_extensions = ('.lg',)
 
@@ -98,34 +130,36 @@ def unique_filenames(filenames, extension, existing):
 
     return result, existing
 
-def compile_to_exe(input_filenames, output_filename, thread_count,
-                   clean_first, search_path, legion_runtime_dir, stdout, stderr):
+def compile_to_exe(opts, stdout, stderr):
     # Filter input files according to file type
     input_legion_filenames = [
         filename
-        for filename in input_filenames
+        for filename in opts.input_filenames
         if os.path.splitext(filename)[1] in _legion_extensions]
 
     input_cpp_filenames = [
         filename
-        for filename in input_filenames
+        for filename in opts.input_filenames
         if os.path.splitext(filename)[1] in _cpp_extensions]
 
     assert len(set(input_legion_filenames + input_cpp_filenames)) == \
         len(input_legion_filenames + input_cpp_filenames)
     assert set(input_legion_filenames + input_cpp_filenames) == \
-        set(input_filenames)
+        set(opts.input_filenames)
 
     # Dump C++ files and Makefile to a temp directory, build, and copy back
     temp_dir = tempfile.mkdtemp()
     existing = set(['Makefile', 'output'])
     temp_legion_basenames, existing = unique_filenames(
         [os.path.basename(filename) for filename in input_legion_filenames],
-        '.cc',
+        '.lg.cc',
         existing)
     temp_legion_paths = [
         os.path.join(temp_dir, basename)
         for basename in temp_legion_basenames]
+    temp_legion_h_paths = [
+        options.with_ext(path, '.h')
+        for path in temp_legion_paths]
     temp_cpp_basenames, existing = unique_filenames(
         [os.path.basename(filename) for filename in input_cpp_filenames],
         '.cc',
@@ -135,100 +169,83 @@ def compile_to_exe(input_filenames, output_filename, thread_count,
         for basename in temp_cpp_basenames]
     temp_output_basename = 'output'
     temp_output_path = os.path.join(temp_dir, temp_output_basename)
-    makefile_template_path = os.path.join(legion_runtime_dir, '..', 'apps', 'Makefile.template')
+    makefile_template_path = os.path.join(opts.legion_runtime_dir, '..', 'apps', 'Makefile.template')
     temp_makefile_path = os.path.join(temp_dir, 'Makefile')
+
+    threads = []
+    if opts.thread_count is not None:
+        threads = [str(opts.thread_count)]
+    else:
+        try:
+            threads = [str(multiprocessing.cpu_count())]
+        except NotImplementedError:
+            pass
+
+    # If the compiler failed to produce any temporary files, no reason
+    # to keep around the temporary directory.
+    try:
+        for input_filename, temp_h_path, temp_cpp_path in \
+                zip(input_legion_filenames, temp_legion_h_paths, temp_legion_paths):
+            compile_to_cpp(opts.with_single_source(
+                    input_filename, (temp_h_path, temp_cpp_path), options.TARGET_CPP))
+    except:
+        shutil.rmtree(temp_dir)
+        raise
+
     try:
         shutil.copy(makefile_template_path, temp_makefile_path)
         for input_filename, temp_cpp_path in \
                 zip(input_cpp_filenames, temp_cpp_paths):
             shutil.copy(input_filename, temp_cpp_path)
-        for input_filename, temp_cpp_path in \
-                zip(input_legion_filenames, temp_legion_paths):
-            compile_to_cpp(input_filename, temp_cpp_path, search_path)
+        make_env = dict(
+            os.environ.items() +
+            [('OUTFILE', temp_output_basename),
+             ('GEN_SRC', ' '.join(temp_legion_basenames + temp_cpp_basenames)),
+             ('GCC', platform_cxx()),
+             ('CC_FLAGS', ' '.join(
+                        platform_cxxflags() +
+                        [option
+                         for path in opts.search_path
+                         for option in ('-I', path)])),
+            ('DEBUG', ('1' if opts.debug else '0')),
+            ('SHARED_LOWLEVEL', '1')])
         make_args = [
             '--file=%s' % temp_makefile_path,
             '--directory=%s' % temp_dir,
-            'OUTFILE=%s' % temp_output_basename,
-            'GEN_SRC=%s' % ' '.join(temp_legion_basenames + temp_cpp_basenames),
-            'GCC=%s' % platform_cxx(),
-            'CC_FLAGS=%s' % ' '.join(
-                platform_cxxflags() +
-                [option
-                 for path in search_path
-                 for option in ('-I', path)]),
-            'LD_FLAGS=%s' % ' '.join(
-                platform_ldflags()),
-            'SHARED_LOWLEVEL=1',
-            ] + (
-            ['-j', str(thread_count)] if thread_count is not None else ['-j'])
+            'LD_FLAGS=%s' % ' '.join(platform_ldflags()),
+            '-j'] + threads
         make_targets = []
-        if clean_first:
+        if opts.clean_first:
             make_targets.append('clean')
         make_targets.append('all')
-        proc = subprocess.Popen(
-            ['make'] + make_args + make_targets,
-            stdout = stdout, stderr = stderr)
-        output, errors = proc.communicate()
-        if proc.returncode != 0:
-            raise Exception(output, errors)
-        shutil.copy(temp_output_path, output_filename)
+        for make_target in make_targets:
+            proc = subprocess.Popen(
+                ['make'] + make_args + [make_target],
+                env = make_env,
+                stdout = stdout, stderr = stderr)
+            output, errors = proc.communicate()
+            if proc.returncode != 0:
+                raise CompilerException(output, errors, [temp_dir] if opts.save_temps else [])
+        shutil.copy(temp_output_path, opts.output_filename)
     finally:
-        shutil.rmtree(temp_dir)
+        if not opts.save_temps:
+            shutil.rmtree(temp_dir)
+            temp_dir = None
+    return [temp_dir] if temp_dir is not None else []
 
-def driver(argv, verbose = True):
-    parser = optparse.OptionParser(description = 'Compiles a Legion source file.')
-    parser.add_option('-c', dest = 'compile_to_obj', action = 'store_true', default = False)
-    parser.add_option('-S', dest = 'compile_to_cpp', action = 'store_true', default = False)
-    parser.add_option('-o', dest = 'output', default = 'a.out')
-    parser.add_option('-j', dest = 'thread_count', default = None, type = int)
-    parser.add_option('--clean', dest = 'clean_first', action = 'store_true', default = False)
-    (options, args) = parser.parse_args(argv[1:])
-    if len(args) == 0:
-        parser.error('No input files')
-    if len(args) != 1 and (options.compile_to_cpp or options.compile_to_obj):
-        parser.error('No input files')
+def driver(argv = None):
+    opts = options.parse_options(argv)
 
-    search_path = tuple(os.path.abspath(os.path.dirname(arg)) for arg in args)
+    if opts.allow_all():
+        stdout, stderr = None, None
+    else:
+        stdout, stderr = subprocess.PIPE, subprocess.STDOUT
 
-    # For the duration of compilation, replace stdout and stderr with
-    # the provided values.
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
-    try:
-        if verbose:
-            stdout, stderr = None, None
-        if not verbose:
-            sys.stdout = open('/dev/null', 'wb')
-            sys.stderr = sys.stdout
-            stdout, stderr = subprocess.PIPE, subprocess.STDOUT
-
-        if options.compile_to_cpp:
-            compile_to_cpp(
-                input_filename = args[0],
-                output_filename = options.output,
-                search_path = search_path)
-        elif options.compile_to_obj:
-            if 'LG_RT_DIR' not in os.environ:
-                parser.error('LG_RT_DIR variable is not defined')
-            compile_to_obj(
-                input_filename = args[0],
-                output_filename = options.output,
-                search_path = search_path,
-                legion_runtime_dir = os.environ['LG_RT_DIR'],
-                stdout = stdout,
-                stderr = stderr)
-        else:
-            if 'LG_RT_DIR' not in os.environ:
-                parser.error('LG_RT_DIR variable is not defined')
-            compile_to_exe(
-                input_filenames = args,
-                output_filename = options.output,
-                thread_count = options.thread_count,
-                clean_first = options.clean_first,
-                search_path = search_path,
-                legion_runtime_dir = os.environ['LG_RT_DIR'],
-                stdout = stdout,
-                stderr = stderr)
-    finally:
-        sys.stdout = original_stdout
-        sys.stderr = original_stderr
+    if opts.target == options.TARGET_CPP:
+        return compile_to_cpp(opts)
+    elif opts.target == options.TARGET_OBJ:
+        return compile_to_obj(opts, stdout, stderr)
+    elif opts.target == options.TARGET_EXE:
+        return compile_to_exe(opts, stdout, stderr)
+    else:
+        assert False

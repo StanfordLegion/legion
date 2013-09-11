@@ -20,6 +20,7 @@
 ###
 
 import os, ply, ply.yacc, sys
+from cStringIO import StringIO
 from . import ast, lex
 
 class ParseError (Exception):
@@ -53,16 +54,24 @@ class Parser:
         ('left', '(', ')', '{', '}'),
         )
 
-    def p_program_empty(self, p):
-        'program : '
-        p[0] = ast.Program(
-            span = ast.Span.from_slice(p))
-
-    def p_program_def(self, p):
-        'program : program def'
+    def p_program(self, p):
+        'program : definitions'
         p[0] = ast.Program(
             span = ast.Span.from_slice(p),
-            program = p[1], definition = p[2])
+            full_text = p.lexer.full_text,
+            line_resets = p.lexer.line_resets,
+            definitions = p[1])
+
+    def p_definitions_empty(self, p):
+        'definitions : '
+        p[0] = ast.Definitions(
+            span = ast.Span.from_slice(p))
+
+    def p_definitions_def(self, p):
+        'definitions : definitions def'
+        p[0] = ast.Definitions(
+            span = ast.Span.from_slice(p),
+            definitions = p[1], definition = p[2])
 
     def p_import(self, p):
         'def : IMPORT STRING_VALUE ";"'
@@ -71,11 +80,17 @@ class Parser:
             filename = p[2][1:-1])
 
     def p_struct(self, p):
-        'def : STRUCT ID struct_params struct_regions struct_constraints field_decls'
+        'def : STRUCT struct_name struct_params struct_regions struct_constraints field_decls'
         p[0] = ast.Struct(
             span = ast.Span.from_slice(p),
             name = p[2], params = p[3], regions = p[4], constraints = p[5],
             field_decls = p[6])
+
+    def p_struct_name(self, p):
+        'struct_name : ID'
+        p[0] = ast.StructName(
+            span = ast.Span.from_slice(p),
+            name = p[1])
 
     def p_struct_params_empty(self, p):
         'struct_params : '
@@ -84,7 +99,9 @@ class Parser:
 
     def p_struct_params_nonempty(self, p):
         'struct_params : "<" struct_params_list ">"'
-        p[0] = p[2]
+        p[0] = ast.StructParams(
+            span = ast.Span.from_slice(p),
+            params = p[2])
 
     def p_struct_params_list_single_param(self, p):
         'struct_params_list : struct_param'
@@ -111,7 +128,9 @@ class Parser:
 
     def p_struct_regions_nonempty(self, p):
         'struct_regions : "[" struct_regions_list "]"'
-        p[0] = p[2]
+        p[0] = ast.StructRegions(
+            span = ast.Span.from_slice(p),
+            regions = p[2])
 
     def p_struct_regions_list_single_region(self, p):
         'struct_regions_list : struct_region'
@@ -172,7 +191,9 @@ class Parser:
 
     def p_field_decls_nonempty(self, p):
         'field_decls : "{" field_decls_list optional_comma "}"'
-        p[0] = p[2]
+        p[0] = ast.FieldDecls(
+            span = ast.Span.from_slice(p),
+            field_decls = p[2])
 
     def p_field_decls_list_single_field(self, p):
         'field_decls_list : field_decl'
@@ -201,177 +222,94 @@ class Parser:
         pass
 
     def p_function(self, p):
-        'def : TASK ID params return_type privileges block'
+        'def : TASK function_name function_params function_return_type function_privileges block'
         p[0] = ast.Function(
             span = ast.Span.from_slice(p),
             name = p[2], params = p[3],
             return_type = p[4], privileges = p[5],
             block = p[6])
 
-    def p_params_empty(self, p):
-        'params : "(" ")"'
-        p[0] = ast.Params(
+    def p_function_name(self, p):
+        'function_name : ID'
+        p[0] = ast.FunctionName(
+            span = ast.Span.from_slice(p),
+            name = p[1])
+
+    def p_function_params_empty(self, p):
+        'function_params : "(" ")"'
+        p[0] = ast.FunctionParams(
             span = ast.Span.from_slice(p))
 
-    def p_params_nonempty(self, p):
-        'params : "(" params_list ")"'
-        p[0] = p[2]
+    def p_function_params_nonempty(self, p):
+        'function_params : "(" function_params_list ")"'
+        p[0] = ast.FunctionParams(
+            span = ast.Span.from_slice(p),
+            params = p[2])
 
-    def p_params_list_single_param(self, p):
-        'params_list : param'
-        p[0] = ast.Params(
+    def p_function_params_list_single_param(self, p):
+        'function_params_list : function_param'
+        p[0] = ast.FunctionParams(
             span = ast.Span.from_slice(p),
             param = p[1])
 
-    def p_params_list_additional_param(self, p):
-        'params_list : params_list "," param'
-        p[0] = ast.Params(
+    def p_function_params_list_additional_param(self, p):
+        'function_params_list : function_params_list "," function_param'
+        p[0] = ast.FunctionParams(
             span = ast.Span.from_slice(p),
             params = p[1], param = p[3])
 
-    def p_param(self, p):
-        'param : ID ":" param_type'
-        p[0] = ast.Param(
+    def p_function_param(self, p):
+        'function_param : ID ":" function_param_type'
+        p[0] = ast.FunctionParam(
             span = ast.Span.from_slice(p),
             name = p[1], declared_type = p[3])
 
-    def p_param_type(self, p):
-        '''param_type : type_nonvoid
+    def p_function_param_type(self, p):
+        '''function_param_type : type_nonvoid
                       | type_region_kind
                       | type_array_kind
                       | type_ispace_kind'''
         p[0] = p[1]
 
-    def p_privileges_empty(self, p):
-        'privileges : '
-        p[0] = ast.Privileges(
+    def p_function_return_type_void(self, p):
+        'function_return_type : '
+        p[0] = ast.FunctionReturnType(
+            span = ast.Span.from_slice(p),
+            declared_type = ast.TypeVoid(
+                span = ast.Span.from_slice(p)))
+
+    def p_function_return_type_nonvoid(self, p):
+        'function_return_type : ":" type'
+        p[0] = ast.FunctionReturnType(
+            span = ast.Span.from_slice(p),
+            declared_type = p[2])
+
+    def p_function_privileges_empty(self, p):
+        'function_privileges : '
+        p[0] = ast.FunctionPrivileges(
             span = ast.Span.from_slice(p))
 
-    def p_privileges_nonempty(self, p):
-        'privileges : "," privileges_list'
-        p[0] = p[2]
+    def p_function_privileges_nonempty(self, p):
+        'function_privileges : function_privileges_list'
+        p[0] = p[1]
 
-    def p_privileges_list_single_privilege(self, p):
-        'privileges_list : privilege'
-        p[0] = ast.Privileges(
+    def p_function_privileges_list_single_function_privilege(self, p):
+        'function_privileges_list : function_privilege'
+        p[0] = ast.FunctionPrivileges(
             span = ast.Span.from_slice(p),
             privilege = p[1])
 
-    def p_privileges_list_additional_privilege(self, p):
-        'privileges_list : privileges_list "," privilege'
-        p[0] = ast.Privileges(
+    def p_function_privileges_list_additional_function_privilege(self, p):
+        'function_privileges_list : function_privileges_list function_privilege'
+        p[0] = ast.FunctionPrivileges(
             span = ast.Span.from_slice(p),
-            privileges = p[1], privilege = p[3])
+            privileges = p[1], privilege = p[2])
 
-    def p_privilege_read_write(self, p):
-        '''privilege : READS privilege_regions
-                     | WRITES privilege_regions'''
-        p[0] = ast.Privilege(
+    def p_function_privilege(self, p):
+        'function_privilege : "," privilege'
+        p[0] = ast.FunctionPrivilege(
             span = ast.Span.from_slice(p),
-            privilege = p[1], regions = p[2])
-
-    def p_privilege_reduce(self, p):
-        '''privilege : REDUCES reduce_op privilege_regions'''
-        p[0] = ast.Privilege(
-            span = ast.Span.from_slice(p),
-            privilege = p[1], regions = p[3], op = p[2])
-
-    def p_privilege_regions(self, p):
-        'privilege_regions :  "(" privilege_regions_list ")"'
-        p[0] = p[2]
-
-    def p_privilege_regions_list_single_region(self, p):
-        'privilege_regions_list : privilege_region'
-        p[0] = ast.PrivilegeRegions(
-            span = ast.Span.from_slice(p),
-            region = p[1])
-
-    def p_privilege_regions_list_additional_region(self, p):
-        'privilege_regions_list : privilege_regions_list "," privilege_region'
-        p[0] = ast.PrivilegeRegions(
-            span = ast.Span.from_slice(p),
-            regions = p[1],
-            region = p[3])
-
-    def p_privilege_region(self, p):
-        'privilege_region : ID'
-        p[0] = ast.PrivilegeRegion(
-            span = ast.Span.from_slice(p),
-            name = p[1],
-            fields = ast.PrivilegeRegionFields(
-                span = ast.Span.from_slice(p)))
-
-    def p_privilege_region_with_field(self, p):
-        'privilege_region : ID "." privilege_region_field_top'
-        p[0] = ast.PrivilegeRegion(
-            span = ast.Span.from_slice(p),
-            name = p[1],
-            fields = p[3])
-
-    def p_privilege_region_top_field_single(self, p):
-        'privilege_region_field_top : privilege_region_field'
-        p[0] = ast.PrivilegeRegionFields(
-                span = ast.Span.from_slice(p),
-                field = p[1])
-
-    def p_privilege_region_top_field_multiple(self, p):
-        'privilege_region_field_top : privilege_region_field_multiple'
-        p[0] = p[1]
-
-    def p_privilege_region_field_single(self, p):
-        'privilege_region_field : ID'
-        p[0] = ast.PrivilegeRegionField(
-            span = ast.Span.from_slice(p),
-            name = p[1],
-            fields = ast.PrivilegeRegionFields(
-                span = ast.Span.from_slice(p)))
-
-    def p_privilege_region_field_nested(self, p):
-        'privilege_region_field : ID "." privilege_region_field_top'
-        p[0] = ast.PrivilegeRegionField(
-            span = ast.Span.from_slice(p),
-            name = p[1],
-            fields = p[3])
-
-    def p_privilege_region_field_multiple(self, p):
-        'privilege_region_field_multiple : "{" privilege_region_fields_list "}"'
-        p[0] = p[2]
-
-    def p_privilege_region_fields_list_single_field(self, p):
-        'privilege_region_fields_list : privilege_region_field'
-        p[0] = ast.PrivilegeRegionFields(
-            span = ast.Span.from_slice(p),
-            field = p[1])
-
-    def p_privilege_region_fields_list_additional_field(self, p):
-        'privilege_region_fields_list : privilege_region_fields_list "," privilege_region_field'
-        p[0] = ast.PrivilegeRegionFields(
-            span = ast.Span.from_slice(p),
-            fields = p[1],
-            field = p[3])
-
-    def p_reduce_op(self, p):
-        'reduce_op : type_start reduce_op_inner type_end'
-        p[0] = p[2]
-
-    def p_reduce_op_inner(self, p):
-        '''reduce_op_inner : "<" "*" ">"
-                           | "<" "/" ">"
-                           | "<" "+" ">"
-                           | "<" "-" ">"
-                           | "<" "&" ">"
-                           | "<" "^" ">"
-                           | "<" "|" ">"'''
-        p[0] = p[2]
-
-    def p_return_type_void(self, p):
-        'return_type : '
-        p[0] = ast.TypeVoid(
-            span = ast.Span.from_slice(p))
-
-    def p_return_type_nonvoid(self, p):
-        'return_type : ":" type'
-        p[0] = p[2]
+            privilege = p[2])
 
     def p_type_start(self, p):
         'type_start :'
@@ -616,6 +554,107 @@ class Parser:
             region_type = p[3],
             mode = p[5])
 
+    def p_privilege_read_write(self, p):
+        '''privilege : READS privilege_regions
+                     | WRITES privilege_regions'''
+        p[0] = ast.Privilege(
+            span = ast.Span.from_slice(p),
+            privilege = p[1], regions = p[2])
+
+    def p_privilege_reduce(self, p):
+        '''privilege : REDUCES reduce_op privilege_regions'''
+        p[0] = ast.Privilege(
+            span = ast.Span.from_slice(p),
+            privilege = p[1], regions = p[3], op = p[2])
+
+    def p_privilege_regions(self, p):
+        'privilege_regions :  "(" privilege_regions_list ")"'
+        p[0] = p[2]
+
+    def p_privilege_regions_list_single_region(self, p):
+        'privilege_regions_list : privilege_region'
+        p[0] = ast.PrivilegeRegions(
+            span = ast.Span.from_slice(p),
+            region = p[1])
+
+    def p_privilege_regions_list_additional_region(self, p):
+        'privilege_regions_list : privilege_regions_list "," privilege_region'
+        p[0] = ast.PrivilegeRegions(
+            span = ast.Span.from_slice(p),
+            regions = p[1],
+            region = p[3])
+
+    def p_privilege_region(self, p):
+        'privilege_region : ID'
+        p[0] = ast.PrivilegeRegion(
+            span = ast.Span.from_slice(p),
+            name = p[1],
+            fields = ast.PrivilegeRegionFields(
+                span = ast.Span.from_slice(p)))
+
+    def p_privilege_region_with_field(self, p):
+        'privilege_region : ID "." privilege_region_field_top'
+        p[0] = ast.PrivilegeRegion(
+            span = ast.Span.from_slice(p),
+            name = p[1],
+            fields = p[3])
+
+    def p_privilege_region_top_field_single(self, p):
+        'privilege_region_field_top : privilege_region_field'
+        p[0] = ast.PrivilegeRegionFields(
+                span = ast.Span.from_slice(p),
+                field = p[1])
+
+    def p_privilege_region_top_field_multiple(self, p):
+        'privilege_region_field_top : privilege_region_field_multiple'
+        p[0] = p[1]
+
+    def p_privilege_region_field_single(self, p):
+        'privilege_region_field : ID'
+        p[0] = ast.PrivilegeRegionField(
+            span = ast.Span.from_slice(p),
+            name = p[1],
+            fields = ast.PrivilegeRegionFields(
+                span = ast.Span.from_slice(p)))
+
+    def p_privilege_region_field_nested(self, p):
+        'privilege_region_field : ID "." privilege_region_field_top'
+        p[0] = ast.PrivilegeRegionField(
+            span = ast.Span.from_slice(p),
+            name = p[1],
+            fields = p[3])
+
+    def p_privilege_region_field_multiple(self, p):
+        'privilege_region_field_multiple : "{" privilege_region_fields_list "}"'
+        p[0] = p[2]
+
+    def p_privilege_region_fields_list_single_field(self, p):
+        'privilege_region_fields_list : privilege_region_field'
+        p[0] = ast.PrivilegeRegionFields(
+            span = ast.Span.from_slice(p),
+            field = p[1])
+
+    def p_privilege_region_fields_list_additional_field(self, p):
+        'privilege_region_fields_list : privilege_region_fields_list "," privilege_region_field'
+        p[0] = ast.PrivilegeRegionFields(
+            span = ast.Span.from_slice(p),
+            fields = p[1],
+            field = p[3])
+
+    def p_reduce_op(self, p):
+        'reduce_op : type_start reduce_op_inner type_end'
+        p[0] = p[2]
+
+    def p_reduce_op_inner(self, p):
+        '''reduce_op_inner : "<" "*" ">"
+                           | "<" "/" ">"
+                           | "<" "+" ">"
+                           | "<" "-" ">"
+                           | "<" "&" ">"
+                           | "<" "^" ">"
+                           | "<" "|" ">"'''
+        p[0] = p[2]
+
     def p_block_empty(self, p):
         'block : "{" "}"'
         p[0] = ast.Block(
@@ -623,7 +662,9 @@ class Parser:
 
     def p_block_nonempty(self, p):
         'block : "{" block_list "}"'
-        p[0] = p[2]
+        p[0] = ast.Block(
+            span = ast.Span.from_slice(p),
+            block = p[2])
 
     def p_block_list_single_statement(self, p):
         'block_list : statement'
@@ -662,12 +703,10 @@ class Parser:
             condition = p[3], then_block = p[5], else_block = p[7])
 
     def p_statement_for_region(self, p):
-        'statement : FOR for_index_list IN for_region block'
+        'statement : FOR for_index_list IN for_region_single block'
         p[0] = ast.StatementFor(
             span = ast.Span.from_slice(p),
-            indices = p[2], regions = ast.ForRegions(
-                span = ast.Span.from_slice(p),
-                region = p[4]),
+            indices = p[2], regions = p[4],
             block = p[5])
 
     def p_statement_for_zip(self, p):
@@ -699,6 +738,12 @@ class Parser:
         p[0] = ast.ForIndex(
             span = ast.Span.from_slice(p),
             name = p[1], type = p[3])
+
+    def p_for_region_single(self, p):
+        'for_region_single : for_region'
+        p[0] = ast.ForRegions(
+            span = ast.Span.from_slice(p),
+            region = p[1])
 
     def p_for_region_list_single_region(self, p):
         'for_region_list : for_region'
@@ -850,6 +895,7 @@ class Parser:
 
     def p_expr_parens(self, p):
         'expr : "(" expr ")"'
+        p[2].span = ast.Span.from_slice(p)
         p[0] = p[2]
 
     def p_expr_id(self, p):

@@ -23,4 +23,4 @@ sys.path.append(os.path.join(_root_dir, 'lib'))
 from lcomp import driver
 
 if __name__ == '__main__':
-    driver.driver(sys.argv)
+    driver.driver()
