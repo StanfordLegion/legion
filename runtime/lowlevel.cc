@@ -1424,6 +1424,19 @@ namespace LegionRuntime {
       return result;
     }
 
+    void Barrier::destroy_barrier(void)
+    {
+      // TODO: Implement this
+      assert(false);
+    }
+
+    Barrier Barrier::advance_barrier(void) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return *this;
+    }
+
     Barrier Barrier::alter_arrival_count(int delta) const
     {
       // TODO: Implement this
@@ -2828,7 +2841,10 @@ namespace LegionRuntime {
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
-      resp.inst_offset = StaticAccess<RegionInstance::Impl>(resp.i.impl())->alloc_offset;
+      StaticAccess<RegionInstance::Impl> i_data(resp.i.impl());
+      resp.inst_offset = i_data->alloc_offset;
+      resp.count_offset = i_data->count_offset;
+      //resp.inst_offset = StaticAccess<RegionInstance::Impl>(resp.i.impl())->alloc_offset;
       return resp;
     }
 
@@ -3231,6 +3247,13 @@ namespace LegionRuntime {
 
 	virtual void thread_main(void)
 	{
+          if (proc->core_id >= 0) {
+            cpu_set_t cset;
+            CPU_ZERO(&cset);
+            CPU_SET(proc->core_id, &cset);
+            pthread_t current_thread = pthread_self();
+            CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
+          }
 	  // first thing - take the lock and set our status
 	  state = STATE_IDLE;
 
@@ -3270,7 +3293,17 @@ namespace LegionRuntime {
 	      // now we can set 'init_done', and signal anybody who is in the
 	      //  INIT_WAIT state
 	      proc->init_done = true;
-	      proc->enable_idle_task();
+              // Enable the idle task
+              if(proc->util_proc) {
+                log_task.info("idle task enabled for processor %x on util proc %x",
+                              proc->me.id, proc->util.id);
+
+                proc->util_proc->enable_idle_task(proc);
+              } else {
+                assert(proc->kind != Processor::UTIL_PROC);
+                log_task.info("idle task enabled for processor %x", proc->me.id);
+                proc->idle_task_enabled = true;
+              }
 	      for(std::set<Thread *>::iterator it = proc->all_threads.begin();
 		  it != proc->all_threads.end();
 		  it++)
@@ -3554,8 +3587,32 @@ namespace LegionRuntime {
 	} else {
 	  assert(kind != Processor::UTIL_PROC);
 	  log_task.info("idle task enabled for processor %x", me.id);
+          // need the lock when modifying data structures
+          AutoHSLLock a(mutex);
 	  idle_task_enabled = true;
-	  // TODO: wake up thread if we're called from another thread
+          if(active_thread_count < max_active_threads) {
+            if(avail_threads.size() > 0) {
+              // take a thread and start him - up to him to run this task or not
+              Thread *t = avail_threads.front();
+              avail_threads.pop_front();
+              assert(t->state == Thread::STATE_IDLE);
+              log_task.info("waking up thread %p to run idle task", t);
+              t->state = Thread::STATE_RUN;
+              active_thread_count++;
+              gasnett_cond_signal(&t->condvar);
+            } else
+              if(preemptable_threads.size() > 0) {
+                Thread *t = preemptable_threads.front();
+                preemptable_threads.pop_front();
+                assert(t->state == Thread::STATE_PREEMPTABLE);
+                t->state = Thread::STATE_RUN;
+                active_thread_count++;
+                log_task.info("preempting thread %p to run idle task", t);
+                gasnett_cond_signal(&t->condvar);
+              } else {
+                log_task.info("no threads avialable to run idle task");
+              }
+          }
 	}
       }
 
@@ -3718,6 +3775,13 @@ namespace LegionRuntime {
     protected:
       void thread_main(void)
       {
+        if (proc->core_id >= 0) {
+          cpu_set_t cset;
+          CPU_ZERO(&cset);
+          CPU_SET(proc->core_id, &cset);
+          pthread_t current_thread = pthread_self();
+          CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
+        }
 	// need to call init for utility processor too
 	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 	if(it != task_id_table.end()) {
@@ -3802,8 +3866,8 @@ namespace LegionRuntime {
 
           log_task(LEVEL_INFO, "finished processor shutdown task for utility proc: proc=%x", proc->me.id);
         }
-        if(proc->shutdown_event.exists())
-          proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
+        //if(proc->shutdown_event.exists())
+        //  proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
         proc->finished();
       }
 
@@ -3812,9 +3876,10 @@ namespace LegionRuntime {
     };
 
     UtilityProcessor::UtilityProcessor(Processor _me,
+                                       int _core_id /*=-1*/,
 				       int _num_worker_threads /*= 1*/)
       : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
-	num_worker_threads(_num_worker_threads), shutdown_event(Event::NO_EVENT)
+	core_id(_core_id), num_worker_threads(_num_worker_threads)
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
@@ -4529,6 +4594,21 @@ namespace LegionRuntime {
       } else {
 	copy_from.memory.impl()->get_bytes(copy_from.offset, raw_data, bytes_needed);
       }
+    }
+
+    ElementMask& ElementMask::operator=(const ElementMask &rhs)
+    {
+      first_element = rhs.first_element;
+      num_elements = rhs.num_elements;
+      first_enabled_elmt = rhs.first_enabled_elmt;
+      last_enabled_elmt = rhs.last_enabled_elmt;
+      size_t bytes_needed = rhs.raw_size();
+      raw_data = calloc(1, bytes_needed);
+      if (rhs.raw_data)
+        memcpy(raw_data, rhs.raw_data, bytes_needed);
+      else
+        rhs.memory.impl()->get_bytes(rhs.offset, raw_data, bytes_needed);
+      return *this;
     }
 
     void ElementMask::init(int _first_element, int _num_elements, Memory _memory, off_t _offset)
@@ -6218,7 +6298,8 @@ namespace LegionRuntime {
       for(unsigned i = 0; i < num_util_procs; i++) {
 	UtilityProcessor *up = new UtilityProcessor(ID(ID::ID_PROCESSOR, 
 						       gasnet_mynode(), 
-						       n->processors.size()).convert<Processor>());
+						       n->processors.size()).convert<Processor>(),
+                                                    num_local_cpus+i/*core id*/);
 
 	n->processors.push_back(up);
 	local_util_procs.push_back(up);
@@ -6657,7 +6738,7 @@ namespace LegionRuntime {
 	fflush(stdout);
 	sleep(1);
       }
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
       Logger::finalize();
 #endif
       log_machine.info("running proc count is now zero - terminating\n");
@@ -6703,7 +6784,7 @@ namespace LegionRuntime {
 
   }; // namespace LowLevel
   // Implementation of logger for low level runtime
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
   /*static*/ void Logger::finalize(void)
   {
     //assert(lockf(get_log_file(), F_LOCK, logging_buffer_size) == 0);
@@ -6733,7 +6814,7 @@ namespace LegionRuntime {
     int len = strlen(buffer);
     vsnprintf(buffer+len, 999-len, fmt, args);
     strcat(buffer, "\n");
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
     // Update the length to reflect the newline character
     len = strlen(buffer);
     long long loc = __sync_fetch_and_add(get_logging_location(),len);

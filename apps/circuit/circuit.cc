@@ -158,9 +158,8 @@ void region_main(const void *args, size_t arglen,
   ArgumentMap local_args = runtime->create_argument_map(ctx);
   for (int idx = 0; idx < num_pieces; idx++)
   {
-    int point[1];
-    point[0] = idx;
-    local_args.set_point_arg<int,1>(point, TaskArgument(&(pieces[idx]),sizeof(CircuitPiece)));
+    DomainPoint point(idx);
+    local_args.set_point(point, TaskArgument(&(pieces[idx]),sizeof(CircuitPiece)));
   }
 
   FutureMap last;
@@ -268,7 +267,7 @@ void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
 }
 
 // GPU wrappers
-#ifndef USING_SHARED
+#ifndef SHARED_LOWLEVEL
 void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
                                  const void *local_args, size_t local_arglen,
                                  const DomainPoint &point,
@@ -332,7 +331,7 @@ int main(int argc, char **argv)
           (DISTRIBUTE_CHARGE, Processor::LOC_PROC, true/*leaf*/, "distribute_charge");
   HighLevelRuntime::register_index_task<update_voltages_task_cpu>
           (UPDATE_VOLTAGES, Processor::LOC_PROC, true/*leaf*/, "update_voltages");
-#ifndef USING_SHARED
+#ifndef SHARED_LOWLEVEL
   // GPU variants
   HighLevelRuntime::register_index_task<calculate_currents_task_gpu>
           (CALC_NEW_CURRENTS, Processor::TOC_PROC, true/*leaf*/, "calc_new_currents");

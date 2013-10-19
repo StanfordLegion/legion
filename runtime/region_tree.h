@@ -14,347 +14,315 @@
  */
 
 
-#ifndef __REGION_TREE_H__
-#define __REGION_TREE_H__
+#ifndef __LEGION_REGION_TREE_H__
+#define __LEGION_REGION_TREE_H__
 
 #include "legion_types.h"
 #include "legion_utilities.h"
+#include "garbage_collection.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
-
-    /////////////////////////////////////////////////////////////
-    // Region Tree Forest 
-    /////////////////////////////////////////////////////////////
+    
+    /**
+     * \class RegionTreeForest
+     * "In the darkness of the forest resides the one true magic..."
+     * Most of the magic in Legion is encoded in the RegionTreeForest
+     * class and its children.  This class manages both the shape and 
+     * states of the region tree.  We use fine-grained locking on 
+     * individual nodes and the node look-up tables to enable easy 
+     * updates to the shape of the tree.  Each node has a lock that 
+     * protects the pointers to its child nodes.  There is a creation 
+     * lock that protects the look-up tables.  The logical and physical
+     * states of each of the nodes are stored using deques which can
+     * be appended to without worrying about resizing so we don't 
+     * require any locks for accessing state.  Each logical and physical
+     * task context must maintain its own external locking mechanism
+     * for serializing access to its logical and physical states.
+     *
+     * Modifications to the region tree shape are accompanied by a 
+     * runtime mask which says which nodes have seen the update.  The
+     * forest will record which nodes have sent updates and then 
+     * tell the runtime to send updates to the other nodes which
+     * have not observed the updates.
+     */
     class RegionTreeForest {
     public:
-      enum SendingMode {
-        PHYSICAL,
-        PRIVILEGE,
-        DIFF,
-      };
-    public:
-      RegionTreeForest(HighLevelRuntime *rt);
+      RegionTreeForest(Runtime *rt);
+      RegionTreeForest(const RegionTreeForest &rhs);
       ~RegionTreeForest(void);
     public:
-      void lock_context(bool exclusive = true);
-      void unlock_context(void);
+      RegionTreeForest& operator=(const RegionTreeForest &rhs);
+    public:
+      void create_index_space(const Domain &domain);
+      void create_index_partition(IndexPartition pid, IndexSpace parent,
+          bool disjoint, int part_color,
+          const std::map<Color,Domain> &subspaces,
+          Domain color_space = Domain::NO_DOMAIN);
+      bool destroy_index_space(IndexSpace handle, AddressSpaceID source);
+      void destroy_index_partition(IndexPartition handle, 
+                                   AddressSpaceID source);
+    public:
+      IndexPartition get_index_partition(IndexSpace parent, Color color);
+      IndexSpace get_index_subspace(IndexPartition parent, Color color);
+      Domain get_index_space_domain(IndexSpace handle);
+      Domain get_index_partition_color_space(IndexPartition p);
+      Color get_index_space_color(IndexSpace handle);
+      Color get_index_partition_color(IndexPartition handle);
+      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
+    public:
+      void create_field_space(FieldSpace handle);
+      void destroy_field_space(FieldSpace handle, AddressSpaceID source);
+      // Return true if local is set to true and we actually performed the 
+      // allocation.  It is an error if the field already existed and the
+      // allocation was not local.
+      bool allocate_field(FieldSpace handle, size_t field_size, 
+                          FieldID fid, bool local);
+      void free_field(FieldSpace handle, FieldID fid, AddressSpaceID source);
+      void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
+                           const std::vector<FieldID> &resulting_fields);
+      void free_fields(FieldSpace handle, const std::set<FieldID> &to_free,
+                       AddressSpaceID source);
+      void allocate_field_index(FieldSpace handle, size_t field_size, 
+                                FieldID fid, unsigned index, 
+                                AddressSpaceID source);
+      void allocate_field_indexes(FieldSpace handle, 
+                                  const std::vector<FieldID> &resulting_fields,
+                                  const std::vector<size_t> &sizes,
+                                  const std::vector<unsigned> &indexes,
+                                  AddressSpaceID source);
+      void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
+      void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
+    public:
+      void create_logical_region(LogicalRegion handle);
+      bool destroy_logical_region(LogicalRegion handle, 
+                                  AddressSpaceID source);
+      void destroy_logical_partition(LogicalPartition handle,
+                                     AddressSpaceID source);
+    public:
+      LogicalPartition get_logical_partition(LogicalRegion parent, 
+                                             IndexPartition handle);
+      LogicalPartition get_logical_partition_by_color(
+                                  LogicalRegion parent, Color color);
+      LogicalPartition get_logical_partition_by_tree(
+          IndexPartition handle, FieldSpace space, RegionTreeID tid);
+      LogicalRegion get_logical_subregion(LogicalPartition parent,
+                                          IndexSpace handle);
+      LogicalRegion get_logical_subregion_by_color(
+                              LogicalPartition parent, Color color);
+      LogicalRegion get_logical_subregion_by_tree(
+            IndexSpace handle, FieldSpace space, RegionTreeID tid);
+      Color get_logical_region_color(LogicalRegion handle);
+      Color get_logical_partition_color(LogicalPartition handle);
+    public:
+      // Logical analysis methods
+      void perform_dependence_analysis(RegionTreeContext ctx, 
+                                       Operation *op, unsigned idx,
+                                       const RegionRequirement &req,
+                                       RegionTreePath &path);
+      void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
+                                  LogicalRegion handle);
+      void analyze_destroy_index_space(RegionTreeContext ctx, 
+                    IndexSpace handle, Operation *op, LogicalRegion region);
+      void analyze_destroy_index_partition(RegionTreeContext ctx,
+                    IndexPartition handle, Operation *op, LogicalRegion region);
+      void analyze_destroy_field_space(RegionTreeContext ctx,
+                    FieldSpace handle, Operation *op, LogicalRegion region);
+      void analyze_destroy_fields(RegionTreeContext ctx,
+            FieldSpace handle, const std::set<FieldID> &fields, 
+            Operation *op, LogicalRegion region);
+      void analyze_destroy_logical_region(RegionTreeContext ctx,
+                  LogicalRegion handle, Operation *op, LogicalRegion region);
+      void analyze_destroy_logical_partition(RegionTreeContext ctx,
+                  LogicalPartition handle, Operation *op, LogicalRegion region);
+      void initialize_logical_context(RegionTreeContext ctx, 
+                                      LogicalRegion handle);
+      void invalidate_logical_context(RegionTreeContext ctx,
+                                      LogicalRegion handle);
+    public:
+      // Physical analysis methods
+      bool premap_physical_region(RegionTreeContext ctx,
+                                  RegionTreePath &path,
+                                  RegionRequirement &req,
+                                  Mappable *mappable,
+                                  SingleTask *parent_ctx,
+                                  Processor local_proc
 #ifdef DEBUG_HIGH_LEVEL
-      void assert_locked(void);
-      void assert_not_locked(void);
+                                  , unsigned index
+                                  , const char *log_name
+                                  , UniqueID uid
 #endif
-    public:
-      bool compute_index_path(IndexSpace parent, IndexSpace child, std::vector<Color> &path);
-      bool compute_partition_path(IndexSpace parent, IndexPartition child, std::vector<Color> &path);
-      bool is_disjoint(LogicalPartition partition);
-      // Checks for r1 <= r2 or r2 <= r1, but won't catch !(r1 * r2) at the same level
-      bool are_overlapping(LogicalRegion h1, LogicalRegion h2);
-    public:
-      // Index Space operations
-      void create_index_space(Domain domain);
-      void destroy_index_space(IndexSpace space, bool finalize, const std::vector<ContextID> &deletion_contexts);
-      void get_destroyed_regions(IndexSpace space, std::vector<LogicalRegion> &new_deletions);
-      Color create_index_partition(IndexPartition pid, IndexSpace parent, bool disjoint, int color,
-                                  const std::map<Color,Domain> &coloring, Domain color_space); 
-      void destroy_index_partition(IndexPartition pid, bool finalize, const std::vector<ContextID> &deletion_contexts);
-      void get_destroyed_partitions(IndexPartition pid, std::vector<LogicalPartition> &new_deletions);
-      IndexPartition get_index_partition(IndexSpace parent, Color color, bool can_create);
-      IndexSpace get_index_subspace(IndexPartition p, Color color, bool can_create);
-      Domain get_index_space_domain(IndexSpace handle, bool can_create);
-      Domain get_index_partition_color_space(IndexPartition p, bool can_create);
-      int get_index_space_color(IndexSpace handle, bool can_create);
-      int get_index_partition_color(IndexPartition handle, bool can_create);
-    public:
-      // Field Space operations
-      void create_field_space(FieldSpace space);
-      void destroy_field_space(FieldSpace space, bool finalize, const std::vector<ContextID> &deletion_contexts);
-      void get_destroyed_regions(FieldSpace space, std::vector<LogicalRegion> &new_deletions);
-      void allocate_fields(FieldSpace space, const std::map<FieldID,size_t> &field_allocations);
-      void free_fields(FieldSpace space, const std::set<FieldID> &to_free);
-      bool has_field(FieldSpace space, FieldID fid);
-      size_t get_field_size(FieldSpace space, FieldID fid);
-    public:
-      // Logical Region operations
-      void create_region(LogicalRegion handle, ContextID ctx);  
-      void destroy_region(LogicalRegion handle, bool finalize, const std::vector<ContextID> &deletion_contexts);
-      void destroy_partition(LogicalPartition handle, bool finalize, const std::vector<ContextID> &deletion_contexts);
-      LogicalPartition get_region_partition(LogicalRegion parent, IndexPartition handle);
-      LogicalRegion get_partition_subregion(LogicalPartition parent, IndexSpace handle);
-      LogicalPartition get_region_subcolor(LogicalRegion parent, Color c, bool can_create);
-      LogicalRegion get_partition_subcolor(LogicalPartition parent, Color c, bool can_create);
-      LogicalPartition get_partition_subtree(IndexPartition handle, FieldSpace space, RegionTreeID tid);
-      LogicalRegion get_region_subtree(IndexSpace handle, FieldSpace space, RegionTreeID tid);
-      LogicalRegion get_partition_parent(LogicalPartition handle);
-    public:
-      // Logical Region contexts 
-      void initialize_logical_context(LogicalRegion handle, ContextID ctx);
-      void analyze_region(RegionAnalyzer &az);
-      // Special registrations for deletions
-      void analyze_index_space_deletion(ContextID ctx, IndexSpace sp, DeletionOperation *op);
-      void analyze_index_part_deletion(ContextID ctx, IndexPartition part, DeletionOperation *op);
-      void analyze_field_space_deletion(ContextID ctx, FieldSpace sp, DeletionOperation *op);
-      void analyze_field_deletion(ContextID ctx, FieldSpace sp, const std::set<FieldID> &to_free, DeletionOperation *op);
-      void analyze_region_deletion(ContextID ctx, LogicalRegion handle, DeletionOperation *op);
-      void analyze_partition_deletion(ContextID ctx, LogicalPartition handle, DeletionOperation *op);
-    public:
-      // Physical Region contexts
-      InstanceRef initialize_physical_context(const RegionRequirement &req, unsigned idx, InstanceRef ref, UniqueID uid, 
-                                              ContextID ctx, Event term_event, const DomainPoint &point);
-      void map_region(RegionMapper &rm, LogicalRegion start_region);
-      Event close_to_instance(const InstanceRef &ref, RegionMapper &rm);
-      Event close_to_reduction(const InstanceRef &ref, RegionMapper &rm);
-      void invalidate_physical_context(const RegionRequirement &req, const std::vector<FieldID> &new_fields, 
-                                       ContextID ctx, bool new_only);
-      void invalidate_physical_context(LogicalRegion handle, ContextID ctx);
-      void invalidate_physical_context(LogicalPartition handle, ContextID ctx);
-      void invalidate_physical_context(LogicalRegion handle, ContextID ctx, const std::vector<FieldID> &fields,
-                                       bool last_use);
-      void merge_field_context(LogicalRegion handle, ContextID outer_ctx, ContextID inner_ctx, const std::vector<FieldID> &fields);
-    public:
-      // Packing and unpacking send
-      size_t compute_region_forest_shape_size(const std::vector<IndexSpaceRequirement> &indexes,
-                                            const std::vector<FieldSpaceRequirement> &fields,
-                                            const std::vector<RegionRequirement> &regions);
-      void pack_region_forest_shape(Serializer &rez);
-      void unpack_region_forest_shape(Deserializer &derez);
-    private:
-      FieldMask compute_field_mask(const RegionRequirement &req, SendingMode mode, FieldSpaceNode *field_node) const;
-    public:
-      // Packing and unpacking state send
-      size_t compute_region_tree_state_size(const RegionRequirement &req, ContextID ctx, SendingMode mode);
-      size_t post_compute_region_tree_state_size(void);
-      void begin_pack_region_tree_state(Serializer &rez, unsigned long num_ways = 1);
-      void pack_region_tree_state(const RegionRequirement &req, ContextID ctx, SendingMode mode, Serializer &rez
+                                  );
+      MappingRef map_physical_region(RegionTreeContext ctx,
+                                     RegionTreePath &path,
+                                     RegionRequirement &req,
+                                     unsigned idx,
+                                     Mappable *mappable,
+                                     Processor local_proc,
+                                     Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
-            , unsigned idx, const char *task_name, unsigned uid
+                                     , const char *log_name
+                                     , UniqueID uid
 #endif
-          );
-      void begin_unpack_region_tree_state(Deserializer &derez, unsigned long split_factor = 1);
-      void unpack_region_tree_state(const RegionRequirement &req, ContextID ctx, SendingMode mode, Deserializer &derez
+                                     );
+      // Note this works without a path which assumes
+      // we are remapping exactly the logical region
+      // specified by the region requirement
+      MappingRef remap_physical_region(RegionTreeContext ctx,
+                                       RegionRequirement &req,
+                                       unsigned index,
+                                       const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
-            , unsigned idx, const char *task_name, unsigned uid
+                                       , const char *log_name
+                                       , UniqueID uid
 #endif
-          );
-    public:
-      // Packing and unpacking reference send
-      size_t compute_reference_size(InstanceRef ref);
-      void pack_reference(const InstanceRef &ref, Serializer &derez);
-      InstanceRef unpack_reference(Deserializer &derez);
-    public:
-      // Packing and unpacking reference return
-      size_t compute_reference_size_return(InstanceRef ref);
-      void pack_reference_return(InstanceRef ref, Serializer &rez);
-      void unpack_and_remove_reference(Deserializer &derez, UniqueID uid); // will unpack and remove reference
-    public:
-      // Packing and unpacking structure updates return
-      size_t compute_region_tree_updates_return(void);
-      void pack_region_tree_updates_return(Serializer &rez);
-      void unpack_region_tree_updates_return(Deserializer &derez, const std::vector<ContextID> &enclosing_contexts);
-    public:
-      // Packing and unpacking state return
-      size_t compute_region_tree_state_return(const RegionRequirement &req, unsigned idx, 
-                                              ContextID ctx, bool overwrite, SendingMode mode 
+                                       );
+      InstanceRef register_physical_region(RegionTreeContext ctx,
+                                           const MappingRef &ref,
+                                           RegionRequirement &req,
+                                           unsigned idx,
+                                           Mappable *mappable,
+                                           Processor local_proc,
+                                           Event term_event
 #ifdef DEBUG_HIGH_LEVEL
-                                              , const char *task_name
-                                              , unsigned uid
+                                           , const char *log_name
+                                           , UniqueID uid
+                                           , RegionTreePath &path
 #endif
-                                              );
-      
-      void post_partition_state_return(const RegionRequirement &req, ContextID ctx, SendingMode mode);
-      size_t post_compute_region_tree_state_return(bool created_only);
-      void begin_pack_region_tree_state_return(Serializer &rez, bool created_only);
-      void pack_region_tree_state_return(const RegionRequirement &req, unsigned idx, 
-                              ContextID ctx, bool overwrite, SendingMode mode, Serializer &rez);
-      
-      void post_partition_pack_return(const RegionRequirement &req, ContextID ctx, SendingMode mode);
-      void end_pack_region_tree_state_return(Serializer &rez, bool created_only);
-      void begin_unpack_region_tree_state_return(Deserializer &derez, bool created_only);
-      void unpack_region_tree_state_return(const RegionRequirement &req, ContextID ctx, 
-                                            bool overwrite, SendingMode mode, Deserializer &derez
+                                           );
+      InstanceRef initialize_physical_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, PhysicalManager *manager,
+                    UniqueID uid, Event term_event, Processor local_proc,
+                    std::map<PhysicalManager*,PhysicalView*> &top_views);
+      void invalidate_physical_context(RegionTreeContext ctx,
+                                       LogicalRegion handle);
+      Event close_physical_context(RegionTreeContext ctx,
+                                   RegionRequirement &req,
+                                   Mappable *mappable,
+                                   SingleTask *parent_ctx,
+                                   Processor local_proc,
+                                   const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
-                                            , unsigned idx, const char *task_name
-                                            , unsigned uid
+                                   , unsigned index
+                                   , const char *log_name
+                                   , UniqueID uid
 #endif
-                                            );
-      void end_unpack_region_tree_state_return(Deserializer &derez, bool created_only);
+                                   );
+      Event copy_across(RegionTreeContext src_ctx, 
+                        RegionTreeContext dst_ctx,
+                        const RegionRequirement &src_req,
+                        const RegionRequirement &dst_req,
+                        const InstanceRef &src_ref,
+                        const InstanceRef &dst_ref);
     public:
-      // Packing and unpacking for returning created field states for pre-existing region trees
-      size_t compute_created_field_state_return(LogicalRegion handle, const std::vector<FieldID> &fields, 
-                                                ContextID ctx
-#ifdef DEBUG_HIGH_LEVEL
-                                              , const char *task_name, unsigned uid
-#endif
-                                              );
-      void pack_created_field_state_return(LogicalRegion handle, const std::vector<FieldID> &fields, 
-                                            ContextID ctx, Serializer &rez);
-      void unpack_created_field_state_return(LogicalRegion handle, ContextID ctx, Deserializer &derez
-#ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name, unsigned uid      
-#endif
-                                            );
+      // Methods for sending and returning state information
+      void send_physical_state(RegionTreeContext ctx,
+                               const RegionRequirement &req,
+                               UniqueID unique_id,
+                               AddressSpaceID target,
+                               std::set<PhysicalView*> &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      void send_tree_shape(const RegionRequirement &req,
+                           AddressSpaceID target);
+      void send_back_physical_state(RegionTreeContext ctx,
+                               RegionTreeContext remote_ctx,
+                               RegionTreePath &path,
+                               const RegionRequirement &req,
+                               AddressSpaceID target,
+                               std::set<PhysicalManager*> &needed_managers);
+      void send_remote_references(
+          const std::set<PhysicalManager*> &needed_managers,
+          AddressSpaceID target);
+      void send_remote_references(const std::set<PhysicalView*> &needed_views,
+          const std::set<PhysicalManager*> &needed_managers, 
+          AddressSpaceID target);
+      void handle_remote_references(Deserializer &derez);
     public:
-      // Packing and unpacking for returning created region trees
-      size_t compute_created_state_return(LogicalRegion handle, ContextID ctx
-#ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name, unsigned uid
-#endif
-                                            );
-      void pack_created_state_return(LogicalRegion handle, ContextID ctx, Serializer &rez);
-      void unpack_created_state_return(LogicalRegion handle, ContextID ctx, Deserializer &derez
-#ifdef DEBUG_HIGH_LEVEL
-                                            , const char *task_name, unsigned uid
-#endif
-                                          );
+      // Debugging method for checking context state
+      void check_context_state(RegionTreeContext ctx);
     public:
-      // Packing and unpacking leaked references
-      size_t compute_leaked_return_size(void);
-      void pack_leaked_return(Serializer &rez);
-      void unpack_leaked_return(Deserializer &derez); // will unpack leaked references and remove them
-#ifdef DYNAMIC_TESTS
-    public:
-      // For performing dynamic independence tests
-      bool fix_dynamic_test_set(void); // Return true if there are any tests to perform (must hold forest lock)
-      void perform_dynamic_tests(void); // Perform the set of dynamic tests (don't need to hold the lock if only on performing
-      void publish_dynamic_test_results(void);
-#endif
-    protected:
-      friend class IndexSpaceNode;
-      friend class IndexPartNode;
-      friend class FieldSpaceNode;
-      friend class RegionTreeNode;
-      friend class RegionNode;
-      friend class PartitionNode;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-    public: 
-      IndexSpaceNode* create_node(Domain d, IndexPartNode *par, Color c, bool add);
-      IndexPartNode* create_node(IndexPartition p, IndexSpaceNode *par, Color c, Domain color_space, bool dis, bool add);
-      FieldSpaceNode* create_node(FieldSpace sp);
-      RegionNode* create_node(LogicalRegion r, PartitionNode *par, bool add);
-      PartitionNode* create_node(LogicalPartition p, RegionNode *par, bool add);
-    public:
-      void destroy_node(IndexSpaceNode *node, bool top, bool finalize); // (recursive)
-      void destroy_node(IndexPartNode *node, bool top, bool finalize); // (recursive)
-      void destroy_node(FieldSpaceNode *node);
-      void destroy_node(RegionNode *node, bool top, bool finalize, const std::vector<ContextID> &deletion_contexts); // (recursive)
-      void destroy_node(PartitionNode *node, bool top, bool finalize, const std::vector<ContextID> &deletion_contexts); // (recursive)
+      IndexSpaceNode* create_node(Domain d, IndexPartNode *par, Color c);
+      IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
+                                 Color c, Domain color_space, bool disjoint);
+      FieldSpaceNode* create_node(FieldSpace space);
+      RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
+      PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
       IndexSpaceNode* get_node(IndexSpace space);
       IndexPartNode*  get_node(IndexPartition part);
       FieldSpaceNode* get_node(FieldSpace space);
       RegionNode*     get_node(LogicalRegion handle);
-      PartitionNode * get_node(LogicalPartition handle);
-      RegionNode*     get_top_node(RegionTreeID tid);
+      PartitionNode*  get_node(LogicalPartition handle);
+      RegionNode*     get_tree(RegionTreeID tid);
     public:
       bool has_node(IndexSpace space) const;
       bool has_node(IndexPartition part) const;
       bool has_node(FieldSpace space) const;
-      bool has_node(LogicalRegion handle, bool strict = true) const;
-      bool has_node(LogicalPartition handle, bool strict = true) const;
+      bool has_node(LogicalRegion handle) const;
+      bool has_node(LogicalPartition handle) const;
+      bool has_tree(RegionTreeID tid) const;
+      bool has_field(FieldSpace space, FieldID fid);
     public:
-      InstanceView* create_instance_view(InstanceManager *manager, InstanceView *par, RegionNode *reg, bool made_local);
-      InstanceManager* create_instance_manager(Memory location, PhysicalInstance inst, 
-                        const std::map<FieldID,Domain::CopySrcDstField> &infos, FieldSpace fsp,
-                        const FieldMask &field_mask, bool remote, bool clone, UniqueManagerID mid = 0);
-      ReductionView* create_reduction_view(ReductionManager *manager, RegionNode *reg, bool made_local);
-      ReductionManager* create_reduction_manager(Memory location, PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, 
-            bool remote, bool clone, Domain domain = Domain::NO_DOMAIN, UniqueManagerID mid = 0);
-      PhysicalView* find_view(InstanceKey key) const;
-      PhysicalManager* find_manager(UniqueManagerID mid) const;
-      InstanceView* find_instance_view(InstanceKey key) const;
-      InstanceManager* find_instance_manager(UniqueManagerID mid) const;
-      ReductionView* find_reduction_view(InstanceKey key) const;
-      ReductionManager* find_reduction_manager(UniqueManagerID mid) const;
-      bool has_view(InstanceKey key) const;
-      bool has_instance_view(InstanceKey key) const;
-      bool has_reduction_view(InstanceKey key) const;
+      bool is_disjoint(IndexPartition handle);
+      bool is_disjoint(LogicalPartition handle);
+      bool are_disjoint(IndexSpace parent, IndexSpace child);
+      bool are_disjoint(IndexSpace parent, IndexPartition child);
+      bool compute_index_path(IndexSpace parent, IndexSpace child,
+                              std::vector<Color> &path);
+      bool compute_partition_path(IndexSpace parent, IndexPartition child,
+                                  std::vector<Color> &path); 
+      void initialize_path(IndexSpace child, IndexSpace parent,
+                           RegionTreePath &path);
+      void initialize_path(IndexPartition child, IndexSpace parent,
+                           RegionTreePath &path);
+      void initialize_path(IndexSpace child, IndexPartition parent,
+                           RegionTreePath &path);
+      void initialize_path(IndexPartition child, IndexPartition parent,
+                           RegionTreePath &path);
+    public:
+      void register_physical_manager(PhysicalManager *manager);
+      void unregister_physical_manager(DistributedID did);
+      void register_physical_view(PhysicalView *view);
+      void unregister_physical_view(DistributedID did);
+    public:
+      bool has_manager(DistributedID did) const;
+      bool has_view(DistributedID did) const;
+      PhysicalManager* find_manager(DistributedID did);
+      PhysicalView* find_view(DistributedID did);
+    protected:
+      void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
+                           RegionTreePath &path);
     public:
       template<typename T>
       Color generate_unique_color(const std::map<Color,T> &current_map);
+    public:
+      void resize_node_contexts(unsigned total_contexts);
+    public:
+      Runtime *const runtime;
+    protected:
+      Lock forest_lock;
+      Lock lookup_lock;
+      Lock distributed_lock;
     private:
-      HighLevelRuntime *const runtime;
-      // There are two primary locks for a RegionTreeForest.  The context_lock
-      // is the coarse grained lock that supports mutating the state of the
-      // RegionTreeForest.  In general all operations need to hold this lock
-      // before performing any operations on the data structure.  The second lock,
-      // the creation_lock is used for reading the shape of the forest without
-      // holding the context_lock.  This allows for simultaneous mapping and
-      // resolving of name queuries (e.g. get subregion with color 'c' or partition P)
-      // which means tasks don't need to wait for mapping to finish before
-      // continuing.  To update the shape of the structure of the RegionTreeForest
-      // you still need to hold the context lock and the creation lock.
-#ifdef LOW_LEVEL_LOCKS
-      Lock context_lock;
-      Lock creation_lock;
-#else
-      ImmovableLock context_lock;
-      ImmovableLock creation_lock;
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      bool lock_held;
-#endif
-    private:
-      // The creation lock must be held whenever updating one of these
-      // five data structures or any of the color_maps
+      // The lookup lock must be held when accessing these
+      // data structures
       std::map<IndexSpace,IndexSpaceNode*>     index_nodes;
       std::map<IndexPartition,IndexPartNode*>  index_parts;
       std::map<FieldSpace,FieldSpaceNode*>     field_nodes;
       std::map<LogicalRegion,RegionNode*>     region_nodes;
       std::map<LogicalPartition,PartitionNode*> part_nodes;
+      std::map<RegionTreeID,RegionNode*>        tree_nodes;
     private:
-      // References to delete when cleaning up
-      std::map<UniqueManagerID,InstanceManager*> managers;
-      std::map<InstanceKey,InstanceView*> views;
-      std::map<UniqueManagerID,ReductionManager*> reduc_managers;
-      std::map<InstanceKey,ReductionView*> reduc_views;
-    private: // lists of new things to know what to return
-      std::list<IndexSpace> created_index_trees;
-      std::list<IndexSpace> deleted_index_spaces;
-      std::list<IndexPartition> deleted_index_parts;
-    private:
-      std::set<FieldSpace> created_field_spaces;
-      std::list<FieldSpace> deleted_field_spaces;
-    private:
-      std::list<LogicalRegion> created_region_trees;
-      std::list<LogicalRegion> deleted_regions;
-      std::list<LogicalPartition> deleted_partitions;
-    private:
-      // Data structures for determining what to pack and unpack when moving trees
-      std::set<IndexSpaceNode*>     send_index_nodes;
-      std::set<FieldSpaceNode*>     send_field_nodes;
-      std::set<RegionNode*>         send_logical_nodes;
-      std::vector<IndexPartNode*>  new_index_part_nodes;
-      std::set<InstanceManager*>        unique_managers;
-      std::set<ReductionManager*>       unique_reductions;
-      std::map<InstanceView*,FieldMask> unique_views; // points to the top instance view
-      std::vector<InstanceView*>        ordered_views;
-      std::vector<bool>                 overwrite_views; // for knowing when to overwrite views when returning 
-      std::map<unsigned,std::vector<RegionNode*> >  diff_region_maps;
-      std::map<unsigned,std::vector<PartitionNode*> > diff_part_maps;
-      std::vector<InstanceManager*>     returning_managers;
-      std::vector<ReductionManager*>    returning_reductions;
-      std::vector<InstanceView*>        returning_views;
-      std::vector<ReductionView*>       returning_reduc_views;
-      std::map<EscapedUser,unsigned>    escaped_users;
-      std::set<EscapedCopy>             escaped_copies;
-      std::vector<RegionNode*>          created_field_space_trees;
-      std::vector<FieldSpaceNode*>      created_field_nodes;
-    private:
-      std::list<IndexSpaceNode*> top_index_trees;
-      std::list<RegionNode*>   top_logical_trees;
+      // References to objects stored in the region forest
+      std::map<DistributedID,PhysicalManager*> managers;
+      std::map<DistributedID,PhysicalView*> views;
 #ifdef DYNAMIC_TESTS
-    private:
+    public:
       class DynamicSpaceTest {
       public:
-        DynamicSpaceTest(IndexPartNode *parent, Color c1, IndexSpace left, Color c2, IndexSpace right);
-        bool perform_test(void);
-        void publish_test(void) const;
+        DynamicSpaceTest(IndexPartNode *parent, Color c1, 
+              IndexSpace left, Color c2, IndexSpace right);
+        void perform_test(void) const;
       public:
         IndexPartNode *parent;
         Color c1, c2;
@@ -364,1450 +332,1682 @@ namespace LegionRuntime {
       public:
         DynamicPartTest(IndexSpaceNode *parent, Color c1, Color c2);
         void add_child_space(bool left, IndexSpace space);
-        bool perform_test(void);
-        void publish_test(void) const;
+        void perform_test(void) const;
       public:
         IndexSpaceNode *parent;
         Color c1, c2;
         std::vector<IndexSpace> left, right;
       };
     private:
-      std::list<DynamicSpaceTest> dynamic_space_tests;
-      std::list<DynamicPartTest>  dynamic_part_tests;
-      std::list<DynamicSpaceTest> ghost_space_tests;
-      std::list<DynamicPartTest>  ghost_part_tests;
+      Lock dynamic_lock;
+      std::deque<DynamicSpaceTest> dynamic_space_tests;
+      std::deque<DynamicPartTest>  dynamic_part_tests;
+    public:
+      bool perform_dynamic_tests(unsigned num_tests);
+      void add_disjointness_test(const DynamicPartTest &test);
 #endif
     };
 
-    /////////////////////////////////////////////////////////////
-    // Index Space Node 
-    /////////////////////////////////////////////////////////////
     /**
-     * Capture the relationship of index spaces
+     * \class IndexTreeNode
+     * The abstract base class for nodes in the index space trees.
      */
-    class IndexSpaceNode {
+    class IndexTreeNode {
     public:
-      friend class RegionTreeForest;
-      friend class IndexPartNode;
-      friend class RegionNode;
-      friend class PartitionNode;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-      IndexSpaceNode(Domain d, IndexPartNode *par,
-                Color c, bool add, RegionTreeForest *ctx);
-      ~IndexSpaceNode(void);
-      void mark_destroyed(void);
+      IndexTreeNode(void);
+      IndexTreeNode(Color color, unsigned depth, RegionTreeForest *ctx); 
+      virtual ~IndexTreeNode(void);
     public:
-      void add_child(IndexPartition handle, IndexPartNode *node);
-      void remove_child(Color c);
-      bool has_child(Color c) const;
+      virtual IndexTreeNode* get_parent(void) const = 0;
+      virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
+    public:
+      const unsigned depth;
+      const Color color;
+      RegionTreeForest *const context;
+    public:
+      std::set<AddressSpaceID> creation_set;
+      std::set<AddressSpaceID> destruction_set;
+    protected:
+      Lock node_lock;
+    };
+
+    /**
+     * \class IndexSpaceNode
+     * A class for representing a generic index space node.
+     */
+    class IndexSpaceNode : public IndexTreeNode {
+    public:
+      IndexSpaceNode(Domain d, IndexPartNode *par, Color c,
+                     RegionTreeForest *ctx);
+      IndexSpaceNode(const IndexSpaceNode &rhs);
+      virtual ~IndexSpaceNode(void);
+    public:
+      IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
+    public:
+      virtual IndexTreeNode* get_parent(void) const;
+    public:
+      bool has_child(Color c);
       IndexPartNode* get_child(Color c);
+      void add_child(IndexPartNode *child);
+      void remove_child(Color c);
+    public:
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
       Color generate_color(void);
     public:
       void add_instance(RegionNode *inst);
-      void remove_instance(RegionNode *inst);
-      RegionNode* instantiate_region(RegionTreeID tid, FieldSpace fid);
+      bool has_instance(RegionTreeID tid);
+      void add_creation_source(AddressSpaceID source);
+      void destroy_node(AddressSpaceID source);
+#ifdef DYNAMIC_TESTS
+      void add_disjointness_tests(IndexPartNode *child,
+                const std::vector<IndexSpaceNode*> &children);
+#endif
     public:
-      size_t compute_tree_size(bool returning) const;
-      void serialize_tree(Serializer &rez, bool returning);
-      static IndexSpaceNode* deserialize_tree(Deserializer &derez, IndexPartNode *parent,
-                          RegionTreeForest *context, bool returning);
-      void mark_node(bool recurse);
-      IndexSpaceNode* find_top_marked(void) const;
-      void find_new_partitions(std::vector<IndexPartNode*> &new_parts) const;
-    private:
+      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      static void handle_node_creation(RegionTreeForest *context,
+                                       Deserializer &derez, 
+                                       AddressSpaceID source);
+    public:
+      IndexSpaceAllocator* get_allocator(void);
+    public:
       const Domain domain;
       const IndexSpace handle;
-      const unsigned depth;
-      const Color color;
       IndexPartNode *const parent;
-      RegionTreeForest *const context;
-      std::map<Color,IndexPartNode*> color_map; // all children seen locally ever
-      std::map<Color,IndexPartNode*> valid_map; // valid children
-      std::list<RegionNode*> logical_nodes; // corresponding region nodes
-      std::set<std::pair<Color,Color> > disjoint_subsets; // pairs of disjoint subsets
-      bool added; // added locally
-      bool marked;
-      bool destroy_index_space; // destroy index space when deleting node
-      bool node_destroyed; // node has been destroyed
+    private:
+      // Must hold the node lock when accessing the
+      // remaining data structures
+      // Color map is all children seen ever
+      std::map<Color,IndexPartNode*> color_map;
+      // Valid map is all chidlren that haven't been deleted
+      std::map<Color,IndexPartNode*> valid_map;
+      std::set<RegionNode*> logical_nodes;
+      std::set<std::pair<Color,Color> > disjoint_subsets;
+    private:
+      IndexSpaceAllocator *allocator;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Index Partition Node 
-    /////////////////////////////////////////////////////////////
-    class IndexPartNode {
+    /**
+     * \class IndexPartNode
+     * A node for representing a generic index partition.
+     */
+    class IndexPartNode : public IndexTreeNode { 
     public:
-      friend class RegionTreeForest;
-      friend class IndexSpaceNode;
-      friend class RegionNode;
-      friend class PartitionNode;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
       IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                Color c, Domain color_space, bool dis, bool add, RegionTreeForest *ctx);
-      ~IndexPartNode(void);
-      void mark_destroyed(void);
+                    Color c, Domain color_space, bool dis,
+                    RegionTreeForest *ctx);
+      IndexPartNode(const IndexPartNode &rhs);
+      virtual ~IndexPartNode(void);
     public:
-      void add_child(IndexSpace handle, IndexSpaceNode *node);
-      void remove_child(Color c);
-      bool has_child(Color c) const;
+      IndexPartNode& operator=(const IndexPartNode &rhs);
+    public:
+      virtual IndexTreeNode* get_parent(void) const;
+    public:
+      bool has_child(Color c);
       IndexSpaceNode* get_child(Color c);
+      void add_child(IndexSpaceNode *child);
+      void remove_child(Color c);
+    public:
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
     public:
       void add_instance(PartitionNode *inst);
-      void remove_instance(PartitionNode *inst);
-      PartitionNode* instantiate_partition(RegionTreeID tid, FieldSpace fid);
+      bool has_instance(RegionTreeID tid);
+      void add_creation_source(AddressSpaceID source);
+      void destroy_node(AddressSpaceID source);
+#ifdef DYNAMIC_TESTS
+      void add_disjointness_tests(IndexPartNode *child,
+              const std::vector<IndexSpaceNode*> &children);
+#endif
     public:
-      size_t compute_tree_size(bool returning) const;
-      void serialize_tree(Serializer &rez, bool returning);
-      static void deserialize_tree(Deserializer &derez, IndexSpaceNode *parent, 
-                        RegionTreeForest *context, bool returning);
-      void mark_node(bool recurse);
-      IndexSpaceNode* find_top_marked(void) const;
-      void find_new_partitions(std::vector<IndexPartNode*> &new_parts) const;
-    private:
+      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      static void handle_node_creation(RegionTreeForest *context,
+                                       Deserializer &derez, 
+                                       AddressSpaceID source);
+    public:
       const IndexPartition handle;
-      const unsigned depth;
-      const Color color;
       const Domain color_space;
-      IndexSpaceNode *const parent;
-      RegionTreeForest *const context;
-      std::map<Color,IndexSpaceNode*> color_map; // all children seen locally ever
-      std::map<Color,IndexSpaceNode*> valid_map; // valid children
-      std::list<PartitionNode*> logical_nodes; // corresponding partition nodes
-      std::set<std::pair<Color,Color> > disjoint_subspaces; // for non-disjoint partitions
+      IndexSpaceNode *parent;
       const bool disjoint;
-      bool added; // was the node added locally
-      bool marked;
-      bool node_destroyed; // has this node been destroyed
+    private:
+      // Must hold the node lock when accessing
+      // the remaining data structures
+      std::map<Color,IndexSpaceNode*> color_map;
+      std::map<Color,IndexSpaceNode*> valid_map;
+      std::set<PartitionNode*> logical_nodes;
+      std::set<std::pair<Color,Color> > disjoint_subspaces;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Field Space Node 
-    /////////////////////////////////////////////////////////////
+    /**
+     * \class FieldSpaceNode
+     * Represent a generic field space that can be
+     * pointed at by nodes in the region trees.
+     */
     class FieldSpaceNode {
-    public:
-      friend class RegionTreeForest;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
-      ~FieldSpaceNode(void);
-      void mark_destroyed(void);
     public:
       struct FieldInfo {
       public:
-        FieldInfo(void) : field_size(0), idx(0) { }
-        FieldInfo(size_t size, unsigned id)
-          : field_size(size), idx(id) { }
+        FieldInfo(void) : field_size(0), idx(0), 
+                          local(false), destroyed(false) { }
+        FieldInfo(size_t size, unsigned id, bool loc)
+          : field_size(size), idx(id), local(loc), destroyed(false) { }
       public:
         size_t field_size;
         unsigned idx;
+        bool local;
+        bool destroyed;
       };
     public:
-      void allocate_fields(const std::map<FieldID,size_t> &field_allocations);
-      void free_fields(const std::set<FieldID> &to_free);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
+      FieldSpaceNode(const FieldSpaceNode &rhs);
+      ~FieldSpaceNode(void);
+    public:
+      FieldSpaceNode& operator=(const FieldSpaceNode &rhs);
+    public:
+      void allocate_field(FieldID fid, size_t size, bool local);
+      void allocate_field_index(FieldID fid, size_t size, 
+                                AddressSpaceID runtime, unsigned index);
+      void free_field(FieldID fid, AddressSpaceID source);
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
-      bool is_set(FieldID fid, const FieldMask &mask) const;
+      void get_all_fields(std::set<FieldID> &to_set);
+      void get_all_regions(std::set<LogicalRegion> &regions);
     public:
-      void add_instance(RegionNode *node);
-      void remove_instance(RegionNode *node);
-      InstanceManager* create_instance(Memory location, Domain domain, 
-                    const std::vector<FieldID> &fields, size_t blocking_factor);
+      void add_instance(RegionNode *inst);
+      bool has_instance(RegionTreeID tid);
+      void add_creation_source(AddressSpaceID source);
+      void destroy_node(AddressSpaceID source);
     public:
-      size_t compute_node_size(void) const;
-      void serialize_node(Serializer &rez) const;
-      static FieldSpaceNode* deserialize_node(Deserializer &derez, RegionTreeForest *context);
-    public:
-      bool has_modifications(void) const;
-      size_t compute_field_return_size(void) const;
-      void serialize_field_return(Serializer &rez);
-      void deserialize_field_return(Deserializer &derez);
-      unsigned get_shift_amount(void) const { return shift; }
-    public:
-      FieldMask get_field_mask(const std::vector<FieldID> &fields) const;
+      void transform_field_mask(FieldMask &mask, AddressSpaceID source);
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
-      FieldMask get_field_mask(void) const;
-      FieldMask get_created_field_mask(void) const;
+      void get_field_indexes(const std::set<FieldID> &fields,
+                             std::map<unsigned,FieldID> &indexes) const;
     public:
-      // For debugging return an allocated string for the given mask
+      InstanceManager* create_instance(Memory location, Domain dom,
+                                       const std::set<FieldID> &fields,
+                                       size_t blocking_factor,
+                                       RegionNode *node);
+      ReductionManager* create_reduction(Memory location, Domain dom,
+                                        FieldID fid, bool reduction_list,
+                                        RegionNode *node, ReductionOpID redop);
+    public:
+      void send_node(AddressSpaceID target);
+      static void handle_node_creation(RegionTreeForest *context,
+                                       Deserializer &derez, 
+                                       AddressSpaceID target);
+    public:
+      // Help with debug printing
       char* to_string(const FieldMask &mask) const;
-      // Sanity check debugging
-      void sanity_check(void) const;
-    private:
+      void to_field_set(const FieldMask &mask,
+                        std::set<FieldID> &field_set) const;
+    protected:
+      // Assume we are already holding the node lock
+      // when calling these methods
+      unsigned allocate_index(bool local, int goal=-1);
+      void free_index(unsigned index);
+    public:
       const FieldSpace handle;
       RegionTreeForest *const context;
-      // Top nodes in the trees for which this field space is used 
-      std::list<RegionNode*> logical_nodes;
+    public:
+      std::set<AddressSpaceID> creation_set;
+      std::set<AddressSpaceID> destruction_set;
+    private:
+      Lock node_lock;
+      // Top nodes in the trees for which this field space is used
+      std::set<RegionNode*> logical_nodes;
       std::map<FieldID,FieldInfo> fields;
-      std::list<FieldID> created_fields;
-      std::list<FieldID> deleted_fields;
-      unsigned total_index_fields;
-      // Shift is only valid while the context lock is held during
-      // the deserialization phase, once it is released, all bets are off
-      unsigned shift;
+      FieldMask allocated_indexes;
+      /*
+       * Every field space contains a permutation transformer that
+       * can translate a field mask from any other node onto
+       * this node.
+       */
+      std::map<AddressSpaceID,FieldPermutation> transformers;
     };
-
-    /////////////////////////////////////////////////////////////
-    // Region Tree Node 
-    /////////////////////////////////////////////////////////////
+ 
     /**
-     * A generic parent class for RegionNode and PartitionNode
+     * \struct GenericUser
+     * A base struct for tracking the user of a logical region
      */
-    class RegionTreeNode {
-    public:
-      enum OpenState {
-        NOT_OPEN           = 0,
-        OPEN_READ_ONLY     = 1,
-        OPEN_READ_WRITE    = 2, // unknown dirty information below
-        OPEN_SINGLE_REDUCE = 3, // only one open child with only reductions below
-        OPEN_MULTI_REDUCE  = 4, // multiple open children with the same reduction
-      };
-    public:
-      struct FieldState {
-      public:
-        FieldState(void);
-        FieldState(const GenericUser &user);
-        FieldState(const GenericUser &user, const FieldMask &mask, Color next);
-      public:
-        bool still_valid(void) const;
-        bool overlap(const FieldState &rhs) const;
-        void merge(const FieldState &rhs);
-        bool upgrade(const FieldState &rhs);
-        void clear(const FieldMask &init_mask);
-      public:
-        size_t compute_state_size(const FieldMask &pack_mask) const;
-        void pack_physical_state(const FieldMask &pack_mask, Serializer &rez) const;
-        void unpack_physical_state(Deserializer &derez, unsigned shift = 0);
-      public:
-        void print_state(TreeStateLogger *logger, FieldMask capture_mask) const;
-      public:
-        FieldMask valid_fields;
-        OpenState open_state;
-        ReductionOpID redop;
-        std::map<Color,FieldMask> open_children;
-      };
-      struct GenericState {
-      public:
-        std::list<FieldState> field_states;
-        // The following data structure tracks diffs for sending back
-        std::list<FieldState> added_states;
-      };
-      struct LogicalState : public GenericState {
-      public:
-        std::list<LogicalUser> curr_epoch_users; // Users from the current epoch
-        std::list<LogicalUser> prev_epoch_users; // Users from the previous epoch
-      };
-      struct PhysicalState : public GenericState {
-      public:
-        PhysicalState(void) { }
-        PhysicalState(FieldMask top) : top_mask(top) { }
-      public:
-        std::map<InstanceView*,FieldMask> valid_views;
-        std::map<ReductionView*,FieldMask> reduction_views;
-        FieldMask dirty_mask;
-        FieldMask reduction_mask;
-        // Used for tracking diffs in the physical tree for sending back
-        std::map<InstanceView*,FieldMask> added_views;
-        std::map<ReductionView*,FieldMask> added_reductions;
-        // Mark the top of the context for given fields
-        FieldMask top_mask;
-      public:
-        void clear_state(const FieldMask &init_mask);
-      };
-    public:
-      RegionTreeNode(RegionTreeForest *ctx);
-    public:
-      void register_logical_region(const LogicalUser &user, RegionAnalyzer &az);
-      void open_logical_tree(const LogicalUser &user, RegionAnalyzer &az);
-      void open_logical_tree(const LogicalUser &user, const ContextID ctx, std::vector<Color> &path);
-      void close_logical_tree(LogicalCloser &closer, const FieldMask &closing_mask);
-    public:
-      virtual void close_physical_tree(PhysicalCloser &closer, const FieldMask &closing_mask) = 0;
-      virtual void close_reduction_tree(ReductionCloser &closer, const FieldMask &closing_mask) = 0;
-    protected:
-      // Generic operations on the region tree
-      //**********************************************************************//
-      // HEY YOU! (out there in the cold) YES YOU!
-      // PAY ATTENTION RIGHT HERE!!!!!!!!!!!!!!!!!
-      // These are the two most important functions in all of Legion!
-      // During both logical and physical traversals, for every node that is visited
-      // siphon_open_children is invoked to close up any open children that must be
-      // closed before the traversal can continue.  To perform the close operation
-      // on a FieldState, perform_close_operations is invoked.
-      //**********************************************************************//
-      bool siphon_open_children(TreeCloser &closer, // Closer that will perform any close operations
-                                GenericState &state, // The state of the RegionTreeNode
-                                const GenericUser &user, // The user for which we are traversing
-                                const FieldMask &current_mask, // The local field mask for which we are traversing
-                                int next_child = -1); // The next child we are going to traverse (if any)
-      bool perform_close_operations(TreeCloser &closer, // Closer for performing close operations
-                                    const GenericUser &user, // The user for which we are performing the close
-                                    const FieldMask &closing_mask, // The field mask for the close operation
-                                    FieldState &state, // The field state we are closing
-                                    int next_child, // The next child we are traversing (or -1 if none)
-                                    bool allow_next_child, // Are we allowed to keep the state open if it is the same child
-                                    bool upgrade_next_child, // Whether or not the same child will need to upgrade its state
-                                    bool permit_leave_open, // Whether or not we are allowed to leave this state open
-                                    std::vector<FieldState> &new_states, // Append downgraded states to the set of new states
-                                    FieldMask &already_open); // return set of fields which are already open for the next_child
-    protected:
-      // Logical region helper functions
-      FieldMask perform_dependence_checks(const LogicalUser &user, 
-                    const std::list<LogicalUser> &users, const FieldMask &user_mask, bool closing_partition = false);
-      // This will merge the new state in with existing states 
-      void merge_new_field_state(GenericState &gstate, const FieldState &new_state, bool add_state);
-      void merge_new_field_states(GenericState &gstate, std::vector<FieldState> &new_states, bool add_states);
-      // This will upgrade all the fields to the new state, checking that upgrades are safe
-      void upgrade_new_field_state(GenericState &gstate, const FieldState &new_state, bool add_state);
-      void sanity_check_field_states(const GenericState &gstate);
-      void down_sample_list(std::list<LogicalUser> &users, unsigned max_users);
-      void filter_user_list(std::list<LogicalUser> &users);
-    protected:
-      virtual bool are_children_disjoint(Color c1, Color c2) = 0;
-      virtual bool are_closing_partition(void) const = 0;
-      virtual RegionTreeNode* get_tree_child(Color c) = 0;
-      virtual Color get_color(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual bool color_match(Color c) = 0;
-#endif
-    protected:
-      RegionTreeForest *const context;
-      std::map<ContextID,LogicalState> logical_states;
-      std::map<ContextID,PhysicalState> physical_states;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Region Node 
-    /////////////////////////////////////////////////////////////
-    /**
-     * Represents a single logical region
-     */
-    class RegionNode : public RegionTreeNode {
-    public:
-      friend class RegionTreeForest;
-      friend class IndexSpaceNode;
-      friend class PartitionNode;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-      friend class TreeStateLogger;
-      RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
-                 FieldSpaceNode *col_src, bool add, RegionTreeForest *ctx);
-      virtual ~RegionNode(void);
-      void mark_destroyed(void);
-    public:
-      void add_child(LogicalPartition handle, PartitionNode *child);
-      bool has_child(Color c) const;
-      PartitionNode* get_child(Color c);
-      void remove_child(Color c);
-    public:
-      // Logical context operations
-      void initialize_logical_context(ContextID ctx);
-      void register_deletion_operation(ContextID ctx, DeletionOperation *op, const FieldMask &deletion_mask);
-    public:
-      // Physical context operations
-      void initialize_physical_context(ContextID ctx, bool clear, const FieldMask &init_mask, bool top);
-      void fill_exclusive_context(ContextID ctx, const FieldMask &fill_mask, Color open_child);
-      void merge_physical_context(ContextID outer_ctx, ContextID inner_ctx, const FieldMask &merge_mask);
-      void register_physical_region(const PhysicalUser &user, RegionMapper &rm);
-      void open_physical_tree(const PhysicalUser &user, RegionMapper &rm);
-      virtual void close_physical_tree(PhysicalCloser &closer, const FieldMask &closing_mask);
-      virtual void close_reduction_tree(ReductionCloser &closer, const FieldMask &closing_mask);
-    protected:
-      virtual bool are_children_disjoint(Color c1, Color c2);
-      virtual bool are_closing_partition(void) const;
-      virtual RegionTreeNode* get_tree_child(Color c);
-      virtual Color get_color(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual bool color_match(Color c);
-#endif
-    public:
-      // Physical traversal methods
-      InstanceView* map_physical_region(const PhysicalUser &user, RegionMapper &rm);
-      ReductionView* map_reduction_region(const PhysicalUser &user, RegionMapper &rm);
-      void update_valid_views(ContextID ctx, const FieldMask &valid_mask, bool dirty, InstanceView* new_view);
-      void update_valid_views(ContextID ctx, const FieldMask &valid_mask, 
-                          const FieldMask &dirty_mask, const std::vector<InstanceView*>& new_views);
-      void update_reduction_views(ContextID ctx, const FieldMask &valid_mask, ReductionView *new_view);
-      // Issue the necessary copies for each of the fields in the copy mask to make the data in
-      // the destination instance up-to-date.
-      void issue_update_copies(InstanceView *dst, RegionMapper &rm, FieldMask copy_mask);
-      // Issue reductions from the current reduction instances to the target instance to make it valid
-      void issue_update_reductions(PhysicalView *target, const FieldMask &mask, RegionMapper &rm);
-      void mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse);
-      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask, bool last_use);
-      void invalidate_instance_views(PhysicalState &state, const FieldMask &invalid_mask, bool clean);
-      void invalidate_reduction_views(PhysicalState &state, const FieldMask &invalid_mask);
-      void find_valid_instance_views(ContextID ctx, 
-                                     std::list<std::pair<InstanceView*,FieldMask> > &valid_views, 
-                                     const FieldMask &valid_mask, const FieldMask &field_mask, bool needs_space);
-      void find_valid_reduction_views(ContextID ctx, std::list<ReductionView*> &valid_views, const FieldMask &valid_mask);
-      InstanceView* create_instance(Memory location, RegionMapper &rm, const std::vector<FieldID> &new_fields);
-      ReductionView* create_reduction(Memory location, RegionMapper &rm);
-      void issue_final_close_operation(RegionMapper &rm, const PhysicalUser &user, PhysicalCloser &closer);
-      void issue_final_reduction_operation(RegionMapper &rm, const PhysicalUser &user, ReductionCloser &closer);
-      void pull_valid_views(ContextID ctx, const FieldMask &field_mask);
-      void flush_reductions(const PhysicalUser &user, RegionMapper &rm);
-      void update_top_mask(FieldMask allocated_mask);
-    public:
-      size_t compute_tree_size(bool returning) const;
-      void serialize_tree(Serializer &rez, bool returning);
-      static RegionNode* deserialize_tree(Deserializer &derez, PartitionNode *parent,
-                      RegionTreeForest *context, bool returning);
-      void mark_node(bool recurse);
-      RegionNode* find_top_marked(void) const;
-      void find_new_partitions(std::vector<PartitionNode*> &new_parts) const;
-    public:
-      size_t compute_state_size(ContextID ctx, const FieldMask &pack_mask,
-                                std::set<InstanceManager*> &unique_managers, 
-                                std::set<ReductionManager*> &unique_reductions,
-                                bool mark_invalid_views, bool recurse); 
-      void pack_physical_state(ContextID ctx, const FieldMask &pack_mask,
-                                Serializer &rez, bool invalidate_views, bool recurse);
-      void unpack_physical_state(ContextID ctx, Deserializer &derez, bool recurse, unsigned shift = 0);
-    public:
-      size_t compute_diff_state_size(ContextID, const FieldMask &pack_mask,
-                                std::set<InstanceManager*> &unique_managers,
-                                std::set<ReductionManager*> &unique_reductions,
-                                std::vector<RegionNode*> &diff_regions,
-                                std::vector<PartitionNode*> &diff_partitions,
-                                bool invalidate_views, bool recurse);
-      void pack_diff_state(ContextID ctx, const FieldMask &pack_mask, Serializer &rez);
-      void unpack_diff_state(ContextID ctx, Deserializer &derez);
-    public:
-      void print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask);
-    private:
-      const LogicalRegion handle;
-      PartitionNode *const parent;
-      IndexSpaceNode *const row_source;
-      FieldSpaceNode *const column_source; // only valid for top of region trees
-      std::map<Color,PartitionNode*> color_map; // all children seen locally ever
-      std::map<Color,PartitionNode*> valid_map; // only valid children
-      bool added;
-      bool marked;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Partition Node 
-    /////////////////////////////////////////////////////////////
-    class PartitionNode : public RegionTreeNode {
-    public:
-      friend class RegionTreeForest;
-      friend class IndexPartNode;
-      friend class RegionNode;
-      friend class InstanceManager;
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReducitonView;
-      friend class TreeStateLogger;
-      PartitionNode(LogicalPartition p, RegionNode *par, IndexPartNode *row_src,
-                    bool add, RegionTreeForest *ctx);
-      virtual ~PartitionNode(void);
-      void mark_destroyed(void);
-    public:
-      void add_child(LogicalRegion handle, RegionNode *child);
-      bool has_child(Color c) const;
-      RegionNode* get_child(Color c);
-      void remove_child(Color c);
-    public:
-      // Logical context operations
-      void initialize_logical_context(ContextID ctx);
-      void register_deletion_operation(ContextID ctx, DeletionOperation *op, const FieldMask &deletion_mask);
-    public:
-      void initialize_physical_context(ContextID ctx, bool clear, const FieldMask &initialize_mask);
-      void fill_exclusive_context(ContextID ctx, const FieldMask &fill_mask, Color open_child);
-      void merge_physical_context(ContextID outer_ctx, ContextID inner_ctx, const FieldMask &merge_mask);
-      void register_physical_region(const PhysicalUser &user, RegionMapper &rm);
-      void open_physical_tree(const PhysicalUser &user, RegionMapper &rm);
-      virtual void close_physical_tree(PhysicalCloser &closer, const FieldMask &closing_mask);
-      virtual void close_reduction_tree(ReductionCloser &closer, const FieldMask &closing_mask);
-    protected:
-      virtual bool are_children_disjoint(Color c1, Color c2);
-      virtual bool are_closing_partition(void) const;
-      virtual RegionTreeNode* get_tree_child(Color c);
-      virtual Color get_color(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual bool color_match(Color c);
-#endif
-    public:
-      size_t compute_tree_size(bool returning) const;
-      void serialize_tree(Serializer &rez, bool returning);
-      static void deserialize_tree(Deserializer &derez, RegionNode *parent,
-                        RegionTreeForest *context, bool returning);
-      void mark_node(bool recurse);
-      RegionNode* find_top_marked(void) const;
-      void find_new_partitions(std::vector<PartitionNode*> &new_parts) const;
-    public:
-      size_t compute_state_size(ContextID ctx, const FieldMask &pack_mask,
-                                std::set<InstanceManager*> &unique_managers, 
-                                std::set<ReductionManager*> &unique_reductions,
-                                bool mark_invalid_views, bool recurse);
-      void pack_physical_state(ContextID ctx, const FieldMask &mask,
-                                Serializer &rez, bool invalidate_views, bool recurse);
-      void unpack_physical_state(ContextID ctx, Deserializer &derez, bool recurse, unsigned shift = 0);
-    public:
-      size_t compute_diff_state_size(ContextID, const FieldMask &pack_mask,
-                                std::set<InstanceManager*> &unique_managers,
-                                std::set<ReductionManager*> &unique_reductions,
-                                std::vector<RegionNode*> &diff_regions,
-                                std::vector<PartitionNode*> &diff_partitions,
-                                bool invalidate_views, bool recurse);
-      void pack_diff_state(ContextID ctx, const FieldMask &pack_mask, Serializer &rez);
-      void unpack_diff_state(ContextID ctx, Deserializer &derez);
-    public:
-      void mark_invalid_instance_views(ContextID ctx, const FieldMask &invalid_mask, bool recurse);
-      void recursive_invalidate_views(ContextID ctx, const FieldMask &invalid_mask, bool last_use);
-    public:
-      void print_physical_context(ContextID ctx, TreeStateLogger *logger, FieldMask capture_mask);
-    private:
-      const LogicalPartition handle;
-      RegionNode *const parent;
-      IndexPartNode *const row_source;
-      // No column source here
-      std::map<Color,RegionNode*> color_map; // all children seen locally ever
-      std::map<Color,RegionNode*> valid_map; // only valid children
-      const bool disjoint;
-      bool added;
-      bool marked;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Region Usage 
-    /////////////////////////////////////////////////////////////
-    struct RegionUsage {
-    public:
-      RegionUsage(void)
-        : privilege(NO_ACCESS), prop(EXCLUSIVE), redop(0) { }
-      RegionUsage(PrivilegeMode p, CoherenceProperty c, ReductionOpID r)
-        : privilege(p), prop(c), redop(r) { }
-      RegionUsage(const RegionRequirement &req)
-        : privilege(req.privilege), prop(req.prop), redop(req.redop) { }
-    public:
-      inline bool operator==(const RegionUsage &rhs) const
-      { return ((privilege == rhs.privilege) && (prop == rhs.prop) && (redop == rhs.redop)); }
-      inline bool operator!=(const RegionUsage &rhs) const
-      { return !((*this) == rhs); }
-    public:
-      PrivilegeMode     privilege;
-      CoherenceProperty prop;
-      ReductionOpID     redop;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Generic User 
-    /////////////////////////////////////////////////////////////
     struct GenericUser {
     public:
       GenericUser(void) { }
-      GenericUser(const FieldMask &m, const RegionUsage &u);
+      GenericUser(const RegionUsage &u, const FieldMask &m)
+        : usage(u), field_mask(m) { }
     public:
-      FieldMask field_mask;
       RegionUsage usage;
+      FieldMask field_mask;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Logical User 
-    /////////////////////////////////////////////////////////////
+    /**
+     * \struct LogicalUser
+     * A class for representing logical users of a logical 
+     * region including the necessary information to
+     * register mapping dependences on the user.
+     */
     struct LogicalUser : public GenericUser {
     public:
-      LogicalUser(void) : GenericUser(), op(NULL), idx(0), gen(0) { }
-      LogicalUser(GeneralizedOperation *o, unsigned id, const FieldMask &m, const RegionUsage &u);
+      LogicalUser(void);
+      LogicalUser(Operation *o, unsigned id, 
+                  const RegionUsage &u, const FieldMask &m);
     public:
-      bool operator==(const LogicalUser &rhs) const;
-      bool operator!=(const LogicalUser &rhs) const { return !((*this) == rhs); }
-    public:
-      GeneralizedOperation *op;
+      Operation *op;
       unsigned idx;
       GenerationID gen;
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+      UniqueID uid;
+#endif
     };
 
-    /////////////////////////////////////////////////////////////
-    // Physical User 
-    /////////////////////////////////////////////////////////////
+    /**
+     * \struct PhysicalUser
+     * A class for representing physical users of a logical
+     * region including necessary information to 
+     * register execution dependences on the user.
+     */
     struct PhysicalUser : public GenericUser {
     public:
-      PhysicalUser(void) : GenericUser(), single_term(Event::NO_EVENT), multi_term(Event::NO_EVENT), idx(0) { }
-      PhysicalUser(const FieldMask &m, const RegionUsage &u, Event single, Event multi, unsigned idx);
+      PhysicalUser(void);
+      PhysicalUser(const RegionUsage &u, const FieldMask &m,
+                   Event term_event, int child = -1);
     public:
-      bool operator==(const PhysicalUser &rhs) const;
-      bool operator!=(const PhysicalUser &rhs) const { return !((*this) == rhs); }
-    public:
-      Event single_term;
-      Event multi_term;
-      unsigned idx;
+      Event term_event;
+      int child;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Physical Manager 
-    /////////////////////////////////////////////////////////////
     /**
-     * This is the base class for all managers, including both
-     * instance and reduction managers, and contains all the
-     * logic that can be shared between them.
+     * \struct CloseInfo
+     * A struct containing information about how to close
+     * a child node including the close mask and whether
+     * the child can be kept open in read mode.
      */
-    class PhysicalManager {
+    struct CloseInfo {
     public:
-      PhysicalManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, PhysicalInstance inst);
+      CloseInfo(void)
+        : target_child(-1), close_mask(FieldMask()), 
+          leave_open(false), allow_next(false) { }
+      CloseInfo(int child, const FieldMask &m, bool open, bool allow)
+        : target_child(child), close_mask(m), 
+          leave_open(open), allow_next(allow) { }
+    public:
+      int target_child;
+      FieldMask close_mask;
+      bool leave_open;
+      bool allow_next;
+    };
+
+    /**
+     * \struct MappableInfo
+     */
+    struct MappableInfo {
+    public:
+      MappableInfo(ContextID ctx, Mappable *mappable,
+                   Processor local_proc, RegionRequirement &req,
+                   const FieldMask &traversal_mask);
+    public:
+      const ContextID ctx;
+      Mappable *const mappable;
+      const Processor local_proc;
+      RegionRequirement &req;
+      const FieldMask traversal_mask;
+    };
+
+    /**
+     * \struct ChildState
+     * Tracks the which fields have open children
+     * and then which children are open for each
+     * field.
+     */
+    struct ChildState {
+    public:
+      FieldMask valid_fields;
+      std::map<Color,FieldMask> open_children;
+    };
+
+    /**
+     * \struct FieldState
+     * Track the field state more accurately
+     * for logical traversals to figure out 
+     * which tasks can run in parallel.
+     */
+    struct FieldState : public ChildState {
+    public:
+      FieldState(const GenericUser &u, const FieldMask &m, Color child);
+    public:
+      bool overlaps(const FieldState &rhs) const;
+      void merge(const FieldState &rhs);
+    public:
+      void print_state(TreeStateLogger *logger, 
+                       const FieldMask &capture_mask) const;
+    public:
+      OpenState open_state;
+      ReductionOpID redop;
+    }; 
+
+    /**
+     * \struct LogicalState
+     * Track the version states for a given logical
+     * region as well as the previous and current
+     * epoch users and any close operations that
+     * needed to be performed.
+     */
+    struct LogicalState {
+    public:
+      LogicalState(void);
+    public:
+      void reset(void);
+    public:
+      std::map<VersionID,FieldMask> field_versions;
+      std::list<FieldState> field_states;
+      std::list<LogicalUser> curr_epoch_users;
+      std::list<LogicalUser> prev_epoch_users;
+      std::list<CloseInfo> close_operations;
+    };
+
+    /**
+     * \struct PhysicalState
+     * Track the physical state of a logical region
+     * including which fields have dirty data,
+     * which children are open, and the valid
+     * reduction and instance views.
+     */
+    struct PhysicalState {
+    public:
+      PhysicalState(void);
+      PhysicalState(ContextID ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalState(ContextID ctx, RegionTreeNode *node);
+#endif
+    public:
+      FieldMask dirty_mask;
+      FieldMask reduction_mask;
+      ChildState children;
+      std::map<InstanceView*,FieldMask> valid_views;
+      std::map<ReductionView*,FieldMask> reduction_views;
+      std::set<Color> complete_children;
+    public:
+      // These are used for managing access to the physical state
+      unsigned acquired_count;
+      bool exclusive;
+      std::deque<std::pair<UserEvent,bool/*exclusive*/> > requests;
+    public:
+      ContextID ctx;
+#ifdef DEBUG_HIGH_LEVEL
+      RegionTreeNode *node;
+#endif
+    };
+
+    /**
+     * \struct LogicalCloser
+     * This structure helps keep track of the state
+     * necessary for performing a close operation
+     * on the logical region tree.
+     */
+    struct LogicalCloser {
+    public:
+      LogicalCloser(ContextID ctx, const LogicalUser &u,
+                    bool validates);
+    public:
+      ContextID ctx;
+      const LogicalUser &user;
+      bool validates;
+      // All the fields that we close for this traversal
+      FieldMask closed_mask;
+      std::deque<LogicalUser> closed_users;
+      std::deque<CloseInfo> close_operations;
+    }; 
+
+    struct PhysicalCloser {
+    public:
+      PhysicalCloser(MappableInfo *info,
+                     bool leave_open,
+                     LogicalRegion closing_handle);
+      PhysicalCloser(const PhysicalCloser &rhs);
+      ~PhysicalCloser(void);
+    public:
+      PhysicalCloser& operator=(const PhysicalCloser &rhs);
+    public:
+      bool needs_targets(void) const;
+      void add_target(InstanceView *target);
+      void close_tree_node(RegionTreeNode *node, 
+                           const FieldMask &closing_mask);
+      const std::vector<InstanceView*>& get_upper_targets(void) const;
+      const std::vector<InstanceView*>& get_lower_targets(void) const;
+    public:
+      void update_dirty_mask(const FieldMask &mask);
+      const FieldMask& get_dirty_mask(void) const;
+      void update_node_views(RegionTreeNode *node, PhysicalState &state);
+    public:
+      MappableInfo *const info;
+      const LogicalRegion handle;
+      bool permit_leave_open;
+    protected:
+      bool targets_selected;
+      FieldMask dirty_mask;
+      std::vector<InstanceView*> upper_targets;
+      std::vector<InstanceView*> lower_targets;
+    };
+
+    /**
+     * \class RegionTreeNode
+     * A generic region tree node from which all
+     * other kinds of region tree nodes inherit.  Notice
+     * that all important analyses are defined on 
+     * this kind of node making them general across
+     * all kinds of node types.
+     */
+    class RegionTreeNode {
+    public:
+      RegionTreeNode(RegionTreeForest *ctx);
+      virtual ~RegionTreeNode(void);
+    public:
+      void reserve_contexts(unsigned num_contexts);
+      LogicalState& get_logical_state(ContextID ctx);
+      PhysicalState& acquire_physical_state(ContextID ctx, bool exclusive);
+      void acquire_physical_state(PhysicalState &state, bool exclusive);
+      bool release_physical_state(PhysicalState &state);
+    public:
+      // Logical traversal operations
+      void register_logical_node(ContextID ctx,
+                                 const LogicalUser &user,
+                                 RegionTreePath &path);
+      void open_logical_node(ContextID ctx,
+                             const LogicalUser &user,
+                             RegionTreePath &path);
+      void close_logical_node(LogicalCloser &closer,
+                              const FieldMask &closing_mask);
+      bool siphon_logical_children(LogicalCloser &closer,
+                                   LogicalState &state,
+                                   const FieldMask &closing_mask,
+                                   bool record_close_operations,
+                                   int next_child = -1);
+      void perform_close_operations(LogicalCloser &closer,
+                                    const FieldMask &closing_mask,
+                                    FieldState &closing_state,
+                                    int next_child, bool allow_next_child,
+                                    bool upgrade_next_child, 
+                                    bool permit_leave_open,
+                                    bool record_close_operations,
+                                    std::deque<FieldState> &new_states,
+                                    FieldMask &need_open);
+      void merge_new_field_state(LogicalState &state, 
+                                 const FieldState &new_state);
+      void merge_new_field_states(LogicalState &state, 
+                                  const std::deque<FieldState> &new_states);
+      void record_field_versions(LogicalState &state, RegionTreePath &path,
+                                 const FieldMask &field_mask, 
+                                 unsigned depth, bool before);
+      void record_close_operations(LogicalState &state, RegionTreePath &path,
+                                  const FieldMask &field_mask, unsigned depth);
+      void advance_field_versions(LogicalState &state, const FieldMask &mask);
+      void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
+      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
+      void filter_close_operations(LogicalState &state, const FieldMask &mask);
+      void sanity_check_logical_state(LogicalState &state);
+      void initialize_logical_state(ContextID ctx);
+      void invalidate_logical_state(ContextID ctx);
+      void register_logical_dependences(ContextID ctx, Operation *op,
+                                        const FieldMask &field_mask);
+    public:
+      // Physical traversal operations
+      // Entry
+      void close_physical_node(PhysicalCloser &closer,
+                               const FieldMask &closing_mask);
+      bool select_close_targets(PhysicalCloser &closer,
+                                PhysicalState &state,
+                                const FieldMask &closing_mask,
+                                bool complete);
+      bool siphon_physical_children(PhysicalCloser &closer,
+                                    PhysicalState &state,
+                                    const FieldMask &closing_mask,
+                                    int next_child, 
+                                    bool allow_next);
+      bool close_physical_child(PhysicalCloser &closer,
+                                PhysicalState &state,
+                                const FieldMask &closing_mask,
+                                Color target_child,
+                                int next_child,
+                                bool allow_next);
+      void find_valid_instance_views(PhysicalState &state,
+                                     const FieldMask &valid_mask,
+                                     const FieldMask &space_mask, 
+                                     bool needs_space,
+                           std::map<InstanceView*,FieldMask> &valid_views);
+      void find_valid_reduction_views(PhysicalState &state,
+                                      const FieldMask &valid_mask,
+                                      std::set<ReductionView*> &valid_views);
+      void pull_valid_instance_views(PhysicalState &state,
+                                     const FieldMask &mask);
+      void issue_update_copies(PhysicalState &state,
+                               MappableInfo *info,
+                               InstanceView *target, 
+                               FieldMask copy_mask);
+      void issue_update_reductions(PhysicalState &state,
+                                   PhysicalView *target,
+                                   const FieldMask &update_mask,
+                                   Processor local_proc);
+      void invalidate_instance_views(PhysicalState &state,
+                                     const FieldMask &invalid_mask, bool clean);
+      void invalidate_reduction_views(PhysicalState &state,
+                                      const FieldMask &invalid_mask);
+      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+                              bool dirty, InstanceView *new_view);
+      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+                              const FieldMask &dirty_mask, 
+                              const std::vector<InstanceView*> &new_views);
+      void update_reduction_views(PhysicalState &state, 
+                                  const FieldMask &valid_mask,
+                                  ReductionView *new_view);
+      void flush_reductions(PhysicalState &state,  const FieldMask &flush_mask,
+                            ReductionOpID redop, MappableInfo *info);
+      // Entry
+      void initialize_physical_state(ContextID ctx);
+      // Entry
+      void invalidate_physical_state(ContextID ctx);
+      // Entry
+      void invalidate_physical_state(ContextID ctx, 
+                                     const FieldMask &invalid_mask);
+    public:
+      virtual unsigned get_depth(void) const = 0;
+      virtual unsigned get_color(void) const = 0;
+      virtual RegionTreeNode* get_parent(void) const = 0;
+      virtual RegionTreeNode* get_tree_child(Color c) = 0;
+      virtual bool are_children_disjoint(Color c1, Color c2) = 0;
+      virtual bool is_region(void) const = 0;
+      virtual bool visit_node(PathTraverser *traverser) = 0;
+      virtual bool visit_node(NodeTraverser *traverser) = 0;
+      virtual Domain get_domain(void) const = 0;
+      virtual InstanceView* create_instance(Memory target_mem,
+                                            const std::set<FieldID> &fields,
+                                            size_t blocking_factor) = 0;
+      virtual ReductionView* create_reduction(Memory target_mem,
+                                              FieldID fid,
+                                              bool reduction_list,
+                                              ReductionOpID redop) = 0;
+      virtual void send_node(AddressSpaceID target) = 0;
+      virtual void print_logical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask) = 0;
+      virtual void print_physical_context(ContextID ctx, 
+                                          TreeStateLogger *logger,
+                                          const FieldMask &mask) = 0;
+    public:
+      bool pack_send_state(ContextID ctx, Serializer &rez, 
+                           AddressSpaceID target,
+                           const FieldMask &send_mask,
+                           std::set<PhysicalView*> &needed_views,
+                           std::set<PhysicalManager*> &needed_managers);
+      bool pack_send_back_state(ContextID ctx, Serializer &rez,
+                                AddressSpaceID target, const FieldMask &send_mask,
+                                std::set<PhysicalManager*> &needed_managers);
+      void unpack_send_state(ContextID ctx, Deserializer &derez, 
+                             FieldSpaceNode *column, AddressSpaceID source);
+    public:
+      // Logical helper operations
+      static FieldMask perform_dependence_checks(const LogicalUser &user, 
+            std::list<LogicalUser> &users, const FieldMask &check_mask, 
+            bool validates_regions);
+    public:
+      RegionTreeForest *const context;
+    public:
+      std::set<AddressSpaceID> creation_set;
+      std::set<AddressSpaceID> destruction_set;
+    protected:
+      Lock node_lock;
+      std::deque<LogicalState> logical_states;
+      std::deque<PhysicalState> physical_states;
+#ifdef DEBUG_HIGH_LEVEL
+      // Uses these for debugging to avoid races accessing
+      // the logical and physical deques to check for size
+      // when they are possibly growing and in an inconsistent state
+      size_t logical_state_size;
+      size_t physical_state_size;
+#endif
+    };
+
+    /**
+     * \class RegionNode
+     * Represent a region in a region tree
+     */
+    class RegionNode : public RegionTreeNode {
+    public:
+      RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
+                 FieldSpaceNode *col_src, RegionTreeForest *ctx);
+      RegionNode(const RegionNode &rhs);
+      virtual ~RegionNode(void);
+    public:
+      RegionNode& operator=(const RegionNode &rhs);
+    public:
+      bool has_child(Color c);
+      PartitionNode* get_child(Color c);
+      void add_child(PartitionNode *child);
+      void remove_child(Color c);
+      void add_creation_source(AddressSpaceID source);
+      void destroy_node(AddressSpaceID source);
+    public:
+      virtual unsigned get_depth(void) const;
+      virtual unsigned get_color(void) const;
+      virtual RegionTreeNode* get_parent(void) const;
+      virtual RegionTreeNode* get_tree_child(Color c);
+      virtual bool are_children_disjoint(Color c1, Color c2);
+      virtual bool is_region(void) const;
+      virtual bool visit_node(PathTraverser *traverser);
+      virtual bool visit_node(NodeTraverser *traverser);
+      virtual Domain get_domain(void) const;
+      virtual InstanceView* create_instance(Memory target_mem,
+                                            const std::set<FieldID> &fields,
+                                            size_t blocking_factor);
+      virtual ReductionView* create_reduction(Memory target_mem,
+                                              FieldID fid,
+                                              bool reduction_list,
+                                              ReductionOpID redop);
+      virtual void send_node(AddressSpaceID target);
+      static void handle_node_creation(RegionTreeForest *context,
+                            Deserializer &derez, AddressSpaceID source);
+      virtual void print_logical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+      virtual void print_physical_context(ContextID ctx, 
+                                          TreeStateLogger *logger,
+                                          const FieldMask &mask);
+    public:
+      void remap_region(ContextID ctx, InstanceView *view, 
+                        const FieldMask &user_mask, FieldMask &needed_mask);
+      InstanceRef register_region(MappableInfo *info, 
+                                  PhysicalUser &user,
+                                  PhysicalView *view,
+                                  const FieldMask &needed_fields);
+      InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
+                             PhysicalView *new_view,
+                             Processor local_proc);
+      Event close_state(MappableInfo *info, PhysicalUser &user,
+                        const InstanceRef &target);
+    public:
+      bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
+                      const FieldMask &send_mask, bool invalidate,
+                      std::set<PhysicalView*> &needed_views,
+                      std::set<PhysicalManager*> &needed_managers);
+      static void handle_send_state(RegionTreeForest *context,
+                                    Deserializer &derez, 
+                                    AddressSpaceID source);
+    public:
+      bool send_back_state(ContextID ctx, ContextID remote_ctx,
+                           AddressSpaceID target,
+                           bool invalidate, const FieldMask &send_mask,
+                           std::set<PhysicalManager*> &needed_managers);
+      static void handle_send_back_state(RegionTreeForest *context,
+                           Deserializer &derez, AddressSpaceID source);
+    public:
+      const LogicalRegion handle;
+      PartitionNode *const parent;
+      IndexSpaceNode *const row_source;
+      FieldSpaceNode *const column_source;
+    protected:
+      std::map<Color,PartitionNode*> color_map;
+      std::map<Color,PartitionNode*> valid_map;
+    };
+
+    /**
+     * \class PartitionNode
+     * Represent an instance of a partition in a region tree.
+     */
+    class PartitionNode : public RegionTreeNode {
+    public:
+      PartitionNode(LogicalPartition p, RegionNode *par, 
+                    IndexPartNode *row_src, FieldSpaceNode *col_src,
+                    RegionTreeForest *ctx);
+      PartitionNode(const PartitionNode &rhs);
+      ~PartitionNode(void);
+    public:
+      PartitionNode& operator=(const PartitionNode &rhs);
+    public:
+      bool has_child(Color c);
+      RegionNode* get_child(Color c);
+      void add_child(RegionNode *child);
+      void remove_child(Color c);
+      void add_creation_source(AddressSpaceID source);
+      void destroy_node(AddressSpaceID source);
+    public:
+      virtual unsigned get_depth(void) const;
+      virtual unsigned get_color(void) const;
+      virtual RegionTreeNode* get_parent(void) const;
+      virtual RegionTreeNode* get_tree_child(Color c);
+      virtual bool are_children_disjoint(Color c1, Color c2);
+      virtual bool is_region(void) const;
+      virtual bool visit_node(PathTraverser *traverser);
+      virtual bool visit_node(NodeTraverser *traverser);
+      virtual Domain get_domain(void) const;
+      virtual InstanceView* create_instance(Memory target_mem,
+                                            const std::set<FieldID> &fields,
+                                            size_t blocking_factor);
+      virtual ReductionView* create_reduction(Memory target_mem,
+                                              FieldID fid,
+                                              bool reduction_list,
+                                              ReductionOpID redop);
+      virtual void send_node(AddressSpaceID target);
+      virtual void print_logical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+      virtual void print_physical_context(ContextID ctx, 
+                                          TreeStateLogger *logger,
+                                          const FieldMask &mask);
+    public:
+      bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
+                      const FieldMask &send_mask, bool invalidate,
+                      std::set<PhysicalView*> &needed_views,
+                      std::set<PhysicalManager*> &needed_managers);
+      static void handle_send_state(RegionTreeForest *context,
+                                    Deserializer &derez, 
+                                    AddressSpaceID source);
+    public:
+      bool send_back_state(ContextID ctx, ContextID remote_ctx,
+                           AddressSpaceID target,
+                           bool invalidate, const FieldMask &send_mask,
+                           std::set<PhysicalManager*> &needed_managers);
+      static void handle_send_back_state(RegionTreeForest *context,
+                           Deserializer &derez, AddressSpaceID source);
+    public:
+      const LogicalPartition handle;
+      RegionNode *const parent;
+      IndexPartNode *const row_source;
+      FieldSpaceNode *const column_source;
+      const bool disjoint;
+      const bool complete;
+    protected:
+      std::map<Color,RegionNode*> color_map;
+      std::map<Color,RegionNode*> valid_map;
+    }; 
+
+    /**
+     * \class RegionTreePath
+     * Keep track of the path and states associated with a 
+     * given region requirement of an operation.
+     */
+    class RegionTreePath {
+    public:
+      RegionTreePath(void);
+    public:
+      void initialize(unsigned min_depth, unsigned max_depth);
+      void register_child(unsigned depth, Color color);
+    public:
+      bool has_child(unsigned depth) const;
+      Color get_child(unsigned depth) const;
+      unsigned get_path_length(void) const;
+    public:
+      void record_close_operation(unsigned depth, const CloseInfo &info);
+      void record_before_version(unsigned depth, VersionID vid,
+                                 const FieldMask &version_mask);
+      void record_after_version(unsigned depth, VersionID vid,
+                                const FieldMask &version_mask);
+    public:
+      const std::deque<CloseInfo>& get_close_operations(unsigned depth) const;
+    protected:
+      std::vector<int> path;
+      std::vector<std::deque<CloseInfo> > close_operations;
+      unsigned min_depth;
+      unsigned max_depth;
+    };
+
+    /**
+     * \class PathTraverser
+     * An abstract class which provides the needed
+     * functionality for walking a path and visiting
+     * all the kinds of nodes along the path.
+     */
+    class PathTraverser {
+    public:
+      PathTraverser(RegionTreePath &path);
+      PathTraverser(const PathTraverser &rhs);
+      virtual ~PathTraverser(void);
+    public:
+      PathTraverser& operator=(const PathTraverser &rhs);
+    public:
+      // Return true if the traversal was successful
+      // or false if one of the nodes exit stopped early
+      bool traverse(RegionTreeNode *start);
+    public:
+      virtual bool visit_region(RegionNode *node) = 0;
+      virtual bool visit_partition(PartitionNode *node) = 0;
+    protected:
+      RegionTreePath &path;
+    protected:
+      // Fields are only valid during traversal
+      unsigned depth;
+      bool has_child;
+      Color next_child;
+    };
+
+    /**
+     * \class NodeTraverser
+     * An abstract class which provides the needed
+     * functionality for visiting a node in the tree
+     * and all of its sub-nodes.
+     */
+    class NodeTraverser {
+    public:
+      virtual bool visit_only_valid(void) const = 0;
+      virtual bool visit_region(RegionNode *node) = 0;
+      virtual bool visit_partition(PartitionNode *node) = 0;
+    };
+
+    /**
+     * \class LogicalPathRegistrar
+     * A class that registers dependences for an operation
+     * against all other operation with an overlapping
+     * field mask along a given path
+     */
+    class LogicalPathRegistrar : public PathTraverser {
+    public:
+      LogicalPathRegistrar(ContextID ctx, Operation *op,
+            const FieldMask &field_mask, RegionTreePath &path);
+      LogicalPathRegistrar(const LogicalPathRegistrar &rhs);
+      virtual ~LogicalPathRegistrar(void);
+    public:
+      LogicalPathRegistrar& operator=(const LogicalPathRegistrar &rhs);
+    public:
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const ContextID ctx;
+      const FieldMask field_mask;
+      Operation *const op;
+    };
+
+    /**
+     * \class LogicalRegistrar
+     * A class that registers dependences for an operation
+     * against all other operations with an overlapping
+     * field mask.
+     */
+    class LogicalRegistrar : public NodeTraverser {
+    public:
+      LogicalRegistrar(ContextID ctx, Operation *op,
+                       const FieldMask &field_mask);
+      LogicalRegistrar(const LogicalRegistrar &rhs);
+      ~LogicalRegistrar(void);
+    public:
+      LogicalRegistrar& operator=(const LogicalRegistrar &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const ContextID ctx;
+      const FieldMask field_mask;
+      Operation *const op;
+    };
+
+    /**
+     * \class LogicalInitializer
+     * A class for initializing logical contexts
+     */
+    class LogicalInitializer : public NodeTraverser {
+    public:
+      LogicalInitializer(ContextID ctx);
+      LogicalInitializer(const LogicalInitializer &rhs);
+      ~LogicalInitializer(void);
+    public:
+      LogicalInitializer& operator=(const LogicalInitializer &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+    };
+
+    /**
+     * \class LogicalInvalidator
+     * A class for invalidating logical contexts
+     */
+    class LogicalInvalidator : public NodeTraverser {
+    public:
+      LogicalInvalidator(ContextID ctx);
+      LogicalInvalidator(const LogicalInvalidator &rhs);
+      ~LogicalInvalidator(void);
+    public:
+      LogicalInvalidator& operator=(const LogicalInvalidator &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+    };
+
+    /**
+     * \class PhysicalInitializer
+     * A class for initializing physical contexts
+     */
+    class PhysicalInitializer : public NodeTraverser {
+    public:
+      PhysicalInitializer(ContextID ctx);
+      PhysicalInitializer(const PhysicalInitializer &rhs);
+      ~PhysicalInitializer(void);
+    public:
+      PhysicalInitializer& operator=(const PhysicalInitializer &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+    };
+
+    /**
+     * \class PhysicalInvalidator
+     * A class for invalidating physical contexts
+     */
+    class PhysicalInvalidator : public NodeTraverser {
+    public:
+      PhysicalInvalidator(ContextID ctx);
+      PhysicalInvalidator(ContextID ctx, const FieldMask &invalid_mask);
+      PhysicalInvalidator(const PhysicalInvalidator &rhs);
+      ~PhysicalInvalidator(void);
+    public:
+      PhysicalInvalidator& operator=(const PhysicalInvalidator &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const bool total;
+      const FieldMask invalid_mask;
+    };
+
+    /**
+     * \class ReductionCloser
+     * A class for performing reduciton close operations
+     */
+    class ReductionCloser : public NodeTraverser {
+    public:
+      ReductionCloser(ContextID ctx, ReductionView *target,
+                      const FieldMask &reduc_mask,
+                      Processor local_proc);
+      ReductionCloser(const ReductionCloser &rhs);
+      ~ReductionCloser(void);
+    public:
+      ReductionCloser& operator=(const ReductionCloser &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      ReductionView *const target;
+      const FieldMask close_mask;
+      const Processor local_proc;
+    };
+
+    /**
+     * \class PremapTraverser
+     * A traverser of the physical region tree for
+     * performing the premap operation.
+     */
+    class PremapTraverser : public PathTraverser {
+    public:
+      PremapTraverser(RegionTreePath &path, MappableInfo *info);  
+      PremapTraverser(const PremapTraverser &rhs); 
+      ~PremapTraverser(void);
+    public:
+      PremapTraverser& operator=(const PremapTraverser &rhs);
+    public:
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      bool perform_close_operations(RegionTreeNode *node,
+                                    LogicalRegion closing_handle);
+    protected:
+      MappableInfo *const info;
+    }; 
+
+    /**
+     * \class StateSender
+     * This class is used for traversing the region
+     * tree to figure out which states need to be sent back
+     */
+    class StateSender : public NodeTraverser {
+    public:
+      StateSender(ContextID ctx, UniqueID uid, AddressSpaceID target,
+                  std::set<PhysicalView*> &needed_views,
+                  std::set<PhysicalManager*> &needed_managers,
+                  const FieldMask &send_mask, bool invalidate);
+      StateSender(const StateSender &rhs);
+      ~StateSender(void);
+    public:
+      StateSender& operator=(const StateSender &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const ContextID ctx;
+      const UniqueID uid;
+      const AddressSpaceID target;
+      std::set<PhysicalView*> &needed_views;
+      std::set<PhysicalManager*> &needed_managers;
+      const FieldMask send_mask;
+      const bool invalidate;
+    };
+
+    /**
+     * \class PathReturner
+     * This class is used for sending back select paths
+     * of physical state for merging between where a region
+     * mapped and where it's projection requirement initially
+     * had privileges.
+     */
+    class PathReturner : public PathTraverser {
+    public:
+      PathReturner(RegionTreePath &path, ContextID ctx, 
+                   RegionTreeContext remote_ctx, AddressSpaceID target,
+                   const FieldMask &return_mask,
+                   std::set<PhysicalManager*> &needed_managers);
+      PathReturner(const PathReturner &rhs);
+      ~PathReturner(void);
+    public:
+      PathReturner& operator=(const PathReturner &rhs);
+    public:
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const ContextID ctx;
+      const ContextID remote_ctx;
+      const AddressSpaceID target;
+      const FieldMask return_mask;
+      std::set<PhysicalManager*> &needed_managers;
+    };
+
+    /**
+     * \class StateReturner
+     * This class is used for returning state back to a
+     * context on the original node for a task.
+     */
+    class StateReturner : public NodeTraverser {
+    public:
+      StateReturner(ContextID ctx, RegionTreeContext remote_ctx,
+                    AddressSpaceID target, bool invalidate,
+                    const FieldMask &return_mask,
+                    std::set<PhysicalManager*> &needed_managers);
+      StateReturner(const StateReturner &rhs);
+      ~StateReturner(void);
+    public:
+      StateReturner& operator=(const StateReturner &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const ContextID ctx;
+      const ContextID remote_ctx;
+      const AddressSpaceID target;
+      const bool invalidate;
+      const FieldMask return_mask;
+      std::set<PhysicalManager*> &needed_managers;
+    };
+ 
+    /**
+     * \class PhysicalManager
+     * This class abstracts the a physical instance in memory
+     * be it a normal instance or a reduction instance.
+     */
+    class PhysicalManager : public DistributedCollectable {
+    public:
+      PhysicalManager(RegionTreeForest *ctx, DistributedID did,
+                      AddressSpaceID owner_space, AddressSpaceID local_space,
+                      Memory mem, PhysicalInstance inst);
       virtual ~PhysicalManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const = 0;
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
+      virtual void notify_activate(void);
+      virtual void garbage_collect(void);
+      virtual void notify_new_remote(AddressSpaceID sid);
     public:
-      inline UniqueManagerID get_unique_id(void) const { return unique_id; }
-      inline Memory get_location(void) const { return location; }
-      inline bool is_returned(void) const { return remote_frac.is_empty(); }
-      inline bool is_clone(void) const { return clone; }
-      inline bool is_remote(void) const { return remote; }
-      inline PhysicalInstance get_instance(void) const 
-      { 
+      inline PhysicalInstance get_instance(void) const
+      {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
-        return instance; 
+        return instance;
       }
-    protected:
+    public:
       RegionTreeForest *const context;
-      unsigned references;
-      const UniqueManagerID unique_id;
-      bool remote;
-      const bool clone;
-      InstFrac remote_frac; // The fraction we are remote from somewhere else
-      InstFrac local_frac; // Fraction of this instance info that is still here
-      const Memory location;
+      const Memory memory;
+    protected:
       PhysicalInstance instance;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Instance Manager 
-    /////////////////////////////////////////////////////////////
     /**
-     * Instance managers are the objects that represent physical
-     * instances and keeps track of when they can be garbage
-     * collected.  Once all InstanceViews have removed their
-     * reference then they can be collected.
+     * \class InstanceManager
+     * A class for managing normal physical instances
      */
     class InstanceManager : public PhysicalManager {
     public:
-      InstanceManager(Memory m, PhysicalInstance inst, const std::map<FieldID,Domain::CopySrcDstField> &infos,
-              FieldSpace fsp, const FieldMask &mask, RegionTreeForest *ctx, UniqueManagerID mid, bool rem, bool clone);
+      InstanceManager(RegionTreeForest *ctx, DistributedID did,
+                      AddressSpaceID owner_space, AddressSpaceID local_space,
+                      Memory mem, PhysicalInstance inst, RegionNode *node,
+                      const FieldMask &mask, size_t blocking_factor,
+                      const std::map<FieldID,Domain::CopySrcDstField> &infos,
+                      const std::map<unsigned,FieldID> &indexes);
+      InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
-      inline const FieldMask& get_allocated_fields(void) const { return allocated_fields; }
-      inline Lock get_lock(void) const { return lock; }
-      inline UniqueManagerID get_unique_id(void) const { return unique_id; }
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(instance.exists());
-#endif
-        Accessor::RegionAccessor<Accessor::AccessorType::Generic> result = instance.get_accessor();
-        return result;
-      }
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const
-      {
-        std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = field_infos.find(fid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(instance.exists());
-        assert(finder != field_infos.end());
-#endif
-        Accessor::RegionAccessor<Accessor::AccessorType::Generic> temp = instance.get_accessor();
-        return temp.get_untyped_field_accessor(finder->second.offset, finder->second.size);
-      }
-      virtual bool is_reduction_manager(void) const { return false; }
-      virtual InstanceManager* as_instance_manager(void) const { return const_cast<InstanceManager*>(this); }
-      virtual ReductionManager* as_reduction_manager(void) const { return NULL; }
+      InstanceManager& operator=(const InstanceManager &rhs);
     public:
-      void add_reference(void);
-      void remove_reference(void);
-      void add_view(InstanceView *view);
-      void compute_copy_offsets(const FieldMask &mask, std::vector<Domain::CopySrcDstField> &fields);
-      void find_info(FieldID fid, std::vector<Domain::CopySrcDstField> &sources);
-      InstanceManager* clone_manager(const FieldMask &mask, FieldSpaceNode *node) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const;
+      virtual bool is_reduction_manager(void) const;
+      virtual InstanceManager* as_instance_manager(void) const;
+      virtual ReductionManager* as_reduction_manager(void) const;
     public:
-      // This function helps to find views that need to be sent from the a specific logical region
-      // and any of it's children with an optional filter on the chosen children
-      void find_views_from(LogicalRegion handle, std::map<InstanceView*,FieldMask> &unique_views,
-                            std::vector<InstanceView*> &ordered_views, const FieldMask &packing_mask, int filter = -1);
+      InstanceView* create_top_view(void);
+      void compute_copy_offsets(const FieldMask &copy_mask,
+                                std::vector<Domain::CopySrcDstField> &fields);
     public:
-      size_t compute_send_size(void) const;
-      void pack_manager_send(Serializer &rez, unsigned long num_ways);
-      static void unpack_manager_send(RegionTreeForest *context, Deserializer &derez, unsigned long split_factor);
+      DistributedID send_manager(AddressSpaceID target, 
+                                 std::set<PhysicalManager*> &needed_managers);
     public:
-      void find_user_returns(std::vector<InstanceView*> &returning_views) const;
-      size_t compute_return_size(void) const;
-      void pack_manager_return(Serializer &rez);
-      static void unpack_manager_return(RegionTreeForest *context, Deserializer &derez); 
+      static void handle_send_manager(RegionTreeForest *context, 
+                                      AddressSpaceID source,
+                                      Deserializer &derez);
     public:
-      // For checking if an instance manager no longer has any valid
-      // references and can therefore be returned back
-      bool is_valid_free(void) const;
+      void pack_manager(Serializer &rez);
+      static InstanceManager* unpack_manager(Deserializer &derez,
+                                             RegionTreeForest *context, 
+                                             DistributedID did,
+                                             bool make = true);
     public:
-      void pack_remote_fraction(Serializer &rez);
-      void unpack_remote_fraction(Deserializer &derez);
-    private:
-      void garbage_collect(void);
-    private:
-      friend class RegionTreeForest;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-      friend class RegionNode; // for sanity checks only 
-      Lock lock;
-      const FieldSpace fspace;
-      FieldMask allocated_fields;
-      std::map<FieldID,Domain::CopySrcDstField> field_infos;
-      // One nice property of this view of views is that they are in
-      // a partial order that will allow them to be serialized and deserialized correctly
-      std::vector<InstanceView*> all_views;
+      RegionNode *const region_node;
+      const FieldMask allocated_fields;
+      const size_t blocking_factor;
+    protected:
+      const std::map<FieldID,Domain::CopySrcDstField> field_infos;
+      // Remember these indexes are only good on the local node and
+      // have to be transformed when the manager is sent remotely
+      const std::map<unsigned/*index*/,FieldID> field_indexes;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Reduction Manager 
-    /////////////////////////////////////////////////////////////
     /**
-     * For keeping track of the information for reduction instances
+     * \class ReductionManager
+     * An abstract class for managing reduction physical instances
      */
     class ReductionManager : public PhysicalManager {
     public:
-      ReductionManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, 
-                        PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op);
+      ReductionManager(RegionTreeForest *ctx, DistributedID did,
+                       AddressSpaceID owner_space, AddressSpaceID local_space,
+                       Memory mem, PhysicalInstance inst, 
+                       RegionNode *region_node, ReductionOpID redop, 
+                       const ReductionOp *op);
       virtual ~ReductionManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const = 0;
-      virtual bool is_reduction_manager(void) const { return true; }
-      virtual InstanceManager* as_instance_manager(void) const { return NULL; }
-      virtual ReductionManager* as_reduction_manager(void) const { return const_cast<ReductionManager*>(this); }
-      virtual ReductionManager* clone_manager(void) const = 0;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
-                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                    Domain space, Event precondition, bool reduction_fold) = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const = 0;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const = 0;
+      virtual bool is_reduction_manager(void) const;
+      virtual InstanceManager* as_instance_manager(void) const;
+      virtual ReductionManager* as_reduction_manager(void) const;
+    public:
       virtual bool is_foldable(void) const = 0;
+      virtual void find_field_offsets(const FieldMask &reduce_mask,
+          std::vector<Domain::CopySrcDstField> &fields) = 0;
+      virtual Event issue_reduction(
+          const std::vector<Domain::CopySrcDstField> &src_fields,
+          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          Domain space, Event precondition, bool reduction_fold) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      void set_view(ReductionView *v);
-      void add_reference(void);
-      void remove_reference(void);
+      DistributedID send_manager(AddressSpaceID target, 
+                        std::set<PhysicalManager*> &needed_managers);
     public:
-      size_t compute_send_size(void) const;
-      void pack_manager_send(Serializer &rez, unsigned long num_ways);
-      static void unpack_manager_send(RegionTreeForest *context, Deserializer &derez, unsigned long split_factor);
+      static void handle_send_manager(RegionTreeForest *context,
+                                      AddressSpaceID source,
+                                      Deserializer &derez);
     public:
-      size_t compute_return_size(void) const;
-      void pack_manager_return(Serializer &rez);
-      static void unpack_manager_return(RegionTreeForest *context, Deserializer &derez);
+      void pack_manager(Serializer &rez);
+      static ReductionManager* unpack_manager(Deserializer &derez,
+                            RegionTreeForest *context, 
+                            DistributedID did, bool make = true);
     public:
-      void pack_remote_fraction(Serializer &rez);
-      void unpack_remote_fraction(Deserializer &derez);
+      ReductionView* create_view(void);
     public:
-      bool is_valid_free(void) const;
-      void find_user_returns(std::vector<ReductionView*> &returning_views) const;
-    private:
-      void garbage_collect(void);
-    public:
+      const ReductionOp *const op;
       const ReductionOpID redop;
-      const ReductionOp *op;
-    private:
-      friend class RegionTreeForest;
-      friend class PhysicalView;
-      friend class InstanceView;
-      friend class ReductionView;
-      friend class RegionNode;
-      ReductionView *view;
+      RegionNode *const region_node;
     };
 
-    /////////////////////////////////////////////////////////////
-    // List Reduction Manager 
-    /////////////////////////////////////////////////////////////
     /**
-     * The manager for list reduction instances
+     * \class ListReductionManager
+     * A class for storing list reduction instances
      */
     class ListReductionManager : public ReductionManager {
     public:
-      ListReductionManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, 
-                        PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op, Domain domain);
+      ListReductionManager(RegionTreeForest *ctx, DistributedID did,
+                           AddressSpaceID owner_space, 
+                           AddressSpaceID local_space,
+                           Memory mem, PhysicalInstance inst, 
+                           RegionNode *node, ReductionOpID redop, 
+                           const ReductionOp *op, Domain dom);
+      ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
-      virtual ReductionManager* clone_manager(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
-                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                    Domain space, Event precondition, bool reduction_fold);
-      virtual bool is_foldable(void) const { return false; }
-      virtual Domain get_pointer_space(void) const { return ptr_space; }
+      ListReductionManager& operator=(const ListReductionManager &rhs);
     public:
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const;
+    public:
+      virtual bool is_foldable(void) const;
+      virtual void find_field_offsets(const FieldMask &reduce_mask,
+          std::vector<Domain::CopySrcDstField> &fields);
+      virtual Event issue_reduction(
+          const std::vector<Domain::CopySrcDstField> &src_fields,
+          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          Domain space, Event precondition, bool reduction_fold);
+      virtual Domain get_pointer_space(void) const;
+    protected:
       const Domain ptr_space;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Fold Reduction Manager 
-    /////////////////////////////////////////////////////////////
     /**
-     * The manager for fold reduction instances
+     * \class FoldReductionManager
+     * A class for representing fold reduction instances
      */
     class FoldReductionManager : public ReductionManager {
     public:
-      FoldReductionManager(RegionTreeForest *ctx, UniqueManagerID mid, bool remote, bool clone, Memory loc, 
-                        PhysicalInstance inst, ReductionOpID redop, const ReductionOp *op);
+      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
+                           AddressSpaceID owner_space, 
+                           AddressSpaceID local_space,
+                           Memory mem, PhysicalInstance inst, 
+                           RegionNode *node, ReductionOpID redop, 
+                           const ReductionOp *op);
+      FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic> get_field_accessor(FieldID fid) const;
-      virtual ReductionManager* clone_manager(void) const;
-      virtual void find_field_offsets(const FieldMask &reduce_mask, std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(const std::vector<Domain::CopySrcDstField> &src_fields,
-                                    const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                    Domain space, Event precondition, bool reduction_fold);
-      virtual bool is_foldable(void) const { return true; }
-      virtual Domain get_pointer_space(void) const { return Domain::NO_DOMAIN; }
+      FoldReductionManager& operator=(const FoldReductionManager &rhs);
+    public:
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const;
+      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const;
+    public:
+      virtual bool is_foldable(void) const;
+      virtual void find_field_offsets(const FieldMask &reduce_mask,
+          std::vector<Domain::CopySrcDstField> &fields);
+      virtual Event issue_reduction(
+          const std::vector<Domain::CopySrcDstField> &src_fields,
+          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          Domain space, Event precondition, bool reduction_fold);
+      virtual Domain get_pointer_space(void) const;
     };
 
     /**
-     * A class for uniquely identifying a specific InstanceView on
-     * a single node in the system.  Primarily this allows us to
-     * merge InstanceViews that may represent the same state but
-     * were created on different nodes.
+     * \class PhysicalView
+     * This class abstracts a view on a physical instance
+     * in memory.  Physical views are reference counted
+     * and will delete themselves once they no longer have
+     * any valid handles.
      */
-    class InstanceKey {
+    class PhysicalView : public HierarchicalCollectable {
     public:
-      InstanceKey(void);
-      InstanceKey(UniqueManagerID mid, LogicalRegion handle);
-    public:
-      bool operator==(const InstanceKey &rhs) const;
-      bool operator<(const InstanceKey &rhs) const;
-    public:
-      UniqueManagerID mid;
-      LogicalRegion handle;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Physical View 
-    /////////////////////////////////////////////////////////////
-    /**
-     * This is the base class for both instance views and reduction
-     * views and contains all the logic that can be shared between them.
-     */
-    class PhysicalView {
-    public:
-      PhysicalView(RegionTreeForest *ctx, RegionNode *logical, bool made_local);
+      PhysicalView(RegionTreeForest *ctx, DistributedID did,
+                   AddressSpaceID owner_proc, DistributedID own_did,
+                   RegionTreeNode *node);
       virtual ~PhysicalView(void);
     public:
       virtual bool is_reduction_view(void) const = 0;
       virtual InstanceView* as_instance_view(void) const = 0;
       virtual ReductionView* as_reduction_view(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
-      virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading) = 0;
-      virtual void remove_user(UniqueID uid, unsigned refs, bool force) = 0;
-      virtual void remove_copy(Event copy, bool force) = 0;
-      virtual void add_valid_reference(void) = 0;
-      virtual void remove_valid_reference(void) = 0;
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
+    public:
+      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const FieldMask &mask, bool reading,
+                                 Processor exec_proc) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc) = 0;
+      virtual bool reduce_to(ReductionOpID redop, 
+                             const FieldMask &reduce_mask,
+                             std::set<Event> &preconditions,
+                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+    public:
+      virtual void notify_activate(void) = 0;
+      virtual void garbage_collect(void) = 0;
+    public:
+      void defer_collect_user(Event term_event, Processor p, bool gc_epoch);
+      virtual void collect_user(Event term_event) = 0;
+      static void handle_deferred_collect(Deserializer &derez);
+    public:
+      void send_back_user(const PhysicalUser &user);
+      virtual void process_send_back_user(AddressSpaceID source,
+                                          PhysicalUser &user) = 0;
+      static void handle_send_back_user(RegionTreeForest *context,
+                                        Deserializer &derez,
+                                        AddressSpaceID source);
+    public:
+      void send_user(AddressSpaceID target, DistributedID target_did,
+                     const PhysicalUser &user);
+      virtual void process_send_user(AddressSpaceID source,
+                                     PhysicalUser &user) = 0;
+      static void handle_send_user(RegionTreeForest *context,
+                                   Deserializer &derez,
+                                   AddressSpaceID source);
     public:
       RegionTreeForest *const context;
-      RegionNode *const logical_region;
+      RegionTreeNode *const logical_node;
     protected:
-      unsigned valid_references;
-      bool local_view; // true until it is sent back in some form
+      Lock view_lock;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Instance View 
-    /////////////////////////////////////////////////////////////
     /**
-     * Instance views correspond to the view to a single physical
-     * instance from a given location in the region tree.  Instance
-     * views also manage the references from that viewpoint.  Once
-     * all the references from tasks and the region tree are removed
-     * from the instance view, then it will remove its reference
-     * from the instance manager which can lead to the instance
-     * being garbage collected.
+     * \class InstanceView
+     * The InstanceView class is used for providing views
+     * onto instance managers from a given logical perspective.
      */
     class InstanceView : public PhysicalView {
-    protected:
-      struct ReferenceTracker {
-      public:
-        ReferenceTracker(void)
-          : references(0) { }
-        ReferenceTracker(unsigned refs, const DomainPoint &point)
-          : references(refs) { }
-      public:
-        bool add_reference(unsigned refs, const DomainPoint &point);
-        bool remove_reference(unsigned refs);
-        bool use_single_event(void) const;
-        unsigned get_reference_count(void) const;
-      public:
-        size_t compute_tracker_send(void) const;
-        void pack_tracker_send(Serializer &rez);
-        void unpack_tracker_send(Deserializer &derez);
-      public:
-        size_t compute_tracker_return(void) const;
-        void pack_tracker_return(Serializer &rez);
-        void unpack_tracker_return(Deserializer &derez);
-      private:
-        unsigned references;
-        std::set<DomainPoint,DomainPoint::STLComparator> points;
-      };
-      struct CopyUser {
-      public:
-        CopyUser(void)
-          :  redop(0), references(0) { }
-        CopyUser(ReductionOpID op, unsigned ref)
-          : redop(op), references(ref) { }
-      public:
-        ReductionOpID redop;
-        unsigned references;
-      };
-      struct AliasedUser {
-      public:
-        AliasedUser(void) { }
-        AliasedUser(const FieldMask &mask, const PhysicalUser &u, bool single)
-          : valid_mask(mask), user(u), use_single(single) { }
-      public:
-        FieldMask valid_mask;
-        PhysicalUser user;
-        bool use_single;
-      };
-      struct AliasedCopyUser {
-      public:
-        AliasedCopyUser(void) { }
-        AliasedCopyUser(const FieldMask &mask, Event ready, ReductionOpID op)
-          : valid_mask(mask), ready_event(ready), redop(op) { }
-      public:
-        FieldMask valid_mask;
-        Event ready_event;
-        ReductionOpID redop;
-      };
-      typedef std::pair<Event,FieldMask> AliasedEvent;
     public:
-      InstanceView(InstanceManager *man, InstanceView *par,  
-                    RegionNode *reg, RegionTreeForest *ctx, bool made_local);
+      InstanceView(RegionTreeForest *ctx, DistributedID did,
+                   AddressSpaceID owner_proc, DistributedID own_did,
+                   RegionTreeNode *node, InstanceManager *manager,
+                   InstanceView *parent);
+      InstanceView(const InstanceView &rhs);
       virtual ~InstanceView(void);
     public:
-      InstanceView* get_subview(Color pc, Color rc);
-      void add_child_view(Color pc, Color rc, InstanceView *child);
-      void remove_child_view(const std::pair<Color,Color> &key);
+      InstanceView& operator=(const InstanceView &rhs);
     public:
-      virtual bool is_reduction_view(void) const { return false; } 
-      virtual InstanceView* as_instance_view(void) const { return const_cast<InstanceView*>(this); }
-      virtual ReductionView* as_reduction_view(void) const { return NULL; } 
-      InstanceRef add_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point);
-      InstanceRef add_init_user(UniqueID uid, const PhysicalUser &user, const DomainPoint &point);
-      virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading);
-      virtual void remove_user(UniqueID uid, unsigned refs, bool force);
-      virtual void remove_copy(Event copy, bool force);
+      Memory get_location(void) const;
+      size_t get_blocking_factor(void) const;
+      InstanceView* get_subview(Color c);
+      void add_subview(InstanceView *view, Color c);
+      const FieldMask& get_physical_mask(void) const;
     public:
-      virtual void add_valid_reference(void);
-      virtual void remove_valid_reference(void);
-      void mark_to_be_invalidated(void);
-      bool is_valid_view(void) const;
-      bool has_war_dependence(const PhysicalUser &user) const;
+      void copy_to(const FieldMask &copy_mask, 
+                   std::set<Event> &preconditions,
+                   std::vector<Domain::CopySrcDstField> &dst_fields);
+      void copy_from(const FieldMask &copy_mask, 
+                     std::set<Event> &preconditions,
+                     std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
+                     std::set<Event> &preconditions,
+                     std::vector<Domain::CopySrcDstField> &dst_fields);
+      bool has_war_dependence(const RegionUsage &usage, 
+                              const FieldMask &user_mask);
     public:
-      inline PhysicalInstance get_instance(void) const { return manager->get_instance(); }
-      inline Memory get_location(void) const { return manager->get_location(); }
-      inline const FieldMask& get_physical_mask(void) const { return manager->get_allocated_fields(); }
-      inline InstanceKey get_key(void) const { return InstanceKey(manager->get_unique_id(), logical_region->handle); }
-      virtual PhysicalManager* get_manager(void) const { return manager; }
-      inline InstanceManager* get_instance_manager(void) const { return manager; }
-      inline LogicalRegion get_handle(void) const { return logical_region->handle; }
-      Event get_valid_event(const FieldMask &mask);
-      void copy_to(RegionMapper &rm, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &dst_fields);
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &dst_fields);
-      void copy_from(RegionMapper &rm, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &src_fields);
-      void find_copy_preconditions(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
-      void update_valid_event(Event new_valid, const FieldMask &mask);
-    private:
-      void check_state_change(bool adding);
-      void find_dependences_above(std::set<Event> &wait_on, const PhysicalUser &user, InstanceView *child);
-      void find_dependences_above(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask, InstanceView *child);
-      bool find_dependences_below(std::set<Event> &wait_on, const PhysicalUser &user);
-      bool find_dependences_below(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
-      bool find_local_dependences(std::set<Event> &wait_on, const PhysicalUser &user);
-      bool find_local_dependences(std::set<Event> &wait_on, bool writing, ReductionOpID redop, const FieldMask &mask);
-      bool has_war_dependence_above(const PhysicalUser &user) const;
-      bool has_war_dependence_below(const PhysicalUser &user) const;
-      bool has_local_war_dependence(const PhysicalUser &user) const;
-      template<typename T>
-      void remove_invalid_elements(std::map<T,FieldMask> &elements, const FieldMask &new_mask);
-      void remove_invalid_users(std::map<std::pair<UniqueID,unsigned>,PhysicalUser> &users, const FieldMask &new_mask);
+      virtual bool is_reduction_view(void) const;
+      virtual InstanceView* as_instance_view(void) const;
+      virtual ReductionView* as_reduction_view(void) const;
+      virtual PhysicalManager* get_manager(void) const;
     public:
-      size_t compute_send_size(const FieldMask &pack_mask);
-      void pack_view_send(const FieldMask &pack_mask, Serializer &rez);
-      static void unpack_view_send(RegionTreeForest *context, Deserializer &derez);
+      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const FieldMask &mask, bool reading,
+                                 Processor exec_proc);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc);
     public:
-      void find_required_views(std::map<InstanceView*,FieldMask> &unique_views,
-             std::vector<InstanceView*> &ordered_views, const FieldMask &packing_mask, int filter);
-      void find_required_below(std::map<InstanceView*,FieldMask> &unique_views,
-             std::vector<InstanceView*> &ordered_views, const FieldMask &packing_mask);
+      virtual void notify_activate(void);
+      virtual void garbage_collect(void);
+      virtual void collect_user(Event term_event);
+      virtual void process_send_back_user(AddressSpaceID source,
+                                          PhysicalUser &user);
+      virtual void process_send_user(AddressSpaceID source,
+                                     PhysicalUser &user); 
+    protected:
+      void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
+      void add_local_user(std::set<Event> &wait_on, const PhysicalUser &user);
+    protected:
+      void find_copy_preconditions(std::set<Event> &wait_on, 
+                                   bool writing, ReductionOpID redop, 
+                                   const FieldMask &mask);
+      void find_copy_preconditions_above(Color child_color,
+                                   std::set<Event> &wait_on,
+                                   bool writing, ReductionOpID redop,
+                                   const FieldMask &copy_mask);
+      bool has_war_dependence_above(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    Color child_color);
+      void update_versions(const FieldMask &update_mask);
+      void filter_local_users(Event term_event);
+      void notify_subscribers(std::set<AddressSpaceID> &notified, 
+                              const PhysicalUser &user);
     public:
-      void find_aliased_above(std::vector<AliasedUser> &add_aliased_users, 
-                              std::vector<AliasedCopyUser> &add_aliased_copies,
-                              std::vector<AliasedEvent> &add_aliased_events,
-                              const FieldMask &packing_mask, InstanceView *child_source);
-      void find_aliased_below(std::vector<AliasedUser> &add_aliased_users, 
-                              std::vector<AliasedCopyUser> &add_aliased_copies,
-                              std::vector<AliasedEvent> &add_aliased_events,
-                              const FieldMask &packing_mask);
-      void find_aliased_local(std::vector<AliasedUser> &add_aliased_users, 
-                              std::vector<AliasedCopyUser> &add_aliased_copies,
-                              std::vector<AliasedEvent> &add_aliased_events,
-                              const FieldMask &packing_mask);
+      DistributedID send_state(AddressSpaceID target,
+                      std::set<PhysicalView*> &needed_views,
+                      std::set<PhysicalManager*> &needed_managers);
+      DistributedID send_back_state(AddressSpaceID target,
+                      std::set<PhysicalManager*> &needed_managers);
+    protected:
+      void pack_instance_view(Serializer &rez);
+      void unpack_instance_view(Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_added_users(void) const;
-      size_t compute_return_state_size(const FieldMask &pack_mask, bool overwrite, 
-          std::map<EscapedUser,unsigned> &escaped_users, std::set<EscapedCopy> &escaped_copies);
-      size_t compute_return_users_size(std::map<EscapedUser,unsigned> &escaped_users,
-                                       std::set<EscapedCopy> &escaped_copies,
-                                       bool already_returning, const FieldMask &returning_mask);
-      void pack_return_state(const FieldMask &mask, bool overwrite, Serializer &rez);
-      void pack_return_users(Serializer &rez);
-      static void unpack_return_state(RegionTreeForest *context, Deserializer &derez);
-      static void unpack_return_users(RegionTreeForest *context, Deserializer &derez);
-    public:
-      size_t compute_simple_return(void) const;
-      void pack_simple_return(Serializer &rez);
-      static void unpack_simple_return(RegionTreeForest *context, Deserializer &derez);
-    public:
-      // Some helper methods
-      template<typename T>
-      static void pack_vector(const std::vector<T> &to_pack, Serializer &rez);
-      template<typename T>
-      static void unpack_vector(std::vector<T> &target, Deserializer &derez);
-#ifdef DEBUG_HIGH_LEVEL
-    public:
-      void sanity_check_state(void) const;
-#endif
+      static void handle_send_instance_view(RegionTreeForest *context, 
+                                            Deserializer &derez,
+                                            AddressSpaceID source);
+      static void handle_send_back_instance_view(
+                      RegionTreeForest *context, Deserializer &derez,
+                      AddressSpaceID source);
     public:
       InstanceManager *const manager;
-      InstanceView *const parent; 
-    private:
-      friend class RegionTreeForest;
-      friend class InstanceManager; 
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      typedef std::pair<Color/*part color*/,Color/*region color*/> ChildKey;
-      // Keep track of all the children and whether or not they are active
-      std::map<ChildKey,InstanceView*> children;
-      std::map<InstanceView*,bool> active_map;
-      // Keep track of the number of active children
-      unsigned active_children;
-      // For each child keep track of other children with which it aliases
-      std::map<InstanceView*,std::set<InstanceView*> > aliased_children;
-      // The next four members only deal with garbage collection
-      // and should be passed back whenever an InstanceView is
-      // passed back and is not remote
-      std::map<UniqueID,ReferenceTracker> users;
-      std::map<UniqueID,ReferenceTracker> added_users;
-      std::map<Event,ReductionOpID> copy_users; // if redop > 0 then writing reduction, otherwise just a read
-      std::map<Event,ReductionOpID> added_copy_users;
-#ifdef LEGION_SPY
-      std::map<UniqueID,ReferenceTracker> deleted_users;
-      std::map<Event,ReductionOpID> deleted_copy_users;
-#endif
-      // The next three members deal with dependence analysis
-      // and the state of the view, they should always entirely
-      // be passed back
-      std::map<std::pair<UniqueID,unsigned/*idx*/>,PhysicalUser> epoch_users;
-      std::map<Event,FieldMask> epoch_copy_users;
-      std::map<Event,FieldMask> valid_events;
-      // These are users and valid events that would normally come
-      // from doing 'find_dependences_above', but since we are
-      // remote we summarize them here.  Note we never have to
-      // send these back since they are always only a summary of 
-      // things that already exist on the original node.
-      std::vector<AliasedUser> aliased_users;
-      std::vector<AliasedCopyUser> aliased_copy_users;
-      std::vector<AliasedEvent> aliased_valid_events;
-      // Everything below here is used for serializing and deserializing instance views
-      size_t packing_sizes[7]; // storage for packing instances
-      bool to_be_invalidated; // about to be invalidated
-      // For packing aliased things to be sent remotely 
-      std::vector<AliasedUser> packing_aliased_users;
-      std::vector<AliasedCopyUser> packing_aliased_copy_users;
-      std::vector<AliasedEvent> packing_aliased_valid_events;
-      // For packing trackers
-      std::map<UniqueID,int/*location*/> needed_trackers;
+      InstanceView *const parent;
+    protected:
+      // The lock for the instance shared between all views
+      // of a physical instance within a context.  The top
+      // most view is responsible for deleting the lock
+      // when it is reclaimed.
+      Lock inst_lock;
+      // Keep track of the child views
+      std::map<Color,InstanceView*> children;
+      // These are the sets of users in the current and next epochs
+      // for performing dependence analysis
+      std::list<PhysicalUser> curr_epoch_users;
+      std::list<PhysicalUser> prev_epoch_users;
+      // Keep track of how many outstanding references we have
+      // for each of the user events
+      std::map<Event,unsigned> event_references;
+      // Version information for each of the fields
+      std::map<VersionID,FieldMask> current_versions;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Reduction View 
-    /////////////////////////////////////////////////////////////
     /**
-     * For keeping track of views on reduction instances
+     * \class ReductionView
+     * The ReductionView class is used for providing a view
+     * onto reduction physical instances from any logical perspective.
      */
     class ReductionView : public PhysicalView {
-    protected:
-      struct TaskUser {
-      public:
-        TaskUser(void)
-          : references(0), use_multi(false) { }
-        TaskUser(const PhysicalUser &u, unsigned ref)
-          : user(u), mask(u.field_mask), references(ref), use_multi(false) { }
-      public:
-        PhysicalUser user;
-        FieldMask mask;
-        unsigned references;
-        bool use_multi;
-      };
-      struct CopyUser {
-      public:
-        CopyUser(void)
-          : reading(true) { }
-        CopyUser(bool read, const FieldMask &m)
-          : reading(read), mask(m) { }
-      public:
-        bool reading;
-        FieldMask mask;
-      };
     public:
-      ReductionView(RegionTreeForest *ctx, RegionNode *logical, bool made_local, ReductionManager *man);
+      ReductionView(RegionTreeForest *ctx, DistributedID did,
+                    AddressSpaceID owner_proc, DistributedID own_did,
+                    RegionTreeNode *node, ReductionManager *manager);
+      ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
-      virtual bool is_reduction_view(void) const { return true; }
-      virtual InstanceView* as_instance_view(void) const { return NULL; }
-      virtual ReductionView* as_reduction_view(void) const { return const_cast<ReductionView*>(this); } 
-      virtual PhysicalManager* get_manager(void) const { return manager; }
-      InstanceRef add_user(UniqueID uid, const PhysicalUser &user);
-      InstanceRef add_init_user(UniqueID uid, const PhysicalUser &user);
-      virtual InstanceRef add_copy_user(ReductionOpID redop, Event copy_term, const FieldMask &mask, bool reading);
-      virtual void remove_user(UniqueID uid, unsigned refs, bool force);
-      virtual void remove_copy(Event copy, bool force);
-      virtual void add_valid_reference(void);
-      virtual void remove_valid_reference(void);
+      ReductionView& operator=(const ReductionView&rhs);
     public:
-      inline ReductionManager* get_reduction_manager(void) const { return manager; }
-      inline Memory get_location(void) const { return manager->get_location(); }
-      inline InstanceKey get_key(void) const { return InstanceKey(manager->get_unique_id(), logical_region->handle); }
-      inline PhysicalInstance get_instance(void) const { return manager->get_instance(); }
+      void perform_reduction(PhysicalView *target, 
+                             const FieldMask &copy_mask, Processor local_proc);
     public:
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &dst_fields);
-      void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask, std::set<Event> &preconditions,
-                                            std::vector<Domain::CopySrcDstField> &src_fields);
-      void perform_reduction(PhysicalView *dst, const FieldMask &reduce_mask, RegionMapper &rm);
-      
-      Event get_valid_event(const FieldMask &mask);
-      void mark_to_be_invalidated(void);
-      bool has_added_users(void) const;
-      bool is_valid_view(void) const;
+      virtual bool is_reduction_view(void) const;
+      virtual InstanceView* as_instance_view(void) const;
+      virtual ReductionView* as_reduction_view(void) const;
+      virtual PhysicalManager* get_manager(void) const;
     public:
-      size_t compute_send_size(void) const;
-      void pack_view_send(Serializer &rez);
-      static void unpack_view_send(RegionTreeForest *context, Deserializer &derez);
+      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const FieldMask &mask, bool reading,
+                                 Processor exec_proc);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc);
+      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
+                     std::set<Event> &preconditions,
+                     std::vector<Domain::CopySrcDstField> &dst_fields);
     public:
-      size_t compute_return_size(std::map<EscapedUser,unsigned> &escaped_users, 
-                                 std::set<EscapedCopy> &escaped_copies) const;
-      void pack_view_return(Serializer &rez);
-      static void unpack_view_return(RegionTreeForest *context, Deserializer &derez);
-    private:
-      void find_preconditions(const std::map<UniqueID,TaskUser> &current_users, 
-                    const FieldMask &reduce_mask, std::set<Event> &preconditions);
-      void find_read_preconditions(const std::map<Event,CopyUser> &current_users, 
-                    const FieldMask &reduce_mask, std::set<Event> &preconditions);
-      void find_write_preconditions(const std::map<Event,CopyUser> &current_users, 
-                    const FieldMask &reduce_mask, std::set<Event> &preconditions);
-      void check_state_change(bool adding);
+      void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
+                       std::set<Event> &preconditions,
+                       std::vector<Domain::CopySrcDstField> &src_fields);
+      void notify_subscribers(const PhysicalUser &user, 
+                              int skip = -1);
+    public:
+      virtual void notify_activate(void);
+      virtual void garbage_collect(void);
+      virtual void collect_user(Event term_event);
+      virtual void process_send_back_user(AddressSpaceID source,
+                                          PhysicalUser &user);
+      virtual void process_send_user(AddressSpaceID source,
+                                     PhysicalUser &user);
+    public:
+      DistributedID send_state(AddressSpaceID target,
+                               std::set<PhysicalView*> &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      DistributedID send_back_state(AddressSpaceID target,
+                               std::set<PhysicalManager*> &needed_managers);
+    public:
+      void pack_reduction_view(Serializer &rez);
+      void unpack_reduction_view(Deserializer &derez, AddressSpaceID source);
+    public:
+      static void handle_send_reduction_view(RegionTreeForest *context,
+                                Deserializer &derez, AddressSpaceID source);
+      static void handle_send_back_reduction_view(RegionTreeForest *context,
+                                Deserializer &derez, AddressSpaceID source);
+    public:
+      Memory get_location(void) const;
+      ReductionOpID get_redop(void) const;
     public:
       ReductionManager *const manager;
-    private:
-      friend class RegionTreeForest;
-      friend class InstanceManager; 
-      friend class PhysicalManager;
-      friend class ReductionManager;
-      friend class ListReductionManager;
-      friend class FoldReducitonManager;
-      std::map<UniqueID,TaskUser> users;
-      std::map<UniqueID,TaskUser> added_users;
-      std::map<Event,CopyUser>    copy_users;
-      std::map<Event,CopyUser>    added_copy_users;
-#ifdef LEGION_SPY
-      std::map<UniqueID,TaskUser> deleted_users;
-      std::map<Event,CopyUser>    deleted_copy_users;
-#endif
-      bool to_be_invalidated;
+    protected:
+      std::list<PhysicalUser> reduction_users;
+      std::list<PhysicalUser> reading_users;
+      std::map<Event,unsigned> event_references;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Instance Reference 
-    /////////////////////////////////////////////////////////////
     /**
-     * Used for passing around references to InstanceViews
+     * \class ViewHandle
+     * The view handle class provides a handle that
+     * properly maintains the reference counting property on
+     * physical views for garbage collection purposes.
+     */
+    class ViewHandle {
+    public:
+      ViewHandle(void);
+      ViewHandle(PhysicalView *v);
+      ViewHandle(const ViewHandle &rhs);
+      ~ViewHandle(void);
+    public:
+      ViewHandle& operator=(const ViewHandle &rhs);
+    public:
+      inline bool has_view(void) const { return (view != NULL); }
+      inline PhysicalView* get_view(void) const { return view; }
+      inline bool is_reduction_view(void) const
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(view != NULL);
+#endif
+        return view->is_reduction_view();
+      }
+      inline PhysicalManager* get_manager(void) const
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(view != NULL);
+#endif
+        return view->get_manager();
+      }
+    private:
+      PhysicalView *view;
+    };
+
+    /**
+     * \class MappingRef
+     * This class keeps a reference to a physical instance that has
+     * been allocated and is ready to have dependence analysis performed.
+     * Once all the allocations have been performed, then an operation
+     * can pass all of the mapping references to the RegionTreeForest
+     * to actually perform the operations necessary to make the 
+     * region valid and return an InstanceRef.
+     */
+    class MappingRef {
+    public:
+      MappingRef(void);
+      MappingRef(const ViewHandle &handle, const FieldMask &needed_mask);
+    public:
+      inline bool has_ref(void) const { return handle.has_view(); }
+      inline PhysicalView* get_view(void) const { return handle.get_view(); } 
+      inline const FieldMask& get_mask(void) const { return needed_fields; }
+    private:
+      ViewHandle handle;
+      FieldMask needed_fields;
+    };
+
+    /**
+     * \class InstanceRef
+     * A class for keeping track of references to physical instances
      */
     class InstanceRef {
     public:
       InstanceRef(void);
-      InstanceRef(Event ready, Memory loc, PhysicalInstance inst, 
-                  PhysicalView *v, bool copy = false, Lock lock = Lock::NO_LOCK);
-      InstanceRef(PhysicalManager *m, LogicalRegion handle, Event ready, Memory loc, 
-                  PhysicalInstance inst, bool copy = false, Lock lock = Lock::NO_LOCK);
+      InstanceRef(Event ready, Lock lock, const ViewHandle &handle);
     public:
-      inline bool is_virtual_ref(void) const { return (!location.exists()); }
+      inline bool has_ref(void) const { return handle.has_view(); }
       inline Event get_ready_event(void) const { return ready_event; }
-      inline bool has_required_lock(void) const { return required_lock.exists(); }
-      inline Lock get_required_lock(void) const { return required_lock; }
-      inline PhysicalInstance get_instance(void) const { return instance; }
-      inline PhysicalManager* get_manager(void) const { return manager; }
-      inline Memory get_memory(void) const { return manager->get_location(); }
-      inline bool is_reduction_ref(void) const { return is_reduction; }
-      void remove_reference(UniqueID uid, bool strict);
+      inline bool has_required_lock(void) const { return needed_lock.exists(); }
+      Lock get_required_lock(void) const { return needed_lock; }
+      const ViewHandle& get_handle(void) const { return handle; }
+      Memory get_memory(void) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_accessor(void) const;
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        get_field_accessor(FieldID fid) const;
+      void pack_reference(Serializer &rez, AddressSpaceID target);
+      static InstanceRef unpack_reference(Deserializer &derez,
+                                          RegionTreeForest *context);
     private:
-      friend class RegionTreeForest;
       Event ready_event;
-      Lock required_lock;
-      Memory location;
-      PhysicalInstance instance;
-      bool copy;
-      bool is_reduction;
-      // We either have a view (if the reference was made locally)
-      PhysicalView *view;
-      // Or we have both a handle and a manager (if the reference was sent remotely)
-      LogicalRegion handle;
-      PhysicalManager *manager;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Escaped User 
-    /////////////////////////////////////////////////////////////
-    struct EscapedUser {
-    public:
-      EscapedUser(void)
-        : user(0) { }
-      EscapedUser(InstanceKey k, UniqueID uid)
-        : view_key(k), user(uid) { }
-    public:
-      bool operator==(const EscapedUser &rhs) const;
-      bool operator<(const EscapedUser &rhs) const;
-    public:
-      InstanceKey view_key;
-      UniqueID user;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Escaped Copy 
-    /////////////////////////////////////////////////////////////
-    struct EscapedCopy {
-    public:
-      EscapedCopy(void)
-        : copy_event(Event::NO_EVENT) { }
-      EscapedCopy(InstanceKey k, Event copy)
-        : view_key(k), copy_event(copy) { }
-    public:
-      bool operator==(const EscapedCopy &rhs) const;
-      bool operator<(const EscapedCopy &rhs) const;
-    public:
-      InstanceKey view_key;
-      Event copy_event;
+      Lock needed_lock;
+      ViewHandle handle;
     };
     
-    /////////////////////////////////////////////////////////////
-    // Tree Closer 
-    /////////////////////////////////////////////////////////////
-    class TreeCloser {
-    public:
-      virtual void pre_siphon(void) = 0;
-      virtual void post_siphon(void) = 0; 
-      virtual bool closing_state(const RegionTreeNode::FieldState &state) = 0;
-      virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask) = 0;
-      virtual bool leave_children_open(void) const = 0;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Logical Closer 
-    /////////////////////////////////////////////////////////////
-    class LogicalCloser : public TreeCloser {
-    public:
-      LogicalCloser(const LogicalUser &u, ContextID c, std::list<LogicalUser> &users, bool closing_part);
-    public:
-      virtual void pre_siphon(void);
-      virtual void post_siphon(void);
-      virtual bool closing_state(const RegionTreeNode::FieldState &state);
-      virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
-      virtual bool leave_children_open(void) const;
-    public:
-      const LogicalUser &user;
-      ContextID ctx;
-      std::list<LogicalUser> &epoch_users;
-      bool closing_partition;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Physical Closer 
-    /////////////////////////////////////////////////////////////
     /**
-     * A class for performing a close between physical instances
-     * at adjacent (region) levels of the physical region tree.
-     * Upper targets are the InstanceViews from the upper level
-     * and lower targets are the InstanceViews from the lower level.
+     * \class MappingTraverser
+     * A traverser of the physical region tree for
+     * performing the mapping operation.
      */
-    class PhysicalCloser : public TreeCloser {
+    class MappingTraverser : public PathTraverser {
     public:
-      PhysicalCloser(const PhysicalUser &u, RegionMapper &rm, RegionNode *close_target, bool leave_open);
-      PhysicalCloser(const PhysicalCloser &rhs, RegionNode *close_target);
-      ~PhysicalCloser(void);
+      MappingTraverser(RegionTreePath &path, MappableInfo *info,
+                       const RegionUsage &u, const FieldMask &m,
+                       Processor target, unsigned idx);
+      MappingTraverser(const MappingTraverser &rhs);
+      ~MappingTraverser(void);
     public:
-      virtual void pre_siphon(void);
-      virtual void post_siphon(void);
-      virtual bool closing_state(const RegionTreeNode::FieldState &state);
-      virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
-      virtual bool leave_children_open(void) const;
+      MappingTraverser& operator=(const MappingTraverser &rhs);
     public:
-      void pre_region(Color region_color);
-      void post_region(void);
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
     public:
-      void pre_partition(Color partition_color);
-      void post_partition(void);
+      const MappingRef& get_instance_ref(void) const;
+    protected:
+      void traverse_node(RegionTreeNode *node);
+      bool map_physical_region(RegionNode *node);
+      bool map_reduction_region(RegionNode *node);
     public:
-      void add_upper_target(InstanceView *target);
-    public:
-      const PhysicalUser &user;
-      RegionMapper &rm;
-      RegionNode *const close_target;
-      const bool leave_open;
-      bool targets_selected;
-      bool success;
-      bool partition_valid;
-      Color partition_color;
-      FieldMask dirty_mask;
-      std::vector<InstanceView*> lower_targets;
-      std::vector<InstanceView*> upper_targets;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Reduction Closer 
-    /////////////////////////////////////////////////////////////
-    /**
-     * A class for closing up all the sub-task reduction instances
-     * to a reduction instance class.
-     */
-    class ReductionCloser : public TreeCloser {
-    public:
-      ReductionCloser(const PhysicalUser &u, RegionMapper &rm, RegionNode *close_target, ReductionView *target);
-      ~ReductionCloser(void);
-    public:
-      virtual void pre_siphon(void);
-      virtual void post_siphon(void);
-      virtual bool closing_state(const RegionTreeNode::FieldState &state);
-      virtual void close_tree_node(RegionTreeNode *node, const FieldMask &closing_mask);
-      virtual bool leave_children_open(void) const;
-    public:
-      const PhysicalUser &user;
-      RegionMapper &rm;
-      RegionNode *const close_target;
-      ReductionView *const target;
-      bool success;
-    };
-
-    /////////////////////////////////////////////////////////////
-    // Region Analyzer 
-    /////////////////////////////////////////////////////////////
-    /**
-     * Used for doing logical traversals of the region tree.
-     */
-    class RegionAnalyzer {
-    public:
-      RegionAnalyzer(ContextID ctx_id, GeneralizedOperation *op, unsigned idx, const RegionRequirement &req);
-    public:
-      const ContextID ctx;
-      GeneralizedOperation *const op;
-      const unsigned idx;
-      const LogicalRegion start;
+      MappableInfo *const info;
       const RegionUsage usage;
-      std::vector<FieldID> fields;
-      std::vector<Color> path;
+      const FieldMask user_mask;
+      const Processor target_proc;
+      const unsigned index;
+    protected:
+      MappingRef result;
     };
 
-    /////////////////////////////////////////////////////////////
-    // Region Mapper 
-    /////////////////////////////////////////////////////////////
-    /**
-     * This is the class that is used to do physical traversals
-     * of the region tree for both sanitization and mapping
-     * physical instances.
-     */
-    class RegionMapper {
-    public:
-#ifdef LOW_LEVEL_LOCKS
-      RegionMapper(Task *t, UniqueID uid, ContextID id, unsigned idx, const RegionRequirement &req, Mapper *mapper, 
-                    Lock mapper_lock, Processor target, Event single, Event multi, 
-                    MappingTagID tag, bool sanitizing, bool inline_mapping, 
-                    std::vector<InstanceRef> &source_copy);
-#else
-      RegionMapper(Task *t, UniqueID uid, ContextID id, unsigned idx, const RegionRequirement &req, Mapper *mapper, 
-                    ImmovableLock mapper_lock, Processor target, Event single, Event multi, 
-                    MappingTagID tag, bool sanitizing, bool inline_mapping, 
-                    std::vector<InstanceRef> &source_copy);
-#endif
-    public:
-      ContextID ctx;
-      bool sanitizing;
-      bool inline_mapping;
-      bool success; // for knowing whether a sanitizing walk succeeds or not
-      bool final_closing;
-      unsigned idx;
-      const RegionRequirement &req;
-      Task *task;
-      UniqueID uid;
-#ifdef LOW_LEVEL_LOCKS
-      Lock mapper_lock;
-#else
-      ImmovableLock mapper_lock;
-#endif
-      Mapper *mapper;
-      MappingTagID tag;
-      Processor target;
-      Event single_term;
-      Event multi_term;
-      std::vector<unsigned> path;
-      // Vector for tracking source copy references, note it's a reference
-      std::vector<InstanceRef> &source_copy_instances;
-      // The resulting InstanceRef (if any)
-      InstanceRef result;
-    };
+  };
+};
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+#endif // __LEGION_REGION_TREE_H__
 
-#endif // __REGION_TREE_H__
+// EOF
 

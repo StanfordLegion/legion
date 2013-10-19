@@ -14,290 +14,1261 @@
  */
 
 
+
 #ifndef __LEGION_LOGGING_H__
-#define __LEGION_LOGGING_H__
+#define __LEGION_LOGGING_H___
+
+#ifdef LEGION_LOGGING
 
 #include "lowlevel.h"
 #include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
 
-/**
- * This file contains calls for logging that are consumed by the legion_spy tool in the tools directory.
- * To see where these statements get consumed, look in spy_parser.py
- */
+#include <cassert>
+#include <deque>
 
 namespace LegionRuntime {
-  namespace HighLevel {
-    namespace LegionSpy {
 
-      extern Logger::Category log_spy;
+  // These need to be in this namespace so they
+  // are visible to both the high- and low-level 
+  // namespaces.
+  enum TimingKind {
+    // High-Level Timing Kinds 
+    BEGIN_DEPENDENCE_ANALYSIS = 0,
+    END_DEPENDENCE_ANALYSIS = 1,
+    BEGIN_PRE_MAPPING = 2,
+    END_PRE_MAPPING = 3,
+    BEGIN_MAPPING = 4,
+    END_MAPPING = 5,
+    BEGIN_SLICING = 6,
+    END_SLICING = 7,
+    BEGIN_EXECUTION = 8,
+    END_EXECUTION = 9,
+    LAUNCH_TASK = 10,
+    RESOLVE_SPECULATION = 11,
+    COMPLETE_OPERATION = 12,
+    COMMIT_OPERATION = 13,
+    BEGIN_INLINING = 14,
+    END_INLINING = 15,
+    BEGIN_WINDOW_WAIT = 16,
+    END_WINDOW_WAIT = 17,
+    BEGIN_SCHEDULING = 18,
+    END_SCHEDULING = 19,
+    // Low-Level Timing Kinds
+    COPY_INIT = 20,
+    COPY_READY = 21,
+    COPY_BEGIN = 22,
+    COPY_END = 23,
+  };
+  
+  namespace HighLevel { 
 
-      static int next_point_id = 0;
+    /**
+     * \namespace LegionLogging
+     * Namespace for profiling functionality including all the necessary
+     * logging infrastructure.  For performance reasons, messages get
+     * buffered in memory during execution and are written to disk only
+     * at the end of the program execution.
+     */
+    namespace LegionLogging {
 
-      // Logger calls for the machine architecture
-      static inline void log_utility_processor(unsigned unique_id)
-      {
-        log_spy(LEVEL_INFO, "Utility %x", unique_id);
-      }
+      //========================================================================
+      // Logging message types
+      //========================================================================
 
-      static inline void log_processor(unsigned unique_id, unsigned util_id, unsigned kind)
-      {
-        log_spy(LEVEL_INFO, "Processor %x %x %d", unique_id, util_id, kind);
-      }
-
-      static inline void log_memory(unsigned unique_id, size_t capacity)
-      {
-        log_spy(LEVEL_INFO, "Memory %x %ld", unique_id, capacity);
-      }
-
-      static inline void log_proc_mem_affinity(unsigned proc_id, unsigned mem_id, unsigned bandwidth, unsigned latency)
-      {
-        log_spy(LEVEL_INFO, "Processor Memory %x %x %d %d", proc_id, mem_id, bandwidth, latency);
-      }
-
-      static inline void log_mem_mem_affinity(unsigned mem1, unsigned mem2, unsigned bandwidth, unsigned latency)
-      {
-        log_spy(LEVEL_INFO, "Memory Memory %x %x %d %d", mem1, mem2, bandwidth, latency);
-      }
-
-      // Logger calls for the shape of region trees
-      static inline void log_top_index_space(unsigned unique_id)
-      {
-        log_spy(LEVEL_INFO,"Index Space %x", unique_id);
-      }
-
-      static inline void log_index_partition(unsigned parent_id, unsigned unique_id, bool disjoint, unsigned color)
-      {
-        log_spy(LEVEL_INFO,"Index Partition %x %d %d %d", parent_id, unique_id, disjoint, color);
-      }
-
-      static inline void log_index_subspace(unsigned parent_id, unsigned unique_id, unsigned color)
-      {
-        log_spy(LEVEL_INFO,"Index Subspace %d %x %d", parent_id, unique_id, color);
-      }
-
-      static inline void log_field_space(unsigned unique_id)
-      {
-        log_spy(LEVEL_INFO,"Field Space %d", unique_id);
-      }
-
-      static inline void log_field_creation(unsigned unique_id, unsigned field_id)
-      {
-        log_spy(LEVEL_INFO,"Field Creation %d %d", unique_id, field_id);
-      }
-
-      static inline void log_top_region(unsigned index_space, unsigned field_space, unsigned tree_id)
-      {
-        log_spy(LEVEL_INFO,"Region %x %d %d", index_space, field_space, tree_id);
-      }
-
-      // Logger calls for operations 
-      static inline void log_top_level_task(unsigned hid, unsigned gen, unsigned unique_id, unsigned context, unsigned top_id)
-      {
-        log_spy(LEVEL_INFO,"Top Task %x %d %d %d %d", hid, gen, context, unique_id, top_id);
-      }
-
-      static inline void log_task_operation(unsigned unique_id, unsigned task_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen, bool index_space)
-      {
-        log_spy(LEVEL_INFO,"Task Operation %d %d %d %d %x %d %d", unique_id, task_id, parent_id, parent_ctx, hid, gen, index_space);
-      }
-
-      static inline void log_mapping_operation(unsigned unique_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen)
-      {
-        log_spy(LEVEL_INFO,"Mapping Operation %d %d %d %x %d", unique_id, parent_id, parent_ctx, hid, gen);
-      }
-
-      static inline void log_deletion_operation(unsigned unique_id, unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen)
-      {
-        log_spy(LEVEL_INFO,"Deletion Operation %d %d %d %x %d", unique_id, parent_id, parent_ctx, hid, gen);
-      }
-
-      static inline void log_task_name(unsigned unique_id, const char *name)
-      {
-        log_spy(LEVEL_INFO,"Task Name %d %s", unique_id, name);
-      }
-
-      // Logger calls for mapping dependence analysis 
-      static inline void log_logical_requirement(unsigned unique_id, unsigned index, bool region, unsigned index_component,
-                            unsigned field_component, unsigned tree_id, unsigned privilege, unsigned coherence, unsigned redop)
-      {
-        log_spy(LEVEL_INFO,"Logical Requirement %d %d %d %x %d %d %d %d %d", unique_id, index, region, index_component,
-                                                field_component, tree_id, privilege, coherence, redop);
-      }
-
-      static inline void log_requirement_fields(unsigned unique_id, unsigned index, const std::set<unsigned> &logical_fields)
-      {
-        for (std::set<unsigned>::const_iterator it = logical_fields.begin();
-              it != logical_fields.end(); it++)
+      struct LogMsgProcessor {
+      public:
+        LogMsgProcessor(Processor p, Processor u, Processor::Kind k) :
+            proc(p), utility(u), kind(k)
         {
-          log_spy(LEVEL_INFO,"Logical Requirement Field %d %d %d", unique_id, index, *it);
+        }
+      public:
+        Processor proc;
+        Processor utility;
+        Processor::Kind kind;
+      };
+
+      struct LogMsgMemory {
+      public:
+        LogMsgMemory(Memory mem, Memory::Kind kind, size_t capacity) :
+            mem(mem), kind(kind), capacity(capacity)
+        {
+        }
+      public:
+        Memory mem;
+        Memory::Kind kind;
+        size_t capacity;
+      };
+
+      struct LogMsgProcMemAffinity {
+      public:
+        LogMsgProcMemAffinity(Processor proc, Memory mem, size_t bandwidth,
+                              size_t latency) :
+            proc(proc), mem(mem), bandwidth(bandwidth), latency(latency)
+        {
+        }
+      public:
+        Processor proc;
+        Memory mem;
+        size_t bandwidth;
+        size_t latency;
+      };
+
+      struct LogMsgMemMemAffinity {
+      public:
+        LogMsgMemMemAffinity(Memory mem1, Memory mem2, size_t bandwidth,
+                             size_t latency) :
+            mem1(mem1), mem2(mem2), bandwidth(bandwidth), latency(latency)
+        {
+        }
+      public:
+        Memory mem1;
+        Memory mem2;
+        size_t bandwidth;
+        size_t latency;
+      };
+
+      enum LogMsgOperationKind {
+        MAPPING_OPERATION = 0,
+        COPY_OPERATION = 1,
+        FENCE_OPERATION = 2,
+        DELETION_OPERATION = 3,
+        CLOSE_OPERATION = 4,
+      };
+
+      struct LogMsgOperation {
+      public:
+        LogMsgOperation(LogMsgOperationKind k, UniqueID id, UniqueID context) :
+            kind(k), unique_op_id(id), context(context)
+        {
+        }
+      public:
+        LogMsgOperationKind kind;
+        UniqueID unique_op_id;
+        UniqueID context;
+      };
+
+      struct LogMsgTaskOperation {
+      public:
+        LogMsgTaskOperation(bool i, UniqueID id, Processor::TaskFuncID tid, UniqueID context, unsigned long long time) :
+            isIndividual(i), unique_op_id(id), task_id(tid), context(context), time(time)
+        {
+        }
+      public:
+        bool isIndividual;
+        UniqueID unique_op_id;
+        Processor::TaskFuncID task_id;
+        UniqueID context;
+        unsigned long long time;
+      };
+
+      struct LogMsgTaskInstanceVariant {
+      public:
+        LogMsgTaskInstanceVariant(UniqueID unique_op_id, VariantID vid) :
+            unique_op_id(unique_op_id), vid(vid)
+        {
+        }
+      public:
+        UniqueID unique_op_id;
+        VariantID vid;
+      };
+
+      struct LogMsgTaskCollection {
+      public:
+        LogMsgTaskCollection(Processor::TaskFuncID task_id, bool leaf,
+                             bool idempotent, const char *name) :
+            task_id(task_id), leaf(leaf), idempotent(idempotent), name(name)
+        {
+        }
+      public:
+        Processor::TaskFuncID task_id;
+        bool leaf;
+        bool idempotent;
+        const char *name;
+      };
+
+      struct LogMsgTaskVariant {
+      public:
+        LogMsgTaskVariant(Processor::TaskFuncID task_id,
+                          Processor::Kind proc_kind, bool single_task,
+                          bool index_task, VariantID vid) :
+            task_id(task_id), proc_kind(proc_kind), single_task(single_task), index_task(
+                index_task), vid(vid)
+        {
+        }
+      public:
+        Processor::TaskFuncID task_id;
+        Processor::Kind proc_kind;
+        bool single_task;
+        bool index_task;
+        VariantID vid;
+      };
+
+      struct LogMsgTopLevelTask {
+      public:
+        LogMsgTopLevelTask(Processor::TaskFuncID task_id, UniqueID unique_op_id) :
+            task_id(task_id), unique_op_id(unique_op_id)
+        {
+        }
+      public:
+        Processor::TaskFuncID task_id;
+        UniqueID unique_op_id;
+      };
+
+      struct LogMsgIndexSlice {
+      public:
+        LogMsgIndexSlice(UniqueID index_id, UniqueID slice_id) :
+            index_id(index_id), slice_id(slice_id)
+        {
+        }
+      public:
+        UniqueID index_id;
+        UniqueID slice_id;
+      };
+
+      struct LogMsgSliceSlice {
+      public:
+        LogMsgSliceSlice(UniqueID slice_parent, UniqueID slice_subslice) :
+            slice_parent(slice_parent), slice_subslice(slice_subslice)
+        {
+        }
+      public:
+        UniqueID slice_parent;
+        UniqueID slice_subslice;
+      };
+
+      struct LogMsgPointPoint {
+      public:
+        LogMsgPointPoint(UniqueID orig_point, UniqueID new_point) :
+            orig_point(orig_point), new_point(new_point)
+        {
+        }
+      public:
+        UniqueID orig_point;
+        UniqueID new_point;
+      };
+
+      struct LogMsgSlicePoint {
+      public:
+        LogMsgSlicePoint(UniqueID slice_id, UniqueID point_id,
+                         const DomainPoint &point) :
+            slice_id(slice_id), point_id(point_id), point(point)
+        {
+        }
+      public:
+        UniqueID slice_id;
+        UniqueID point_id;
+        const DomainPoint &point;
+      };
+
+      struct LogMsgOperationTiming {
+      public:
+        LogMsgOperationTiming(UniqueID unique_op_id, TimingKind kind,
+                              unsigned long long time) :
+            unique_op_id(unique_op_id), kind(kind), time(time)
+        {
+        }
+      public:
+        UniqueID unique_op_id;
+        TimingKind kind;
+        unsigned long long time;
+      };
+
+      struct LogMsgEventTiming {
+      public:
+        LogMsgEventTiming(Event event, TimingKind kind, unsigned long long time) :
+            event(event), kind(kind), time(time)
+        {
+        }
+      public:
+        Event event;
+        TimingKind kind;
+        unsigned long long time;
+      };
+
+      enum WaitKind {
+        WAIT_BEGIN = 0,
+        WAIT_END = 1,
+        WAIT_NOWAIT = 2, // indicates that the resource being waited on is already ready
+      };
+
+      struct LogMsgFutureWait {
+      public:
+        LogMsgFutureWait(UniqueID context, UniqueID wait_on, WaitKind kind, unsigned long long time) :
+            context(context), wait_on(wait_on), kind(kind), time(time)
+        {
+        }
+      public:
+        UniqueID context;
+        UniqueID wait_on;
+        WaitKind kind;
+        unsigned long long time;
+      };
+
+      struct LogMsgTopIndexSpace {
+      public:
+        LogMsgTopIndexSpace(IndexSpace space) :
+            space(space)
+        {
+        }
+      public:
+        IndexSpace space;
+      };
+
+      struct LogMsgIndexPartition {
+      public:
+        LogMsgIndexPartition(IndexSpace parent, IndexPartition handle,
+                             bool disjoint, Color color) :
+            parent(parent), handle(handle), disjoint(disjoint), color(color)
+        {
+        }
+      public:
+        IndexSpace parent;
+        IndexPartition handle;
+        bool disjoint;
+        Color color;
+      };
+
+      struct LogMsgIndexSubspace {
+      public:
+        LogMsgIndexSubspace(IndexPartition parent, IndexSpace handle,
+                            Color color) :
+            parent(parent), handle(handle), color(color)
+        {
+        }
+      public:
+        IndexPartition parent;
+        IndexSpace handle;
+        Color color;
+      };
+
+      struct LogMsgFieldSpace {
+      public:
+        LogMsgFieldSpace(FieldSpace handle) :
+            handle(handle)
+        {
+        }
+      public:
+        FieldSpace handle;
+      };
+
+      struct LogMsgFieldCreation {
+      public:
+        LogMsgFieldCreation(FieldSpace handle, FieldID fid, bool local) :
+            handle(handle), fid(fid), local(local)
+        {
+        }
+      public:
+        FieldSpace handle;
+        FieldID fid;
+        bool local;
+      };
+
+      struct LogMsgTopRegion {
+      public:
+        LogMsgTopRegion(IndexSpace ispace, FieldSpace fspace, RegionTreeID tid) :
+            ispace(ispace), fspace(fspace), tid(tid)
+        {
+        }
+      public:
+        IndexSpace ispace;
+        FieldSpace fspace;
+        RegionTreeID tid;
+      };
+
+      struct LogMsgLogicalRequirement {
+      public:
+        LogMsgLogicalRequirement(UniqueID unique_op_id, unsigned index,
+                                 bool region, unsigned index_component,
+                                 unsigned field_component, RegionTreeID tid,
+                                 PrivilegeMode privilege,
+                                 CoherenceProperty prop, ReductionOpID redop) :
+            unique_op_id(unique_op_id), index(index), region(region), index_component(
+                index_component), field_component(field_component), tid(tid), privilege(
+                privilege), prop(prop), redop(redop)
+        {
+        }
+      public:
+        UniqueID unique_op_id;
+        unsigned index;
+        bool region;
+        unsigned index_component;
+        unsigned field_component;
+        RegionTreeID tid;
+        PrivilegeMode privilege;
+        CoherenceProperty prop;
+        ReductionOpID redop;
+      };
+
+      struct LogMsgRequirementFields {
+      public:
+        LogMsgRequirementFields(UniqueID unique_op_id, unsigned index,
+                                const std::set<FieldID> &logical_fields) :
+            unique_op_id(unique_op_id), index(index), logical_fields(
+                logical_fields)
+        {
+        }
+      public:
+        UniqueID unique_op_id;
+        unsigned index;
+        const std::set<FieldID> &logical_fields;
+      };
+
+      struct LogMsgMappingDependence {
+      public:
+        LogMsgMappingDependence(UniqueID parent_context, UniqueID previous_id,
+                                unsigned previous_index, UniqueID next_id,
+                                unsigned next_index, DependenceType dep_type) :
+            parent_context(parent_context), previous_id(previous_id), previous_index(
+                previous_index), next_id(next_id), next_index(next_index), dep_type(
+                dep_type)
+        {
+        }
+      public:
+        UniqueID parent_context;
+        UniqueID previous_id;
+        unsigned previous_index;
+        UniqueID next_id;
+        unsigned next_index;
+        DependenceType dep_type;
+      };
+
+      struct LogMsgTaskInstanceRequirement {
+      public:
+        LogMsgTaskInstanceRequirement(UniqueID unique_id, unsigned index,
+                                      IndexSpace handle) :
+            unique_id(unique_id), index(index), handle(handle)
+        {
+        }
+      public:
+        UniqueID unique_id;
+        unsigned index;
+        IndexSpace handle;
+      };
+
+      struct LogMsgEventDependency {
+      public:
+        LogMsgEventDependency(Event one, Event two) :
+            one(one), two(two)
+        {
+        }
+      public:
+        Event one;
+        Event two;
+      };
+
+      struct LogMsgOperationEvents {
+      public:
+        LogMsgOperationEvents(UniqueID unique_op_id, Event start_event,
+                              Event end_event) :
+            unique_op_id(unique_op_id), start_event(start_event), end_event(
+                end_event)
+        {
+        }
+      public:
+        UniqueID unique_op_id;
+        Event start_event;
+        Event end_event;
+      };
+
+      struct LogMsgPhysicalInstance {
+      public:
+        LogMsgPhysicalInstance(PhysicalInstance instance, Memory memory,
+                               IndexSpace index_handle, FieldSpace field_handle,
+                               RegionTreeID tree_id, ReductionOpID redop, bool fold,
+                               Domain indirect_domain) :
+            instance(instance), memory(memory), index_handle(index_handle), field_handle(
+                field_handle), tree_id(tree_id), redop(redop), fold(fold), indirect_domain(
+                indirect_domain)
+        {
+        }
+      public:
+        PhysicalInstance instance;
+        Memory memory;
+        IndexSpace index_handle;
+        FieldSpace field_handle;
+        RegionTreeID tree_id;
+        ReductionOpID redop;
+        bool fold;
+        Domain indirect_domain;
+      };
+
+      struct LogMsgPhysicalUser {
+      public:
+        LogMsgPhysicalUser(PhysicalInstance instance, UniqueID unique_op_id,
+                           unsigned index) :
+            instance(instance), unique_op_id(unique_op_id), index(index)
+        {
+        }
+      public:
+        PhysicalInstance instance;
+        UniqueID unique_op_id;
+        unsigned index;
+      };
+
+      struct LogMsgLowlevelCopy {
+      public:
+        LogMsgLowlevelCopy(PhysicalInstance src_instance,
+                           PhysicalInstance dst_instance,
+                           IndexSpace index_handle, FieldSpace field_handle,
+                           RegionTreeID tree_id, Event start_event,
+                           Event termination_event,
+                           const std::set<FieldID> &fields, ReductionOpID redop) :
+            src_instance(src_instance), dst_instance(dst_instance), index_handle(
+                index_handle), field_handle(field_handle), tree_id(tree_id), start_event(
+                start_event), termination_event(termination_event), fields(
+                fields), redop(redop)
+        {
+        }
+      public:
+        PhysicalInstance src_instance;
+        PhysicalInstance dst_instance;
+        IndexSpace index_handle;
+        FieldSpace field_handle;
+        RegionTreeID tree_id;
+        Event start_event;
+        Event termination_event;
+        const std::set<FieldID> &fields;
+        ReductionOpID redop;
+      };
+
+      //========================================================================
+      // Processor profiler and in-memory buffering
+      //========================================================================
+
+      struct ProcessorProfiler {
+      public:
+        ProcessorProfiler(void)
+          : proc(Processor::NO_PROC), init_time(0) { }
+        ProcessorProfiler(Processor p)
+          : proc(p), init_time(TimeStamp::get_current_time_in_micros()) { }
+      public:
+        void add_msg(const LogMsgOperation &msg) { msgs_operation.push_back(msg); }
+        void add_msg(const LogMsgTaskOperation &msg) { msgs_task_operation.push_back(msg); }
+        void add_msg(const LogMsgTaskInstanceVariant &msg) { msgs_task_instance_variant.push_back(msg); }
+        void add_msg(const LogMsgIndexSlice &msg) { msgs_index_slice.push_back(msg); }
+        void add_msg(const LogMsgSliceSlice &msg) { msgs_slice_slice.push_back(msg); }
+        void add_msg(const LogMsgPointPoint &msg) { msgs_point_point.push_back(msg); }
+        void add_msg(const LogMsgSlicePoint &msg) { msgs_slice_point.push_back(msg); }
+        void add_msg(const LogMsgOperationTiming &msg) { msgs_operation_timing.push_back(msg); }
+        void add_msg(const LogMsgEventTiming &msg) { msgs_event_timing.push_back(msg); }
+        void add_msg(const LogMsgFutureWait &msg) { msgs_future_wait.push_back(msg); }
+        void add_msg(const LogMsgTopIndexSpace &msg) { msgs_top_index_space.push_back(msg); }
+        void add_msg(const LogMsgIndexPartition &msg) { msgs_index_partition.push_back(msg); }
+        void add_msg(const LogMsgIndexSubspace &msg) { msgs_index_subspace.push_back(msg); }
+        void add_msg(const LogMsgFieldSpace &msg) { msgs_field_space.push_back(msg); }
+        void add_msg(const LogMsgFieldCreation &msg) { msgs_field_creation.push_back(msg); }
+        void add_msg(const LogMsgTopRegion &msg) { msgs_top_region.push_back(msg); }
+        void add_msg(const LogMsgLogicalRequirement &msg) { msgs_logical_requirement.push_back(msg); }
+        void add_msg(const LogMsgRequirementFields &msg) { msgs_requirement_fields.push_back(msg); }
+        void add_msg(const LogMsgMappingDependence &msg) { msgs_mapping_dependence.push_back(msg); }
+        void add_msg(const LogMsgTaskInstanceRequirement &msg) { msgs_task_instance_requirement.push_back(msg); }
+        void add_msg(const LogMsgEventDependency &msg) { msgs_event_dependency.push_back(msg); }
+        void add_msg(const LogMsgOperationEvents &msg) { msgs_operation_events.push_back(msg); }
+        void add_msg(const LogMsgPhysicalInstance &msg) { msgs_physical_instance.push_back(msg); }
+        void add_msg(const LogMsgPhysicalUser &msg) { msgs_phyiscal_user.push_back(msg); }
+        void add_msg(const LogMsgLowlevelCopy &msg) { msgs_lowlevel_copy.push_back(msg); }
+      private:
+        // no copy constructor or assignment
+        ProcessorProfiler(const ProcessorProfiler& copy_from) {}
+        ProcessorProfiler& operator=(const ProcessorProfiler& copy_from) {}
+      public:
+        Processor proc;
+        unsigned long long init_time;
+        std::deque<LogMsgOperation> msgs_operation;
+        std::deque<LogMsgTaskOperation> msgs_task_operation;
+        std::deque<LogMsgTaskInstanceVariant> msgs_task_instance_variant;
+        std::deque<LogMsgIndexSlice> msgs_index_slice;
+        std::deque<LogMsgSliceSlice> msgs_slice_slice;
+        std::deque<LogMsgPointPoint> msgs_point_point;
+        std::deque<LogMsgSlicePoint> msgs_slice_point;
+        std::deque<LogMsgOperationTiming> msgs_operation_timing;
+        std::deque<LogMsgEventTiming> msgs_event_timing;
+        std::deque<LogMsgFutureWait> msgs_future_wait;
+        std::deque<LogMsgTopIndexSpace> msgs_top_index_space;
+        std::deque<LogMsgIndexPartition> msgs_index_partition;
+        std::deque<LogMsgIndexSubspace> msgs_index_subspace;
+        std::deque<LogMsgFieldSpace> msgs_field_space;
+        std::deque<LogMsgFieldCreation> msgs_field_creation;
+        std::deque<LogMsgTopRegion> msgs_top_region;
+        std::deque<LogMsgLogicalRequirement> msgs_logical_requirement;
+        std::deque<LogMsgRequirementFields> msgs_requirement_fields;
+        std::deque<LogMsgMappingDependence> msgs_mapping_dependence;
+        std::deque<LogMsgTaskInstanceRequirement> msgs_task_instance_requirement;
+        std::deque<LogMsgEventDependency> msgs_event_dependency;
+        std::deque<LogMsgOperationEvents> msgs_operation_events;
+        std::deque<LogMsgPhysicalInstance> msgs_physical_instance;
+        std::deque<LogMsgPhysicalUser> msgs_phyiscal_user;
+        std::deque<LogMsgLowlevelCopy> msgs_lowlevel_copy;
+      };
+
+      extern Logger::Category log_logging;
+      // Profiler table indexed by processor id
+      extern ProcessorProfiler *legion_prof_table;
+      // all message queues for sequential logger calls
+      extern std::deque<LogMsgProcessor> msgs_processor;
+      extern std::deque<LogMsgMemory> msgs_memory;
+      extern std::deque<LogMsgProcMemAffinity> msgs_proc_mem_affinity;
+      extern std::deque<LogMsgMemMemAffinity> msgs_mem_mem_affinity;
+      extern std::deque<LogMsgTaskCollection> msgs_task_collection;
+      extern std::deque<LogMsgTaskVariant> msgs_task_variant;
+      extern std::deque<LogMsgTopLevelTask> msgs_top_level_task;
+
+      static inline ProcessorProfiler& get_profiler(Processor proc)
+      {
+        return legion_prof_table[(proc.id & 0xffff)];
+      }
+
+      //========================================================================
+      // Logger calls for initialization 
+      //========================================================================
+      // Sequential
+      // Called in Runtime constructor in runtime.cc
+      static void initialize_legion_logging(AddressSpaceID sid,
+                                        const std::set<Processor> &processors)
+      {
+        for(std::set<Processor>::iterator it = processors.begin(); it != processors.end(); ++it)
+        {
+          ProcessorProfiler &p = get_profiler(*it);
+          p.proc = *it;
+          p.init_time = TimeStamp::get_current_time_in_micros();
+
+          // check if we have initialized the profiler for the utility processor
+          Processor utility = it->get_utility_processor();
+          ProcessorProfiler &up = get_profiler(utility);
+          if (up.init_time == 0) {
+            up.proc = utility;
+            up.init_time = TimeStamp::get_current_time_in_micros();
+          }
         }
       }
-
-      static inline void log_mapping_dependence(unsigned parent_id, unsigned parent_ctx, unsigned hid, unsigned gen, unsigned prev_id, 
-                                                unsigned prev_idx, unsigned next_id, unsigned next_idx, unsigned dep_type)
+      // Sequential
+      // Called in Runtime destructor in runtime.cc
+      static void finalize_legion_logging(const std::set<Processor> &processors)
       {
-        log_spy(LEVEL_INFO,"Mapping Dependence %d %d %x %d %d %d %d %d %d", parent_id, parent_ctx, hid, gen, prev_id, prev_idx, next_id, next_idx, dep_type);
+        // global log messages
+        for (unsigned idx = 0; idx < msgs_processor.size(); idx++)
+        {
+          LogMsgProcessor &msg = msgs_processor[idx];
+          Machine *machine = Machine::get_machine();
+          log_logging(LEVEL_INFO, "processor: {\"id\":%d, \"utility\":%d, \"utility_kind\":%d, \"kind\":%d}", msg.proc.id, msg.utility.id, machine->get_processor_kind(msg.utility), machine->get_processor_kind(msg.proc));
+        }
+        for (unsigned idx = 0; idx < msgs_memory.size(); idx++)
+        {
+          LogMsgMemory &msg = msgs_memory[idx];
+          log_logging(LEVEL_INFO, "memory: {\"id\":%d, \"kind\":%d, \"capacity\":%ld}", msg.mem.id, msg.kind, msg.capacity);
+        }
+        for (unsigned idx = 0; idx < msgs_proc_mem_affinity.size(); idx++)
+        {
+          LogMsgProcMemAffinity &msg = msgs_proc_mem_affinity[idx];
+          log_logging(LEVEL_INFO, "proc_mem_affinity: {\"proc\":%d, \"mem\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.proc.id, msg.mem.id, msg.bandwidth, msg.latency);
+        }
+        for (unsigned idx = 0; idx < msgs_mem_mem_affinity.size(); idx++)
+        {
+          LogMsgMemMemAffinity &msg = msgs_mem_mem_affinity[idx];
+          log_logging(LEVEL_INFO, "mem_mem_affinity: {\"mem1\":%d, \"mem2\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.mem1.id, msg.mem2.id, msg.bandwidth, msg.latency);
+        }
+        for (unsigned idx = 0; idx < msgs_task_collection.size(); idx++)
+        {
+          LogMsgTaskCollection &msg = msgs_task_collection[idx];
+          log_logging(LEVEL_INFO, "task_collection: {\"task_id\":%d, \"leaf\":%d, \"idempotent\":%d, \"name\":\"%s\"}", msg.task_id, msg.leaf, msg.idempotent, msg.name);
+        }
+        for (unsigned idx = 0; idx < msgs_task_variant.size(); idx++)
+        {
+          LogMsgTaskVariant &msg = msgs_task_variant[idx];
+          log_logging(LEVEL_INFO, "task_variant: {\"task_id\":%d, \"proc_kind\":%d, \"single_task\":%d, \"index_task\":%d, \"vid\":%ld}", msg.task_id, msg.proc_kind, msg.single_task, msg.index_task, msg.vid);
+        }
+        for (unsigned idx = 0; idx < msgs_top_level_task.size(); idx++)
+        {
+          LogMsgTopLevelTask &msg = msgs_top_level_task[idx];
+          log_logging(LEVEL_INFO, "top_level_task: {\"task_id\":%d, \"unique_op_id\":%lld}", msg.task_id, msg.unique_op_id);
+        }
+        // per processor log messages
+        for(std::set<Processor>::iterator it = processors.begin(); it != processors.end(); ++it)
+        {
+          ProcessorProfiler &prof = get_profiler(*it);
+          for (unsigned idx = 0; idx < prof.msgs_task_operation.size(); idx++)
+          {
+            LogMsgTaskOperation &msg = prof.msgs_task_operation[idx];
+            log_logging(LEVEL_INFO, "task_operation: {\"processor\":%u, \"is_individual\":%d, \"unique_op_id\":%lld, \"task_id\":%d, \"context\":%lld, \"time\":%lld}", it->id, msg.isIndividual, msg.unique_op_id, msg.task_id, msg.context, msg.time);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_operation.size(); idx++)
+          {
+            LogMsgOperation &msg = prof.msgs_operation[idx];
+            const char * kind;
+            switch (msg.kind)
+            {
+              case MAPPING_OPERATION: kind = "MAPPING_OPERATION"; break;
+              case COPY_OPERATION: kind = "COPY_OPERATION"; break;
+              case FENCE_OPERATION: kind = "FENCE_OPERATION"; break;
+              case DELETION_OPERATION: kind = "DELETION_OPERATION"; break;
+              case CLOSE_OPERATION: kind = "CLOSE_OPERATION"; break;
+              default: kind = "UNKNOWN_OPERATION"; break;
+            }
+            log_logging(LEVEL_INFO, "operation: {\"processor\":%u, \"kind\":\"%s\", \"unique_op_id\":%lld, \"context\":%lld}", it->id, kind, msg.unique_op_id, msg.context);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_task_instance_variant.size(); idx++) {
+            LogMsgTaskInstanceVariant &msg = prof.msgs_task_instance_variant[idx];
+            log_logging(LEVEL_INFO, "task_instance_variant: {\"processor\":%u, \"unique_op_id\":%lld, \"vid\":%ld}", it->id, msg.unique_op_id, msg.vid);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_index_slice.size(); idx++)
+          {
+            LogMsgIndexSlice &msg = prof.msgs_index_slice[idx];
+            log_logging(LEVEL_INFO, "index_slice: {\"processor\":%u, \"index_id\":%lld, \"slice_id\":%lld}", it->id, msg.index_id, msg.slice_id);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_slice_slice.size(); idx++)
+          {
+            LogMsgSliceSlice &msg = prof.msgs_slice_slice[idx];
+            log_logging(LEVEL_INFO, "slice_slice: {\"processor\":%u, \"slide_parent\":%lld, \"slice_subslice\":%lld}", it->id, msg.slice_parent, msg.slice_subslice);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_point_point.size(); idx++)
+          {
+            LogMsgPointPoint &msg = prof.msgs_point_point[idx];
+            log_logging(LEVEL_INFO, "point_point: {\"processor\":%u, \"orig_point\":%lld, \"new_point\":%lld}", it->id, msg.orig_point, msg.new_point);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_slice_point.size(); idx++)
+          {
+            LogMsgSlicePoint &msg = prof.msgs_slice_point[idx];
+            log_logging(LEVEL_INFO, "slice_point: {\"processor\":%u, \"slice_id\":%lld, \"point_id\":%lld, \"dim\":%d, \"d0\":%d, \"d1\":%d, \"d2\":%d}", it->id, msg.slice_id, msg.point_id, msg.point.dim, msg.point.point_data[0], msg.point.point_data[1], msg.point.point_data[2]);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_lowlevel_copy.size(); idx++)
+          {
+            LogMsgLowlevelCopy &msg = prof.msgs_lowlevel_copy[idx];
+            // TODO: fields are not logged right now
+            log_logging(LEVEL_INFO, "lowlevel_copy: {\"processor\":%u, \"src_instance\":%u, \"dst_instance\":%u, \"index_handle\":%u, \"field_handle\":%d, \"tree_id\":%u, \"start_event_id\":%d, \"start_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d, \"redop\":%d}", it->id, msg.src_instance.id, msg.dst_instance.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.start_event.id, msg.start_event.gen, msg.termination_event.id, msg.termination_event.gen, msg.redop);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_operation_timing.size(); idx++)
+          {
+            LogMsgOperationTiming &msg = prof.msgs_operation_timing[idx];
+            log_logging(LEVEL_INFO, "operation_timing: {\"processor\":%u, \"unique_op_id\":%lld, \"kind\":%d, \"time\":%lld}", it->id, msg.unique_op_id, msg.kind, msg.time);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_event_timing.size(); idx++)
+          {
+            LogMsgEventTiming &msg = prof.msgs_event_timing[idx];
+            log_logging(LEVEL_INFO, "event_timing: {\"processor\":%u, \"event_id\":%d, \"event_gen\":%d, \"kind\":%d, \"time\":%lld}", it->id, msg.event.id, msg.event.gen, msg.kind, msg.time);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_future_wait.size(); idx++)
+          {
+            LogMsgFutureWait &msg = prof.msgs_future_wait[idx];
+            log_logging(LEVEL_INFO, "future_wait: {\"processor\":%u, \"context\":%lld, \"wait_on\":%lld, \"kind\":%d, \"time\":%lld}", it->id, msg.context, msg.wait_on, msg.kind, msg.time);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_top_index_space.size(); idx++)
+          {
+            LogMsgTopIndexSpace &msg = prof.msgs_top_index_space[idx];
+            log_logging(LEVEL_INFO, "top_index_space: {\"processor\":%u, \"id\":%d}", it->id, msg.space.id);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_index_partition.size(); idx++)
+          {
+            LogMsgIndexPartition &msg = prof.msgs_index_partition[idx];
+            log_logging(LEVEL_INFO, "index_partition: {\"processor\":%u, \"parent\":%d, \"handle\":%d, \"disjoint\":%d, \"color\":%d}", it->id, msg.parent.id, msg.handle, msg.disjoint, msg.color);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_index_subspace.size(); idx++)
+          {
+            LogMsgIndexSubspace &msg = prof.msgs_index_subspace[idx];
+            log_logging(LEVEL_INFO, "index_subspace: {\"processor\":%u, \"parent\":%d, \"handle\":%d, \"color\":%d}", it->id, msg.parent, msg.handle.id, msg.color);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_field_space.size(); idx++)
+          {
+            LogMsgFieldSpace &msg = prof.msgs_field_space[idx];
+            log_logging(LEVEL_INFO, "field_space: {\"processor\":%u, \"handle\":%d}", it->id, msg.handle.get_id());
+          }
+          for (unsigned idx = 0; idx < prof.msgs_field_creation.size(); idx++)
+          {
+            LogMsgFieldCreation &msg = prof.msgs_field_creation[idx];
+            log_logging(LEVEL_INFO, "field_creation: {\"processor\":%u, \"handle\":%d, \"fid\":%d, \"local\":%d}", it->id, msg.handle.get_id(), msg.fid, msg.local);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_top_region.size(); idx++)
+          {
+            LogMsgTopRegion &msg = prof.msgs_top_region[idx];
+            log_logging(LEVEL_INFO, "top_region: {\"processor\":%u, \"ispace\":%d, \"fspace\":%d, \"tid\":%d}", it->id, msg.ispace.id, msg.fspace.get_id(), msg.tid);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_logical_requirement.size(); idx++)
+          {
+            LogMsgLogicalRequirement &msg = prof.msgs_logical_requirement[idx];
+            log_logging(LEVEL_INFO, "logical_requirement: {\"processor\":%u, \"unique_op_id\":%lld, \"index\":%d, \"region\":%d, \"index_component\":%d, \"field_component\":%d, \"tid\":%d, \"privilege\":%d, \"prop\":%d, \"redop\":%d}", it->id, msg.unique_op_id, msg.index, msg.region, msg.index_component, msg.field_component, msg.tid, msg.privilege, msg.prop, msg.redop);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_requirement_fields.size(); idx++)
+          {
+            LogMsgRequirementFields &msg = prof.msgs_requirement_fields[idx];
+            for (std::set<FieldID>::iterator it2 = msg.logical_fields.begin(); it2!=msg.logical_fields.end(); ++it)
+              log_logging(LEVEL_INFO, "requirement_fields: {\"processor\":%u, \"unique_op_id\":%lld, \"index\":%d, \"logical_field\":%d}", it->id, msg.unique_op_id, msg.index, *it2);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_mapping_dependence.size(); idx++)
+          {
+            LogMsgMappingDependence &msg = prof.msgs_mapping_dependence[idx];
+            log_logging(LEVEL_INFO, "mapping_dependence: {\"processor\":%u, \"parent_context\":%lld, \"previous_id\":%lld, \"previous_index\":%d, \"next_id\":%lld, \"next_index\":%d, \"dep_type\":%d}", it->id, msg.parent_context, msg.previous_id, msg.previous_index, msg.next_id, msg.next_index, msg.dep_type);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_task_instance_requirement.size(); idx++)
+          {
+            LogMsgTaskInstanceRequirement &msg = prof.msgs_task_instance_requirement[idx];
+            log_logging(LEVEL_INFO, "task_instance_requirement: {\"processor\":%u, \"unique_id\":%lld, \"index\":%d, \"handle\":%d}", it->id, msg.unique_id, msg.index, msg.handle.id);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_operation_events.size(); idx++)
+          {
+            LogMsgOperationEvents &msg = prof.msgs_operation_events[idx];
+            log_logging(LEVEL_INFO, "operation_events: {\"processor\":%u, \"unique_op_id\":%lld, \"start_event_id\":%d, \"start_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d}", it->id, msg.unique_op_id, msg.start_event.id, msg.start_event.gen, msg.end_event.id, msg.end_event.gen);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_event_dependency.size(); idx++)
+          {
+            LogMsgEventDependency &msg = prof.msgs_event_dependency[idx];
+            log_logging(LEVEL_INFO, "event_dependency: {\"processor\":%u, \"event1_id\":%d, \"event1_gen\":%d, \"event2_id\":%d, \"event2_gen\":%d}", it->id, msg.one.id, msg.one.gen, msg.two.id, msg.two.gen);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_physical_instance.size(); idx++)
+          {
+            LogMsgPhysicalInstance &msg = prof.msgs_physical_instance[idx];
+            log_logging(LEVEL_INFO, "physical_instance: {\"processor\":%u, \"instance\":%d, \"memory\":%d, \"index_handle\":%d, \"field_handle\":%d, \"tree_id\":%d, \"redop\":%d, \"fold\":%d, \"indirect_domain\":%d}", it->id, msg.instance.id, msg.memory.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.redop, msg.fold, msg.indirect_domain.is_id);
+          }
+          for (unsigned idx = 0; idx < prof.msgs_phyiscal_user.size(); idx++)
+          {
+            LogMsgPhysicalUser &msg = prof.msgs_phyiscal_user[idx];
+            log_logging(LEVEL_INFO, "physical_user: {\"processor\":%u, \"instance\":%d, \"unique_op_id\":%lld, \"index\":%d}", it->id, msg.instance.id, msg.unique_op_id, msg.index);
+          }
+        }
+      }
+      
+      //========================================================================
+      // Logger calls for the machine architecture
+      //========================================================================
+
+      // Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static void log_processor(Processor proc, Processor utility,
+                                       Processor::Kind kind)
+      {
+        msgs_processor.push_back(LogMsgProcessor(proc, utility, kind));
       }
 
+      // Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static void log_memory(Memory mem, Memory::Kind kind,
+                                    size_t capacity)
+      {
+        msgs_memory.push_back(LogMsgMemory(mem, kind ,capacity));
+      }
+
+      // Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static void log_proc_mem_affinity(Processor proc, Memory mem,
+                                               size_t bandwidth,
+                                               size_t latency)
+      {
+        msgs_proc_mem_affinity.push_back(LogMsgProcMemAffinity(proc, mem, bandwidth, latency));
+      }
+
+      //Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static void log_mem_mem_affinity(Memory mem1, Memory mem2,
+                                              size_t bandwidth,
+                                              size_t latency)
+      {
+        msgs_mem_mem_affinity.push_back(LogMsgMemMemAffinity(mem1, mem2, bandwidth, latency));
+      }
+
+      //========================================================================
+      // Logger calls for operations 
+      //========================================================================
+
+      // Thread-safe
+      // Called in MapOp::initialize in legion_ops.cc
+      static inline void log_mapping_operation(Processor p,
+                                               UniqueID context,
+                                               UniqueID unique_op_id)
+      {
+        get_profiler(p).add_msg(LogMsgOperation(MAPPING_OPERATION, unique_op_id, context));
+      }
+
+      // Thread-safe
+      // Called in CopyOp::initialize in legion_ops.cc
+      static inline void log_copy_operation(Processor p,
+                                            UniqueID context,
+                                            UniqueID unique_op_id)
+      {
+        get_profiler(p).add_msg(LogMsgOperation(COPY_OPERATION, unique_op_id, context));
+      }
+
+      // Thread-safe
+      // Called in FenceOp::initialize in legion_ops.cc
+      static inline void log_fence_operation(Processor p,
+                                             UniqueID context,
+                                             UniqueID unique_op_id)
+      {
+        get_profiler(p).add_msg(LogMsgOperation(FENCE_OPERATION, unique_op_id, context));
+      }
+
+      // Thread-safe
+      // Called in DeletionOp::initialize in legion_ops.cc
+      static inline void log_deletion_operation(Processor p,
+                                                UniqueID context,
+                                                UniqueID unique_op_id)
+      {
+        get_profiler(p).add_msg(LogMsgOperation(DELETION_OPERATION, unique_op_id, context));
+      }
+
+      // Thread-safe
+      // Called in CloseOp::initialize in legion_ops.cc
+      static inline void log_close_operation(Processor p,
+                                             UniqueID context,
+                                             UniqueID unique_op_id)
+      {
+        get_profiler(p).add_msg(LogMsgOperation(CLOSE_OPERATION, unique_op_id, context));
+      }
+
+      // Thread-safe
+      // Called in IndividualTask::initialize_task in legion_tasks.cc
+      static inline void log_individual_task(Processor p,
+                                             UniqueID context,
+                                             UniqueID unique_op_id,
+                                             Processor::TaskFuncID task_id)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgTaskOperation(true, unique_op_id, task_id, context, time));
+      }
+
+      // Thread-safe
+      // Called in IndexTask::initialize_task in legion_tasks.cc
+      static inline void log_index_space_task(Processor p,
+                                              UniqueID context,
+                                              UniqueID unique_op_id,
+                                              Processor::TaskFuncID task_id)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgTaskOperation(false, unique_op_id, task_id, context, time));
+      }
+
+      //========================================================================
+      // Logger calls for tasks
+      //========================================================================
+
+      // Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static inline void log_task_collection(Processor::TaskFuncID task_id,
+                                             bool leaf, bool idempotent,
+                                             const char *name)
+      {
+        msgs_task_collection.push_back(LogMsgTaskCollection(task_id, leaf, idempotent, name));
+      }
+
+      // Sequential
+      // Called in Runtime::perform_one_time_logging in runtime.cc
+      static inline void log_task_variant(Processor::TaskFuncID task_id,
+                                          Processor::Kind proc_kind,
+                                          bool single_task, bool index_task,
+                                          VariantID vid)
+      {
+        msgs_task_variant.push_back(LogMsgTaskVariant(task_id, proc_kind, single_task, index_task, vid));
+      }
+
+      // Sequential
+      // Called in Runtime::launch_top_level_task in runtime.cc
+      static inline void log_top_level_task(Processor::TaskFuncID task_id,
+                                            UniqueID unique_op_id)
+      {
+        msgs_top_level_task.push_back(LogMsgTopLevelTask(task_id, unique_op_id));
+      }
+
+      // Thread-safe
+      // Called in IndexTask::clone_as_slice_task in legion_tasks.cc
+      static inline void log_index_slice(Processor p, UniqueID index_id,
+                                          UniqueID slice_id)
+      {
+        get_profiler(p).add_msg(LogMsgIndexSlice(index_id, slice_id));
+      }
+
+      // Thread-safe
+      // Called in SliceTask::clone_as_slice_task in legion_tasks.cc
+      // Called in SliceTask::unpack_task
+      static inline void log_slice_slice(Processor p, UniqueID slice_parent,
+                                          UniqueID slice_subslice)
+      {
+        get_profiler(p).add_msg(LogMsgSliceSlice(slice_parent, slice_subslice));
+      }
+
+      // Thread-safe
+      // Called in SliceTask::clone_as_point_task in legion_tasks.cc
+      // Called in SliceTask::unpack_task
+      static inline void log_slice_point(Processor p, UniqueID slice_id,
+                                          UniqueID point_id, 
+                                          const DomainPoint &point)
+      {
+        get_profiler(p).add_msg(LogMsgSlicePoint(slice_id, point_id, point));
+      }
+
+      // Thread-safe
+      // Called in IndividualTask::unpack_task
+      static inline void log_point_point(Processor p, UniqueID orig_point,
+                                         UniqueID new_point)
+      {
+        get_profiler(p).add_msg(LogMsgPointPoint(orig_point, new_point));
+      }
+
+      //========================================================================
+      // Operation timing calls 
+      //========================================================================
+      
+      // Thread-safe
+      static inline void log_timing_event(Processor p, UniqueID unique_id,
+                                          TimingKind kind)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgOperationTiming(unique_id, kind, time));
+      }
+
+      // Thread-safe
+      static inline void log_timing_event(Processor p, Event event,
+                                          TimingKind kind)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgEventTiming(event, kind, time));
+      }
+
+      // Thread-safe
+      static inline void log_future_wait_begin(Processor p, UniqueID context,
+                                         UniqueID wait_on)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgFutureWait(context, wait_on, WAIT_BEGIN, time));
+      }
+
+      // Thread-safe
+      // Calls to this method always follow a call to log_future_wait_begin
+      // with the same context/wait_on parameter (making it possible to match
+      // up the beginning and end of future waits).
+      static inline void log_future_wait_end(Processor p, UniqueID context,
+                                         UniqueID wait_on)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgFutureWait(context, wait_on, WAIT_END, time));
+      }
+
+      // Thread-safe
+      static inline void log_future_nowait(Processor p, UniqueID context,
+                                         UniqueID wait_on)
+      {
+        unsigned long long time = TimeStamp::get_current_time_in_micros();
+        get_profiler(p).add_msg(LogMsgFutureWait(context, wait_on, WAIT_NOWAIT, time));
+      }
+
+      //========================================================================
+      // Logger calls for the shape of region trees
+      //========================================================================
+
+      // Thread-safe
+      // Called in Runtime::create_index_space
+      // Called in Runtime::create_index_space with domain in runtime.cc
+      static inline void log_top_index_space(Processor p, IndexSpace space)
+      {
+        get_profiler(p).add_msg(LogMsgTopIndexSpace(space));
+      }
+
+      // Thread-safe
+      // Called in Runtime::create_index_partition in runtime.cc
+      static inline void log_index_partition(Processor p,
+                                             IndexSpace parent, 
+                                             IndexPartition handle,
+                                             bool disjoint, Color color)
+      {
+        get_profiler(p).add_msg(LogMsgIndexPartition(parent, handle, disjoint, color));
+      }
+
+      // Thread-safe
+      // Called in Runtime::create_index_partition in runtime.cc
+      static inline void log_index_subspace(Processor p, IndexPartition parent,
+                                            IndexSpace handle, Color color)
+      {
+        get_profiler(p).add_msg(LogMsgIndexSubspace(parent, handle, color));
+      }
+
+      // Thread-safe
+      // Called in Runtime::create_field_space in runtime.cc
+      static inline void log_field_space(Processor p, FieldSpace handle)
+      {
+        get_profiler(p).add_msg(LogMsgFieldSpace(handle));
+      }
+
+      // Thread-safe
+      // Called in Runtime::allocate_field in runtime.cc
+      // Called in Runtime::allocate_fields in runtime.cc
+      static inline void log_field_creation(Processor p, FieldSpace handle, 
+                                            FieldID fid, bool local)
+      {
+        get_profiler(p).add_msg(LogMsgFieldCreation(handle, fid, local));
+      }
+
+      // Thread-safe
+      // Called in Runtime::create_logical_region in runtime.cc
+      static inline void log_top_region(Processor p, IndexSpace ispace,
+                                        FieldSpace fspace, RegionTreeID tid)
+      {
+        get_profiler(p).add_msg(LogMsgTopRegion(ispace, fspace, tid));
+      }
+
+      //========================================================================
+      // Logger calls for mapping dependence analysis 
+      //========================================================================
+
+      // Thread-safe
+      // Called in MapOp::initialize in legion_ops.cc
+      // Called in CopyOp::initialize in legion_ops.cc
+      // Called in CloseOp::initialize in legion_ops.cc
+      // Called in TaskOp::log_requirement in legion_tasks.cc
+      static inline void log_logical_requirement(Processor p, 
+                                                 UniqueID unique_op_id,
+                                                 unsigned index,
+                                                 bool region,
+                                                 unsigned index_component,
+                                                 unsigned field_component,
+                                                 RegionTreeID tid,
+                                                 PrivilegeMode privilege,
+                                                 CoherenceProperty prop,
+                                                 ReductionOpID redop,
+                                       const std::set<FieldID> &logical_fields)
+      {
+        // TODO: fields are not logged at the moment
+        get_profiler(p).add_msg(LogMsgLogicalRequirement(unique_op_id, index, region, index_component, field_component, tid, privilege, prop, redop));
+      }
+
+      // Thread-safe
+      // Called in RegionTreeNode::register_logical_dependences 
+      //    in region_tree.cc
+      // Called in RegionTreeNode::perform_dependence_checks in region_tree.cc
+      static inline void log_mapping_dependence(Processor p,
+                                                UniqueID parent_context,
+                                                UniqueID previous_id,
+                                                unsigned previous_index,
+                                                UniqueID next_id,
+                                                unsigned next_index,
+                                                DependenceType dep_type)
+      {
+        get_profiler(p).add_msg(LogMsgMappingDependence(parent_context, previous_id, previous_index, next_id, next_index, dep_type));
+      }
+
+      //========================================================================
       // Logger calls for physical dependence analysis
-      static inline void log_task_instance_requirement(unsigned unique_id, unsigned ctx, unsigned gen, unsigned hid, unsigned idx, unsigned index)
+      //========================================================================
+
+      // Thread-safe
+      // Called in SingleTask::launch_task in legion_tasks.cc
+      static inline void log_task_instance_requirement(Processor p,
+                                                       UniqueID unique_id,
+                                                       unsigned index,
+                                                       IndexSpace handle)
       {
-        log_spy(LEVEL_INFO,"Task Instance Requirement %d %d %d %x %d %x", unique_id, ctx, gen, hid, idx, index);
+        get_profiler(p).add_msg(LogMsgTaskInstanceRequirement(unique_id,index, handle));
       }
 
+      // Thread-safe
+      // Called in IndividualTask::perform_mapping in legion_tasks.cc
+      // Called in SliceTask::enumerate_points in legion_tasks.cc
+      static inline void log_task_instance_variant(Processor p,
+                                                   UniqueID unique_op_id,
+                                                   VariantID vid)
+      {
+        get_profiler(p).add_msg(LogMsgTaskInstanceVariant(unique_op_id, vid));
+      }
+
+      //========================================================================
       // Logger calls for events
-      static inline void log_event_dependence(Event one, Event two)
+      //========================================================================
+
+      // Thread-safe
+      // Called in MapOp::trigger_execution in legion_ops.cc
+      // Called in CloseOp::trigger_execution in legion_ops.cc
+      // Called in SingleTask::launch_task in legion_tasks.cc
+      static inline void log_event_dependence(Processor p, 
+                                              Event one, Event two)
       {
         if (one != two)
-          log_spy(LEVEL_INFO,"Event Event %x %d %x %d", one.id, one.gen, two.id, two.gen);
+          get_profiler(p).add_msg(LogMsgEventDependency(one, two));
       }
 
-      static inline void log_event_dependences(const std::set<Event> &preconditions, Event result)
+      // Thread-safe
+      // Called in SingleTask::launch_task in legion_tasks.cc
+      // Called in RegionTreeNode::issue_update_copies in region_tree.cc
+      // Called in ReductionView::perform_reduction in region_tree.cc
+      // Called in InstanceView::add_user in region_tree.cc
+      // Called in ReductionView::add_user in region_tree.cc
+      static inline void log_event_dependences(Processor p,
+                           const std::set<Event> &preconditions, Event result)
       {
         for (std::set<Event>::const_iterator it = preconditions.begin();
               it != preconditions.end(); it++)
         {
-          if (*it != result)
-            log_spy(LEVEL_INFO,"Event Event %x %d %x %d", it->id, it->gen, result.id, result.gen);
+          log_event_dependence(p, *it, result);
         }
       }
 
-      static inline void log_task_events(unsigned hid, unsigned gen, unsigned ctx, unsigned unique_id, bool index_space, unsigned point, 
-                                          Event start_event, Event term_event)
+      // Thread-safe
+      // Called in MapOp::trigger_execution in legion_ops.cc
+      // Called in CloseOp::trigger_execution in legion_ops.cc
+      // Called in SingleTask::launch_task in legion_tasks.cc
+      static inline void log_operation_events(Processor p,
+                                              UniqueID unique_op_id,
+                                              Event start_event,
+                                              Event end_event)
       {
-        log_spy(LEVEL_INFO,"Task Events %x %d %d %d %d %d %x %d %x %d", hid, gen, ctx, unique_id, index_space, point, start_event.id, start_event.gen, term_event.id, term_event.gen);
+        get_profiler(p).add_msg(LogMsgOperationEvents(unique_op_id, start_event, end_event));
       }
 
-      template<int DIM>
-      static inline void log_task_events(unsigned hid, unsigned gen, unsigned ctx, unsigned unique_id, bool index_space, Arrays::Point<DIM> point,
-                                          Event start_event, Event term_event)
-      {
-        int point_id = next_point_id++;
-        char point_buffer[128];
-        point_buffer[0] = '\0';
-        for (int i = 0; i < DIM; i++)
-        {
-          char idx_buffer[128];
-          sprintf(idx_buffer,"%d ", point[i]);
-          strcat(point_buffer,idx_buffer);
-        }
-        log_spy(LEVEL_INFO,"Point Value %d %d %s\n", DIM, point_id, point_buffer);
-        log_spy(LEVEL_INFO,"Point Task Events %x %d %d %d %d %d %x %d %x %d", hid, gen, ctx, unique_id, index_space, point_id, start_event.id, start_event.gen, term_event.id, term_event.gen);
-      }
-
-      static inline void log_index_task_termination(unsigned unique_id, Event term_event)
-      {
-        log_spy(LEVEL_INFO,"Index Termination %d %x %d", unique_id, term_event.id, term_event.gen);
-      }
-
-      static inline void log_copy_operation(unsigned src_manager_id, unsigned dst_manager_id,
-                                            unsigned index_handle, unsigned field_handle, unsigned tree_id,
-                                            Event start_event, Event term_event, const char *mask)
-      {
-        log_spy(LEVEL_INFO,"Copy Events %d %d %x %d %d %x %d %x %d %s", src_manager_id, dst_manager_id,
-          index_handle, field_handle, tree_id, start_event.id, start_event.gen, term_event.id, term_event.gen, mask);
-      }
-
-      static inline void log_reduction_operation(unsigned src_manager_id, unsigned dst_manager_id,
-                                                 unsigned index_handle, unsigned field_handle, unsigned tree_id,
-                                                 Event start_event, Event term_event, unsigned redop, const char *mask)
-      {
-        log_spy(LEVEL_INFO,"Reduce Events %d %d %x %d %d %x %d %x %d %d %s", src_manager_id, dst_manager_id, 
-          index_handle, field_handle, tree_id, start_event.id, start_event.gen, term_event.id, term_event.gen, redop, mask);
-      }
-
-      static inline void log_map_events(unsigned unique_id, Event start_event, Event term_event)
-      {
-        log_spy(LEVEL_INFO, "Map Events %d %x %d %x %d", unique_id, start_event.id, start_event.gen, term_event.id, term_event.gen);
-      }
-
+      //========================================================================
       // Logger calls for physical instances
-      static inline void log_physical_instance(unsigned inst_id, unsigned mem_id, unsigned index_handle, unsigned field_handle, unsigned tree_id)
+      //========================================================================
+
+      // Thread-safe
+      // Called in RegionNode::create_instance in region_tree.cc
+      // Called in RegionNode::create_reduction in region_tree.cc
+      static inline void log_physical_instance(Processor p,
+                                               PhysicalInstance instance,
+                                               Memory memory, 
+                                               IndexSpace index_handle,
+                                               FieldSpace field_handle,
+                                               RegionTreeID tree_id,
+                                               ReductionOpID redop = 0,
+                                               bool fold = true, 
+                                   Domain indirect_domain = Domain::NO_DOMAIN)
       {
-        log_spy(LEVEL_INFO, "Physical Instance %x %x %x %d %d", inst_id, mem_id, index_handle, field_handle, tree_id);
+        get_profiler(p).add_msg(LogMsgPhysicalInstance(instance, memory, index_handle, field_handle, tree_id, redop, fold, indirect_domain));
       }
 
-      static inline void log_instance_manager(unsigned inst_id, unsigned manager_id)
+      // Thread safe
+      // Called in MapOp::trigger_execution in legion_ops.cc
+      // Called in CloseOp::trigger_execution in legion_ops.cc
+      // Called in SingleTask::begin_task in legion_tasks.cc
+      static inline void log_physical_user(Processor p,
+                                           PhysicalInstance instance,
+                                           UniqueID unique_op_id,
+                                           unsigned index)
       {
-        log_spy(LEVEL_INFO, "Instance Manager %x %d", inst_id, manager_id);
+        get_profiler(p).add_msg(LogMsgPhysicalUser(instance, unique_op_id, index));
       }
 
-      static inline void log_physical_reduction(unsigned inst_id, unsigned mem_id, unsigned index_handle, unsigned field_handle, unsigned tree_id, bool fold, unsigned indirect_id = 0)
+      //========================================================================
+      // Logger calls for low-level copy operations
+      //========================================================================
+
+      // Thread-safe
+      // Called in RegionTreeNode::issue_update_copies in region_tree.cc
+      // Called in ReductionView::perform_reduction in region_tree.cc
+      static inline void log_lowlevel_copy(Processor p,
+                                           PhysicalInstance src_instance,
+                                           PhysicalInstance dst_instance,
+                                           IndexSpace index_handle,
+                                           FieldSpace field_handle,
+                                           RegionTreeID tree_id,
+                                           Event start_event,
+                                           Event termination_event,
+                                           const std::set<FieldID> &fields,
+                                           ReductionOpID redop = 0)
       {
-        log_spy(LEVEL_INFO, "Reduction Instance %x %x %x %d %d %d %d", inst_id, mem_id, index_handle, field_handle, tree_id, fold, indirect_id);
+        get_profiler(p).add_msg(LogMsgLowlevelCopy(src_instance, dst_instance, index_handle, field_handle, tree_id, start_event, termination_event, fields, redop));
       }
+    }
+  }
+}
 
-      static inline void log_reduction_manager(unsigned inst_id, unsigned manager_id)
-      {
-        log_spy(LEVEL_INFO, "Reduction Manager %x %d", inst_id, manager_id);
-      }
+#endif // LEGION__LOGGING
 
-      static inline void log_task_user(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned idx, unsigned manager_id)
-      {
-        log_spy(LEVEL_INFO, "Task Instance User %d %d %d %x %d %d", uid, ctx, gen, hid, idx, manager_id);
-      }
+#endif // __LEGION__LOGGING_H__
 
-      static inline void log_mapping_user(unsigned uid, unsigned manager_id)
-      {
-        log_spy(LEVEL_INFO, "Mapping Instance User %d %d", uid, manager_id);
-      }
-
-      // Logger calls for timing information
-      static inline void log_task_execution_information(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned proc_id)
-      {
-        log_spy(LEVEL_INFO, "Execution Information %d %d %d %x %d", uid, ctx, gen, hid, proc_id); 
-      }
-
-      static inline void log_task_begin_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long start_time)
-      {
-        log_spy(LEVEL_INFO, "Begin Task Timing %d %d %d %x %ld", uid, ctx, gen, hid, start_time);
-      }
-
-      static inline void log_task_end_timing(unsigned uid, unsigned ctx, unsigned gen, unsigned hid, unsigned long end_time)
-      {
-        log_spy(LEVEL_INFO, "End Task Timing %d %d %d %x %ld", uid, ctx, gen, hid, end_time);
-      }
-    };
-
-    class TreeStateLogger {
-    public:
-      explicit TreeStateLogger(Processor local_proc);
-      ~TreeStateLogger(void);
-    public:
-      void log(const char *fmt, ...);
-      void down(void);
-      void up(void);
-      void start_block(const char *ftm, ...);
-      void finish_block(void);
-      unsigned get_depth(void) const { return depth; }
-    public:
-      static void capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name, 
-                                unsigned uid, RegionNode *node, ContextID ctx, bool pack, 
-                                bool send, FieldMask capture_mask, FieldMask working_mask);
-      static void capture_state(HighLevelRuntime *rt, unsigned idx, const char *task_name,
-                                unsigned uid, PartitionNode *node, ContextID ctx, 
-                                bool pack, bool send, FieldMask capture_mask, 
-                                FieldMask working_mask);
-      static void capture_state(HighLevelRuntime *rt, const RegionRequirement *req, 
-                                unsigned idx, const char *task_name, unsigned uid,
-                                RegionNode *node, ContextID ctx, bool pre_map, 
-                                bool sanitize, bool closing, 
-                                FieldMask capture_mask, FieldMask working_mask);
-      static void capture_state(HighLevelRuntime *rt, LogicalRegion handle, 
-                                const char *task_name, unsigned uid,
-                                RegionNode *node, ContextID ctx, bool pack, unsigned shift,
-                                FieldMask capture_mask, FieldMask working_mask);
-    private:
-      void println(const char *fmt, va_list args);
-    private:
-      FILE *tree_state_log;
-      char block_buffer[128];
-      unsigned depth;
-    };
-  };
-};
-
-#endif // __LEGION_LOGGING_H__
+// EOF
 

@@ -30,20 +30,53 @@
 #include <map>
 #include <set>
 #include <list>
+#include <deque>
 #include <vector>
 
 #define AUTO_GENERATE_ID   UINT_MAX
-
-#define MAX_FIELDS         2048
-// The folowing fields are used in the FieldMask instantiation of BitMask
+#define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
+#define MAX_FIELDS         2048 // must be divisible by 2^FIELD_SHIFT
+#define FIELD_LOG2         11 // log2(MAX_FIELDS)
+// The folowing macros are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
 #define FIELD_TYPE          uint64_t 
 #define FIELD_SHIFT         6
 #define FIELD_MASK          0x3F
 #define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
+// Some default values 
+
+// The maximum number of processors on a node
+#define MAX_NUM_PROCS           1024
+// Default number of mapper slots
+#define DEFAULT_MAPPER_SLOTS    8
+// Default number of contexts made for each runtime instance
+#define DEFAULT_CONTEXTS        64 
+// Maximum number of sub-tasks per task at a time
+#define DEFAULT_MAX_TASK_WINDOW         1024
+// How many tasks to group together for runtime operations
+#define DEFAULT_MIN_TASKS_TO_SCHEDULE 1
+// Scheduling granularity for how many operations to
+// handle at a time at each stage of the pipeline
+#define DEFAULT_SUPERSCALAR_WIDTH 4
+// The maximum size of active messages sent by the runtime
+// Note this value was picked based on making a tradeoff between
+// latency and bandwidth numbers on both Cray and Infiniband
+// interconnect networks.
+#define DEFAULT_MAX_MESSAGE_SIZE 4096 
+// Maximum number of tasks in logical region node before consolidation
+#define DEFAULT_MAX_FILTER_SIZE         (16*DEFAULT_MIN_TASKS_TO_SCHEDULE) 
 
 namespace LegionRuntime {
+  /**
+   * \struct LegionStaticAssert
+   * Help with static assertions.
+   */
+  template<bool> struct LegionStaticAssert;
+  template<> struct LegionStaticAssert<true> { };
+#define LEGION_STATIC_ASSERT(condition) \
+  do { LegionStaticAssert<(condition)>(); } while (0)
+  
   namespace HighLevel {
     
     enum LegionErrorType {
@@ -122,15 +155,35 @@ namespace LegionRuntime {
       ERROR_NON_DISJOINT_TASK_REGIONS = 72,
       ERROR_INVALID_FIELD_ACCESSOR_PRIVILEGES = 73,
       ERROR_INVALID_PREMAPPED_REGION_LOCATION = 74,
+      ERROR_IDEMPOTENT_MISMATCH = 75,
+      ERROR_INVALID_MAPPER_ID = 76,
+      ERROR_INVALID_TREE_ENTRY = 77,
+      ERROR_SEPARATE_UTILITY_PROCS = 78,
+      ERROR_MAXIMUM_NODES_EXCEEDED = 79,
+      ERROR_MAXIMUM_PROCS_EXCEEDED = 80,
+      ERROR_INVALID_TASK_ID = 81,
+      ERROR_INVALID_MAPPER_DOMAIN_SLICE = 82,
+      ERROR_UNFOLDABLE_REDUCTION_OP = 83,
+      ERROR_INVALID_INLINE_ID = 84,
+      ERROR_ILLEGAL_MUST_PARALLEL_INLINE = 85,
+      ERROR_RETURN_SIZE_MISMATCH = 86,
+      ERROR_ACCESSING_EMPTY_FUTURE = 87,
+      ERROR_ILLEGAL_PREDICATE_FUTURE = 88,
+      ERROR_COPY_REQUIREMENTS_MISMATCH = 89,
+      ERROR_INVALID_COPY_FIELDS_SIZE = 90,
+      ERROR_COPY_SPACE_MISMATCH = 91,
+      ERROR_INVALID_COPY_PRIVILEGE = 92,
+      ERROR_INVALID_PARTITION_COLOR = 93,
     };
 
     // enum and namepsaces don't really get along well
     enum PrivilegeMode {
-      NO_ACCESS  = 0x00000000,
-      READ_ONLY  = 0x00000001,
-      READ_WRITE = 0x00000111,
-      WRITE_ONLY = 0x00000010,
-      REDUCE     = 0x00000100,
+      NO_ACCESS       = 0x00000000,
+      READ_ONLY       = 0x00000001,
+      READ_WRITE      = 0x00000111,
+      WRITE_ONLY      = 0x00000010, // same as WRITE_DISCARD
+      WRITE_DISCARD   = 0x00000010, // same as WRITE_ONLY
+      REDUCE          = 0x00000100,
     };
 
     enum AllocateMode {
@@ -164,121 +217,150 @@ namespace LegionRuntime {
       SIMULTANEOUS_DEPENDENCE = 4,
     };
 
+    enum OpenState {
+      NOT_OPEN            = 0,
+      OPEN_READ_ONLY      = 1,
+      OPEN_READ_WRITE     = 2, // unknown dirty information below
+      OPEN_SINGLE_REDUCE  = 3, // only one open child with reductions below
+      OPEN_MULTI_REDUCE   = 4, // multiple open children with same reduction
+    };
+
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID       = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID   = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      SCHEDULER_ID       = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
-      ENQUEUE_TASK_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
-      STEAL_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      CHILDREN_MAPPED_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
-      FINISH_ID          = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
-      NOTIFY_START_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
-      NOTIFY_MAPPED_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
-      NOTIFY_FINISH_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      ADVERTISEMENT_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
-      FINALIZE_DEL_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
-      TERMINATION_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+9),
-      CUSTOM_PREDICATE_ID= (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+10),
-      TASK_ID_AVAILABLE  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+11),
+      INIT_FUNC_ID         = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_FUNC_ID     = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      SCHEDULER_ID         = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
+      MESSAGE_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
+      POST_END_TASK_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
+      COPY_COMPLETE_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
+      FENCE_COMPLETE_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
+      CLOSE_COMPLETE_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
+      RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
+      DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
+      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
     };
 
     // Forward declarations for user level objects
     // legion.h
+    class FieldSpace;
     class LogicalRegion;
     class LogicalPartition;
-    class FieldSpace;
-    class Task;
-    class TaskVariantCollection;
-    class Future;
-    class FutureMap;
-    class IndexSpaceRequirement;
-    class FieldSpaceRequirement;
-    class RegionRequirement;
-    template<int NUM_PRIV, int NUM_INST> class SizedRegionRequirement;
-    class TaskArgument;
-    class ArgumentMap;
-    class FutureMap;
-    class PhysicalRegion;
     class IndexAllocator;
     class FieldAllocator;
+    class TaskArgument;
+    class ArgumentMap;
+    class Reservation;
+    class PhaseBarrier;
+    struct RegionRequirement;
+    struct IndexSpaceRequirement;
+    struct FieldSpaceRequirement;
+    struct ReservationRequest;
+    struct TaskLauncher;
+    struct IndexLauncher;
+    struct InlineLauncher;
+    struct CopyLauncher;
+    class Future;
+    class FutureMap;
+    class Predicate;
+    class PhysicalRegion;
     class IndexIterator;
+    class Mappable;
+    class Task;
+    class Copy;
+    class Inline;
+    class TaskVariantCollection;
+    class Mapper; 
     template<typename T> struct ColoredPoints; 
-    class Structure;
+    struct InputArgs;
     class HighLevelRuntime;
-    class Mapper;
 
     // Forward declarations for compiler level objects
     // legion.h
     class ColoringSerializer;
     class DomainColoringSerializer;
 
-    // Forward declarations for runtime level objects
+    // Forward declarations for wrapper tasks
     // legion.h
-    class Lockable;
-    class Collectable;
-    class Notifiable;
-    class Waitable;
-    class Mappable; // For things that need to have a mapper and lock selelcted 
-    class PredicateImpl;
-    class FutureImpl;
-    class FutureMapImpl;
-    class ArgumentMapImpl;
-    class ArgumentMapStore;
-    class PhysicalRegionImpl;
-    class IndexAllocatorImpl;
-    class AnyPoint;
+    class LegionTaskWrapper;
+    class LegionSerialization;
 
-    // Forward declarations for runtime level predicates
-    // in legion.cc
-    class PredicateAnd;
-    class PredicateOr;
-    class PredicateNot;
-    class PredicateFuture;
-    class PredicateCustom;
+    // Forward declarations for runtime level objects
+    // runtime.h
+    class Collectable;
+    class ArgumentMapStore;
+    class ProcessorManager;
+    class Runtime;
 
     // legion_ops.h
-    class GeneralizedOperation;
-    class EpochOperation;
-    class DeferredOperation;
-    class TaskContext;
-    class MappingOperation;
-    class UnmapOperation;
-    class DeletionOperation;
-    class CreationOperation;
-    class StartOperation;
-    class CompleteOperation;
+    class Operation;
+    class SpeculativeOp;
+    class MapOp;
+    class CopyOp;
+    class FenceOp;
+    class DeletionOp;
+    class CloseOp;
+    class FuturePredOp;
+    class NotPredOp;
+    class AndPredOp;
+    class OrPredOp;
+    class TaskOp;
+
+    // legion_tasks.h
     class SingleTask;
     class MultiTask;
+    class IndividualTask;
+    class PointTask;
+    class WrapperTask;
+    class RemoteTask;
+    class InlineTask;
     class IndexTask;
     class SliceTask;
-    class PointTask;
-    class IndividualTask;
+    class RemoteTask;
 
     // region_tree.h
     class RegionTreeForest;
+    class IndexTreeNode;
     class IndexSpaceNode;
     class IndexPartNode;
     class FieldSpaceNode;
     class RegionTreeNode;
     class RegionNode;
     class PartitionNode;
+
+    class RegionTreeContext;
+    class RegionTreePath;
+    class PathTraverser;
+    class NodeTraverser;
+    class LogicalRegistrar;
+    class LogicalInitializer;
+    class LogicalInvalidator;
+    class PremapTraverser;
+    class MappingTraverser;
+
+    class LogicalState;
+    class PhysicalVersion;
+
+    class DistributedCollectable;
+    class HierarchicalCollectable;
     class PhysicalManager; // base class for instance and reduction
     class PhysicalView; // base class for instance and reduciton
     class InstanceManager;
     class InstanceKey;
     class InstanceView;
+    class MappingRef;
     class InstanceRef;
     class ReductionManager;
     class ListReductionManager;
     class FoldReductionManager;
     class ReductionView;
+
     class RegionAnalyzer;
     class RegionMapper;
 
+    struct RegionUsage;
+
     struct EscapedUser;
     struct EscapedCopy;
-    struct RegionUsage;
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
@@ -291,7 +373,11 @@ namespace LegionRuntime {
     class Serializer;
     class Deserializer;
     template<typename T> class Fraction;
-    template<typename T, unsigned int MAX> class BitMask;
+    template<typename T, unsigned int MAX, 
+             unsigned SHIFT, unsigned MASK> class BitMask;
+    template<typename T, unsigned int MAX,
+             unsigned SHIFT, unsigned MASK> class TLBitMask;
+    template<typename T, unsigned LOG2MAX> class BitPermutation;
 
     // legion_logging.h
     class TreeStateLogger;
@@ -316,9 +402,7 @@ namespace LegionRuntime {
     typedef unsigned int Color;
     typedef unsigned int IndexPartition;
     typedef unsigned int FieldID;
-    static const FieldID FIELDID_DYNAMIC = UINT_MAX;
     typedef unsigned int MapperID;
-    typedef unsigned int UniqueID;
     typedef unsigned int ContextID;
     typedef unsigned int InstanceID;
     typedef unsigned int FieldSpaceID;
@@ -326,42 +410,64 @@ namespace LegionRuntime {
     typedef unsigned int TypeHandle;
     typedef unsigned int ProjectionID;
     typedef unsigned int RegionTreeID;
-    typedef unsigned int UniqueManagerID;
+    typedef unsigned int DistributedID;
+    typedef unsigned int AddressSpaceID;
     typedef unsigned long MappingTagID;
     typedef unsigned long VariantID;
+    typedef unsigned long long UniqueID;
+    typedef unsigned long long VersionID;
     typedef Processor::TaskFuncID TaskID;
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
-    typedef void (*RegistrationCallbackFnptr)(Machine *machine, HighLevelRuntime *rt, const std::set<Processor> &local_procs);
-    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, const DomainPoint&, HighLevelRuntime *rt);
-    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, const DomainPoint&, HighLevelRuntime *rt);
-    typedef bool (*PredicateFnptr)(const void*, size_t, const std::vector<Future> futures);
-    typedef std::map<TypeHandle,Structure> TypeTable;
-    typedef std::map<ProjectionID,RegionProjectionFnptr> RegionProjectionTable;
-    typedef std::map<ProjectionID,PartitionProjectionFnptr> PartitionProjectionTable;
-    typedef BitMask<FIELD_TYPE, MAX_FIELDS> FieldMask;
+    typedef void (*RegistrationCallbackFnptr)(Machine *machine, 
+        HighLevelRuntime *rt, const std::set<Processor> &local_procs);
+    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
+        const DomainPoint&, HighLevelRuntime *rt);
+    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
+        const DomainPoint&, HighLevelRuntime *rt);
+    typedef bool (*PredicateFnptr)(const void*, size_t, 
+        const std::vector<Future> futures);
+    typedef std::map<ProjectionID,RegionProjectionFnptr> 
+      RegionProjectionTable;
+    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
+      PartitionProjectionTable;
+    typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
+    typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
+      Context,HighLevelRuntime*,void*&,size_t&);
+    //typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                \
     friend class HighLevelRuntime;                \
-    friend class GeneralizedOperation;            \
-    friend class EpochOperation;                  \
-    friend class DeferredOperation;               \
-    friend class MappingOperation;                \
-    friend class UnmapOperation;                  \
-    friend class DeletionOperation;               \
-    friend class CreationOperation;               \
-    friend class StartOperation;                  \
-    friend class CompleteOperation;               \
-    friend class TaskContext;                     \
+    friend class Runtime;                         \
+    friend class FuturePredicate;                 \
+    friend class NotPredicate;                    \
+    friend class AndPredicate;                    \
+    friend class OrPredicate;                     \
+    friend class Resolver;                        \
+    friend class ProcessorManager;                \
+    friend class Operation;                       \
+    friend class SpeculativeOp;                   \
+    friend class MapOp;                           \
+    friend class CopyOp;                          \
+    friend class FenceOp;                         \
+    friend class FutureOp;                        \
+    friend class FuturePredOp;                    \
+    friend class DeletionOp;                      \
+    friend class CloseOp;                         \
+    friend class NotPredOp;                       \
+    friend class AndPredOp;                       \
+    friend class OrPredOp;                        \
+    friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \
     friend class IndividualTask;                  \
     friend class PointTask;                       \
     friend class IndexTask;                       \
     friend class SliceTask;                       \
-    friend class RegionRequirement;               \
     friend class RegionTreeForest;                \
     friend class IndexSpaceNode;                  \
     friend class IndexPartNode;                   \

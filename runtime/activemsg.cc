@@ -178,8 +178,8 @@ public:
 
 	  gasnet_hsl_unlock(&mutex);
 #ifdef DEBUG_LMB
-	  printf("LMB: sending %zd bytes to node %d, [%p,%p)\n",
-		 hdr->payload_size, peer,
+	  printf("LMB: sending %zd bytes %d->%d, [%p,%p)\n",
+		 hdr->payload_size, gasnet_mynode(), peer,
 		 dest_ptr, dest_ptr + hdr->payload_size);
 #endif
 	  send_long(hdr, dest_ptr);
@@ -199,8 +199,8 @@ public:
 	  gasnet_hsl_unlock(&mutex);
 
 #ifdef DEBUG_LMB
-	  printf("LMB: flipping buffer %d for node %d, [%p,%p), count=%d\n",
-		 flip_buffer, peer, lmb_w_bases[flip_buffer],
+	  printf("LMB: flipping buffer %d for %d->%d, [%p,%p), count=%d\n",
+		 flip_buffer, gasnet_mynode(), peer, lmb_w_bases[flip_buffer],
 		 lmb_w_bases[flip_buffer]+LMB_SIZE, flip_count);
 #endif
 
@@ -270,8 +270,8 @@ public:
     //assert(r_buffer >= 0);
 
 #ifdef DEBUG_LMB
-    printf("LMB: received %p from %d in buffer %d, [%p, %p)\n",
-	   ptr, peer, r_buffer, lmb_r_bases[r_buffer],
+    printf("LMB: received %p for %d->%d in buffer %d, [%p, %p)\n",
+	   ptr, peer, gasnet_mynode(), r_buffer, lmb_r_bases[r_buffer],
 	   lmb_r_bases[r_buffer] + LMB_SIZE);
 #endif
 
@@ -281,8 +281,8 @@ public:
     lmb_r_counts[r_buffer]++;
     if(lmb_r_counts[r_buffer] == 0) {
 #ifdef DEBUG_LMB
-      printf("LMB: acking flip of buffer %d for node %d, [%p,%p)\n",
-	     r_buffer, peer, lmb_r_bases[r_buffer],
+      printf("LMB: acking flip of buffer %d for %d->%d, [%p,%p)\n",
+	     r_buffer, peer, gasnet_mynode(), lmb_r_bases[r_buffer],
 	     lmb_r_bases[r_buffer]+LMB_SIZE);
 #endif
 
@@ -369,8 +369,8 @@ public:
   void handle_flip_request(int buffer, int count)
   {
 #ifdef DEBUG_LMB
-    printf("LMB: received flip of buffer %d for node %d, [%p,%p), count=%d\n",
-	   buffer, peer, lmb_r_bases[buffer],
+    printf("LMB: received flip of buffer %d for %d->%d, [%p,%p), count=%d\n",
+	   buffer, peer, gasnet_mynode(), lmb_r_bases[buffer],
 	   lmb_r_bases[buffer]+LMB_SIZE, count);
 #endif
 
@@ -378,8 +378,8 @@ public:
     lmb_r_counts[buffer] -= count;
     if(lmb_r_counts[buffer] == 0) {
 #ifdef DEBUG_LMB
-      printf("LMB: acking flip of buffer %d for node %d, [%p,%p)\n",
-	     buffer, peer, lmb_r_bases[buffer],
+      printf("LMB: acking flip of buffer %d for %d->%d, [%p,%p)\n",
+	     buffer, peer, gasnet_mynode(), lmb_r_bases[buffer],
 	     lmb_r_bases[buffer]+LMB_SIZE);
 #endif
 
@@ -397,8 +397,8 @@ public:
   void handle_flip_ack(int buffer)
   {
 #ifdef DEBUG_LMB
-    printf("LMB: received flip ack of buffer %d for node %d, [%p,%p)\n",
-	   buffer, peer, lmb_w_bases[buffer],
+    printf("LMB: received flip ack of buffer %d for %d->%d, [%p,%p)\n",
+	   buffer, gasnet_mynode(), peer, lmb_w_bases[buffer],
 	   lmb_w_bases[buffer]+LMB_SIZE);
 #endif
 
@@ -595,6 +595,48 @@ protected:
 			    hdr->payload, msg_size, dest_ptr,
 			    hdr->args[0], hdr->args[1], hdr->args[2],
 			    hdr->args[3], hdr->args[4], hdr->args[5]);
+      break;
+    case 8:
+      gasnet_AMRequestLong8(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7]);
+      break;
+    case 10:
+      gasnet_AMRequestLong10(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9]);
+      break;
+    case 12:
+      gasnet_AMRequestLong12(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10], hdr->args[11]);
+      break;
+    case 14:
+      gasnet_AMRequestLong14(peer, hdr->msgid,
+			    hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10], hdr->args[11],
+			    hdr->args[12], hdr->args[13]);
+      break;
+    case 16:
+      gasnet_AMRequestLong16(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10], hdr->args[11],
+                            hdr->args[12], hdr->args[13], hdr->args[14],
+                            hdr->args[15]);
       break;
 
     default:

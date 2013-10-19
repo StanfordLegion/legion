@@ -16,6 +16,7 @@
 
 #include "lowlevel.h"
 #include "accessor.h"
+#include "legion_logging.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -416,7 +417,7 @@ namespace LegionRuntime {
         // Return a barrier for this EventImplementation
         Barrier get_barrier(unsigned expected_arrivals);
         // Alter the arrival count for the barrier
-        void alter_arrival_count(int delta);
+        Barrier alter_arrival_count(int delta);
     private: 
 	bool in_use;
 	unsigned sources;
@@ -441,7 +442,8 @@ namespace LegionRuntime {
         // For creation of normal processors when there is no utility processors
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table, 
                       Processor p, size_t stacksize, bool return_finish = false) 
-          : init_bar(init), task_table(table), proc(p), utility_proc(this),
+          : init_bar(init), task_table(table), proc(p), 
+            proc_kind(Processor::LOC_PROC), utility_proc(this),
             has_scheduler(table.find(Processor::TASK_ID_PROCESSOR_IDLE) != table.end()),
             is_utility_proc(true), return_on_finish(return_finish), remaining_stops(0),
             scheduler_invoked(false), util_shutdown(true)
@@ -457,7 +459,8 @@ namespace LegionRuntime {
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table,
                       Processor p, size_t stacksize, ProcessorImpl *util, bool return_finish = false)
           : init_bar(init), task_table(table), proc(p), 
-            utility(util->get_utility_processor()), utility_proc(util), 
+            utility(util->get_utility_processor()), 
+            proc_kind(Processor::LOC_PROC), utility_proc(util), 
             has_scheduler(table.find(Processor::TASK_ID_PROCESSOR_IDLE) != table.end()),
             is_utility_proc(false), return_on_finish(return_finish), remaining_stops(0),
             scheduler_invoked(false), util_shutdown(false)
@@ -469,7 +472,8 @@ namespace LegionRuntime {
         // For the creation of explicit utility processors
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table,
                       Processor p, size_t stacksize, unsigned num_owners, bool return_finish = false)
-          : init_bar(init), task_table(table), proc(p), utility_proc(this),
+          : init_bar(init), task_table(table), proc(p), 
+            proc_kind(Processor::UTIL_PROC), utility_proc(this),
             has_scheduler(table.find(Processor::TASK_ID_PROCESSOR_IDLE) != table.end()),
             is_utility_proc(true), return_on_finish(return_finish), remaining_stops(num_owners),
             scheduler_invoked(false), util_shutdown(true)
@@ -492,6 +496,7 @@ namespace LegionRuntime {
     public:
         // Operations for utility processors
         Processor get_utility_processor(void) const;
+        Processor::Kind get_proc_kind(void) const { return proc_kind; }
         void release_user(void);
         void utility_finish(void);
         const std::set<Processor>& get_utility_users(void) const;
@@ -527,6 +532,7 @@ namespace LegionRuntime {
 	Processor::TaskIDTable task_table;
 	Processor proc;
         Processor utility;
+        const Processor::Kind proc_kind;
         ProcessorImpl *utility_proc;
 	std::list<TaskDesc> ready_queue;
 	std::list<TaskDesc> waiting_queue;
@@ -861,7 +867,7 @@ namespace LegionRuntime {
       return result;
     }
 
-    void EventImpl::alter_arrival_count(int delta)
+    Barrier EventImpl::alter_arrival_count(int delta)
     {
 #ifdef DEBUG_LOW_LEVEL
       assert(in_use);
@@ -873,6 +879,10 @@ namespace LegionRuntime {
 #endif
       sources += delta;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      Barrier result;
+      result.id = current.id;
+      result.gen = current.gen;
+      return result;
     }
 
     ////////////////////////////////////////////////////////
@@ -907,7 +917,8 @@ namespace LegionRuntime {
 
     void Barrier::destroy_barrier(void)
     {
-      // do nothing for now
+      // TODO: Implement barrier destruction
+      assert(false);
     }
 
     Barrier Barrier::advance_barrier(void) const
@@ -1484,7 +1495,7 @@ namespace LegionRuntime {
 	{
 		// Try registering this processor with the event
 		EventImpl *wait_impl = Runtime::get_runtime()->get_event_impl(wait_on);
-		if (!wait_impl->register_dependent(this, wait_on.gen))
+		if (!wait_impl->register_dependent(this, wait_on.gen, wait_on.id))
 		{
 #ifdef DEBUG_PRINT
 			DPRINT2("Registering task %d on processor %d ready queue\n",func_id,proc.id);
@@ -1709,16 +1720,7 @@ namespace LegionRuntime {
     {
         // Look through the waiting queue, to see if any tasks
         // have been woken up	
-        for (std::list<TaskDesc>::iterator it = waiting_queue.begin();
-              it != waiting_queue.end(); it++)
-        {
-          if (it->wait.has_triggered())
-          {
-            ready_queue.push_back(*it);
-            waiting_queue.erase(it);
-            break;
-          }	
-        }	
+        	
         // If we don't have any work to do, check to see
         // if we can run the idle task.  Also if we're the utility
         // processor, and we don't have anything to do then try
@@ -1855,6 +1857,21 @@ namespace LegionRuntime {
 	// We're not sure which task is ready, but at least one of them is
 	// so wake up the processor thread if it is waiting
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+        // The trigger handle is the ID of the event we were
+        // waiting on.  Move any tasks in the waiting queue
+        // waiting on that event over to the ready queue
+        // and then wake up the processor.
+        for (std::list<TaskDesc>::iterator it = waiting_queue.begin();
+              it != waiting_queue.end(); /*nothing*/)
+        {
+          if ((it->wait.id == handle) && it->wait.has_triggered())
+          {
+            ready_queue.push_back(*it);
+            it = waiting_queue.erase(it);
+          }	
+          else
+            it++;
+        }
 	PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
@@ -2324,6 +2341,11 @@ namespace LegionRuntime {
 
 	  virtual void trigger(unsigned count = 1, TriggerHandle handle = 0)
 	  {
+#ifdef LEGION_LOGGING
+            LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                          Machine::get_executing_processor(),
+                                          done_event->get_event(), COPY_READY);
+#endif
 	    perform_copy_operation();
             // Trigger the done event if it exists when we're done
             // Hold the lock when reading done event since we need to make
@@ -2341,6 +2363,7 @@ namespace LegionRuntime {
 	  Event register_copy(Event wait_on)
 	  {
             Event result = Event::NO_EVENT;
+            EventImpl *done_clone = NULL;
 	    if (wait_on.exists()) {
 	      // Try registering this as a triggerable with the event	
 	      EventImpl *event_impl = Runtime::get_runtime()->get_event_impl(wait_on);
@@ -2355,11 +2378,25 @@ namespace LegionRuntime {
                 PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
                 return result;
 	      }
+              done_clone = done_event;
               PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
 	    }
+#ifdef LEGION_LOGGING
+            LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                          Machine::get_executing_processor(),
+                                          done_event->get_event(), COPY_INIT);
+#endif
 
 	    // either there was no wait event or it has already fired
 	    perform_copy_operation();
+            if (done_clone)
+            {
+#ifdef LEGION_LOGGING
+              if (!result.exists())
+                result = done_clone->get_event();
+#endif
+              done_clone->trigger();
+            }
             // We're done, so we can free ourselves
             delete this;
             return result;
@@ -3148,8 +3185,8 @@ namespace LegionRuntime {
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 	IndexSpace::Impl *r = Runtime::get_runtime()->get_free_metadata(num_elmts);	
-	log_region(LEVEL_INFO, "index space created: id=%x num=%zd",
-		   r->get_metadata().id, num_elmts);
+	//log_region(LEVEL_INFO, "index space created: id=%x num=%zd",
+        //		   r->get_metadata().id, num_elmts);
 	return r->get_metadata();
     }
 
@@ -3158,8 +3195,8 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       IndexSpace::Impl *par = Runtime::get_runtime()->get_metadata_impl(parent);
       IndexSpace::Impl *r = Runtime::get_runtime()->get_free_metadata(par, mask);
-      log_region(LEVEL_INFO, "index space created: id=%x parent=%x",
-		 r->get_metadata().id, parent.id);
+      //log_region(LEVEL_INFO, "index space created: id=%x parent=%x",
+      //		 r->get_metadata().id, parent.id);
       return r->get_metadata();
     }
 
@@ -3833,6 +3870,11 @@ namespace LegionRuntime {
     void IndexSpace::Impl::CopyOperation::perform_copy_operation(void)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY); 
+#ifdef LEGION_LOGGING
+      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                    Machine::get_executing_processor(),
+                                    done_event->get_event(), COPY_BEGIN);
+#endif
 
       if (redop_id == 0)
       {
@@ -3875,6 +3917,11 @@ namespace LegionRuntime {
           }
         }
       }
+#ifdef LEGION_LOGGING
+      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                      Machine::get_executing_processor(),
+                                      done_event->get_event(), COPY_END);
+#endif
     }
 
     Event IndexSpace::Impl::copy(RegionInstance src_inst, RegionInstance dst_inst, size_t elem_size,
@@ -3894,10 +3941,17 @@ namespace LegionRuntime {
 				 Domain domain, Event wait_on,
 				 ReductionOpID redop_id /*= 0*/, bool red_fold /*= false*/)
     {
+      EventImpl *done_event = NULL;
+#ifdef LEGION_LOGGING
+      done_event = Runtime::get_runtime()->get_free_event(); 
+      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
+                                      Machine::get_executing_processor(),
+                                      done_event->get_event(), COPY_INIT);
+#endif
       CopyOperation *co = new CopyOperation(srcs, dsts, 
 					    domain, //get_element_mask(), get_element_mask(),
 					    redop_id, red_fold,
-					    0);
+					    done_event);
       return co->register_copy(wait_on);
     }
 
@@ -4248,7 +4302,7 @@ namespace LegionRuntime {
           void *result;
           PTHREAD_SAFE_CALL(pthread_join(other_threads[id],&result));
       }
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
       Logger::finalize();
 #endif
       // Once we're done with this, then we can exit
@@ -4280,7 +4334,7 @@ namespace LegionRuntime {
 
     Processor::Kind Machine::get_processor_kind(Processor p) const
     {
-	return Processor::LOC_PROC;
+        return Runtime::get_runtime()->get_processor_impl(p)->get_proc_kind();        
     }
 
     Memory::Kind Machine::get_memory_kind(Memory m) const
@@ -4327,8 +4381,19 @@ namespace LegionRuntime {
                                       Memory restrict_mem1 /*= Memory::NO_MEMORY*/,
                                       Memory restrict_mem2 /*= Memory::NO_MEMORY*/)
     {
-      int count = 0;
+      // Handle the case for same memories
+      if (restrict_mem1.exists() && (restrict_mem1 == restrict_mem2))
+      {
+        MemoryMemoryAffinity affinity;
+        affinity.m1 = restrict_mem1;
+        affinity.m2 = restrict_mem1;
+        affinity.bandwidth = 100;
+        affinity.latency = 1;
+        result.push_back(affinity);
+        return 1;
+      }
 
+      int count = 0;
       for (std::vector<Machine::MemoryMemoryAffinity>::const_iterator it =
             mem_mem_affinities.begin(); it != mem_mem_affinities.end(); it++)
       {
@@ -4668,7 +4733,7 @@ namespace LegionRuntime {
 
   };
 
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
   /*static*/ void Logger::finalize(void)
   {
     // Flush the buffer
@@ -4683,14 +4748,14 @@ namespace LegionRuntime {
   // Machine specific implementation of logvprintf
   /*static*/ void Logger::logvprintf(LogLevel level, int category, const char *fmt, va_list args)
   {
-    char buffer[200];
+    char buffer[400];
     unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
     sprintf(buffer, "[%d - %lx] {%s}{%s}: ",
             0, /*pthread_self()*/long(*local_proc_id), Logger::stringify(level), Logger::get_categories_by_id()[category].c_str());
     int len = strlen(buffer);
-    vsnprintf(buffer+len, 199-len, fmt, args);
+    vsnprintf(buffer+len, 399-len, fmt, args);
     strcat(buffer, "\n");
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
     // Update the length to reflect the newline character
     len = strlen(buffer);
     long long loc = __sync_fetch_and_add(get_logging_location(),len);

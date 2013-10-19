@@ -24,14 +24,14 @@ namespace LegionRuntime {
        * Machine Query Interface
        **************************/
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MachineQueryInterface::MachineQueryInterface(Machine *m)
         : machine(m), global_memory(Memory::NO_MEMORY) { }
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       Memory MachineQueryInterface::find_global_memory(void)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
         if (global_memory.exists())
           return global_memory;
@@ -39,9 +39,10 @@ namespace LegionRuntime {
         return global_memory;
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ Memory MachineQueryInterface::find_global_memory(Machine *machine)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_global_memory(
+                                                              Machine *machine)
+      //------------------------------------------------------------------------
       {
         Memory global_memory = Memory::NO_MEMORY;
         const std::set<Memory> &all_memories = machine->get_all_memories();
@@ -56,11 +57,13 @@ namespace LegionRuntime {
         }
         // Otherwise check to see if there is a memory that is visible
         // to all of the processors
-        const std::set<Processor> &all_processors = machine->get_all_processors();
+        const std::set<Processor> &all_processors = 
+                                          machine->get_all_processors();
         for (std::set<Memory>::const_iterator mit = all_memories.begin();
               mit != all_memories.end(); mit++)
         {
-          const std::set<Processor> &vis_processors = machine->get_shared_processors(*mit);
+          const std::set<Processor> &vis_processors = 
+                                  machine->get_shared_processors(*mit);
           if (vis_processors.size() == all_processors.size())
           {
             global_memory = *mit;
@@ -71,12 +74,13 @@ namespace LegionRuntime {
         return global_memory;
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       void MachineQueryInterface::find_memory_stack(Processor proc,
                           std::vector<Memory> &stack, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
-        std::map<Processor,std::vector<Memory> >::iterator finder = proc_mem_stacks.find(proc);
+        std::map<Processor,std::vector<Memory> >::iterator finder = 
+                                                  proc_mem_stacks.find(proc);
         if (finder != proc_mem_stacks.end())
         {
           stack = finder->second;
@@ -87,25 +91,28 @@ namespace LegionRuntime {
         MachineQueryInterface::find_memory_stack(machine, proc, stack, latency); 
         proc_mem_stacks[proc] = stack;
         if (!latency)
-          MachineQueryInterface::sort_memories(machine, proc, proc_mem_stacks[proc], latency);
+          MachineQueryInterface::sort_memories(machine, proc, 
+                                               proc_mem_stacks[proc], latency);
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, Processor proc,
-                                                          std::vector<Memory> &stack, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, 
+                                                               Processor proc,
+                                      std::vector<Memory> &stack, bool latency)
+      //------------------------------------------------------------------------
       {
         const std::set<Memory> &visible = machine->get_visible_memories(proc);
         stack.insert(stack.end(),visible.begin(),visible.end());
         MachineQueryInterface::sort_memories(machine, proc, stack, latency);
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       void MachineQueryInterface::find_memory_stack(Memory mem,
                           std::vector<Memory> &stack, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
-        std::map<Memory,std::vector<Memory> >::iterator finder = mem_mem_stacks.find(mem);
+        std::map<Memory,std::vector<Memory> >::iterator finder = 
+                                                      mem_mem_stacks.find(mem);
         if (finder != mem_mem_stacks.end())
         {
           stack = finder->second;
@@ -116,37 +123,44 @@ namespace LegionRuntime {
         MachineQueryInterface::find_memory_stack(machine, mem, stack, latency); 
         mem_mem_stacks[mem] = stack;
         if (!latency)
-          MachineQueryInterface::sort_memories(machine, mem, mem_mem_stacks[mem], latency);
+          MachineQueryInterface::sort_memories(machine, mem, 
+                                               mem_mem_stacks[mem], latency);
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, Memory mem,
-                                                          std::vector<Memory> &stack, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, 
+                                                               Memory mem,
+                                      std::vector<Memory> &stack, bool latency)
+      //------------------------------------------------------------------------
       {
         const std::set<Memory> &visible = machine->get_visible_memories(mem);
         stack.insert(stack.end(),visible.begin(),visible.end());
         MachineQueryInterface::sort_memories(machine, mem, stack, latency);
       }
 
-      //--------------------------------------------------------------------------------------------
-      Memory MachineQueryInterface::find_memory_kind(Processor proc, Memory::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Memory MachineQueryInterface::find_memory_kind(Processor proc, 
+                                                     Memory::Kind kind)
+      //------------------------------------------------------------------------
       {
         std::pair<Processor,Memory::Kind> key(proc,kind);
-        std::map<std::pair<Processor,Memory::Kind>,Memory>::const_iterator finder = proc_mem_table.find(key);
+        std::map<std::pair<Processor,Memory::Kind>,Memory>::const_iterator 
+          finder = proc_mem_table.find(key);
         if (finder != proc_mem_table.end())
           return finder->second;
-        Memory result = MachineQueryInterface::find_memory_kind(machine, proc, kind);
+        Memory result = MachineQueryInterface::find_memory_kind(machine, 
+                                                                proc, kind);
         proc_mem_table[key] = result;
         return result;
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ Memory MachineQueryInterface::find_memory_kind(Machine *machine, Processor proc, Memory::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_memory_kind(
+                            Machine *machine, Processor proc, Memory::Kind kind)
+      //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible_memories = machine->get_visible_memories(proc);
+        const std::set<Memory> &visible_memories = 
+                                            machine->get_visible_memories(proc);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
         {
@@ -156,24 +170,29 @@ namespace LegionRuntime {
         return Memory::NO_MEMORY;
       }
 
-      //--------------------------------------------------------------------------------------------
-      Memory MachineQueryInterface::find_memory_kind(Memory mem, Memory::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Memory MachineQueryInterface::find_memory_kind(Memory mem, 
+                                                     Memory::Kind kind)
+      //------------------------------------------------------------------------
       {
         std::pair<Memory,Memory::Kind> key(mem,kind);
-        std::map<std::pair<Memory,Memory::Kind>,Memory>::const_iterator finder = mem_mem_table.find(key);
+        std::map<std::pair<Memory,Memory::Kind>,Memory>::const_iterator 
+          finder = mem_mem_table.find(key);
         if (finder != mem_mem_table.end())
           return finder->second;
-        Memory result = MachineQueryInterface::find_memory_kind(machine, mem, kind); 
+        Memory result = MachineQueryInterface::find_memory_kind(machine, 
+                                                                mem, kind); 
         mem_mem_table[key] = result;
         return result;
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ Memory MachineQueryInterface::find_memory_kind(Machine *machine, Memory mem, Memory::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ Memory MachineQueryInterface::find_memory_kind(
+                                Machine *machine, Memory mem, Memory::Kind kind)
+      //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible_memories = machine->get_visible_memories(mem);
+        const std::set<Memory> &visible_memories = 
+                                        machine->get_visible_memories(mem);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
               it != visible_memories.end(); it++)
         {
@@ -183,24 +202,29 @@ namespace LegionRuntime {
         return Memory::NO_MEMORY;
       }
 
-      //--------------------------------------------------------------------------------------------
-      Processor MachineQueryInterface::find_processor_kind(Memory mem, Processor::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Processor MachineQueryInterface::find_processor_kind(Memory mem, 
+                                                           Processor::Kind kind)
+      //------------------------------------------------------------------------
       {
         std::pair<Memory,Processor::Kind> key(mem,kind);
-        std::map<std::pair<Memory,Processor::Kind>,Processor>::const_iterator finder = mem_proc_table.find(key);
+        std::map<std::pair<Memory,Processor::Kind>,Processor>::const_iterator 
+          finder = mem_proc_table.find(key);
         if (finder != mem_proc_table.end())
           return finder->second;
-        Processor result = MachineQueryInterface::find_processor_kind(machine, mem, kind); 
+        Processor result = MachineQueryInterface::find_processor_kind(machine, 
+                                                                    mem, kind);
         mem_proc_table[key] = result;
         return result;
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ Processor MachineQueryInterface::find_processor_kind(Machine *machine, Memory mem, Processor::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ Processor MachineQueryInterface::find_processor_kind(
+                            Machine *machine, Memory mem, Processor::Kind kind)
+      //------------------------------------------------------------------------
       {
-        const std::set<Processor> &visible_procs = machine->get_shared_processors(mem);
+        const std::set<Processor> &visible_procs = 
+          machine->get_shared_processors(mem);
         for (std::set<Processor>::const_iterator it = visible_procs.begin();
               it != visible_procs.end(); it++)
         {
@@ -210,11 +234,13 @@ namespace LegionRuntime {
         return Processor::NO_PROC;
       }
 
-      //--------------------------------------------------------------------------------------------
-      const std::set<Processor>& MachineQueryInterface::filter_processors(Processor::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      const std::set<Processor>& MachineQueryInterface::filter_processors(
+                                                          Processor::Kind kind)
+      //------------------------------------------------------------------------
       {
-        std::map<Processor::Kind,std::set<Processor> >::const_iterator finder = proc_kinds.find(kind); 
+        std::map<Processor::Kind,std::set<Processor> >::const_iterator 
+          finder = proc_kinds.find(kind); 
         if (finder != proc_kinds.end())
           return finder->second;
         std::set<Processor> &result = proc_kinds[kind];
@@ -222,10 +248,11 @@ namespace LegionRuntime {
         return result;
       }
       
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_processors(Machine *machine, Processor::Kind kind,
-                                                                        std::set<Processor> &procs)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::filter_processors(Machine *machine, 
+                                                           Processor::Kind kind,
+                                                     std::set<Processor> &procs)
+      //------------------------------------------------------------------------
       {
         if (procs.empty())
         {
@@ -254,11 +281,13 @@ namespace LegionRuntime {
         }
       }
 
-      //--------------------------------------------------------------------------------------------
-      const std::set<Memory>& MachineQueryInterface::filter_memories(Memory::Kind kind)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      const std::set<Memory>& MachineQueryInterface::filter_memories(
+                                                              Memory::Kind kind)
+      //------------------------------------------------------------------------
       {
-        std::map<Memory::Kind,std::set<Memory> >::const_iterator finder = mem_kinds.find(kind);
+        std::map<Memory::Kind,std::set<Memory> >::const_iterator finder = 
+          mem_kinds.find(kind);
         if (finder != mem_kinds.end())
           return finder->second;
         std::set<Memory> &result = mem_kinds[kind];
@@ -266,10 +295,11 @@ namespace LegionRuntime {
         return result;
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_memories(Machine *machine, Memory::Kind kind,
-                                                                            std::set<Memory> &mems)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::filter_memories(Machine *machine, 
+                                                             Memory::Kind kind,
+                                                        std::set<Memory> &mems)
+      //------------------------------------------------------------------------
       {
         if (mems.empty())
         {
@@ -298,12 +328,15 @@ namespace LegionRuntime {
         }
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, Processor proc, 
-                                                        std::vector<Memory> &memories, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, 
+                                                           Processor proc, 
+                                                  std::vector<Memory> &memories, 
+                                                            bool latency)
+      //------------------------------------------------------------------------
       {
-        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > temp_stack;
+        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > 
+          temp_stack;
         for (std::vector<Memory>::const_iterator it = memories.begin();
               it != memories.end(); it++)
         {
@@ -313,59 +346,66 @@ namespace LegionRuntime {
           bool inserted = false;
           if (latency)
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = temp_stack.begin();
-                  stack_it != temp_stack.end(); stack_it++)
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+                  temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].latency < stack_it->second)
               {
-                temp_stack.insert(stack_it, std::pair<Memory,unsigned>(*it,affinity[0].latency));
+                temp_stack.insert(stack_it, 
+                    std::pair<Memory,unsigned>(*it,affinity[0].latency));
                 inserted = true;
                 break;
               }
             }
             if (!inserted)
-              temp_stack.push_back(std::pair<Memory,unsigned>(*it,affinity[0].latency));
+              temp_stack.push_back(
+                  std::pair<Memory,unsigned>(*it,affinity[0].latency));
           }
           else /*bandwidth*/
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = temp_stack.begin();
-                  stack_it != temp_stack.end(); stack_it++)
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+                  temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].bandwidth > stack_it->second)
               {
-                temp_stack.insert(stack_it, std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
+                temp_stack.insert(stack_it, 
+                    std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
                 inserted = true;
                 break;
               }
             }
             if (!inserted)
-              temp_stack.push_back(std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
+              temp_stack.push_back(
+                  std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
           }
         }
         // Now put the temp stack onto the real stack
         assert(temp_stack.size() == memories.size());
         unsigned idx = 0;
-        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = temp_stack.begin();
-              it != temp_stack.end(); it++, idx++)
+        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = 
+              temp_stack.begin(); it != temp_stack.end(); it++, idx++)
         {
           memories[idx] = it->first;
         }
       }
 
-      //--------------------------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, Memory mem, 
-                                                        std::vector<Memory> &memories, bool latency)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, 
+                                                           Memory mem, 
+                                                  std::vector<Memory> &memories, 
+                                                           bool latency)
+      //------------------------------------------------------------------------
       {
-        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > temp_stack;
+        std::list<std::pair<Memory,unsigned/*bandwidth or latency*/> > 
+          temp_stack;
         for (std::vector<Memory>::const_iterator it = memories.begin();
               it != memories.end(); it++)
         {
           std::vector<Machine::MemoryMemoryAffinity> affinity; 
           int size = machine->get_mem_mem_affinity(affinity, mem, *it);
 	  if(size == 0) {
-	    // insert a dummy (bad) affinity for when two memories don't actually have affinity
-	    // (i.e. a multi-hop copy would be necessary)
+	    // insert a dummy (bad) affinity for when two memories don't 
+            // actually have affinity (i.e. a multi-hop copy would be necessary)
 	    Machine::MemoryMemoryAffinity mma;
 	    mma.m1 = mem;
 	    mma.m2 = *it;
@@ -378,40 +418,44 @@ namespace LegionRuntime {
           bool inserted = false;
           if (latency)
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = temp_stack.begin();
-                  stack_it != temp_stack.end(); stack_it++)
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+                  temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].latency < stack_it->second)
               {
-                temp_stack.insert(stack_it, std::pair<Memory,unsigned>(*it,affinity[0].latency));
+                temp_stack.insert(stack_it, 
+                    std::pair<Memory,unsigned>(*it,affinity[0].latency));
                 inserted = true;
                 break;
               }
             }
             if (!inserted)
-              temp_stack.push_back(std::pair<Memory,unsigned>(*it,affinity[0].latency));
+              temp_stack.push_back(
+                  std::pair<Memory,unsigned>(*it,affinity[0].latency));
           }
           else /*bandwidth*/
           {
-            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = temp_stack.begin();
-                  stack_it != temp_stack.end(); stack_it++)
+            for (std::list<std::pair<Memory,unsigned> >::iterator stack_it = 
+                  temp_stack.begin(); stack_it != temp_stack.end(); stack_it++)
             {
               if (affinity[0].bandwidth > stack_it->second)
               {
-                temp_stack.insert(stack_it, std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
+                temp_stack.insert(stack_it, 
+                    std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
                 inserted = true;
                 break;
               }
             }
             if (!inserted)
-              temp_stack.push_back(std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
+              temp_stack.push_back(
+                  std::pair<Memory,unsigned>(*it,affinity[0].bandwidth));
           }
         }
         // Now put the temp stack onto the real stack
         assert(temp_stack.size() == memories.size());
         unsigned idx = 0;
-        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = temp_stack.begin();
-              it != temp_stack.end(); it++, idx++)
+        for (std::list<std::pair<Memory,unsigned> >::const_iterator it = 
+              temp_stack.begin(); it != temp_stack.end(); it++, idx++)
         {
           memories[idx] = it->first;
         }
@@ -421,18 +465,20 @@ namespace LegionRuntime {
        * Mapping Memoizer
        **********************************/
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MappingMemoizer::MappingMemoizer(void)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
       }
 
-      //--------------------------------------------------------------------------------------------
-      bool MappingMemoizer::has_mapping(Processor target, const Task *task, unsigned index) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      bool MappingMemoizer::has_mapping(Processor target, const Task *task, 
+                                        unsigned index) const
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = permanent_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+          permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return false;
         if (index < finder->second.rankings.size())
@@ -440,13 +486,15 @@ namespace LegionRuntime {
         return false;
       }
 
-      //--------------------------------------------------------------------------------------------
-      bool MappingMemoizer::recall_mapping(Processor target, const Task *task, unsigned index,
-                                            std::vector<Memory> &ranking) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      bool MappingMemoizer::recall_mapping(Processor target, const Task *task, 
+                                           unsigned index,
+                                           std::vector<Memory> &ranking) const
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = permanent_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+          permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return false;
         if (index < finder->second.rankings.size())
@@ -457,12 +505,14 @@ namespace LegionRuntime {
         return false;
       }
 
-      //--------------------------------------------------------------------------------------------
-      Memory MappingMemoizer::recall_chosen(Processor target, const Task *task, unsigned index) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Memory MappingMemoizer::recall_chosen(Processor target, const Task *task, 
+                                            unsigned index) const
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = permanent_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+          permanent_mappings.find(key);
         if (finder == permanent_mappings.end())
           return Memory::NO_MEMORY;
         if (index < finder->second.chosen.size())
@@ -470,13 +520,15 @@ namespace LegionRuntime {
         return Memory::NO_MEMORY;
       }
 
-      //--------------------------------------------------------------------------------------------
-      void MappingMemoizer::record_mapping(Processor target, const Task *task, unsigned index,
-                                            const std::vector<Memory> &ranking) 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      void MappingMemoizer::record_mapping(Processor target, const Task *task, 
+                                           unsigned index,
+                                           const std::vector<Memory> &ranking) 
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::iterator finder = temporary_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::iterator finder = 
+          temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
         {
           temporary_mappings[key] = MemoizedMapping(task->regions.size());
@@ -485,12 +537,14 @@ namespace LegionRuntime {
         finder->second.rankings[index] = ranking;
       }
 
-      //--------------------------------------------------------------------------------------------
-      void MappingMemoizer::notify_mapping(Processor target, const Task *task, unsigned index, Memory result)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      void MappingMemoizer::notify_mapping(Processor target, const Task *task, 
+                                           unsigned index, Memory result)
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::iterator finder = temporary_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::iterator finder = 
+          temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
         {
           temporary_mappings[key] = MemoizedMapping(task->regions.size());
@@ -499,28 +553,29 @@ namespace LegionRuntime {
         finder->second.chosen[index] = result;
       }
       
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       void MappingMemoizer::commit_mapping(Processor target, const Task *task)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
         MappingKey key(target,task->task_id);
-        std::map<MappingKey,MemoizedMapping>::const_iterator finder = temporary_mappings.find(key);
+        std::map<MappingKey,MemoizedMapping>::const_iterator finder = 
+          temporary_mappings.find(key);
         if (finder == temporary_mappings.end())
           return;
         permanent_mappings.insert(*finder);
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MappingMemoizer::MemoizedMapping::MemoizedMapping(void)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MappingMemoizer::MemoizedMapping::MemoizedMapping(size_t num_elmts)
         : chosen(std::vector<Memory>(num_elmts,Memory::NO_MEMORY)),
           rankings(std::vector<std::vector<Memory> >(num_elmts))
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
       }
     
@@ -528,32 +583,32 @@ namespace LegionRuntime {
        * Mapping Profiler
        ************************/
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MappingProfiler::MappingProfiler(void)
         : needed_samples(1), max_samples(32)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       void MappingProfiler::set_needed_profiling_samples(unsigned num_samples)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
         if (num_samples > 0)
           needed_samples = num_samples;
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       void MappingProfiler::set_max_profiling_samples(unsigned max)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
         if (max > 0)
           max_samples = max;
       }
       
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       bool MappingProfiler::profiling_complete(const Task *task) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
@@ -567,9 +622,10 @@ namespace LegionRuntime {
         return true;
       }
 
-      //--------------------------------------------------------------------------------------------
-      Processor::Kind MappingProfiler::best_processor_kind(const Task *task) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Processor::Kind MappingProfiler::best_processor_kind(
+                                                        const Task *task) const
+      //------------------------------------------------------------------------
       {
         bool best_set = false;
         float best_time = 0.f;
@@ -581,13 +637,15 @@ namespace LegionRuntime {
         {
           if (!best_set)
           {
-            best_time = float(it->second.total_time)/float(it->second.execution_times.size());
+            best_time = float(it->second.total_time)/
+                        float(it->second.execution_times.size());
             best_kind = it->first;
             best_set = true;
           }
           else
           {
-            float time = float(it->second.total_time)/float(it->second.execution_times.size());
+            float time = float(it->second.total_time)/
+                         float(it->second.execution_times.size());
             if (time < best_time)
             {
               best_time = time;
@@ -599,13 +657,14 @@ namespace LegionRuntime {
         return best_kind;
       }
 
-      //--------------------------------------------------------------------------------------------
-      Processor::Kind MappingProfiler::next_processor_kind(const Task *task) const
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      Processor::Kind MappingProfiler::next_processor_kind(
+                                                        const Task *task) const
+      //------------------------------------------------------------------------
       {
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
-          return task->variants->variants.begin()->second.proc_kind;
+          return task->variants->get_all_variants().begin()->second.proc_kind;
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {
@@ -615,18 +674,23 @@ namespace LegionRuntime {
         return best_processor_kind(task);
       }
 
-      //--------------------------------------------------------------------------------------------
-      void MappingProfiler::update_profiling_info(const Task *task, Processor target, Processor::Kind kind,
-                                                  const Mapper::ExecutionProfile &profile)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
+      void MappingProfiler::update_profiling_info(const Task *task, 
+                                                  Processor target, 
+                                                  Processor::Kind kind,
+                                        const Mapper::ExecutionProfile &profile)
+      //------------------------------------------------------------------------
       {
         TaskMap::iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end())
         {
-          for (std::map<VariantID,TaskVariantCollection::Variant>::const_iterator it = task->variants->variants.begin();
-                it != task->variants->variants.end(); it++)
+	  const std::map<VariantID,TaskVariantCollection::Variant>& variants = 
+            task->variants->get_all_variants();
+          for (std::map<VariantID,TaskVariantCollection::Variant>::
+               const_iterator it = variants.begin(); it != variants.end(); it++)
           {
-            task_profiles[task->task_id][it->second.proc_kind] = VariantProfile();
+            task_profiles[task->task_id][it->second.proc_kind] = 
+              VariantProfile();
           }
           finder = task_profiles.find(task->task_id);
         }
@@ -634,7 +698,8 @@ namespace LegionRuntime {
         assert(var_finder != finder->second.end());
         if (var_finder->second.execution_times.size() == max_samples)
         {
-          var_finder->second.total_time -= var_finder->second.execution_times.front();
+          var_finder->second.total_time -= 
+            var_finder->second.execution_times.front();
           var_finder->second.execution_times.pop_front();
         }
         long long total_time = profile.stop_time - profile.start_time;
@@ -642,10 +707,10 @@ namespace LegionRuntime {
         var_finder->second.execution_times.push_back(total_time);
       }
 
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       MappingProfiler::VariantProfile::VariantProfile(void)
         : total_time(0)
-      //--------------------------------------------------------------------------------------------
+      //------------------------------------------------------------------------
       {
       }
 

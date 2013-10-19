@@ -26,7 +26,7 @@ using namespace LegionRuntime::HighLevel;
 LegionRuntime::Logger::Category log_mapper("circuit_mapper");
 
 CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(m, rt, local)
+  : ShimMapper(m, rt, local)
 {
   const std::set<Processor> &all_procs = m->get_all_processors();
   // Make a list of the CPU and GPU processors
@@ -54,7 +54,8 @@ CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor local)
   // Now find our set of memories
   if (local_kind == Processor::LOC_PROC)
   {
-    std::vector<Memory> &memory_stack = memory_stacks[local_proc];
+    std::vector<Memory> memory_stack;
+    machine_interface.find_memory_stack(local_proc, memory_stack, true/*latency*/);
     unsigned num_mem = memory_stack.size();
     assert(num_mem >= 2);
     gasnet_mem = memory_stack[num_mem-1];
@@ -79,7 +80,8 @@ CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor local)
   }
   else
   {
-    std::vector<Memory> &memory_stack = memory_stacks[local_proc];
+    std::vector<Memory> memory_stack; 
+    machine_interface.find_memory_stack(local_proc, memory_stack, true/*latency*/);
     unsigned num_mem = memory_stack.size();
     assert(num_mem >= 2);
     zero_copy_mem = memory_stack[num_mem-1];
@@ -140,7 +142,7 @@ Processor CircuitMapper::select_target_processor(const Task *task)
   // All other tasks get mapped onto the GPU
   assert(task->is_index_space);
 
-  DomainPoint point = task->get_index_point();
+  DomainPoint point = task->index_point;
   unsigned proc_id = point.get_index() % gpu_procs.size();
   return gpu_procs[proc_id];
 }

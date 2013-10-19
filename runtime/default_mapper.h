@@ -27,60 +27,70 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    /**
+     * \class DefaultMapper
+     * The default mapper class is our base implementation of the
+     * mapper interface that relies on some simple heuristics 
+     * to perform most of them calls for general purpose Legion
+     * applications.  You should feel free to extend this class
+     * with your own heuristics by overriding some or all of the
+     * methods.  You can also ignore this implementation entirely
+     * and perform your own implementation of the mapper interface.
+     */
     class DefaultMapper : public Mapper {
     public:
       DefaultMapper(Machine *machine, HighLevelRuntime *rt, Processor local);
+      DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
     public:
-      virtual void select_tasks_to_schedule(const std::list<Task*> &ready_tasks, std::vector<bool> &ready_mask);
-      virtual bool map_task_locally(const Task *task);
-      virtual bool spawn_task(const Task *task);
-      virtual Processor select_target_processor(const Task *task);
-      virtual Processor target_task_steal(const std::set<Processor> &blacklisted);
-      virtual void permit_task_steal(Processor thief, const std::vector<const Task*> &tasks,
-                                      std::set<const Task*> &to_steal);
-      virtual void slice_domain(const Task *task, const Domain &domain,
-                                      std::vector<Mapper::DomainSplit> &slices);
-      virtual VariantID select_task_variant(const Task *task, Processor target);
-      virtual bool map_region_virtually(const Task *task, Processor target,
-                                        const RegionRequirement &req, unsigned index);
-      virtual bool map_task_region(const Task *task, Processor target, 
-                                    MappingTagID tag, bool inline_mapping, bool pre_mapping,
-                                    const RegionRequirement &req, unsigned index,
-                                    const std::map<Memory,bool/*all-fields-up-to-date*/> &current_instances,
-                                    std::vector<Memory> &target_ranking,
-                                    std::set<FieldID> &additional_fields,
-                                    bool &enable_WAR_optimization);
-      virtual void notify_mapping_result(const Task *task, Processor target, const RegionRequirement &req,
-                                          unsigned index, bool inline_mapping, Memory result);
-      virtual void notify_failed_mapping(const Task *task, Processor target,
-                                          const RegionRequirement &req, unsigned index, bool inline_mapping);
-      virtual size_t select_region_layout(const Task *task, Processor target,
-                                          const RegionRequirement &req, unsigned index,
-                                          const Memory &chosen_mem, size_t max_blocking_factor); 
-      virtual bool select_reduction_layout(const Task *task, Processor target,
-                                          const RegionRequirement &req, unsigned index,
-                                          const Memory &chosen_mem);
-      virtual void rank_copy_targets(const Task *task, Processor target,
-                                    MappingTagID tag, bool inline_mapping,
-                                    const RegionRequirement &req, unsigned index,
-                                    const std::set<Memory> &current_instances,
-                                    std::set<Memory> &to_reuse,
-                                    std::vector<Memory> &to_create,
-                                    bool &create_one);
-      virtual void rank_copy_sources(const std::set<Memory> &current_instances,
-                                     const Memory &dst, std::vector<Memory> &chosen_order);
-      virtual bool profile_task_execution(const Task *task, Processor target);
-      virtual void notify_profiling_info(const Task *task, Processor target, const ExecutionProfile &profile);
-      virtual bool speculate_on_predicate(MappingTagID tag, bool &speculative_value);
+      DefaultMapper& operator=(const DefaultMapper &rhs);
     public:
-      // Helper methods for building other kinds of mappers, made static so they can be used in non-derived classes
-
+      virtual void select_task_options(Task *task);
+      virtual void select_tasks_to_schedule(
+                      const std::list<Task*> &ready_tasks);
+      virtual void target_task_steal(
+                            const std::set<Processor> &blacklist,
+                            std::set<Processor> &targets);
+      virtual void permit_task_steal(Processor thief, 
+                                const std::vector<const Task*> &tasks,
+                                std::set<const Task*> &to_steal);
+      virtual void slice_domain(const Task *task, const Domain &domain,
+                                std::vector<DomainSplit> &slices);
+      virtual bool pre_map_task(Task *task);
+      virtual void select_task_variant(Task *task);
+      virtual bool map_task(Task *task);
+      virtual bool map_copy(Copy *copy);
+      virtual bool map_inline(Inline *inline_operation);
+      virtual void notify_mapping_result(const Mappable *mappable);
+      virtual void notify_mapping_failed(const Mappable *mappable);
+      virtual bool rank_copy_targets(const Mappable *mappable,
+                                     LogicalRegion rebuild_region,
+                                     const std::set<Memory> &current_instances,
+                                     bool complete,
+                                     size_t max_blocking_factor,
+                                     std::set<Memory> &to_reuse,
+                                     std::vector<Memory> &to_create,
+                                     bool &create_one,
+                                     size_t &blocking_factor);
+      virtual void rank_copy_sources(const Mappable *mappable,
+                      const std::set<Memory> &current_instances,
+                      Memory dst_mem, 
+                      std::vector<Memory> &chosen_order);
+      virtual void notify_profiling_info(const Task *task);
+      virtual bool speculate_on_predicate(const Task *task,
+                                          bool &spec_value);
+    public:
+      // Helper methods for building other kinds of mappers, made static 
+      // so they can be used in non-derived classes
       // Pick a random processor of a given kind
-      static Processor select_random_processor(const std::set<Processor> &options, Processor::Kind filter, Machine *machine);
+      static Processor select_random_processor(
+                              const std::set<Processor> &options, 
+                              Processor::Kind filter, Machine *machine);
       // Break an IndexSpace of tasks into IndexSplits
-      static void decompose_index_space(const Domain &domain, const std::vector<Processor> &targets,
-                                        unsigned splitting_factor, std::vector<Mapper::DomainSplit> &slice);
+      static void decompose_index_space(const Domain &domain, 
+                              const std::vector<Processor> &targets,
+                              unsigned splitting_factor, 
+                              std::vector<Mapper::DomainSplit> &slice);
     protected:
       HighLevelRuntime *const runtime;
       const Processor local_proc;

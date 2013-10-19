@@ -474,8 +474,9 @@ namespace LegionRuntime {
     void GPUProcessor::enable_idle_task(void)
     {
       log_gpu.info("idle task enabled for processor %x", me.id);
+      AutoHSLLock a(internal->mutex);
       internal->idle_task_enabled = true;
-      // TODO: wake up thread if we're called from another thread
+      gasnett_cond_signal(&internal->worker_condvar);
     }
 
     void GPUProcessor::disable_idle_task(void)

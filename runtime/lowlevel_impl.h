@@ -475,7 +475,8 @@ namespace LegionRuntime {
 
     class UtilityProcessor : public Processor::Impl {
     public:
-      UtilityProcessor(Processor _me, int _num_worker_threads = 1);
+      UtilityProcessor(Processor _me, int core_id = -1, 
+                       int _num_worker_threads = 1);
       virtual ~UtilityProcessor(void);
 
       void start_worker_threads(void);
@@ -500,10 +501,10 @@ namespace LegionRuntime {
       //friend class UtilityTask;
 
       void enqueue_runnable_task(UtilityTask *task);
-
+      int core_id;
       int num_worker_threads;
       bool shutdown_requested;
-      Event shutdown_event;
+      //Event shutdown_event;
 
       gasnet_hsl_t mutex;
       gasnett_cond_t condvar;

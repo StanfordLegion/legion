@@ -105,7 +105,24 @@ namespace LegionRuntime {
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
-  	res.x[i] = x[i] - other.x[i];
+	  res.x[i] = x[i] - other.x[i];
+	return res;
+      }
+  
+      // element-wise multiplication and division
+      Point<DIM> operator*(const Point<DIM> other) const
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+	  res.x[i] = x[i] * other.x[i];
+	return res;
+      }
+  
+      Point<DIM> operator/(const Point<DIM> other) const
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+	  res.x[i] = x[i] / other.x[i];
 	return res;
       }
   
@@ -352,7 +369,7 @@ namespace LegionRuntime {
       virtual Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const = 0;
 
       virtual Rect<IDIM> preimage(const Point<ODIM> p) const { assert(0); }//= 0;
-      virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); }//= 0;
+      virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); return false; }//= 0;
     };
 
     template <typename T>

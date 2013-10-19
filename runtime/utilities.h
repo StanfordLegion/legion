@@ -72,20 +72,12 @@ enum {
 
 namespace LegionRuntime {
   /**
-   * Static Assertion
-   */
-  template<bool> struct LegionStaticAssert;
-  template<> struct LegionStaticAssert<true> { };
-
-#define LEGION_STATIC_ASSERT(condition) do { LegionStaticAssert<(condition)>(); } while (0)
-
-  /**
    * A logger class for tracking everything from debug messages
    * to error messages.
    */
   class Logger {
   public:
-    // Use the -DLEGION_LOGGING flag whenever you need to have ordered
+    // Use the -DORDERED_LOGGING flag whenever you need to have ordered
     // output.  The posix standard guarantees that all writes to files
     // open for appending will be atomic, which is necessary for safely
     // merging multiple streams of output when running across many nodes.
@@ -94,7 +86,7 @@ namespace LegionRuntime {
     // WARNING: apparently this is not true on NFS so instead we use file
     // locks in distributed environments to serialize access to the file
     // for safe logging.
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
     // Make the buffer 1 MB
     static const int logging_buffer_size = (1 << 20);
     static inline int get_log_file(void)
@@ -134,7 +126,7 @@ namespace LegionRuntime {
 #endif
     static void init(int argc, const char *argv[])
     {
-#ifdef LEGION_LOGGING
+#ifdef ORDERED_LOGGING 
       get_log_file(); // Initializes the log file
       get_logging_buffer(); // Initialize the buffer
       get_logging_location(); // Initialize the current location

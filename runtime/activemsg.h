@@ -252,6 +252,7 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
     } rpl_u; \
 \
     rpl_u.typed.args = (*MEDIUM_HNDL_PTR)(u.typed.args, buf, nbytes);	\
+    /*if(nbytes > gasnet_AMMaxMedium())*/ handle_long_msgptr(src, buf);	\
     rpl_u.typed.fptr = u.typed.fptr; \
     rpl_u.raw.reply_short(token); \
   } \

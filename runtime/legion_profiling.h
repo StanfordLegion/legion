@@ -29,125 +29,57 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     // Used for creating LegionProf Recorder
-    enum ProfRecorderKind {
-      PROF_CREATE_INDEX_SPACE = 0,
-      PROF_DESTROY_INDEX_SPACE = 1,
-      PROF_CREATE_INDEX_PARTITION = 2,
-      PROF_DESTROY_INDEX_PARTITION = 3,
-      PROF_GET_INDEX_PARTITION = 4,
-      PROF_GET_INDEX_SUBSPACE = 5,
-      PROF_GET_INDEX_DOMAIN = 6,
-      PROF_GET_INDEX_PARTITION_COLOR_SPACE = 7,
-      PROF_SAFE_CAST = 8,
-      PROF_CREATE_FIELD_SPACE = 9,
-      PROF_DESTROY_FIELD_SPACE = 10,
-      PROF_ALLOCATE_FIELDS = 11,
-      PROF_FREE_FIELDS = 12,
-      PROF_CREATE_REGION = 13,
-      PROF_DESTROY_REGION = 14,
-      PROF_DESTROY_PARTITION = 15,
-      PROF_GET_LOGICAL_PARTITION = 16,
-      PROF_GET_LOGICAL_SUBREGION = 17,
-      PROF_MAP_REGION = 18,
-      PROF_UNMAP_REGION = 19,
-      PROF_TASK_DEP_ANALYSIS = 20,
-      PROF_MAP_DEP_ANALYSIS = 21,
-      PROF_DEL_DEP_ANALYSIS = 22,
-      PROF_SCHEDULER = 23,
-      PROF_TASK_MAP = 24,
-      PROF_TASK_RUN = 25,
-      PROF_TASK_CHILDREN_MAPPED= 26,
-      PROF_TASK_FINISH = 27,
+    enum ProfKind {
+      PROF_BEGIN_DEP_ANALYSIS = 0,
+      PROF_END_DEP_ANALYSIS = 1,
+      PROF_BEGIN_PREMAP_ANALYSIS = 2,
+      PROF_END_PREMAP_ANALYSIS = 3,
+      PROF_BEGIN_MAP_ANALYSIS = 4,
+      PROF_END_MAP_ANALYSIS = 5,
+      PROF_BEGIN_EXECUTION = 6,
+      PROF_END_EXECUTION = 7,
+      PROF_BEGIN_WAIT = 8,
+      PROF_END_WAIT = 9,
+      PROF_BEGIN_SCHEDULER = 10,
+      PROF_END_SCHEDULER = 11,
+      // Non begin-end pairs
+      PROF_COMPLETE = 12,
+      PROF_LAUNCH = 13,
+      // Other begin-end pairs
+      PROF_BEGIN_POST = 14,
+      PROF_END_POST = 15,
+      PROF_BEGIN_TRIGGER = 16,
+      PROF_END_TRIGGER = 17,
+      PROF_BEGIN_GC = 18,
+      PROF_END_GC = 19,
+      PROF_BEGIN_MESSAGE = 20,
+      PROF_END_MESSAGE = 21,
     };
-
+ 
     namespace LegionProf {
-
-      // These numbers exactly match the meanings
-      // in legion_prof.py
-      enum ProfKind {
-        BEGIN_INDEX_SPACE_CREATE = 0,
-        END_INDEX_SPACE_CREATE = 1,
-        BEGIN_INDEX_SPACE_DESTROY = 2,
-        END_INDEX_SPACE_DESTROY = 3,
-        BEGIN_INDEX_PARTITION_CREATE = 4,
-        END_INDEX_PARTITION_CREATE = 5,
-        BEGIN_INDEX_PARTITION_DESTROY = 6,
-        END_INDEX_PARTITION_DESTROY = 7,
-        BEGIN_GET_INDEX_PARTITION = 8,
-        END_GET_INDEX_PARTITION = 9,
-        BEGIN_GET_INDEX_SUBSPACE = 10,
-        END_GET_INDEX_SUBSPACE = 11,
-        BEGIN_GET_INDEX_DOMAIN = 12,
-        END_GET_INDEX_DOMAIN = 13,
-        BEGIN_GET_INDEX_PARTITION_COLOR_SPACE = 14,
-        END_GET_INDEX_PARTITION_COLOR_SPACE = 15,
-        BEGIN_SAFE_CAST = 16,
-        END_SAFE_CAST = 17,
-        BEGIN_CREATE_FIELD_SPACE = 18,
-        END_CREATE_FIELD_SPACE = 19,
-        BEGIN_DESTROY_FIELD_SPACE = 20,
-        END_DESTROY_FIELD_SPACE = 21,
-        BEGIN_ALLOCATE_FIELDS = 22,
-        END_ALLOCATE_FIELDS = 23,
-        BEGIN_FREE_FIELDS = 24,
-        END_FREE_FIELDS = 25,
-        BEGIN_CREATE_REGION = 26,
-        END_CREATE_REGION = 27,
-        BEGIN_DESTROY_REGION = 28,
-        END_DESTROY_REGION = 29,
-        BEGIN_DESTROY_PARTITION = 30,
-        END_DESTROY_PARTITION = 31,
-        BEGIN_GET_LOGICAL_PARTITION = 32,
-        END_GET_LOGICAL_PARTITION = 33,
-        BEGIN_GET_LOGICAL_SUBREGION = 34,
-        END_GET_LOGICAL_SUBREGION = 35,
-        BEGIN_MAP_REGION = 36,
-        END_MAP_REGION = 37,
-        BEGIN_UNMAP_REGION = 38,
-        END_UNMAP_REGION = 39,
-        BEGIN_TASK_DEP_ANALYSIS = 40,
-        END_TASK_DEP_ANALYSIS = 41,
-        BEGIN_MAP_DEP_ANALYSIS = 42,
-        END_MAP_DEP_ANALYSIS = 43,
-        BEGIN_DEL_DEP_ANALYSIS = 44,
-        END_DEL_DEP_ANALYSIS = 45,
-        BEGIN_SCHEDULER = 46,
-        END_SCHEDULER = 47,
-        BEGIN_TASK_MAP = 48,
-        END_TASK_MAP = 49,
-        BEGIN_TASK_RUN = 50,
-        END_TASK_RUN = 51,
-        BEGIN_TASK_CHILDREN_MAPPED = 52,
-        END_TASK_CHILDREN_MAPPED = 53,
-        BEGIN_TASK_FINISH = 54,
-        END_TASK_FINISH = 55,
-        TASK_LAUNCH = 56, // this should always be last
-      }; 
 
       struct ProfilingEvent {
       public:
-        ProfilingEvent(unsigned k, unsigned tid, unsigned uid, const DomainPoint &p, unsigned long long t)
-          : kind(k), task_id(tid), unique_id(uid), point(p), time(t) { }
+        ProfilingEvent(unsigned k, UniqueID uid, unsigned long long t)
+          : kind(k), unique_id(uid), time(t) { }
       public:
         unsigned kind;
-        unsigned task_id;
-        unsigned unique_id;
-        DomainPoint point;
+        UniqueID unique_id;
         unsigned long long time; // absolute time in micro-seconds 
       };
 
       struct MemoryEvent {
       public:
-        MemoryEvent(unsigned iid, unsigned uid, unsigned mem, unsigned r, 
-            unsigned bf, const std::map<unsigned,size_t> &fields, unsigned long long t)
-          : creation(true), inst_id(iid), unique_id(uid), memory(mem), 
+        MemoryEvent(unsigned iid, unsigned mem, unsigned r, 
+                    unsigned bf, const std::map<unsigned,size_t> &fields, 
+                    unsigned long long t)
+          : creation(true), inst_id(iid), memory(mem), 
             redop(r), blocking_factor(bf), time(t), field_infos(fields) { }
-        MemoryEvent(unsigned uid, unsigned long long t)
-          : creation(false), unique_id(uid), time(t) { }
+        MemoryEvent(unsigned iid, unsigned long long t)
+          : creation(false), inst_id(iid), time(t) { }
       public:
         bool creation;
         unsigned inst_id;
-        unsigned unique_id;
         unsigned memory;
         unsigned redop;
         size_t blocking_factor;
@@ -158,12 +90,22 @@ namespace LegionRuntime {
       struct TaskInstance {
       public:
         TaskInstance(void) { }
-        TaskInstance(unsigned tid, unsigned uid, const DomainPoint &p)
+        TaskInstance(unsigned tid, UniqueID uid, const DomainPoint &p)
           : task_id(tid), unique_id(uid), point(p) { }
       public:
         unsigned task_id;
-        unsigned unique_id;
+        UniqueID unique_id;
         DomainPoint point;
+      };
+
+      struct OpInstance {
+      public:
+        OpInstance(void) { }
+        OpInstance(UniqueID uid, UniqueID pid)
+          : unique_id(uid), parent_id(pid) { }
+      public:
+        UniqueID unique_id;
+        UniqueID parent_id;
       };
 
       struct ProcessorProfiler {
@@ -174,9 +116,16 @@ namespace LegionRuntime {
           : proc(p), utility(util), kind(k),
             init_time(TimeStamp::get_current_time_in_micros()) { }
       public:
-        void add_event(const ProfilingEvent &event) { proc_events.push_back(event); }
-        void add_event(const MemoryEvent &event) { mem_events.push_back(event); }
-        void add_subtask(unsigned suid, const TaskInstance &inst) { sub_tasks[suid] = inst; }
+        inline void add_event(const ProfilingEvent &event) 
+                          { proc_events.push_back(event); }
+        inline void add_event(const MemoryEvent &event) 
+                          { mem_events.push_back(event); }
+        inline void add_task(const TaskInstance &inst)
+                          { tasks.push_back(inst); }
+        inline void add_map(const OpInstance &inst)
+                          { mappings.push_back(inst); }
+        inline void add_close(const OpInstance &inst)
+                          { closes.push_back(inst); }
       private:
 	// no copy constructor or assignment
 	ProcessorProfiler(const ProcessorProfiler& copy_from) {}
@@ -188,65 +137,77 @@ namespace LegionRuntime {
         unsigned long long init_time;
         std::deque<ProfilingEvent> proc_events;
         std::deque<MemoryEvent> mem_events;
-        std::map<unsigned,TaskInstance> sub_tasks;
+        std::deque<TaskInstance> tasks;
+        std::deque<OpInstance> mappings;
+        std::deque<OpInstance> closes;
       };
 
       extern Logger::Category log_prof;
       // Profiler table indexed by processor id
       extern ProcessorProfiler *legion_prof_table;
+      // Indicator for when profiling is enabled and disabled
+      extern bool profiling_enabled;
 
       static inline ProcessorProfiler& get_profiler(Processor proc)
       {
         return legion_prof_table[(proc.id & 0xffff)];
       }
 
-      static inline void register_task_variant(unsigned task_id, bool leaf, const char *name)
+      static inline void register_task_variant(unsigned task_id, 
+                                               const char *name)
       {
-        log_prof(LEVEL_INFO,"Prof Task Variant %d %d %s", task_id, leaf, name);
+        log_prof(LEVEL_INFO,"Prof Task Variant %u %s", task_id, name);
       }
 
-      static inline void initialize_processor(Processor proc, bool util, Processor::Kind kind)
+      static inline void initialize_processor(Processor proc, 
+                                              bool util, 
+                                              Processor::Kind kind)
       {
 	ProcessorProfiler &p = get_profiler(proc);
 	p.proc = proc;
 	p.utility = util;
 	p.kind = kind;
 	p.init_time = TimeStamp::get_current_time_in_micros();
-        //get_profiler(proc) = ProcessorProfiler(proc, util, kind);
       }
 
       static inline void initialize_memory(Memory mem, Memory::Kind kind)
       {
-        log_prof(LEVEL_INFO,"Prof Memory %x %d", mem.id, kind);
+        log_prof(LEVEL_INFO,"Prof Memory %u %u", mem.id, kind);
       }
 
       static inline void finalize_processor(Processor proc)
       {
         ProcessorProfiler &prof = get_profiler(proc);
-        log_prof(LEVEL_INFO,"Prof Processor %x %d %d", proc.id, prof.utility, prof.kind);
+        log_prof(LEVEL_INFO,"Prof Processor %u %u %u", 
+                  proc.id, prof.utility, prof.kind);
+        for (unsigned idx = 0; idx < prof.tasks.size(); idx++)
+        {
+          const TaskInstance &inst = prof.tasks[idx];
+          log_prof(LEVEL_INFO,"Prof Unique Task %u %llu %u %u %u %u %u",
+              proc.id, inst.unique_id, inst.task_id, 
+              inst.point.get_dim(), inst.point.point_data[0],
+              inst.point.point_data[1], inst.point.point_data[2]);
+        }
+        for (unsigned idx = 0; idx < prof.mappings.size(); idx++)
+        {
+          const OpInstance &inst = prof.mappings[idx];
+          log_prof(LEVEL_INFO,"Prof Unique Map %u %llu %llu",
+              proc.id, inst.unique_id, inst.parent_id);
+        }
+        for (unsigned idx = 0; idx < prof.closes.size(); idx++)
+        {
+          const OpInstance &inst = prof.closes[idx];
+          log_prof(LEVEL_INFO,"Prof Unique Close %u %llu %llu",
+              proc.id, inst.unique_id, inst.parent_id);
+        }
         for (unsigned idx = 0; idx < prof.proc_events.size(); idx++)
         {
           ProfilingEvent &event = prof.proc_events[idx]; 
           // Probably shouldn't role over, if something did then
           // we may need to change our assumptions
           assert(event.time >= prof.init_time);
-          switch (event.kind)
-          {
-            case BEGIN_SCHEDULER:
-            case END_SCHEDULER:    
-              {
-                log_prof(LEVEL_INFO,"Prof Scheduler %x %d %lld", proc.id, event.kind, (event.time-prof.init_time));
-                break;
-              }
-            default:
-              {
-                log_prof(LEVEL_INFO,"Prof Task Event %x %d %d %d %lld %d %d %d %d",
-                    proc.id, event.kind, event.task_id, event.unique_id, (event.time-prof.init_time),
-                    event.point.get_dim(), event.point.point_data[0], event.point.point_data[1],
-                    event.point.point_data[2]);
-                break;
-              }
-          }
+          log_prof(LEVEL_INFO, "Prof Event %u %u %llu %llu", 
+            proc.id, event.kind, event.unique_id, (event.time-prof.init_time));
         }
         for (unsigned idx = 0; idx < prof.mem_events.size(); idx++)
         {
@@ -255,125 +216,87 @@ namespace LegionRuntime {
           if (event.creation)
           {
             // First log the instance information
-            log_prof(LEVEL_INFO,"Prof Create Instance %x %d %x %d %ld %lld", 
-                event.inst_id, event.unique_id, event.memory, event.redop, 
+            log_prof(LEVEL_INFO,"Prof Create Instance %u %u %u %ld %llu", 
+                event.inst_id, event.memory, event.redop, 
                 event.blocking_factor, (event.time - prof.init_time));
             // Then log the creation of the fields
-            for (std::map<unsigned,size_t>::const_iterator it = event.field_infos.begin();
-                  it != event.field_infos.end(); it++)
+            for (std::map<unsigned,size_t>::const_iterator it = 
+                  event.field_infos.begin(); it != 
+                  event.field_infos.end(); it++)
             {
-              log_prof(LEVEL_INFO,"Prof Instance Field %d %d %ld", event.unique_id, it->first, it->second);
+              log_prof(LEVEL_INFO,"Prof Instance Field %u %u %ld", 
+                  event.inst_id, it->first, it->second);
             }
           }
           else
           {
             // Log the instance destruction
-            log_prof(LEVEL_INFO,"Prof Destroy Instance %d %lld", event.unique_id, (event.time - prof.init_time));
+            log_prof(LEVEL_INFO,"Prof Destroy Instance %u %llu", 
+                event.inst_id , (event.time - prof.init_time));
           }
         }
-        for (std::map<unsigned,TaskInstance>::const_iterator it = prof.sub_tasks.begin();
-              it != prof.sub_tasks.end(); it++)
-        {
-          log_prof(LEVEL_INFO,"Prof Subtask %d %d %d %d %d %d %d",
-              it->first, it->second.task_id, it->second.unique_id, it->second.point.get_dim(),
-              it->second.point.point_data[0], it->second.point.point_data[1],
-              it->second.point.point_data[2]);
-        }
       }
 
-      static inline void register_task_begin_run(unsigned task_id, unsigned unique_id, const DomainPoint &point)
+      static inline void register_event(UniqueID uid, ProfKind kind)
       {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(BEGIN_TASK_RUN,task_id,unique_id,point,time));
-      }
-
-      static inline void register_task_end_run(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(END_TASK_RUN,task_id,unique_id,point,time));
-      }
-
-      static inline void register_task_launch(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(TASK_LAUNCH,task_id,unique_id,point,time));
-      }
-
-      static inline void register_sub_task(unsigned task_id, unsigned unique_id, const DomainPoint &point, unsigned sub_unique_id)
-      {
-        // Kind of tricky here, we actually just need the sub-task relationship, so we'll
-        // pass the sub-task's unique id where the timing information normally goes.
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_subtask(sub_unique_id,TaskInstance(task_id,unique_id,point));
-      }
-
-      static inline void register_task_begin_children_mapped(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(BEGIN_TASK_CHILDREN_MAPPED,task_id,unique_id,point,time));
-      }
-
-      static inline void register_task_end_children_mapped(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(END_TASK_CHILDREN_MAPPED,task_id,unique_id,point,time));
-      }
-
-      static inline void register_task_begin_finish(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(BEGIN_TASK_FINISH,task_id,unique_id,point,time));
-      }
-
-      static inline void register_task_end_finish(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(ProfilingEvent(END_TASK_FINISH,task_id,unique_id,point,time));
-      }
-
-      static inline void register_instance_creation(unsigned inst_id, unsigned unique_id,
-        unsigned memory, unsigned redop, size_t blocking_factor, const std::map<unsigned,size_t> &fields)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(MemoryEvent(inst_id, unique_id, memory, redop, blocking_factor, fields, time));
-      }
-
-      static inline void register_instance_deletion(unsigned unique_id)
-      {
-        unsigned long long time = TimeStamp::get_current_time_in_micros();
-        Processor proc = Machine::get_executing_processor();
-        get_profiler(proc).add_event(MemoryEvent(unique_id, time));
-      }
-
-      template<int REC>
-      class Recorder {
-      public:
-        Recorder(unsigned task_id, unsigned unique_id, const DomainPoint &point)
-          : tid(task_id), uid(unique_id), p(point)
+        if (profiling_enabled)
         {
           unsigned long long time = TimeStamp::get_current_time_in_micros();
           Processor proc = Machine::get_executing_processor();
-          get_profiler(proc).add_event(ProfilingEvent(REC*2,tid,uid,p,time));
+          get_profiler(proc).add_event(ProfilingEvent(kind, uid, time));
         }
-        ~Recorder(void)
+      }
+
+      static inline void register_task(unsigned tid, UniqueID uid, 
+                                       const DomainPoint &point)
+      {
+        if (profiling_enabled)
+        {
+          Processor proc = Machine::get_executing_processor();
+          get_profiler(proc).add_task(TaskInstance(tid, uid, point));
+        }
+      }
+
+      static inline void register_map(UniqueID uid, UniqueID pid)
+      {
+        if (profiling_enabled)
+        {
+          Processor proc = Machine::get_executing_processor();
+          get_profiler(proc).add_map(OpInstance(uid, pid));
+        }
+      }
+
+      static inline void register_close(UniqueID uid, UniqueID pid)
+      {
+        if (profiling_enabled)
+        {
+          Processor proc = Machine::get_executing_processor();
+          get_profiler(proc).add_close(OpInstance(uid, pid));
+        }
+      }
+
+      static inline void register_instance_creation(unsigned inst_id, 
+        unsigned memory, unsigned redop, 
+        size_t blocking_factor, const std::map<unsigned,size_t> &fields)
+      {
+        if (profiling_enabled)
         {
           unsigned long long time = TimeStamp::get_current_time_in_micros();
           Processor proc = Machine::get_executing_processor();
-          get_profiler(proc).add_event(ProfilingEvent(REC*2+1,tid,uid,p,time));
+          get_profiler(proc).add_event(MemoryEvent(inst_id, memory, 
+                                        redop, blocking_factor, fields, time));
         }
-      private:
-        unsigned tid;
-        unsigned uid;
-        const DomainPoint &p;
-      };
+      }
+
+      static inline void register_instance_deletion(unsigned inst_id)
+      {
+        if (profiling_enabled)
+        {
+          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          Processor proc = Machine::get_executing_processor();
+          get_profiler(proc).add_event(MemoryEvent(inst_id, time));
+        }
+      }
 
     };
   };

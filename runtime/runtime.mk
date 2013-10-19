@@ -183,10 +183,18 @@ endif
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
-MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc $(LG_RT_DIR)/mapping_utilities.cc
+MAPPER_SRC	+= $(LG_RT_DIR)/default_mapper.cc \
+		   $(LG_RT_DIR)/shim_mapper.cc \
+		   $(LG_RT_DIR)/mapping_utilities.cc
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc
 endif
 
-HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc $(LG_RT_DIR)/legion_ops.cc $(LG_RT_DIR)/region_tree.cc $(LG_RT_DIR)/legion_logging.cc 
+HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
+		    $(LG_RT_DIR)/legion_ops.cc \
+		    $(LG_RT_DIR)/legion_tasks.cc \
+		    $(LG_RT_DIR)/legion_spy.cc \
+		    $(LG_RT_DIR)/region_tree.cc \
+		    $(LG_RT_DIR)/runtime.cc \
+		    $(LG_RT_DIR)/garbage_collection.cc

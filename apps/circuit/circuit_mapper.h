@@ -18,9 +18,9 @@
 #define __CIRCUIT_MAPPER__
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
-class CircuitMapper : public DefaultMapper {
+class CircuitMapper : public ShimMapper {
 public:
   CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor local);
 public:
