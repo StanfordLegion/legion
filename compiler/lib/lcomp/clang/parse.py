@@ -33,28 +33,64 @@ except ImportError:
 import os, sys
 from . import ast
 
+_typedefs = {
+    # legion_types.h
+    'Coloring': ast.TypeLegionColoring(),
+    'Context': ast.TypeLegionContext(),
+
+    # stdint.h
+    'int8_t': ast.TypeInt8(),
+    'int16_t': ast.TypeInt16(),
+    'int32_t': ast.TypeInt32(),
+    'int64_t': ast.TypeInt64(),
+    'intptr_t': ast.TypeIntPtr(),
+    'uint8_t': ast.TypeUInt8(),
+    'uint16_t': ast.TypeUInt16(),
+    'uint32_t': ast.TypeUInt32(),
+    'uint64_t': ast.TypeUInt64(),
+    'uintptr_t': ast.TypeUIntPtr(),
+}
+
+_structs = {
+    # 'common.h'
+    'ptr_t': ast.TypeLegionPointer(),
+
+    # 'legion.h'
+    'HighLevelRuntime': ast.TypeLegionRuntime(),
+    'PhysicalRegion': ast.TypeLegionRegion(),
+}
+
 class ForeignParseException(Exception):
     pass
 
 def parse_translation_unit(node, opts):
-    definitions = []
-    for definition in node.get_children():
-        try:
-            if definition.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-                definitions.append(parse_function_decl(definition))
-            elif definition.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                definitions.append(parse_typedef_decl(definition))
-            elif definition.kind == clang.cindex.CursorKind.STRUCT_DECL:
-                definitions.append(parse_struct_decl(definition))
-            else:
-                raise ForeignParseException('Failed to parse %s' % definition.spelling)
-        except ForeignParseException as e:
-            # skip any definitions that cannot be parsed
-            name = definition.spelling
-            if opts.allow_warning() and len(name) > 0 and not name.startswith('_'):
-                sys.stderr.write('WARNING: Skipping import of %s\n' % name)
-                sys.stderr.flush()
-    return ast.Program(definitions = definitions)
+    defs = []
+    for decl in node.get_children():
+        defs.extend(parse_decl(decl, opts))
+    return ast.Program(definitions = defs)
+
+def parse_decl(node, opts):
+    try:
+        if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            return [parse_function_decl(node)]
+        elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            return [parse_typedef_decl(node)]
+        elif node.kind == clang.cindex.CursorKind.STRUCT_DECL:
+            return [parse_struct_decl(node)]
+        elif node.kind == clang.cindex.CursorKind.UNEXPOSED_DECL:
+            defs = []
+            for decl in node.get_children():
+                defs.extend(parse_decl(decl, opts))
+            return defs
+        else:
+            raise ForeignParseException('Failed to parse %s' % node.spelling)
+    except ForeignParseException as e:
+        # skip any definitions that cannot be parsed
+        name = node.spelling
+        if opts.allow_warning() and len(name) > 0 and not name.startswith('_'):
+            sys.stderr.write('WARNING: Skipping import of %s\n' % name)
+            sys.stderr.flush()
+        return []
 
 def parse_function_decl(node):
     function_type = parse_type(node.type)
@@ -69,6 +105,10 @@ def parse_typedef_decl(node):
     return ast.Typedef(name = node.spelling, type = typedef_type)
 
 def parse_type(node):
+    # boolean
+    if node.kind == clang.cindex.TypeKind.BOOL:
+        return ast.TypeBool()
+
     # machine-dependent signed integers
     if node.kind == clang.cindex.TypeKind.CHAR_S:
         return ast.TypeChar()
@@ -126,52 +166,22 @@ def parse_type(node):
         points_to_type = parse_type(node.get_pointee())
         return ast.TypePointer(points_to_type = points_to_type)
     if node.kind == clang.cindex.TypeKind.TYPEDEF:
-        # Hack: In stdint.h, the fixed-size integer types (int8_t,
-        # etc.) are defined via typedefs on the standard C types
-        # (signed char, etc.). However, we can't rely on the
-        # properties of these types because we don't know what
-        # compiler will eventually be used. So we have to translate
-        # those types here, before they are lowered to anything else.
+        # Hack: In stdint.h, the fixed-size integer types (int*_t) are
+        # defined via typedefs on the standard C types (signed char,
+        # etc.). However, we can't rely on the properties of these
+        # types because we don't know what compiler will eventually be
+        # used. So we have to translate those types here, before they
+        # are lowered to anything else.
         #
-        # As a safety check, we only do this if the file that declared
-        # the types was named stdint.h.
+        # Unfortunately, when we see a typedef for int*_t, we cannot
+        # even verify that the type was defined in stdint.h, because
+        # the header files are implementation dependent. Therefore we
+        # just trust the user not to cause any name conflicts with
+        # int*_t in the global namespace.
 
-        decl = node.get_declaration()
-        filename = decl.location.file
-        is_stdint = False
-        if filename is not None:
-            is_stdint = (os.path.basename(filename.name) == 'stdint.h')
-
-        if is_stdint:
-            name = decl.spelling
-
-            # machine-dependent signed integers
-            if name == 'intptr_t':
-                return ast.TypeIntPtr()
-
-            # fixed-size signed integers
-            if name == 'int8_t':
-                return ast.TypeInt8()
-            if name == 'int16_t':
-                return ast.TypeInt16()
-            if name == 'int32_t':
-                return ast.TypeInt32()
-            if name == 'int64_t':
-                return ast.TypeInt64()
-
-            # machine-dependent signed integers
-            if name == 'uintptr_t':
-                return ast.TypeUIntPtr()
-
-            # fixed-size unsigned integers
-            if name == 'uint8_t':
-                return ast.TypeUInt8()
-            if name == 'uint16_t':
-                return ast.TypeUInt16()
-            if name == 'uint32_t':
-                return ast.TypeUInt32()
-            if name == 'uint64_t':
-                return ast.TypeUInt64()
+        name = node.get_declaration().spelling
+        if name in _typedefs:
+            return _typedefs[name]
 
         return parse_type(node.get_canonical())
     if node.kind == clang.cindex.TypeKind.RECORD:
@@ -188,18 +198,41 @@ def parse_type(node):
     # miscellaneous
     if node.kind == clang.cindex.TypeKind.VOID:
         return ast.TypeVoid()
+
     raise ForeignParseException('Failed to parse %s' % node.kind)
 
+_struct_cache = {}
 def parse_type_struct(node):
+    name = node.spelling
+
+    if name in _structs:
+        return _structs[name]
+
+    if name in _struct_cache:
+        return _struct_cache[name]
+
+    struct_type = ast.TypeStruct(node.spelling, [])
+    _struct_cache[name] = struct_type
+
     fields = []
     for field in node.get_children():
-        fields.append((field.spelling, parse_type(field.type)))
-    return ast.TypeStruct(node.spelling, fields)
+        if field.spelling is not None:
+            fields.append((field.spelling, parse_type(field.type)))
+    struct_type.fields = fields
+    return struct_type
 
 class Parser:
     def __init__(self):
         self.index = clang.cindex.Index.create()
 
     def parse(self, src, opts):
-        translation_unit = self.index.parse(src)
+        args = [arg for path in opts.search_path for arg in ('-I', path)] + ['-x', 'c++-header']
+        translation_unit = self.index.parse(src, args)
+        if opts.allow_warning():
+            for diagnostic in translation_unit.diagnostics:
+                sys.stderr.write('WARNING: %s:%s:%s: %s\n' % (
+                    diagnostic.location.file.name,
+                    diagnostic.location.line,
+                    diagnostic.location.column,
+                    diagnostic.spelling))
         return parse_translation_unit(translation_unit.cursor, opts)

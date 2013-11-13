@@ -6,12 +6,14 @@ below. For a tutorial on the language itself, see `doc/language.md`.
 
 ## Quickstart Instructions for Ubuntu
 
+These instructions have been tested with Ubuntu 12.04 and above.
+
 Open a terminal and run the following commands to install a C++
-compiler, Git, and PLY:
+compiler, Git, PLY, and singledispatch:
 
 ```bash
 sudo apt-get install build-essential git python-pip
-sudo pip install ply
+sudo pip install ply singledispatch
 ```
 
 Checkout a copy of Legion:
@@ -48,15 +50,18 @@ for Python.
 
 ## Quickstart Instructions for Mac OS X
 
+These instructions have been tested with Mac OS X 10.8 and above.
+
 Install Xcode from the Mac OS X App Store. Once the installation is
 complete, open Xcode and go to the menu Xcode > Preferences >
 Downloads to install the Command Line Tools.
 
-Open a terminal and run the following command to install PLY:
+Open a terminal and run the following command to install PLY and
+singledispatch:
 
 ```bash
 sudo easy_install pip
-sudo pip install ply
+sudo pip install ply singledispatch
 ```
 
 Checkout a copy of Legion:
@@ -95,9 +100,14 @@ The compiler requires at a minimum:
 
   * Python 2.7
 
-      * Python 2.6 can be used as well, but requires a manual
-        installation of the ordereddict library from
-        <https://pypi.python.org/pypi/ordereddict>.
+      * Python 2.6 can be used as well, but requires manual
+        installation of several libraries backported from Python 2.7:
+
+          * ordereddict <https://pypi.python.org/pypi/ordereddict>
+
+          * argparse <https://pypi.python.org/pypi/argparse>
+
+  * singledispatch <https://pypi.python.org/pypi/singledispatch>
 
   * PLY <http://www.dabeaz.com/ply/>
 
@@ -148,6 +158,9 @@ executable binary, linked against the shared low-level runtime.
 `-g`: Enables debugging.
 
 `--pointer-checks`: Enables dynamic pointer checks.
+
+`--leaf-tasks`: Enables aggressive leaf task optimization. Potentially
+unsafe. Requires debugging to be disabled.
 
 `-j`: Specifies the number of threads to use. Default is to compile
 with a number of threads equal to the number of processors on the

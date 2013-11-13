@@ -67,6 +67,9 @@ class Struct(ASTNode):
         self.name = name
         self.type = type
 
+# boolean
+class TypeBool(ASTNode): pass
+
 # machine-dependent signed integers
 class TypeChar(ASTNode): pass
 class TypeShort(ASTNode): pass
@@ -101,6 +104,13 @@ class TypeUInt128(ASTNode): pass
 class TypeFloat(ASTNode): pass
 class TypeDouble(ASTNode): pass
 class TypeLongDouble(ASTNode): pass
+
+# Legion-defined types
+class TypeLegionColoring(ASTNode): pass
+class TypeLegionContext(ASTNode): pass
+class TypeLegionPointer(ASTNode): pass
+class TypeLegionRegion(ASTNode): pass
+class TypeLegionRuntime(ASTNode): pass
 
 class TypeFunction(ASTNode):
     def __init__(self, param_types, return_type):

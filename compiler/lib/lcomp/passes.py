@@ -19,7 +19,7 @@
 ### Compiler Passes
 ###
 
-from . import imports, lower_expressions, parse as _parse, region_analysis, trans, type_check
+from . import imports, leaf_task_analysis, parse as _parse, region_analysis, trans, type_check
 
 _default_search_path = ('/usr/include', '/usr/local/include')
 
@@ -29,16 +29,16 @@ def parse(input_file):
     return program
 
 def check(program, opts):
-    opts = opts.with_search_path(_default_search_path + opts.search_path)
+    opts = opts.with_search_path(
+        _default_search_path +
+        ((opts.legion_runtime_dir,) if opts.legion_runtime_dir is not None else ()) +
+        opts.search_path)
     imports.augment_imports(program, opts)
     type_map, constraints, foreign_types = type_check.type_check(program, opts)
     return type_map, constraints, foreign_types
 
-def lower(program, opts):
-    type_map, constraints, foreign_types = check(program, opts)
-    return lower_expressions.lower(program, opts, type_map)
-
 def compile(program, opts):
     type_map, constraints, foreign_types = check(program, opts)
     region_usage = region_analysis.region_analysis(program, opts, type_map)
-    return trans.trans(program, opts, type_map, constraints, foreign_types, region_usage)
+    leaf_tasks = leaf_task_analysis.leaf_task_analysis(program, opts, type_map)
+    return trans.trans(program, opts, type_map, constraints, foreign_types, region_usage, leaf_tasks)

@@ -116,6 +116,20 @@ def check_function_name(node, name, params, cx):
         raise StyleError(
             params, 'Function declaration: expected no space between name and start of params')
 
+# Function parameters must start on the same line as the task
+# keyword. For parameters spanning multiple lines, each new line
+# should align with the first parameter.
+def check_function_params(node, params, cx):
+    if len(params.params) > 0:
+        initial_column = params.params[0].span.start.column
+        line = params.params[0].span.start.line
+        for param in params.params:
+            if param.span.start.line > line:
+                if param.span.start.column != initial_column:
+                    raise StyleError(
+                        param, 'Function declaration: expected multi-line params to align with first param')
+                line = param.span.start.line
+
 # Function return type must be either on the same line as the rest of
 # the function declaration, or on a new line and indented.
 def check_return_type(node, return_type, cx):
@@ -212,6 +226,7 @@ def style_check_node(node, cx):
         check_indent(node, cx)
         indent_cx = cx.new_block_scope()
         check_function_name(node, node.name, node.params, cx)
+        check_function_params(node, node.params, cx)
         check_return_type(node, node.return_type, indent_cx)
         check_privileges(node, node.privileges, indent_cx)
         check_definition_block(node, node.block, cx)

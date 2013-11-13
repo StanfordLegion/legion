@@ -69,7 +69,7 @@ def test_style_pass(filename, verbose):
         program = passes.parse(f)
         style_check.style_check(program)
 
-_re_expected_failure = re.compile(r'^//\s+fails-with:$\s*((^//.*$\s*)+)', re.MULTILINE)
+_re_expected_failure = re.compile(r'^[ \t\r]*//[ \t]+fails-with:[ \t\r]*$\n((^[ \t\r]*//.*$\n)+)', re.MULTILINE)
 def test_style_fail(filename, verbose):
     # Search for the expected failure in the program
     with open(filename, 'rb') as f:
@@ -78,7 +78,7 @@ def test_style_fail(filename, verbose):
     if expected_failure_match is None:
         raise Exception('No fails-with declaration in style_fail testcase')
     expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
-    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+    expected_failure = '\n'.join([line.strip()[2:].strip() for line in expected_failure_lines])
 
     # Check that the program fails to compile
     try:
@@ -115,7 +115,8 @@ def test_compile_pass(filename, verbose, flags):
         os.close(fd)
         saved_temps = driver.driver(
             ['./driver.py', '-g', '-c', filename, '-o', temp_obj, '--save-temps'] +
-            (['-v'] if verbose else ['-q']))
+            (['-v'] if verbose else ['-q']) +
+            flags)
     except:
         # On failure, keep saved temporaries so that the user can
         # inspect the failure.
@@ -132,7 +133,6 @@ def test_compile_pass(filename, verbose, flags):
         if env_needs_cleanup:
             del os.environ['LG_RT_DIR']
 
-_re_expected_failure = re.compile(r'^//\s+fails-with:$\s*((^//.*$\s*)+)', re.MULTILINE)
 def test_compile_fail(filename, verbose):
     # Search for the expected failure in the program
     with open(filename, 'rb') as f:
@@ -141,7 +141,7 @@ def test_compile_fail(filename, verbose):
     if expected_failure_match is None:
         raise Exception('No fails-with declaration in compile_fail testcase')
     expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
-    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+    expected_failure = '\n'.join([line.strip()[2:].strip() for line in expected_failure_lines])
 
     # Check that the program fails to compile
     try:
@@ -162,7 +162,18 @@ def test_compile_fail(filename, verbose):
     else:
         raise Exception('Expecting failure, type checker returned successfully:\n%s' % program_type)
 
-def test_run_pass(filename, verbose, flags):
+_re_run_params = re.compile(r'^[ \t\r]*//[ \t]+run-with-params:[ \t\r]*$\n((^[ \t\r]*//.*$\n)+)', re.MULTILINE)
+def test_run_pass(filename, verbose, compile_flags):
+    # Search for the command-line parameters specified in the program
+    with open(filename, 'rb') as f:
+        program_text = f.read()
+    run_params_match = re.search(_re_run_params, program_text)
+    run_configurations = [[]]
+    if run_params_match is not None:
+        run_params_lines = run_params_match.group(1).strip().split('\n')
+        run_params = '\n'.join([line.strip()[2:].strip() for line in run_params_lines])
+        run_configurations = json.loads(run_params)
+
     if 'LG_RT_DIR' not in os.environ:
         raise Exception('LG_RT_DIR variable is not defined')
 
@@ -184,14 +195,18 @@ def test_run_pass(filename, verbose, flags):
             input_filenames +
             ['-o', temp_binary, '-j', '1', '--save-temps'] +
             (['-v'] if verbose else ['-q']) +
-            flags)
-        proc = subprocess.Popen(
-            [temp_binary],
-            cwd = os.path.dirname(os.path.realpath(filename)),
-            stdout = stdout, stderr = stderr)
-        output, errors = proc.communicate()
-        if proc.returncode != 0:
-            raise driver.CompilerException(output, errors, saved_temps)
+            compile_flags)
+        for run_configuration in run_configurations:
+            run_command = [temp_binary] + run_configuration
+            if verbose:
+                print ' '.join(run_command)
+            proc = subprocess.Popen(
+                run_command,
+                cwd = os.path.dirname(os.path.realpath(filename)),
+                stdout = stdout, stderr = stderr)
+            output, errors = proc.communicate()
+            if proc.returncode != 0:
+                raise driver.CompilerException(output, errors, saved_temps)
     except:
         # On failure, keep saved temporaries so that the user can
         # inspect the failure.
@@ -205,7 +220,7 @@ def test_run_pass(filename, verbose, flags):
         # failure anyway.
         os.remove(temp_binary)
 
-def test_run_fail(filename, verbose, flags):
+def test_run_fail(filename, verbose, compile_flags):
     # Search for the expected failure in the program
     with open(filename, 'rb') as f:
         program_text = f.read()
@@ -213,7 +228,7 @@ def test_run_fail(filename, verbose, flags):
     if expected_failure_match is None:
         raise Exception('No fails-with declaration in run_fail testcase')
     expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
-    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+    expected_failure = '\n'.join([line.strip()[2:].strip() for line in expected_failure_lines])
 
     if 'LG_RT_DIR' not in os.environ:
         raise Exception('LG_RT_DIR variable is not defined')
@@ -236,7 +251,7 @@ def test_run_fail(filename, verbose, flags):
             input_filenames +
             ['-o', temp_binary, '-j', '1', '--save-temps'] +
             (['-v'] if verbose else ['-q']) +
-            flags)
+            compile_flags)
         proc = subprocess.Popen(
             [temp_binary],
             cwd = os.path.dirname(os.path.realpath(filename)),
@@ -262,7 +277,6 @@ def test_run_fail(filename, verbose, flags):
         # Always remove the output file.
         os.remove(temp_binary)
 
-_re_expected_failure = re.compile(r'^//\s+fails-with:$\s*((^//.*$\s*)+)', re.MULTILINE)
 def test_compile_fail(filename, verbose):
     # Search for the expected failure in the program
     with open(filename, 'rb') as f:
@@ -271,7 +285,7 @@ def test_compile_fail(filename, verbose):
     if expected_failure_match is None:
         raise Exception('No fails-with declaration in compile_fail testcase')
     expected_failure_lines = expected_failure_match.group(1).strip().split('\n')
-    expected_failure = '\n'.join([line[2:].strip() for line in expected_failure_lines])
+    expected_failure = '\n'.join([line.strip()[2:].strip() for line in expected_failure_lines])
 
     # Check that the program fails to compile
     try:

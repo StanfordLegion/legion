@@ -13,29 +13,10 @@
  * limitations under the License.
  */
 
-struct point
-{
-  x: int,
-}
+#include "legion.h"
 
-task reduce_aliased(r0: region<point>, r1: region<point>,
-                    x0: point@r0, x1: point@r1)
-  , reduces<+>(r0.x, r1.x)
-{
-  x0->x += 1;
-  x1->x += 1;
-}
+using namespace LegionRuntime::HighLevel;
 
-task main()
-{
-  let r = region<point>(1);
-  let x = new<point@r>();
-  let c = color(coloring<r>(), x, 0);
-  let p0 = partition<r, disjoint>(c);
-  let p1 = partition<r, disjoint>(c);
-  let r0 = p0[0];
-  let r1 = p1[0];
-  x->x = 0;
-  reduce_aliased(r0, r1, downregion<r0>(x), downregion<r1>(x));
-  assert x->x == 2;
-}
+extern void foreign_initialize(HighLevelRuntime *runtime, Context ctx, PhysicalRegion region[1], ptr_t pointer);
+
+extern void foreign_iterate(HighLevelRuntime *runtime, Context ctx, PhysicalRegion region[1]);

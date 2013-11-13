@@ -51,6 +51,10 @@ def foreign_type(node, opts):
     if isinstance(node, ast.Struct):
         return (node.name, types.Kind(foreign_type(node.type, opts)))
 
+    # boolean
+    if isinstance(node, ast.TypeBool):
+        return types.Bool()
+
     # floating-point
     if isinstance(node, ast.TypeDouble):
         return types.Double()
@@ -85,12 +89,31 @@ def foreign_type(node, opts):
     if isinstance(node, ast.TypeUInt64):
         return types.UInt64()
 
+    # special Legion constructs
+    if isinstance(node, ast.TypeLegionColoring):
+        return types.ForeignColoring()
+    if isinstance(node, ast.TypeLegionContext):
+        return types.ForeignContext()
+    if isinstance(node, ast.TypeLegionPointer):
+        return types.ForeignPointer()
+
     # functions
     if isinstance(node, ast.TypeFunction):
-        param_types = [foreign_type(param, opts) for param in node.param_types]
+        foreign_param_types = [foreign_type(param, opts) for param in node.param_types]
+        param_types = [param for param in foreign_param_types
+                       if not (types.is_foreign_context(param) or
+                               types.is_foreign_runtime(param))]
         return_type = foreign_type(node.return_type, opts)
-        function_type = types.Function(param_types, [], return_type)
+        function_type = types.ForeignFunction(foreign_param_types, param_types, [], return_type)
         return function_type
+
+    # pointers
+    if isinstance(node, ast.TypePointer):
+        # special Legion constructs
+        if isinstance(node.points_to_type, ast.TypeLegionRegion):
+            return types.ForeignRegion()
+        if isinstance(node.points_to_type, ast.TypeLegionRuntime):
+            return types.ForeignRuntime()
 
     # structs
     if isinstance(node, ast.TypeStruct):

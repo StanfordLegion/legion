@@ -24,7 +24,19 @@
 ### be known in order to create accessors of the appropriate types.
 ###
 
+# Backport of singledispatch to Python 2.x.
+try:
+    from functools import singledispatch
+except ImportError:
+    from singledispatch import singledispatch
+
+import copy
 from . import ast, types
+
+class Context:
+    def __init__(self, type_map):
+        self.type_map = type_map
+        self.access_modes = {}
 
 ALL_FIELDS = ()
 
@@ -50,22 +62,23 @@ READ = Mode('reads')
 WRITE = Mode('writes')
 REDUCE = Mode('reduces')
 ALLOC = Mode('allocates')
+# FFI mode denotes when a region is passed into a foreign function.
+FFI = Mode('uses FFI')
 
-def mark_usage(points_to_type, region, field_path, mode, context):
-    type_map, access_modes = context
-
-    if region not in access_modes:
-        access_modes[region] = {}
-    if field_path not in access_modes[region]:
-        access_modes[region][field_path] = set()
-    access_modes[region][field_path].add(mode)
+def mark_usage(region, field_path, mode, cx):
+    assert types.is_region(region)
+    if region not in cx.access_modes:
+        cx.access_modes[region] = {}
+    if field_path not in cx.access_modes[region]:
+        cx.access_modes[region][field_path] = set()
+    cx.access_modes[region][field_path].add(mode)
 
 class Value:
-    def read(self, context):
+    def read(self, cx):
         return self
-    def write(self, context):
+    def write(self, cx):
         return self
-    def reduce(self, op, context):
+    def reduce(self, op, cx):
         return self
     def get_field(self, field_name):
         return self
@@ -75,211 +88,324 @@ class Reference:
         self.refers_to_type = refers_to_type
         self.regions = regions
         self.field_path = tuple(field_path)
-    def read(self, context):
+    def read(self, cx):
         for region in self.regions:
-            mark_usage(self.refers_to_type, region, self.field_path, READ, context)
+            mark_usage(region, self.field_path, READ, cx)
         return self
-    def write(self, context):
+    def write(self, cx):
         for region in self.regions:
-            mark_usage(self.refers_to_type, region, self.field_path, WRITE, context)
+            mark_usage(region, self.field_path, WRITE, cx)
         return self
-    def reduce(self, op, context):
+    def reduce(self, op, cx):
         for region in self.regions:
-            mark_usage(self.refers_to_type, region, self.field_path, REDUCE(op), context)
+            mark_usage(region, self.field_path, REDUCE(op), cx)
         return self
     def get_field(self, field_name):
         return Reference(self.refers_to_type, self.regions, self.field_path + (field_name,))
 
-def region_analysis_helper(node, context):
-    type_map, access_modes = context
-    if isinstance(node, ast.Program):
-        region_analysis_helper(node.definitions, context)
-        return
-    if isinstance(node, ast.Definitions):
-        for definition in node.definitions:
-            region_analysis_helper(definition, context)
-        return
-    if isinstance(node, ast.Import):
-        return
-    if isinstance(node, ast.Struct):
-        return
-    if isinstance(node, ast.Function):
-        region_analysis_helper(node.block, context)
-        return
-    if isinstance(node, ast.Block):
-        for expr in node.block:
-            region_analysis_helper(expr, context)
-        return
-    if isinstance(node, ast.StatementAssert):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementExpr):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementIf):
-        region_analysis_helper(node.condition, context).read(context)
-        region_analysis_helper(node.then_block, context)
-        if node.else_block is not None:
-            region_analysis_helper(node.else_block, context)
-        return
-    if isinstance(node, ast.StatementFor):
-        region_analysis_helper(node.block, context)
-        return
-    if isinstance(node, ast.StatementLet):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementLetRegion):
-        region_analysis_helper(node.size_expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementLetArray):
-        return
-    if isinstance(node, ast.StatementLetIspace):
-        region_analysis_helper(node.size_expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementLetPartition):
-        region_analysis_helper(node.coloring_expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementReturn):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementUnpack):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementVar):
-        region_analysis_helper(node.expr, context).read(context)
-        return
-    if isinstance(node, ast.StatementWhile):
-        region_analysis_helper(node.condition, context).read(context)
-        region_analysis_helper(node.block, context)
-        return
-    if isinstance(node, ast.ExprID):
-        return Value()
-    if isinstance(node, ast.ExprAssignment):
-        region_analysis_helper(node.lval, context).write(context)
-        return region_analysis_helper(node.rval, context).read(context)
-    if isinstance(node, ast.ExprUnaryOp):
-        region_analysis_helper(node.arg, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprBinaryOp):
-        region_analysis_helper(node.lhs, context).read(context)
-        region_analysis_helper(node.rhs, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprReduceOp):
-        region_analysis_helper(node.lhs, context).reduce(node.op, context)
-        region_analysis_helper(node.rhs, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprCast):
-        region_analysis_helper(node.expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprNull):
-        return Value()
-    if isinstance(node, ast.ExprIsnull):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprNew):
-        pointer_type = type_map[node].as_read()
-        for region in pointer_type.regions:
-            mark_usage(pointer_type.points_to_type, region, ALL_FIELDS, ALLOC, context)
-        return Value()
-    if isinstance(node, ast.ExprRead):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        pointer_type = type_map[node.pointer_expr].as_read()
-        for region in pointer_type.regions:
-            mark_usage(pointer_type.points_to_type, region, ALL_FIELDS, READ, context)
-        return Value()
-    if isinstance(node, ast.ExprWrite):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        region_analysis_helper(node.value_expr, context).read(context)
-        pointer_type = type_map[node.pointer_expr].as_read()
-        for region in pointer_type.regions:
-            mark_usage(pointer_type.points_to_type, region, ALL_FIELDS, WRITE, context)
-        return Value()
-    if isinstance(node, ast.ExprReduce):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        region_analysis_helper(node.value_expr, context).read(context)
-        pointer_type = type_map[node.pointer_expr].as_read()
-        for region in pointer_type.regions:
-            mark_usage(pointer_type.points_to_type, region, ALL_FIELDS, REDUCE(node.op), context)
-        return Value()
-    if isinstance(node, ast.ExprDereference):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        pointer_type = type_map[node.pointer_expr].as_read()
-        return Reference(pointer_type.points_to_type, pointer_type.regions, [])
-    if isinstance(node, ast.ExprArrayAccess):
-        region_analysis_helper(node.array_expr, context).read(context)
-        region_analysis_helper(node.index_expr, context).read(context)
-        if types.is_partition(type_map[node.array_expr]):
-            return Value()
-        region_type = type_map[node.array_expr].as_read()
-        return Reference(region_type.kind.contains_type, [region_type], [])
-    if isinstance(node, ast.ExprFieldAccess):
-        return region_analysis_helper(node.struct_expr, context).get_field(node.field_name)
-    if isinstance(node, ast.ExprFieldDereference):
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        pointer_type = type_map[node.pointer_expr].as_read()
-        return Reference(pointer_type.points_to_type, pointer_type.regions, [node.field_name])
-    if isinstance(node, ast.ExprFieldValues):
-        region_analysis_helper(node.field_values, context)
-        return Value()
-    if isinstance(node, ast.FieldValues):
-        for field_value in node.field_values:
-            region_analysis_helper(field_value, context)
-        return
-    if isinstance(node, ast.FieldValue):
-        region_analysis_helper(node.value_expr, context).read(context)
-        return
-    if isinstance(node, ast.ExprFieldUpdates):
-        region_analysis_helper(node.struct_expr, context).read(context)
-        region_analysis_helper(node.field_updates, context)
-        return Value()
-    if isinstance(node, ast.FieldUpdates):
-        for field_update in node.field_updates:
-            region_analysis_helper(field_update, context)
-        return
-    if isinstance(node, ast.FieldUpdate):
-        region_analysis_helper(node.update_expr, context).read(context)
-        return
-    if isinstance(node, ast.ExprColoring):
-        return Value()
-    if isinstance(node, ast.ExprColor):
-        region_analysis_helper(node.coloring_expr, context).read(context)
-        region_analysis_helper(node.pointer_expr, context).read(context)
-        region_analysis_helper(node.color_expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprUpregion):
-        region_analysis_helper(node.expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprDownregion):
-        region_analysis_helper(node.expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprPack):
-        region_analysis_helper(node.expr, context).read(context)
-        return Value()
-    if isinstance(node, ast.ExprCall):
-        region_analysis_helper(node.function, context).read(context)
-        region_analysis_helper(node.args, context)
-        return Value()
-    if isinstance(node, ast.Args):
-        for arg in node.args:
-            region_analysis_helper(arg, context).read(context)
-        return
-    if isinstance(node, ast.ExprConstBool):
-        return Value()
-    if isinstance(node, ast.ExprConstDouble):
-        return Value()
-    if isinstance(node, ast.ExprConstFloat):
-        return Value()
-    if isinstance(node, ast.ExprConstInt):
-        return Value()
-    if isinstance(node, ast.ExprConstUInt):
-        return Value()
+@singledispatch
+def region_analysis_node(node, cx):
     raise Exception('Region analysis failed at %s' % node)
 
+@region_analysis_node.register(ast.Program)
+def _(node, cx):
+    region_analysis_node(node.definitions, cx)
+    return
+
+@region_analysis_node.register(ast.Definitions)
+def _(node, cx):
+    for definition in node.definitions:
+        region_analysis_node(definition, cx)
+    return
+
+@region_analysis_node.register(ast.Import)
+def _(node, cx):
+    return
+
+@region_analysis_node.register(ast.Struct)
+def _(node, cx):
+    return
+
+@region_analysis_node.register(ast.Function)
+def _(node, cx):
+    region_analysis_node(node.block, cx)
+    return
+
+@region_analysis_node.register(ast.Block)
+def _(node, cx):
+    for expr in node.block:
+        region_analysis_node(expr, cx)
+    return
+
+@region_analysis_node.register(ast.StatementAssert)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementExpr)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementIf)
+def _(node, cx):
+    region_analysis_node(node.condition, cx).read(cx)
+    region_analysis_node(node.then_block, cx)
+    if node.else_block is not None:
+        region_analysis_node(node.else_block, cx)
+    return
+
+@region_analysis_node.register(ast.StatementFor)
+def _(node, cx):
+    region_analysis_node(node.block, cx)
+    return
+
+@region_analysis_node.register(ast.StatementLet)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementLetRegion)
+def _(node, cx):
+    region_analysis_node(node.size_expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementLetArray)
+def _(node, cx):
+    return
+
+@region_analysis_node.register(ast.StatementLetIspace)
+def _(node, cx):
+    region_analysis_node(node.size_expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementLetPartition)
+def _(node, cx):
+    region_analysis_node(node.coloring_expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementReturn)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementUnpack)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementVar)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.StatementWhile)
+def _(node, cx):
+    region_analysis_node(node.condition, cx).read(cx)
+    region_analysis_node(node.block, cx)
+    return
+
+@region_analysis_node.register(ast.ExprID)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprAssignment)
+def _(node, cx):
+    region_analysis_node(node.lval, cx).write(cx)
+    return region_analysis_node(node.rval, cx).read(cx)
+
+@region_analysis_node.register(ast.ExprUnaryOp)
+def _(node, cx):
+    region_analysis_node(node.arg, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprBinaryOp)
+def _(node, cx):
+    region_analysis_node(node.lhs, cx).read(cx)
+    region_analysis_node(node.rhs, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprReduceOp)
+def _(node, cx):
+    region_analysis_node(node.lhs, cx).reduce(node.op, cx)
+    region_analysis_node(node.rhs, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprCast)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprNull)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprIsnull)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprNew)
+def _(node, cx):
+    pointer_type = cx.type_map[node].as_read()
+    for region in pointer_type.regions:
+        mark_usage(region, ALL_FIELDS, ALLOC, cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprRead)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    pointer_type = cx.type_map[node.pointer_expr].as_read()
+    for region in pointer_type.regions:
+        mark_usage(region, ALL_FIELDS, READ, cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprWrite)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    region_analysis_node(node.value_expr, cx).read(cx)
+    pointer_type = cx.type_map[node.pointer_expr].as_read()
+    for region in pointer_type.regions:
+        mark_usage(region, ALL_FIELDS, WRITE, cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprReduce)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    region_analysis_node(node.value_expr, cx).read(cx)
+    pointer_type = cx.type_map[node.pointer_expr].as_read()
+    for region in pointer_type.regions:
+        mark_usage(region, ALL_FIELDS, REDUCE(node.op), cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprDereference)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    pointer_type = cx.type_map[node.pointer_expr].as_read()
+    return Reference(pointer_type.points_to_type, pointer_type.regions, [])
+
+@region_analysis_node.register(ast.ExprArrayAccess)
+def _(node, cx):
+    region_analysis_node(node.array_expr, cx).read(cx)
+    region_analysis_node(node.index_expr, cx).read(cx)
+    if types.is_partition(cx.type_map[node.array_expr]):
+        return Value()
+    region_type = cx.type_map[node.array_expr].as_read()
+    return Reference(region_type.kind.contains_type, [region_type], [])
+
+@region_analysis_node.register(ast.ExprFieldAccess)
+def _(node, cx):
+    return region_analysis_node(node.struct_expr, cx).get_field(node.field_name)
+
+@region_analysis_node.register(ast.ExprFieldDereference)
+def _(node, cx):
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    pointer_type = cx.type_map[node.pointer_expr].as_read()
+    return Reference(pointer_type.points_to_type, pointer_type.regions, [node.field_name])
+
+@region_analysis_node.register(ast.ExprFieldValues)
+def _(node, cx):
+    region_analysis_node(node.field_values, cx)
+    return Value()
+
+@region_analysis_node.register(ast.FieldValues)
+def _(node, cx):
+    for field_value in node.field_values:
+        region_analysis_node(field_value, cx)
+    return
+
+@region_analysis_node.register(ast.FieldValue)
+def _(node, cx):
+    region_analysis_node(node.value_expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.ExprFieldUpdates)
+def _(node, cx):
+    region_analysis_node(node.struct_expr, cx).read(cx)
+    region_analysis_node(node.field_updates, cx)
+    return Value()
+
+@region_analysis_node.register(ast.FieldUpdates)
+def _(node, cx):
+    for field_update in node.field_updates:
+        region_analysis_node(field_update, cx)
+    return
+
+@region_analysis_node.register(ast.FieldUpdate)
+def _(node, cx):
+    region_analysis_node(node.update_expr, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.ExprColoring)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprColor)
+def _(node, cx):
+    region_analysis_node(node.coloring_expr, cx).read(cx)
+    region_analysis_node(node.pointer_expr, cx).read(cx)
+    region_analysis_node(node.color_expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprUpregion)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprDownregion)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprPack)
+def _(node, cx):
+    region_analysis_node(node.expr, cx).read(cx)
+    return Value()
+
+@region_analysis_node.register(ast.ExprCall)
+def _(node, cx):
+    region_analysis_node(node.function, cx).read(cx)
+    region_analysis_node(node.args, cx)
+
+    # Foreign functions must be assumed to touch all arguments.
+    if types.is_foreign_function(cx.type_map[node.function]):
+        for arg in node.args.args:
+            arg_type = cx.type_map[arg]
+            if types.is_region(arg_type):
+                mark_usage(arg_type, ALL_FIELDS, FFI, cx)
+
+    return Value()
+
+@region_analysis_node.register(ast.Args)
+def _(node, cx):
+    for arg in node.args:
+        region_analysis_node(arg, cx).read(cx)
+    return
+
+@region_analysis_node.register(ast.ExprConstBool)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprConstDouble)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprConstFloat)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprConstInt)
+def _(node, cx):
+    return Value()
+
+@region_analysis_node.register(ast.ExprConstUInt)
+def _(node, cx):
+    return Value()
+
 def region_analysis(program, opts, type_map):
-    access_modes = {}
-    context = type_map, access_modes
-    region_analysis_helper(program, context)
-    return access_modes
+    cx = Context(type_map)
+    region_analysis_node(program, cx)
+    return cx.access_modes
 
 def summarize_modes_helper(constraint_graph, region_usage, region, visited):
     access_modes = region_usage

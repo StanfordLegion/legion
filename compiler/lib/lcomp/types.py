@@ -296,7 +296,7 @@ class Region(Type):
         self.name = name
         self.kind = kind
     def __eq__(self, other):
-        return id(self) == id(other) or is_region_wild(other)
+        return id(self) == id(other) or is_region_wild(other) or is_foreign_region(other)
     def hash_helper(self, depth):
         return id(self)
     def key(self):
@@ -313,7 +313,7 @@ class Region(Type):
 
 class RegionWild(Type):
     def __eq__(self, other):
-        return is_same_class(self, other) or is_region(other)
+        return is_same_class(self, other) or is_region(other) or is_foreign_region(other)
     def hash_helper(self, depth):
         return 'region_wild'
     def key(self):
@@ -375,7 +375,7 @@ class Coloring(Type):
     def __init__(self, region):
         self.region = region
     def __eq__(self, other):
-        return is_same_class(self, other) and self.region == other.region
+        return (is_same_class(self, other) and self.region == other.region) or is_foreign_coloring(other)
     def hash_helper(self, depth):
         if depth > MAX_HASH_DEPTH:
             return 'coloring'
@@ -496,9 +496,10 @@ class Pointer(Type):
         self.points_to_type = points_to_type
         self.regions = regions
     def __eq__(self, other):
-        return is_same_class(self, other) and \
-            self.points_to_type == other.points_to_type and \
-            self.regions == other.regions
+        return ((is_same_class(self, other) and
+                 self.points_to_type == other.points_to_type and
+                 self.regions == other.regions) or
+                is_foreign_pointer(other))
     def hash_helper(self, depth):
         if depth > MAX_HASH_DEPTH:
             return 'pointer'
@@ -938,6 +939,33 @@ class Function(Type):
              self.return_type.component_types_helper(visited)] +
             [t.component_types_helper(visited) for t in self.param_types])
 
+###
+### Foreign types are used in the FFI between Legion and
+### C++. Generally, they exist implicitly in all Legion tasks, but are
+### managed by the compiler and are not directly accessible to Legion
+### code. However, in order to do useful work in C++, it is frequently
+### necessary to pass them along to C++ code.
+###
+
+class ForeignColoring(Type):
+    def __eq__(self, other):
+        return is_same_class(self, other) or is_coloring(other)
+class ForeignContext(Type): pass
+class ForeignPointer(Type):
+    def __eq__(self, other):
+        return is_same_class(self, other) or is_pointer(other)
+class ForeignRegion(Type):
+    def __eq__(self, other):
+        return is_same_class(self, other) or is_region(other) or is_region_wild(other)
+class ForeignRuntime(Type): pass
+
+class ForeignFunction(Function):
+    def __init__(self, foreign_param_types, param_types, privileges, return_type):
+        Function.__init__(self, param_types, privileges, return_type)
+
+        assert len(foreign_param_types) >= len(param_types)
+        self.foreign_param_types = foreign_param_types
+
 class Module(Type):
     def __init__(self, def_types):
         self.def_types = def_types
@@ -1037,6 +1065,24 @@ def is_struct_instance(t):
 
 def is_function(t):
     return isinstance(t, Function)
+
+def is_foreign_coloring(t):
+    return isinstance(t, ForeignColoring)
+
+def is_foreign_context(t):
+    return isinstance(t, ForeignContext)
+
+def is_foreign_pointer(t):
+    return isinstance(t, ForeignPointer)
+
+def is_foreign_runtime(t):
+    return isinstance(t, ForeignRuntime)
+
+def is_foreign_region(t):
+    return isinstance(t, ForeignRegion)
+
+def is_foreign_function(t):
+    return isinstance(t, ForeignFunction)
 
 def is_ispace(t):
     return isinstance(t, Ispace)

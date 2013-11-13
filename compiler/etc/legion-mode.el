@@ -16,7 +16,7 @@
 (require 'generic-x)
 
 (define-generic-mode 'legion-mode
-  '("//")
+  '("//" ("/*" . "*/"))
   '("array" "as" "assert" "bool" "color" "coloring"
     "double" "downregion" "else" "false" "float"
     "for" "if" "import" "in" "int" "int8" "int16"

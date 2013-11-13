@@ -19,36 +19,53 @@
 ### Augments imports with ASTs of foreign code
 ###
 
+# Backport of singledispatch to Python 2.x.
+try:
+    from functools import singledispatch
+except ImportError:
+    from singledispatch import singledispatch
+
 import os
 from . import ast
 from .clang import parse
 
+@singledispatch
 def augment_node(node, opts):
-    if isinstance(node, ast.Program):
-        augment_node(node.definitions, opts)
-        return
-    if isinstance(node, ast.Definitions):
-        for definition in node.definitions:
-            augment_node(definition, opts)
-        return
-    if isinstance(node, ast.Import):
-        filename = None
-        for search_dir in opts.search_path:
-            test = os.path.join(search_dir, node.filename)
-            if os.path.exists(test):
-                filename = test
-                break
-        if filename is None:
-            raise Exception('Failed to locate file %s in search path %s' % (
-                    node.filename, opts.search_path))
-        parser = parse.Parser()
-        node.ast = parser.parse(filename, opts)
-        return
-    if isinstance(node, ast.Struct):
-        return
-    if isinstance(node, ast.Function):
-        return
     raise Exception('Failed to augment imports for %s' % node)
+
+@augment_node.register(ast.Program)
+def _(node, opts):
+    augment_node(node.definitions, opts)
+    return
+
+@augment_node.register(ast.Definitions)
+def _(node, opts):
+    for definition in node.definitions:
+        augment_node(definition, opts)
+    return
+
+@augment_node.register(ast.Import)
+def _(node, opts):
+    filename = None
+    for search_dir in opts.search_path:
+        test = os.path.join(search_dir, node.filename)
+        if os.path.exists(test):
+            filename = test
+            break
+    if filename is None:
+        raise Exception('Failed to locate file %s in search path %s' % (
+                node.filename, opts.search_path))
+    parser = parse.Parser()
+    node.ast = parser.parse(filename, opts)
+    return
+
+@augment_node.register(ast.Struct)
+def _(node, opts):
+    return
+
+@augment_node.register(ast.Function)
+def _(node, opts):
+    return
 
 def augment_imports(program, opts):
     augment_node(program, opts)

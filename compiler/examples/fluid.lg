@@ -116,18 +116,19 @@ task owned_color(bx: int, buffer_phase: int, nbx: int): int
 
 task ghost_color(bx: int, dir: int, buffer_phase: int, edge_phase: int, nbx: int): int
 {
+  let dshift = 1;
   if (edge_phase == 0) {
     // For phase 0, return own ghost block.
-    return (buffer_phase*nbx + bx)*3 + dir;
+    return (buffer_phase*nbx + bx)*3 + dir + dshift;
   }
   if (edge_phase == 1) {
     if ((bx == 0 && dir == -1) || (bx == nbx - 1 && dir == 1)) {
       // For boundary blocks in phase 1, return own ghost
       // block. (There is no neighbor.)
-      return (buffer_phase*nbx + bx)*3 + dir;
+      return (buffer_phase*nbx + bx)*3 + dir + dshift;
     }
     // For phase 1, return neighbor's opposite-direction ghost block.
-    return (buffer_phase*nbx + bx + dir)*3 - dir;
+    return (buffer_phase*nbx + bx + dir)*3 - dir + dshift;
   }
   assert false;
 }

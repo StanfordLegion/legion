@@ -13,6 +13,18 @@
  * limitations under the License.
  */
 
+// run-with-params:
+// [
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "2", "-foreign", "0"],
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "2", "-foreign", "1"],
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "4", "-foreign", "0"],
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "4", "-foreign", "1"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "2", "-foreign", "0"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "2", "-foreign", "1"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "4", "-foreign", "0"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "4", "-foreign", "1"]
+// ]
+
 // Inspired by https://github.com/losalamos/PENNANT
 
 import "math.h";
@@ -45,9 +57,6 @@ struct zone
 
   // Temporaries for QCS
   zuc:    vec2,         // zone center velocity
-
-  // Temporaries used for coloring
-  zcolor: int,
 }
 
 struct point
@@ -66,19 +75,15 @@ struct point
   has_bcx_1: bool,
   has_bcy_0: bool,
   has_bcy_1: bool,
-
-  // Temporaries used for coloring
-  pcolors: int,
-  phascolor: bool,
 }
 
 struct side<rz: region<zone>, rpp: region<point>, rpg: region<point>, rs: region<side<rz, rpp, rpg, rs>>>
 {
-  mapsz:  zone@rz,              // maps: side -> zone
+  mapsz:  zone@rz,                      // maps: side -> zone
   mapsp1: point@(rpp, rpg),             // maps: side -> points 1 and 2
   mapsp2: point@(rpp, rpg),
-  mapss3: side<rz, rpp, rpg, rs>@rs,  // maps: side -> previous side
-  mapss4: side<rz, rpp, rpg, rs>@rs,  // maps: side -> next side
+  mapss3: side<rz, rpp, rpg, rs>@rs,    // maps: side -> previous side
+  mapss4: side<rz, rpp, rpg, rs>@rs,    // maps: side -> next side
 
   sareap: double,       // side area, middle of cycle
   sarea:  double,       // side area, end of cycle
@@ -116,7 +121,14 @@ struct mesh<rz: region<zone>, rp: region<point>, rs: region<side<?, ?, ?, ?>>>
            [rzp: region<zone>, rpp: region<point>, rpg: region<point>, rps: region<point>, rsp: region<side<rzp, rpp, rpg, rsp>>]
   , rzp <= rz, rpp <= rp, rpg <= rp, rps <= rp, rpp * rpg, rpp * rps, rsp <= rs
 {
-  ignore: int,
+  // Coloring
+  mcolor: int,          // mesh piece color
+
+  // Index bounds for C++ kernels
+  zstart: int,          // zone start index
+  zend: int,            // zone end index (exclusive)
+  sstart: int,          // side start index
+  send: int,            // side end index (exclusive)
 }
 
 ///
@@ -264,23 +276,29 @@ task adv_pos_half(rp: region<point>, dt: double)
 }
 
 // Save off zone variable value from previous cycle.
-task init_step_zones(rz: region<zone>)
+task init_step_zones(rz: region<zone>,
+                     zstart: int, zend: int, use_foreign: bool)
   , reads(rz.zvol)
-  , writes(rz.{zvol0, zvolp, zvol, zareap, zarea, zxp, zx, zuc, zw})
+  , writes(rz.{zxp, zx, zareap, zarea, zvol0, zvolp, zvol, zdl, zw, zuc})
 {
-  for z in rz {
-    // Copy state variables from previous time step.
-    z->zvol0 = z->zvol;
+  if (use_foreign) {
+    foreign_init_step_zones(zstart, zend, rz);
+  } else {
+    for z in rz {
+      // Copy state variables from previous time step.
+      z->zvol0 = z->zvol;
 
-    // Initialize fields used in reductions.
-    z->zxp = {x: 0.0, y: 0.0};
-    z->zx = {x: 0.0, y: 0.0};
-    z->zvolp = 0.0;
-    z->zvol = 0.0;
-    z->zareap = 0.0;
-    z->zarea = 0.0;
-    z->zuc = {x: 0.0, y: 0.0};
-    z->zw = 0.0;
+      // Initialize fields used in reductions.
+      z->zxp = {x: 0.0, y: 0.0};
+      z->zx = {x: 0.0, y: 0.0};
+      z->zareap = 0.0;
+      z->zarea = 0.0;
+      z->zvolp = 0.0;
+      z->zvol = 0.0;
+      z->zdl = 1e99;
+      z->zw = 0.0;
+      z->zuc = {x: 0.0, y: 0.0};
+    }
   }
 }
 
@@ -290,105 +308,120 @@ task init_step_zones(rz: region<zone>)
 
 // Compute centers of zones and edges.
 task calc_centers(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                  rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.znump, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
-  , writes(rs.exp)
-  , reduces<+>(rz.zxp.{x, y})
+                  rs: region<side<rz, rpp, rpg, rs>>,
+                  sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{znump, zxp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
+  , writes(rz.zxp, rs.exp)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
-    let e = s;
+  if (use_foreign) {
+    foreign_calc_centers(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
+      let e = s;
 
-    e->exp = scale(add(p1->pxp, p2->pxp), 0.5);
+      e->exp = scale(add(p1->pxp, p2->pxp), 0.5);
 
-    z->zxp.x += p1->pxp.x / double(z->znump);
-    z->zxp.y += p1->pxp.y / double(z->znump);
+      z->zxp.x += p1->pxp.x / double(z->znump);
+      z->zxp.y += p1->pxp.y / double(z->znump);
+    }
   }
 }
 
 // Compute volumes of zones and sides.
 task calc_volumes(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                  rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.zxp, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
-  , writes(rs.{sareap, svolp})
-  , reduces<+>(rz.{zareap, zvolp})
+                  rs: region<side<rz, rpp, rpg, rs>>,
+                  sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{zxp, zareap, zvolp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
+  , writes(rz.{zareap, zvolp}, rs.{sareap, svolp})
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
+  if (use_foreign) {
+    foreign_calc_volumes(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
 
-    let sa = 0.5 * cross(sub(p2->pxp, p1->pxp), sub(z->zxp, p1->pxp));
-    let sv = (1.0 / 3.0) * sa * (p1->pxp.x + p2->pxp.x + z->zxp.x);
-    s->sareap = sa;
-    s->svolp = sv;
+      let sa = 0.5 * cross(sub(p2->pxp, p1->pxp), sub(z->zxp, p1->pxp));
+      let sv = (1.0 / 3.0) * sa * (p1->pxp.x + p2->pxp.x + z->zxp.x);
+      s->sareap = sa;
+      s->svolp = sv;
 
-    z->zareap += sa;
-    z->zvolp += sv;
+      z->zareap += sa;
+      z->zvolp += sv;
 
-    // FIXME: Turn this assertion back on when we get real working math.
-    // assert sv > 0.0;
+      assert sv > 0.0;
+    }
   }
 }
 
 // Compute surface vectors of sides.
 task calc_surface_vecs(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                       rs: region<side<rz, rpp, rpg, rs>>)
+                       rs: region<side<rz, rpp, rpg, rs>>,
+                       sstart: int, send: int, use_foreign: bool)
   , reads(rz.zxp, rs.{mapsz, exp})
   , writes(rs.ssurfp)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let e = s;
+  if (use_foreign) {
+    foreign_calc_surface_vecs(sstart, send, rz, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let e = s;
 
-    s->ssurfp = rotateCCW(sub(e->exp, z->zxp));
+      s->ssurfp = rotateCCW(sub(e->exp, z->zxp));
+    }
   }
 }
 
 // Compute edge lengths.
 task calc_edge_len(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                   rs: region<side<rz, rpp, rpg, rs>>)
+                   rs: region<side<rz, rpp, rpg, rs>>,
+                   sstart: int, send: int, use_foreign: bool)
   , reads(rpp.pxp, rpg.pxp, rs.{mapsp1, mapsp2})
   , writes(rs.elen)
 {
-  for s in rs {
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
-    let e = s;
+  if (use_foreign) {
+    foreign_calc_edge_len(sstart, send, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
+      let e = s;
 
-    e->elen = length(sub(p2->pxp, p1->pxp));
+      e->elen = length(sub(p2->pxp, p1->pxp));
+    }
   }
 }
 
 // Compute zone characteristic lengths.
 task calc_char_len(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                   rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.znump, rs.{mapsz, sareap, elen})
-  // Note: Technically, this could be reduce<min>, but it shouldn't be
-  // an issue because zone are not shared.
-  , reads(rz.zdl)
+                   rs: region<side<rz, rpp, rpg, rs>>,
+                   sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{znump, zdl}, rs.{mapsz, sareap, elen})
   , writes(rz.zdl)
 {
-  for z in rz {
-    z->zdl = 1e99;
-  }
+  if (use_foreign) {
+    foreign_calc_char_len(sstart, send, rz, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let e = s;
 
-  for s in rs {
-    let z = s->mapsz;
-    let e = s;
-
-    let area = s->sareap;
-    let base = e->elen;
-    var fac = 0.0;
-    if (z->znump == 3) {
-      fac = 3.0;
-    } else {
-      fac = 4.0;
+      let area = s->sareap;
+      let base = e->elen;
+      var fac = 0.0;
+      if (z->znump == 3) {
+        fac = 3.0;
+      } else {
+        fac = 4.0;
+      }
+      let sdl = fac * area / base;
+      z->zdl = fmin(z->zdl, sdl);
     }
-    let sdl = fac * area / base;
-    z->zdl = fmin(z->zdl, sdl);
   }
 }
 
@@ -397,28 +430,38 @@ task calc_char_len(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 ///
 
 // Compute zone densities.
-task calc_rho_half(rz: region<zone>)
+task calc_rho_half(rz: region<zone>,
+                   zstart: int, zend: int, use_foreign: bool)
   , reads(rz.{zvolp, zm})
   , writes(rz.zrp)
 {
-  for z in rz {
-    z->zrp = z->zm / z->zvolp;
+  if (use_foreign) {
+    foreign_calc_rho_half(zstart, zend, rz);
+  } else {
+    for z in rz {
+      z->zrp = z->zm / z->zvolp;
+    }
   }
 }
 
 // Reduce masses into points.
 task sum_point_mass(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                    rs: region<side<rz, rpp, rpg, rs>>)
+                    rs: region<side<rz, rpp, rpg, rs>>,
+                    sstart: int, send: int, use_foreign: bool)
   , reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf})
   , reduces<+>(rpp.pmaswt, rpg.pmaswt)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let s3 = s->mapss3;
+  if (use_foreign) {
+    foreign_sum_point_mass(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let s3 = s->mapss3;
 
-    let m = z->zrp * z->zareap * 0.5 * (s->smf + s3->smf);
-    p1->pmaswt += m;
+      let m = z->zrp * z->zareap * 0.5 * (s->smf + s3->smf);
+      p1->pmaswt += m;
+    }
   }
 }
 
@@ -427,31 +470,37 @@ task sum_point_mass(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 ///
 
 
-task calc_state_at_half(rz: region<zone>, gamma: double, ssmin: double, dt: double)
+task calc_state_at_half(rz: region<zone>,
+                        gamma: double, ssmin: double, dt: double,
+                        zstart: int, zend: int, use_foreign: bool)
   , reads(rz.zvol0, rz.zvolp, rz.zm, rz.zr, rz.ze, rz.zwrate)
   , writes(rz.zp, rz.zss)
 {
-  let gm1 = gamma - 1.0;
-  let ss2 = fmax(ssmin * ssmin, 1e-99);
-  let dth = 0.5 * dt;
+  if (use_foreign) {
+    foreign_calc_state_at_half(gamma, ssmin, dt, zstart, zend, rz);
+  } else {
+    let gm1 = gamma - 1.0;
+    let ss2 = fmax(ssmin * ssmin, 1e-99);
+    let dth = 0.5 * dt;
 
-  for z in rz {
-    let rx = z->zr;
-    let ex = fmax(z->ze, 0.0);
-    let px = gm1 * rx * ex;
-    let prex = gm1 * ex;
-    let perx = gm1 * rx;
-    let csqd = fmax(ss2, prex + perx * px / (rx * rx));
-    let z0per = perx;
-    let zss = sqrt(csqd);
-    z->zss = zss;
+    for z in rz {
+      let rx = z->zr;
+      let ex = fmax(z->ze, 0.0);
+      let px = gm1 * rx * ex;
+      let prex = gm1 * ex;
+      let perx = gm1 * rx;
+      let csqd = fmax(ss2, prex + perx * px / (rx * rx));
+      let z0per = perx;
+      let zss = sqrt(csqd);
+      z->zss = zss;
 
-    let zminv = 1.0 / z->zm;
-    let dv = (z->zvolp - z->zvol0) * zminv;
-    let bulk = z->zr * zss * zss;
-    let denom = 1.0 + 0.5 * z0per * dv;
-    let src = z->zwrate * dth * zminv;
-    z->zp = px + (z0per * src - z->zr * bulk * dv) / denom;
+      let zminv = 1.0 / z->zm;
+      let dv = (z->zvolp - z->zvol0) * zminv;
+      let bulk = z->zr * zss * zss;
+      let denom = 1.0 + 0.5 * z0per * dv;
+      let src = z->zwrate * dth * zminv;
+      z->zp = px + (z0per * src - z->zr * bulk * dv) / denom;
+    }
   }
 }
 
@@ -461,41 +510,51 @@ task calc_state_at_half(rz: region<zone>, gamma: double, ssmin: double, dt: doub
 
 // Compute PolyGas forces.
 task calc_force_pgas(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                     rs: region<side<rz, rpp, rpg, rs>>)
+                     rs: region<side<rz, rpp, rpg, rs>>,
+                     sstart: int, send: int, use_foreign: bool)
   , reads(rz.zp, rs.{mapsz, ssurfp})
   , writes(rs.sfp)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let sfx = scale(s->ssurfp, -z->zp);
-    s->sfp = sfx;
+  if (use_foreign) {
+    foreign_calc_force_pgas(sstart, send, rz, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let sfx = scale(s->ssurfp, -z->zp);
+      s->sfp = sfx;
+    }
   }
 }
 
 // Compute TTS forces.
 task calc_force_tts(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                     rs: region<side<rz, rpp, rpg, rs>>,
-                    alfa: double, ssmin: double)
+                    alfa: double, ssmin: double,
+                    sstart: int, send: int, use_foreign: bool)
   , reads(rz.{zareap, zrp, zss}, rs.{mapsz, sareap, smf, ssurfp})
   , writes(rs.sft)
 {
-  for s in rs {
-    let z = s->mapsz;
+  if (use_foreign) {
+    foreign_calc_force_tts(alfa, ssmin, sstart, send, rz, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
 
-    let svfacinv = z->zareap / s->sareap;
-    let srho = z->zrp * s->smf * svfacinv;
-    let sstmp = fmax(z->zss, ssmin);
-    let sstmp = alfa * sstmp * sstmp;
-    let sdp = sstmp * (srho - z->zrp);
-    let sqq = scale(s->ssurfp, -sdp);
-    s->sft = sqq;
+      let svfacinv = z->zareap / s->sareap;
+      let srho = z->zrp * s->smf * svfacinv;
+      let sstmp = fmax(z->zss, ssmin);
+      let sstmp = alfa * sstmp * sstmp;
+      let sdp = sstmp * (srho - z->zrp);
+      let sqq = scale(s->ssurfp, -sdp);
+      s->sft = sqq;
+    }
   }
 }
 
 task qcs_zone_center_velocity(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                               rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.znump, rpp.pu, rpg.pu, rs.{mapsz, mapsp1})
-  , reduces<+>(rz.zuc.{x, y})
+  , reads(rz.{znump, zuc}, rpp.pu, rpg.pu, rs.{mapsz, mapsp1})
+  , writes(rz.zuc)
 {
   for s in rs {
     let z = s->mapsz;
@@ -678,19 +737,24 @@ task calc_force_qcs(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 
 // Reduce forces into points.
 task sum_point_force(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                     rs: region<side<rz, rpp, rpg, rs>>)
+                     rs: region<side<rz, rpp, rpg, rs>>,
+                     sstart: int, send: int, use_foreign: bool)
   , reads(rs.{mapsz, mapsp1, mapss3, sfp, sfq, sft})
   , reduces<+>(rpp.pf.{x, y}, rpg.pf.{x, y})
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let s3 = s->mapss3;
+  if (use_foreign) {
+    foreign_sum_point_force(sstart, send, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let s3 = s->mapss3;
 
-    let f = sub(add(s->sfp, add(s->sfq, s->sft)),
-                add(s3->sfp, add(s3->sfq, s3->sft)));
-    p1->pf.x += f.x;
-    p1->pf.y += f.y;
+      let f = sub(add(s->sfp, add(s->sfq, s->sft)),
+                  add(s3->sfp, add(s3->sfq, s3->sft)));
+      p1->pf.x += f.x;
+      p1->pf.y += f.y;
+    }
   }
 }
 
@@ -753,21 +817,25 @@ task adv_pos_full(rp: region<point>, dt: double)
 // code. Struct slicing ought to make it possible to use the same code
 // in both cases.
 task calc_centers_full(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                       rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
-  , writes(rs.ex)
-  , reduces<+>(rz.zx.{x, y})
+                       rs: region<side<rz, rpp, rpg, rs>>,
+                       sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{znump, zx}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
+  , writes(rz.zx, rs.ex)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
-    let e = s;
+  if (use_foreign) {
+    foreign_calc_centers_full(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
+      let e = s;
 
-    e->ex = scale(add(p1->px, p2->px), 0.5);
+      e->ex = scale(add(p1->px, p2->px), 0.5);
 
-    z->zx.x += p1->px.x / double(z->znump);
-    z->zx.y += p1->px.y / double(z->znump);
+      z->zx.x += p1->px.x / double(z->znump);
+      z->zx.y += p1->px.y / double(z->znump);
+    }
   }
 }
 
@@ -775,26 +843,29 @@ task calc_centers_full(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 // code. Struct slicing ought to make it possible to use the same code
 // in both cases.
 task calc_volumes_full(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                       rs: region<side<rz, rpp, rpg, rs>>)
-  , reads(rz.zx, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
-  , writes(rs.{sarea, svol})
-  , reduces<+>(rz.{zarea, zvol})
+                       rs: region<side<rz, rpp, rpg, rs>>,
+                       sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{zx, zarea, zvol}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
+  , writes(rz.{zarea, zvol}, rs.{sarea, svol})
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
+  if (use_foreign) {
+    foreign_calc_volumes_full(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
 
-    let sa = 0.5 * cross(sub(p2->px, p1->px), sub(z->zx, p1->px));
-    let sv = (1.0 / 3.0) * sa * (p1->px.x + p2->px.x + z->zx.x);
-    s->sarea = sa;
-    s->svol = sv;
+      let sa = 0.5 * cross(sub(p2->px, p1->px), sub(z->zx, p1->px));
+      let sv = (1.0 / 3.0) * sa * (p1->px.x + p2->px.x + z->zx.x);
+      s->sarea = sa;
+      s->svol = sv;
 
-    z->zarea += sa;
-    z->zvol += sv;
+      z->zarea += sa;
+      z->zvol += sv;
 
-    // FIXME: Turn this assertion back on when we get real working math.
-    // assert sv > 0.0;
+      assert sv > 0.0;
+    }
   }
 }
 
@@ -804,23 +875,28 @@ task calc_volumes_full(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 
 task calc_work(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                rs: region<side<rz, rpp, rpg, rs>>,
-               dt: double)
-  , reads(rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
+               dt: double,
+               sstart: int, send: int, use_foreign: bool)
+  , reads(rz.{zw, zetot}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
           rs.{mapsz, mapsp1, mapsp2, sfp, sfq})
-  , reduces<+>(rz.{zw, zetot})
+  , writes(rz.{zw, zetot})
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
-    let p2 = s->mapsp2;
+  if (use_foreign) {
+    foreign_calc_work(dt, sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
+      let p2 = s->mapsp2;
 
-    let sftot = add(s->sfp, s->sfq);
-    let sd1 = dot(sftot, add(p1->pu0, p1->pu));
-    let sd2 = dot(scale(sftot, -1.0), add(p2->pu0, p2->pu));
-    let dwork = -0.5 * dt * (sd1 * p1->pxp.x + sd2 * p2->pxp.x);
+      let sftot = add(s->sfp, s->sfq);
+      let sd1 = dot(sftot, add(p1->pu0, p1->pu));
+      let sd2 = dot(scale(sftot, -1.0), add(p2->pu0, p2->pu));
+      let dwork = -0.5 * dt * (sd1 * p1->pxp.x + sd2 * p2->pxp.x);
 
-    z->zetot += dwork;
-    z->zw += dwork;
+      z->zetot += dwork;
+      z->zw += dwork;
+    }
   }
 }
 
@@ -911,10 +987,23 @@ task calc_dt_hydro(rz: region<zone>, dtlast: double, dtmax: double, cfl: double,
 
 task initialize(rz_all: region<zone>, rp_all: region<point>,
                 rs_all: region<side<?, ?, ?, ?>>,
-                rm_all: region<mesh<rz_all, rp_all, rs_all>>)
+                rm_all: region<mesh<rz_all, rp_all, rs_all>>,
+                conf: config)
   , reads(rz_all, rp_all, rs_all, rm_all)
   , writes(rz_all, rp_all, rs_all, rm_all)
 {
+  let einit = conf.einit;
+  let einitsub = conf.einitsub;
+  let rinit = conf.rinit;
+  let rinitsub = conf.rinitsub;
+  let subregion_0 = conf.subregion_0;
+  let subregion_1 = conf.subregion_1;
+  let subregion_2 = conf.subregion_2;
+  let subregion_3 = conf.subregion_3;
+  let uinitradial = conf.uinitradial;
+
+  let use_foreign = conf.use_foreign;
+
   for m in rm_all {
     unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
     init_pointers(rz, rpp, rpg, rs);
@@ -924,47 +1013,15 @@ task initialize(rz_all: region<zone>, rp_all: region<point>,
     unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
     init_mesh_zones(rz);
   }
-}
-
-task simulate(rz_all: region<zone>, rp_all: region<point>,
-              rs_all: region<side<?, ?, ?, ?>>,
-              rm_all: region<mesh<rz_all, rp_all, rs_all>>,
-              conf: config)
-  , reads(rz_all, rp_all, rs_all, rm_all)
-  , writes(rz_all, rp_all, rs_all, rm_all)
-{
-  let alfa = conf.alfa;
-  let cfl = conf.cfl;
-  let cflv = conf.cflv;
-  let cstop = conf.cstop;
-  let dtfac = conf.dtfac;
-  let dtinit = conf.dtinit;
-  let dtmax = conf.dtmax;
-  let einit = conf.einit;
-  let einitsub = conf.einitsub;
-  let gamma = conf.qgamma;
-  let q1 = conf.q1;
-  let q2 = conf.q2;
-  let qgamma = conf.qgamma;
-  let rinit = conf.rinit;
-  let rinitsub = conf.rinitsub;
-  let subregion_0 = conf.subregion_0;
-  let subregion_1 = conf.subregion_1;
-  let subregion_2 = conf.subregion_2;
-  let subregion_3 = conf.subregion_3;
-  let ssmin = conf.ssmin;
-  let tstop = conf.tstop;
-  let uinitradial = conf.uinitradial;
-  let vfix = {x: 0.0, y: 0.0};
 
   for m in rm_all {
     unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-    calc_centers_full(rz, rpp, rpg, rs);
+    calc_centers_full(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
   }
 
   for m in rm_all {
     unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-    calc_volumes_full(rz, rpp, rpg, rs);
+    calc_volumes_full(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
   }
 
   for m in rm_all {
@@ -982,6 +1039,36 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
     init_radial_velocity(rpp, uinitradial);
     init_radial_velocity(rps, uinitradial);
   }
+}
+
+task simulate(rz_all: region<zone>, rp_all: region<point>,
+              rs_all: region<side<?, ?, ?, ?>>,
+              rm_all: region<mesh<rz_all, rp_all, rs_all>>,
+              conf: config)
+  , reads(rz_all, rp_all, rs_all, rm_all)
+  , writes(rz_all, rp_all, rs_all, rm_all)
+{
+  let alfa = conf.alfa;
+  let cfl = conf.cfl;
+  let cflv = conf.cflv;
+  let cstop = conf.cstop;
+  let dtfac = conf.dtfac;
+  let dtinit = conf.dtinit;
+  let dtmax = conf.dtmax;
+  let gamma = conf.qgamma;
+  let q1 = conf.q1;
+  let q2 = conf.q2;
+  let qgamma = conf.qgamma;
+  let ssmin = conf.ssmin;
+  let tstop = conf.tstop;
+  let uinitradial = conf.uinitradial;
+  let vfix = {x: 0.0, y: 0.0};
+
+  let use_foreign = conf.use_foreign;
+
+  let interval = 10;
+  let start_time = get_abs_time();
+  var last_time = start_time;
 
   var time = 0.0;
   var cycle = 0;
@@ -989,6 +1076,12 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
   var dthydro = dtmax;
   while (cycle < cstop && time < tstop) {
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle);
+
+    if (cycle > 0 && cycle % interval == 0) {
+      let current_time = get_abs_time();
+      print_simulation_loop(cycle, time, dt, start_time, last_time, current_time, interval);
+      last_time = current_time;
+    }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
@@ -1004,57 +1097,57 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      init_step_zones(rz);
+      init_step_zones(rz, n.zstart, n.zend, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_centers(rz, rpp, rpg, rs);
+      calc_centers(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_volumes(rz, rpp, rpg, rs);
+      calc_volumes(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_surface_vecs(rz, rpp, rpg, rs);
+      calc_surface_vecs(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_edge_len(rz, rpp, rpg, rs);
+      calc_edge_len(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_char_len(rz, rpp, rpg, rs);
+      calc_char_len(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_rho_half(rz);
+      calc_rho_half(rz, n.zstart, n.zend, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      sum_point_mass(rz, rpp, rpg, rs);
+      sum_point_mass(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_state_at_half(rz, gamma, ssmin, dt);
+      calc_state_at_half(rz, gamma, ssmin, dt, n.zstart, n.zend, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_force_pgas(rz, rpp, rpg, rs);
+      calc_force_pgas(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_force_tts(rz, rpp, rpg, rs, alfa, ssmin);
+      calc_force_tts(rz, rpp, rpg, rs, alfa, ssmin, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
@@ -1064,7 +1157,7 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      sum_point_force(rz, rpp, rpg, rs);
+      sum_point_force(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
@@ -1087,17 +1180,17 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_centers_full(rz, rpp, rpg, rs);
+      calc_centers_full(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_volumes_full(rz, rpp, rpg, rs);
+      calc_volumes_full(rz, rpp, rpg, rs, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_work(rz, rpp, rpg, rs, dt);
+      calc_work(rz, rpp, rpg, rs, dt, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
@@ -1126,332 +1219,160 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
   }
 }
 
-task all_zones_coloring(rz_all: region<zone>,
-                        rz_all_is: ispace<int>, rz_all_a: array<rz_all_is, zone@rz_all>,
-                        nz: int, npieces: int)
+task all_zones_coloring(rz_all: region<zone>, rp_all: region<point>,
+                        rs_all: region<side<?, ?, ?, ?>>,
+                        rm_all: region<mesh<rz_all, rp_all, rs_all>>,
+                        conf: config)
   : coloring<rz_all>
-  , reads(rz_all_a)
-  , writes(rz_all.zcolor)
+  , reads(rm_all.{zstart, zend})
 {
-  let pieces_per_color = (nz + npieces - 1) / npieces;
-
-  var result = coloring<rz_all>();
-  for i in rz_all_is {
-    let c = i / pieces_per_color;
-    let z = rz_all_a[i];
-    z->zcolor = c;
-    result = color(result, z, c);
-  }
-  return result;
+  return foreign_all_zones_coloring(conf, rm_all);
 }
 
-task all_points_coloring(rz_all: region<zone>, rp_all: region<point>,
-                         rz_all_is: ispace<int>, rz_all_a: array<rz_all_is, zone@rz_all>,
-                         rp_all_is: ispace<int>, rp_all_a: array<rp_all_is, point@rp_all>,
-                         mapzp_is: ispace<int>, mapzp_a: array<mapzp_is, int>,
-                         maxznump: int)
+task all_points_coloring(rp_all: region<point>,
+                         pcolor_is: ispace<int>, pcolor_a: array<pcolor_is, int>,
+                         conf: config)
   : coloring<rp_all>
-  , reads(rz_all.zcolor, rp_all.pcolors, rz_all_a, rp_all_a, mapzp_a)
-  , writes(rp_all.pcolors)
+  , reads(pcolor_a)
 {
-  let nocolors = -1;
-  let manycolors = -2;
-
-  for p in rp_all {
-    p->pcolors = nocolors;
-  }
-
-  for i in mapzp_is {
-    let iz = i / maxznump;
-
-    let z = rz_all_a[iz];
-    let c = z->zcolor;
-
-    let ip = mapzp_a[i];
-    if (ip >= 0) {
-      let p = rp_all_a[ip];
-      if (p->pcolors == nocolors || p->pcolors == c) {
-        p->pcolors = c;
-      } else {
-        p->pcolors = manycolors;
-      }
-    }
-  }
-
-  var result = coloring<rp_all>();
-  for p in rp_all {
-    if (p->pcolors != manycolors) {
-      result = color(result, p, 0);
-    } else {
-      result = color(result, p, 1);
-    }
-  }
-
-  return result;
+  return foreign_all_points_coloring(conf, pcolor_a);
 }
 
-task piece_points_coloring(rz_all: region<zone>, rp_all: region<point>, rp_piece: region<point>,
-                           rz_all_is: ispace<int>, rz_all_a: array<rz_all_is, zone@rz_all>,
-                           rp_all_is: ispace<int>, rp_all_a: array<rp_all_is, point@rp_all>,
-                           mapzp_is: ispace<int>, mapzp_a: array<mapzp_is, int>,
-                           maxznump: int)
-  : coloring<rp_piece>
-  , reads(rz_all.zcolor, rz_all_a, rp_all_a, mapzp_a)
+task private_points_coloring(rp_all_private: region<point>,
+                             pcolor_is: ispace<int>, pcolor_a: array<pcolor_is, int>,
+                             conf: config)
+  : coloring<rp_all_private>
+  , reads(pcolor_a)
 {
-  var result = coloring<rp_piece>();
-
-  for i in mapzp_is {
-    let iz = i / maxznump;
-
-    let z = rz_all_a[iz];
-    let c = z->zcolor;
-
-    let ip = mapzp_a[i];
-    if (ip >= 0) {
-      let p = rp_all_a[ip];
-
-      let p = downregion<rp_piece>(p);
-      if (!isnull(p)) {
-        result = color(result, p, c);
-      }
-    }
-  }
-
-  return result;
+  return foreign_private_points_coloring(conf, pcolor_a);
 }
 
-task shared_points_coloring(rz_all: region<zone>, rp_all: region<point>, rp_ghost: region<point>,
-                            rz_all_is: ispace<int>, rz_all_a: array<rz_all_is, zone@rz_all>,
-                            rp_all_is: ispace<int>, rp_all_a: array<rp_all_is, point@rp_all>,
-                            mapzp_is: ispace<int>, mapzp_a: array<mapzp_is, int>,
-                            nz: int, npieces: int, maxznump: int)
-  : coloring<rp_ghost>
-  , reads(rz_all.zcolor, rp_ghost.phascolor, rz_all_a, rp_all_a, mapzp_a)
-  , writes(rp_ghost.phascolor)
+task ghost_points_coloring(rp_all_ghost: region<point>,
+                           pcolor_is: ispace<int>, pcolor_a: array<pcolor_is, int>,
+                           pcolors_is: ispace<int>, pcolors_a: array<pcolors_is, uint64>,
+                           conf: config)
+  : coloring<rp_all_ghost>
+  , reads(pcolor_a, pcolors_a)
 {
-  var result = coloring<rp_ghost>();
-
-  let pieces_per_color = (nz + npieces - 1) / npieces;
-
-  var completely_exhausted = false;
-  while (!completely_exhausted) {
-    completely_exhausted = true;
-
-    var c = 0;
-    while (c < npieces) {
-      let i_start = c * pieces_per_color * maxznump;
-      let i_end = (c + 1) * pieces_per_color * maxznump;
-      var i = i_start;
-
-      var has_new_point = false;
-      while (i < i_end && i < nz*maxznump && !has_new_point) {
-        let iz = i / maxznump;
-        let z = rz_all_a[iz];
-
-        let ip = mapzp_a[i];
-        if (ip >= 0) {
-          let p = rp_all_a[ip];
-
-          let p = downregion<rp_ghost>(p);
-          if (!isnull(p)) {
-            if (!p->phascolor) {
-              result = color(result, p, c);
-              p->phascolor = true;
-              has_new_point = true;
-              completely_exhausted = false;
-            }
-          }
-        }
-        i += 1;
-      }
-      c += 1;
-    }
-  }
-
-  return result;
+  return foreign_ghost_points_coloring(conf, pcolor_a, pcolors_a);
 }
 
-task build_all_sides(rz_all: region<zone>, rp_all: region<point>, rs_all: region<side<?, ?, ?, ?>>,
-                     rz_all_is: ispace<int>, rz_all_a: array<rz_all_is, zone@rz_all>,
-                     rp_all_is: ispace<int>, rp_all_a: array<rp_all_is, point@rp_all>,
-                     mapzp_is: ispace<int>, mapzp_a: array<mapzp_is, int>,
-                     maxznump: int)
+task shared_points_coloring(rp_all_shared: region<point>,
+                            pcolor_shared_is: ispace<int>, pcolor_shared_a: array<pcolor_shared_is, int>,
+                            conf: config)
+  : coloring<rp_all_shared>
+  , reads(pcolor_shared_a)
+{
+  return foreign_shared_points_coloring(conf, pcolor_shared_a);
+}
+
+task all_sides_coloring(rz_all: region<zone>, rp_all: region<point>,
+                        rs_all: region<side<?, ?, ?, ?>>,
+                        rm_all: region<mesh<rz_all, rp_all, rs_all>>,
+                        conf: config)
   : coloring<rs_all>
-  , reads(rz_all.{znump, zcolor}, rz_all_a, rp_all_a, mapzp_a)
-  , writes(rs_all.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
+  , reads(rm_all.{sstart, send})
 {
-  var result = coloring<rs_all>();
+  return foreign_all_sides_coloring(conf, rm_all);
+}
 
-  let zsides_is = ispace<int>(maxznump);
-  let zsides = array<zsides_is, side<rz_all, rp_all, rp_all, rs_all>@rs_all>();
+task read_input(conf: config,
+                rz_all: region<zone>, rp_all: region<point>, rs_all: region<side<?, ?, ?, ?>>,
+                rm_all: region<mesh<rz_all, rp_all, rs_all>>,
+                pcolor_is: ispace<int>, pcolor_a: array<pcolor_is, int>,
+                pcolors_is: ispace<int>, pcolors_a: array<pcolors_is, uint64>,
+                pcolor_shared_is: ispace<int>, pcolor_shared_a: array<pcolor_shared_is, int>)
+  , reads(rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a)
+  , writes(rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a)
+{
+  foreign_read_input(conf, rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a);
+}
 
-  for iz in rz_all_is {
-    let z = rz_all_a[iz];
-    let znump = z->znump;
-    let c = z->zcolor;
-
-    for is in zsides_is {
-      if (is < znump) {
-        zsides[is] = new<side<rz_all, rp_all, rp_all, rs_all>@rs_all>();
-      } else {
-        zsides[is] = null<side<rz_all, rp_all, rp_all, rs_all>@rs_all>();
-      }
-    }
-
-    for is in zsides_is {
-      if (is < znump) {
-        let mip1 = is;
-        let ip1 = mapzp_a[iz*maxznump + mip1];
-        let p1 = rp_all_a[ip1];
-
-        let mip2 = (is + 1) % znump;
-        let ip2 = mapzp_a[iz*maxznump + mip2];
-        let p2 = rp_all_a[ip2];
-
-        let is3 = (is + znump - 1) % znump;
-        let s3 = zsides[is3];
-
-        let is4 = (is + 1) % znump;
-        let s4 = zsides[is4];
-
-        let s = zsides[is];
-        assert !isnull(p1) && !isnull(p2) && !isnull(s3) && !isnull(s4) && !isnull(s);
-
-        s->mapsz = z;
-        s->mapsp1 = upregion<rp_all, rp_all>(p1);
-        s->mapsp2 = upregion<rp_all, rp_all>(p2);
-        s->mapss3 = s3;
-        s->mapss4 = s4;
-
-        result = color(result, s, c);
-      }
-    }
-  }
-
-  return result;
+task validate_output(conf: config,
+                     rz_all: region<zone>, rp_all: region<point>, rs_all: region<side<?, ?, ?, ?>>)
+  , reads(rz_all, rp_all, rs_all)
+{
+  foreign_validate_output(conf, rz_all, rp_all, rs_all);
 }
 
 task test()
 {
-  let ctx = read_input();
-  let conf = get_config(ctx);
+  let conf = read_config();
 
-  let npieces = 2;
-  let nz = conf.nz;
-  let np = conf.np;
-  let ns = conf.ns;
-  let maxznump = conf.maxznump;
-
-  let rz_all = region<zone>(nz);
-  let rp_all = region<point>(np);
-  let rs_all = region<side<?, ?, ?, ?>>(ns);
-  let rm_all = region<mesh<rz_all, rp_all, rs_all>>(npieces);
+  let rz_all = region<zone>(conf.nz);
+  let rp_all = region<point>(conf.np);
+  let rs_all = region<side<?, ?, ?, ?>>(conf.ns);
+  let rm_all = region<mesh<rz_all, rp_all, rs_all>>(conf.npieces);
 
   // Create temporary arrays for pointers to use while building the
   // regions.
-  let rz_all_is = ispace<int>(nz);
-  let rz_all_a = array<rz_all_is, zone@rz_all>();
-  let rp_all_is = ispace<int>(np);
-  let rp_all_a = array<rp_all_is, point@rp_all>();
-  let mapzp_is = ispace<int>(nz*maxznump);
-  let mapzp_a = array<mapzp_is, int>();
 
-  // Populate points and zones.
-  for i in rz_all_is {
-    let z = new<zone@rz_all>();
-    rz_all_a[i] = z;
-    z->znump = get_zone_znump(ctx, i);
-  }
+  // Array for tracking number of colors per point:
+  let pcolor_is = ispace<int>(conf.np);
+  let pcolor_a = array<pcolor_is, int>();
 
-  let bcx_0 = conf.bcx_0;
-  let bcx_1 = conf.bcx_1;
-  let bcy_0 = conf.bcy_0;
-  let bcy_1 = conf.bcy_1;
-  let bcx_n = conf.bcx_n;
-  let bcy_n = conf.bcy_n;
-  let eps = 1e-12;
+  // Bitmask for colors of ghost points:
+  let bits = 64;                                // must match bitmask type
+  let words = (conf.npieces + bits - 1)/bits;
+  let pcolors_is = ispace<int>(conf.np*words);
+  let pcolors_a = array<pcolors_is, uint64>();   // must match bits
 
-  for i in rp_all_is {
-    let p = new<point@rp_all>();
-    rp_all_a[i] = p;
-    p->px.x = get_point_pxx(ctx, i) * conf.meshscale;
-    p->px.y = get_point_pxy(ctx, i) * conf.meshscale;
+  // Array for colors of disjoint partition of shared points:
+  let pcolor_shared_is = ispace<int>(conf.np);
+  let pcolor_shared_a = array<pcolor_shared_is, int>();
 
-    p->has_bcx_0 = bcx_n > 0 && fabs(p->px.x - bcx_0) < eps;
-    p->has_bcx_1 = bcx_n > 1 && fabs(p->px.x - bcx_1) < eps;
-    p->has_bcy_0 = bcy_n > 0 && fabs(p->px.y - bcy_0) < eps;
-    p->has_bcy_1 = bcy_n > 1 && fabs(p->px.y - bcy_1) < eps;
-  }
-
-  for i in mapzp_is {
-    let mp = i % maxznump;
-    let iz = i / maxznump;
-
-    let z = rz_all_a[iz];
-
-    var ip = -1;
-    if (mp < z->znump) {
-      ip = get_zone_mapzp(ctx, iz, mp);
-    }
-    mapzp_a[i] = ip;
-  }
+  // Read simulation data into regions.
+  read_input(conf, rz_all, rp_all, rs_all, rm_all, pcolor_is, pcolor_a, pcolors_is, pcolors_a, pcolor_shared_is, pcolor_shared_a);
 
   // Partition zones into disjoint pieces.
-  let rz_all_c = all_zones_coloring(rz_all, rz_all_is, rz_all_a, nz, npieces);
+  let rz_all_c = all_zones_coloring(rz_all, rp_all, rs_all, rm_all, conf);
   let rz_all_p = partition<rz_all, disjoint>(rz_all_c);
 
   // Partition points into private and ghost regions.
-  let rp_all_c = all_points_coloring(rz_all, rp_all, rz_all_is, rz_all_a, rp_all_is, rp_all_a, mapzp_is, mapzp_a, maxznump);
+  let rp_all_c = all_points_coloring(rp_all, pcolor_is, pcolor_a, conf);
   let rp_all_p = partition<rp_all, disjoint>(rp_all_c);
   let rp_all_private = rp_all_p[0];
   let rp_all_ghost = rp_all_p[1];
 
   // Partition private points into disjoint pieces by zone.
-  let rp_all_private_c = piece_points_coloring(rz_all, rp_all, rp_all_private, rz_all_is, rz_all_a, rp_all_is, rp_all_a, mapzp_is, mapzp_a, maxznump);
+  let rp_all_private_c = private_points_coloring(rp_all_private, pcolor_is, pcolor_a, conf);
   let rp_all_private_p = partition<rp_all_private, disjoint>(rp_all_private_c);
 
   // Partition ghost points into aliased pieces by zone.
-  let rp_all_ghost_c = piece_points_coloring(rz_all, rp_all, rp_all_ghost, rz_all_is, rz_all_a, rp_all_is, rp_all_a, mapzp_is, mapzp_a, maxznump);
+  let rp_all_ghost_c = ghost_points_coloring(rp_all_ghost, pcolor_is, pcolor_a, pcolors_is, pcolors_a, conf);
   let rp_all_ghost_p = partition<rp_all_ghost, aliased>(rp_all_ghost_c);
 
   // Partition ghost points into disjoint pieces, breaking ties
   // between zones so that each point goes into one region only.
-  let rp_all_shared_c = shared_points_coloring(rz_all, rp_all, rp_all_ghost, rz_all_is, rz_all_a, rp_all_is, rp_all_a, mapzp_is, mapzp_a, nz, npieces, maxznump);
+  let rp_all_shared_c = shared_points_coloring(rp_all_ghost, pcolor_shared_is, pcolor_shared_a, conf);
   let rp_all_shared_p = partition<rp_all_ghost, disjoint>(rp_all_shared_c);
 
   // Partition sides into disjoint pieces by zone.
-  let rs_all_c = build_all_sides(rz_all, rp_all, rs_all, rz_all_is, rz_all_a, rp_all_is, rp_all_a, mapzp_is, mapzp_a, maxznump);
+  let rs_all_c = all_sides_coloring(rz_all, rp_all, rs_all, rm_all, conf);
   let rs_all_p = partition<rs_all, disjoint>(rs_all_c);
 
-  let colors = ispace<int>(npieces);
-  for c in colors {
-    let zones = rz_all_p[c];
-    let private = rp_all_private_p[c];
-    let ghost = rp_all_ghost_p[c];
-    let shared = rp_all_shared_p[c];
-    let sides = rs_all_p[c];
+  // Stuff regions into mesh pieces.
+  for m in rm_all {
+    let zones = rz_all_p[m->mcolor];
+    let private = rp_all_private_p[m->mcolor];
+    let ghost = rp_all_ghost_p[m->mcolor];
+    let shared = rp_all_shared_p[m->mcolor];
+    let sides = rs_all_p[m->mcolor];
 
-    let m = pack {ignore: 0} as mesh<rz_all, rp_all, rs_all>[zones, private, ghost, shared, sides];
-    let mp = new<mesh<rz_all, rp_all, rs_all>@rm_all>();
-    *mp = m;
+    *m = pack {mcolor: m->mcolor, zstart: m->zstart, zend: m->zend, sstart: m->sstart, send: m->send}
+           as mesh<rz_all, rp_all, rs_all>[zones, private, ghost, shared, sides];
   }
 
-  initialize(rz_all, rp_all, rs_all, rm_all);
+  initialize(rz_all, rp_all, rs_all, rm_all, conf);
 
-  start_timer(ctx);
+  print_simulation_start();
+  let start_time = get_abs_time();
   simulate(rz_all, rp_all, rs_all, rm_all, conf);
-  stop_timer(ctx);
-  print_timer(ctx);
+  let stop_time = get_abs_time();
+  print_global_elapsed_time(start_time, stop_time);
 
-  for i in rz_all_is {
-    let z = rz_all_a[i];
-    put_zone_zr(ctx, i, z->zr);
-    put_zone_ze(ctx, i, z->ze);
-    put_zone_zp(ctx, i, z->zp);
-  }
-
-  // write_output(ctx);
-  validate_output(ctx);
+  // write_output(conf, rz_all, rp_all, rs_all);
+  validate_output(conf, rz_all, rp_all, rs_all);
 }
 
 task toplevel()

@@ -18,6 +18,10 @@
 
 #include "stdint.h"
 
+#include "legion.h"
+
+using namespace LegionRuntime::HighLevel;
+
 // FIXME: This currently breaks C++ import.
 /* typedef intptr_t ctx_t; */
 /* typedef intptr_t lg_int_t; */
@@ -61,26 +65,206 @@ struct config
   intptr_t np;
   intptr_t ns;
   intptr_t maxznump;
+
+  // Command-line parameters.
+  intptr_t npieces;
+  bool use_foreign;
 };
 
 ///
 /// I/O
 ///
 
-extern intptr_t read_input();
-extern void write_output(intptr_t ctx);
-extern void validate_output(intptr_t ctx);
-extern void start_timer(intptr_t ctx);
-extern void stop_timer(intptr_t ctx);
-extern void print_timer(intptr_t ctx);
-extern config get_config(intptr_t ctx);
-extern intptr_t get_zone_znump(intptr_t ctx, intptr_t z);
-extern intptr_t get_zone_mapzp(intptr_t ctx, intptr_t z, intptr_t p);
-extern double get_point_pxx(intptr_t ctx, intptr_t p);
-extern double get_point_pxy(intptr_t ctx, intptr_t p);
-extern void put_zone_zr(intptr_t raw_ctx, intptr_t z, double zr);
-extern void put_zone_ze(intptr_t raw_ctx, intptr_t z, double ze);
-extern void put_zone_zp(intptr_t raw_ctx, intptr_t z, double zp);
+extern config read_config();
+extern void foreign_read_input(HighLevelRuntime *runtime,
+                               Context ctx,
+                               config conf,
+                               PhysicalRegion rz_all[1],
+                               PhysicalRegion rp_all[1],
+                               PhysicalRegion rs_all[1],
+                               PhysicalRegion rm_all[1],
+                               PhysicalRegion pcolor_a[1],
+                               PhysicalRegion pcolors_a[1],
+                               PhysicalRegion pcolor_shared_a[1]);
+extern void write_output(HighLevelRuntime *runtime,
+                         Context ctx,
+                         config conf,
+                         PhysicalRegion rz_all[1],
+                         PhysicalRegion rp_all[1],
+                         PhysicalRegion rs_all[1]);
+extern void foreign_validate_output(HighLevelRuntime *runtime,
+                                    Context ctx,
+                                    config conf,
+                                    PhysicalRegion rz_all[1],
+                                    PhysicalRegion rp_all[1],
+                                    PhysicalRegion rs_all[1]);
+extern double get_abs_time();
+extern void print_global_elapsed_time(double start_time, double stop_time);
+extern void print_simulation_start();
+extern void print_simulation_loop(intptr_t cycle, double time, double dt,
+                                  double start_time, double last_time,
+                                  double current_time, intptr_t interval);
+
+///
+/// Coloring
+///
+
+extern Coloring foreign_all_zones_coloring(HighLevelRuntime *runtime,
+                                           Context ctx,
+                                           config conf,
+                                           PhysicalRegion rm_all[1]);
+
+extern Coloring foreign_all_points_coloring(HighLevelRuntime *runtime,
+                                            Context ctx,
+                                            config conf,
+                                            PhysicalRegion pcolor_a[1]);
+
+extern Coloring foreign_private_points_coloring(HighLevelRuntime *runtime,
+                                                Context ctx,
+                                                config conf,
+                                                PhysicalRegion pcolor_a[1]);
+
+extern Coloring foreign_ghost_points_coloring(HighLevelRuntime *runtime,
+                                              Context ctx,
+                                              config conf,
+                                              PhysicalRegion pcolor_a[1],
+                                              PhysicalRegion pcolors_a[1]);
+
+extern Coloring foreign_shared_points_coloring(HighLevelRuntime *runtime,
+                                               Context ctx,
+                                               config conf,
+                                               PhysicalRegion pcolor_shared_a[1]);
+
+extern Coloring foreign_all_sides_coloring(HighLevelRuntime *runtime,
+                                           Context ctx,
+                                           config conf,
+                                           PhysicalRegion rm_all[1]);
+
+///
+/// Kernels
+///
+
+extern void foreign_init_step_zones(HighLevelRuntime *runtime,
+                                    Context ctx,
+                                    intptr_t zstart,
+                                    intptr_t zend,
+                                    PhysicalRegion rz[2]);
+
+extern void foreign_calc_centers(HighLevelRuntime *runtime,
+                                 Context ctx,
+                                 intptr_t sstart,
+                                 intptr_t send,
+                                 PhysicalRegion rz[2],
+                                 PhysicalRegion rpp[1],
+                                 PhysicalRegion rpg[1],
+                                 PhysicalRegion rs[2]);
+
+extern void foreign_calc_volumes(HighLevelRuntime *runtime,
+                                 Context ctx,
+                                 intptr_t sstart,
+                                 intptr_t send,
+                                 PhysicalRegion rz[2],
+                                 PhysicalRegion rpp[1],
+                                 PhysicalRegion rpg[1],
+                                 PhysicalRegion rs[2]);
+
+extern void foreign_calc_surface_vecs(HighLevelRuntime *runtime,
+                                      Context ctx,
+                                      intptr_t sstart,
+                                      intptr_t send,
+                                      PhysicalRegion rz[1],
+                                      PhysicalRegion rs[2]);
+
+extern void foreign_calc_edge_len(HighLevelRuntime *runtime,
+                                  Context ctx,
+                                  intptr_t sstart,
+                                  intptr_t send,
+                                  PhysicalRegion rpp[1],
+                                  PhysicalRegion rpg[1],
+                                  PhysicalRegion rs[2]);
+
+extern void foreign_calc_char_len(HighLevelRuntime *runtime,
+                                  Context ctx,
+                                  intptr_t sstart,
+                                  intptr_t send,
+                                  PhysicalRegion rz[1],
+                                  PhysicalRegion rs[2]);
+
+extern void foreign_calc_rho_half(HighLevelRuntime *runtime,
+                                  Context ctx,
+                                  intptr_t zstart,
+                                  intptr_t zend,
+                                  PhysicalRegion rz[2]);
+
+extern void foreign_sum_point_mass(HighLevelRuntime *runtime,
+                                   Context ctx,
+                                   intptr_t sstart,
+                                   intptr_t send,
+                                   PhysicalRegion rz[1],
+                                   PhysicalRegion rpp[1],
+                                   PhysicalRegion rpg[1],
+                                   PhysicalRegion rs[1]);
+
+extern void foreign_calc_state_at_half(HighLevelRuntime *runtime,
+                                       Context ctx,
+                                       double gamma,
+                                       double ssmin,
+                                       double dt,
+                                       intptr_t zstart,
+                                       intptr_t zend,
+                                       PhysicalRegion rz[2]);
+
+extern void foreign_calc_force_pgas(HighLevelRuntime *runtime,
+                                    Context ctx,
+                                    intptr_t sstart,
+                                    intptr_t send,
+                                    PhysicalRegion rz[1],
+                                    PhysicalRegion rs[2]);
+
+extern void foreign_calc_force_tts(HighLevelRuntime *runtime,
+                                   Context ctx,
+                                   double afla,
+                                   double ssmin,
+                                   intptr_t sstart,
+                                   intptr_t send,
+                                   PhysicalRegion rz[1],
+                                   PhysicalRegion rs[2]);
+
+extern void foreign_sum_point_force(HighLevelRuntime *runtime,
+                                    Context ctx,
+                                    intptr_t sstart,
+                                    intptr_t send,
+                                    PhysicalRegion rpp[2],
+                                    PhysicalRegion rpg[2],
+                                    PhysicalRegion rs[1]);
+
+extern void foreign_calc_centers_full(HighLevelRuntime *runtime,
+                                      Context ctx,
+                                      intptr_t sstart,
+                                      intptr_t send,
+                                      PhysicalRegion rz[2],
+                                      PhysicalRegion rpp[1],
+                                      PhysicalRegion rpg[1],
+                                      PhysicalRegion rs[2]);
+
+extern void foreign_calc_volumes_full(HighLevelRuntime *runtime,
+                                      Context ctx,
+                                      intptr_t sstart,
+                                      intptr_t send,
+                                      PhysicalRegion rz[2],
+                                      PhysicalRegion rpp[1],
+                                      PhysicalRegion rpg[1],
+                                      PhysicalRegion rs[2]);
+
+extern void foreign_calc_work(HighLevelRuntime *runtime,
+                              Context ctx,
+                              double dt,
+                              intptr_t sstart,
+                              intptr_t send,
+                              PhysicalRegion rz[1],
+                              PhysicalRegion rpp[1],
+                              PhysicalRegion rpg[1],
+                              PhysicalRegion rs[1]);
 
 ///
 /// Vectors

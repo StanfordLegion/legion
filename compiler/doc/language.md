@@ -20,24 +20,15 @@ limitations under the License.
 
 ## Premise
 
-Writing high-performance code on modern hardware is hard.
+Writing high-performance code on modern hardware is challenging.
 
-With the emergence of constraints on scaling within a single core,
-hardware designers have turned to parallelism as a solution. However,
-while current programming models provide many ways to describe
-parallelism in an application, most are blind to the structure of
-data. Programmers are forced to shepherd data as it moves around the
-machine, resulting in over-specified and error-prone code. These codes
-incur substantial maintenance costs as they age, as the old data paths
-may not be optimal for new generations of hardware.
-
-Previous approaches to this problem (e.g., Sequoia, DPJ) have required
-programmers to provide a single, static decomposition of the
-data. This does not work for application domains where the shape of
-the data is not known until runtime. For example, if an application
-operates on an irregular graph, the optimal partitioning of the data
-might depend on the input to the program, and might even change while
-the program is running.
+Few programming models handle the heterogeneity inherent in modern
+hardware. Most handle either intra-node parallelism (e.g. OpenMP,
+CUDA), or inter-node parallelism (e.g. MPI), but not both. Hybrid
+models (e.g. MPI+X) are able to express parallelism at both intra- and
+inter-node levels, but fail to provide abstractions for the memory
+hierarchy. Programmers are forced to shepherd data around the machine,
+resulting in over-specified and error-prone code.
 
 ## Programming Model
 
@@ -45,79 +36,30 @@ Legion is a new parallel programming model that addresses these
 concerns. Specifically:
 
   * Legion captures parallelism which is difficult to describe in
-    traditional programming models.
+    traditional programming models, and at all levels of the
+    compute/memory hierarchy.
 
-      * The Legion model encourages programmers to expose all levels
-        of parallelism in an application. Legion can exploit different
-        types of parallelism in different ways on different types of
-        hardware.
+  * Legion understands the structure and movement of data, so that the
+    programmer is freed from manually scheduling the movement of data
+    around the machine.
 
-  * Legion understands the structure and movement of data.
+  * Legion runs on multicore CPUs, GPUs, other accelerators (e.g. Xeon
+    Phi), and (potentially heterogeneous) clusters featuring all of
+    the above.
 
-      * Legion is able to reason about the movement of data through
-        the machine, can detect cases where a remote computation needs
-        data, and can copy that data automatically.
-
-  * Legion runs on a wide variety of machines: multicore CPUs, GPUs,
-    accelerators (including Xeon Phi), and clusters of machines (where
-    each machine may possibly have a different configuration).
-
-      * Legion programs are guaranteed to run correctly on new
-        hardware with zero effort. Tuning an application for optimal
-        performance on new hardware typically requires programmer
-        effort.
-
-  * Legion is *not magic*.
-
-      * In general, tuning an application for performance is both
-        application and machine-specific. As such, performance tuning
-        is (and must be) the job of the programmer, not the job of
-        Legion. It is expected that performance tuning will require
-        programmer effort on each new machine.
-
-      * Legion provides a *default mapper* with heuristics for
-        reasonable performance on many machines. The default mapper is
-        intended to be a zero-effort solution for the initial
-        development phase of an application, when the focus is on
-        correctness rather than performance.
-
-      * Once a correct program is available, Legion provides a
-        *mapping interface* for the programmer to specify, in as much
-        detail as necessary, how to map an application onto a specific
-        machine. These settings *preserve correctness*, so a program
-        that is correct in one configuration will always run correctly
-        everywhere, no matter what choices the mapper makes.
+  * Legion is *not magic*. Performance decisions are made by a
+    user-defined *mapper*, rather than a heuristic runtime scheduler.
 
 ## Language versus Runtime
 
 Legion is implemented in two parts: a runtime library written in C++,
-and a programming language which is compiled into C++ source code.
-
-The C++ runtime provides the lowest level of control to Legion
-programmers, with all the knobs exposed to provide maximum performance
-potential. However, programming to the runtime interface also tends to
-be error prone, as C++ is unable to verify that the client code is
-using the Legion runtime correctly. In addition, code targeting the
-Legion runtime tends to be verbose, making it difficult to read and
-write code in this manner. As such, programming directly to the
-runtime is recommended primarily for expert users with intimate
-knowledge of Legion semantics.
-
-The Legion language is an alternative which provides expressiveness
-and safety not available in code targeting the Legion runtime. Legion
-programs are typically more concise than the corresponding C++
-programs, and are anecdotally easier to read and write. The Legion
-compiler checks many safety properties of Legion programs, resulting
-in fewer errors slipping through to runtime. This aspect of Legion is
-particularly nice, because debugging parallel distributed programs
-tends to be a difficult and frustrating process. The Legion compiler
-then translates Legion programs into C++ source code, which can be
-turned into a standalone executable, or linked into a pre-existing
-application.
-
-The remainder of this document introduces the Legion language. For
-information on the Legion runtime, refer the runtime documentation
-(forthcoming).
+and a programming language with a compiler that produces C++ source
+code targeting the runtime. Legion programs can either be written in
+C++ and target the runtime directly, or be written in the Legion
+language. Compared to the runtime, the language features improved
+expressiveness and static and dynamic safety properties. The remainder
+of this document introduces the Legion language. For information on
+the Legion runtime, refer the runtime documentation (forthcoming).
 
 # Quickstart Guide
 
@@ -127,12 +69,14 @@ operating systems, refer to `legion/compiler/README.md`.
 
 ## Instructions for Ubuntu
 
+These instructions have been tested with Ubuntu 12.04 and above.
+
 Open a terminal and run the following commands to install a C++
-compiler, Git, and PLY:
+compiler, Git, and PLY and singledispatch:
 
 ```bash
 sudo apt-get install build-essential git python-pip
-sudo pip install ply
+sudo pip install ply singledispatch
 ```
 
 Checkout a copy of Legion:
@@ -169,15 +113,18 @@ bindings for Python.
 
 ## Instructions for Mac OS X
 
+These instructions have been tested with Mac OS X 10.8 and above.
+
 Install Xcode from the Mac OS X App Store. Once the installation is
 complete, open Xcode and go to the menu Xcode > Preferences >
 Downloads to install the Command Line Tools.
 
-Open a terminal and run the following command to install PLY:
+Open a terminal and run the following command to install PLY and
+singledispatch:
 
 ```bash
 sudo easy_install pip
-sudo pip install ply
+sudo pip install ply singledispatch
 ```
 
 Checkout a copy of Legion:
@@ -234,14 +181,7 @@ task add2(x: int): int
 
 Tasks in Legion resemble functions in most C-family languages. For
 now, think of tasks as functions. The differences between tasks and
-functions are explained in Section 2.7, below.
-
-Parameters to tasks are passed by-value and are lexically
-scoped. There is no type inference for task declarations, although
-there is a limited form of `auto`-style type inference available for
-local variables (see below).
-
-Task calls work like you'd expect. Parentheses are *not* optional.
+functions are explained in Section 3.7, below.
 
 ## Variables
 
@@ -272,7 +212,7 @@ type. However, regions are different from arrays, because the elements
 of region have no specific layout (i.e., no array indexing) and no
 specific location in the memory of the machine (i.e., because regions
 are not placed in memories until runtime, and may even more between
-memories dynamically).
+memories during the execution of a program).
 
 Regions are declared with the type of data they hold and the maximum
 number of elements that will be allocated.
@@ -305,8 +245,8 @@ task a_pointer()
 }
 ```
 
-A pointer in Legion includes the region that the pointer points to as
-part of its type. That is, `int@r` is a pointer that points to an
+A pointer in Legion includes the region that the pointer points into
+as part of its type. That is, `int@r` is a pointer that points to an
 `int` inside the region `r`. This property gives the compiler a handle
 on the *aliasing problem*. Suppose we know two regions are
 disjoint. Then we also know that any pointers into those two regions
@@ -314,9 +254,9 @@ are also disjoint (i.e., they do not alias).
 
 There is no pointer arithmetic in Legion. You can't increment the
 pointer to get the next value, nor can you obtain a pointer to the
-interior of a struct (but more on that later).
+interior of a struct.
 
-Legion does have null pointers. Here's an example.
+Legion does have null pointers:
 
 ```legion
 task a_null_pointer()
@@ -329,8 +269,10 @@ task a_null_pointer()
 
 Note that even null pointers explicitly point into a region.
 
-Dereferencing a null pointer is a runtime error, but this error is not
-checked for and will likely result in a program crash.
+Dereferencing a null pointer is a runtime error. When invoked with the
+`--pointer-checks` option, the Legion compiler will emit code to check
+for null pointers before each pointer dereference. Otherwise, the
+error is not checked for and will likely result in a program crash.
 
 ## Privileges
 
@@ -390,10 +332,10 @@ task read_write_region(r: region<int>, p: int@r): int
 
 ## Partitions
 
-Regions can be *partitioned* into *disjoint subregions*. Partitions
-allow the programmer to specify that two tasks operate on independent
-data and therefore should run in parallel. More details on parallelism
-in Legion are provided in Section 2.7, below.
+Regions can be *partitioned* into *disjoint* or *aliased*
+subregions. Partitions allow the programmer to specify that two tasks
+operate on independent data and therefore should run in parallel. More
+details on parallelism in Legion are provided in Section 3.7, below.
 
 Partitions can be constructed in two ways:
 
@@ -446,29 +388,11 @@ runtime.
 
 ## Implicit Parallelism
 
-Consider the following naive implementation of a Fibonacci number
-calculation.
-
-```legion
-task fib(x: int): int
-{
-  if (x < 2) {
-    return 1;
-  } else {
-    return fib(x - 1) + fib(x - 2);
-  }
-}
-```
-
-While the code above is wildly inefficient, it does have one
-interesting property: the two recursive calls to `fib` can execute in
-parallel.
-
 Legion programs define an explicit *serial execution order*. This is
-how the program would run if you executed it by hand, starting at
-`main`, from top to bottom, line by line. In other words, Legion
-programs can be thought as of executing as if they were written in a
-more traditional serial programming language, like C.
+how the program would run if executed by hand, starting at `main`,
+from top to bottom, line by line. In other words, Legion programs can
+be thought as of executing as if they were written in a more
+traditional serial programming language, like C.
 
 Behind the scenes, the Legion runtime may decide that it is possible
 to execute parts of the program in parallel. Such code is said to be
@@ -512,7 +436,8 @@ task am_i_parallel1(r: region<int>, p: int@r): int
 In this program, `expensive1a` and `expensive1b` *can* run in
 parallel, because both use region `r` with read-only privileges.
 
-What about the following program?
+Now consider the following program where the second task now writes to
+the region `r`.
 
 ```legion
 task expensive2a(r: region<int>, p: int@r): int, reads(r) {/*...*/}
@@ -528,22 +453,25 @@ task am_i_parallel2(r: region<int>, p: int@r): int
 }
 ```
 
-Again, `expensive2a` and `expensive2b` *can* run in parallel, although
-this case is trickier. Parallelizing the two tasks isn't trivial,
-because if both try to access the same physical memory at the same
-time, then `expensive1` could potentially read invalid results.
+In this case, `expensive2a` and `expensive2b` *might* run in
+parallel. If both tasks attempt to access the same physical memory at
+the same time, then `expensive2a` could potentially read invalid data;
+Legion cannot allow this to happen. Legion can avoid this conflict in
+one of two ways: either Legion can serialize both tasks so that
+`expensive2a` completes before `expensive2b` begins to run, or Legion
+can make two copies of the region `r` so that both tasks can run in
+parallel without conflict. Once both tasks finish, Legion declares
+`expensive2b`'s copy of `r` to be the official one going forward (so
+that `am_i_parallel2` reads the correct value once `expensive2b`
+returns).
 
-In order to parallelize this code, Legion has to make a copy of region
-`r`. Then `expensive2a` and `expensive2b` can run in parallel, and
-once both finish, Legion declares `expensive2b`'s copy of `r` to be
-the official one going forward (so that `am_i_parallel2` reads the
-correct value once `expensive2b` returns).
+The decision of what optimization strategy to apply is generally
+application-specific, and is therefore delegated to a user-defined
+*mapper*. The mapper, which is not described further in this document,
+gives the user complete control over performance decisions like the
+one above.
 
-This might or might not be a performance win, depending on the
-application and machine. The decision to make this copy can be made by
-the user via the mapping interface (not described in this document).
-
-Ok, what about this one?
+Next, let us consider a case where two tasks cannot run in parallel.
 
 ```legion
 task expensive3a(r: region<int>, p: int@r), reads(r), writes(r) {/*...*/}

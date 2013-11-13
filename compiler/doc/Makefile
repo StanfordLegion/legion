@@ -21,4 +21,4 @@ clean:
 	rm -f *.pdf
 
 %.pdf: %.md
-	pandoc $< -o $@ --toc --number-sections --highlight=monochrome
+	pandoc $< -o $@ --toc --toc-depth=2 --number-sections --highlight=monochrome
