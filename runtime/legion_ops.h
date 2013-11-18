@@ -230,6 +230,9 @@ namespace LegionRuntime {
       bool trigger_complete_invoked;
       // Track whether trigger_commit has already been invoked
       bool trigger_commit_invoked;
+      // Indicate whether we are responsible for
+      // triggering the completion event for this operation
+      bool need_completion_trigger;
       // Are we tracking this operation in the parent's context
       bool track_parent;
       // The enclosing context for this operation
@@ -433,7 +436,6 @@ namespace LegionRuntime {
     public:
       void complete_execution_fence(void);
     protected:
-      UserEvent completion_event;
       bool mapping_fence;
     };
 
@@ -520,7 +522,6 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       InstanceRef reference;
-      UserEvent completion_event;
       RegionTreePath privilege_path;
 #ifdef DEBUG_HIGH_LEVEL
       unsigned parent_index;

@@ -1017,9 +1017,9 @@ namespace LegionRuntime {
         // executing tasks
         Processor proc = context->get_executing_processor();
 #ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(proc,
-                                        context->get_unique_task_id(),
-                                        BEGIN_INLINING);
+        LegionLogging::log_inline_wait_begin(proc,
+                                             context->get_unique_task_id(),
+                                             ready_event);
 #endif
 #ifdef LEGION_PROF
         LegionProf::register_event(context->get_unique_task_id(),
@@ -1029,24 +1029,33 @@ namespace LegionRuntime {
         ready_event.wait();
         runtime->post_wait(proc);
 #ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(proc,
-                                        context->get_unique_task_id(),
-                                        END_INLINING);
+        LegionLogging::log_inline_wait_end(proc,
+                                           context->get_unique_task_id(),
+                                           ready_event);
 #endif
 #ifdef LEGION_PROF
         LegionProf::register_event(context->get_unique_task_id(),
                                    PROF_END_WAIT);
 #endif
       }
+#ifdef LEGION_LOGGING
+      else
+      {
+        Processor proc = context->get_executing_processor();
+        LegionLogging::log_inline_nowait(proc,
+                                         context->get_unique_task_id(),
+                                         ready_event);
+      }
+#endif
       // Now wait for the reference to be ready
       Event ref_ready = reference.get_ready_event();
       if (!ref_ready.has_triggered())
       {
         Processor proc = context->get_executing_processor();
 #ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(proc,
-                                        context->get_unique_task_id(),
-                                        BEGIN_INLINING);
+        LegionLogging::log_inline_wait_begin(proc,
+                                             context->get_unique_task_id(),
+                                             ref_ready);
 #endif
 #ifdef LEGION_PROF
         LegionProf::register_event(context->get_unique_task_id(),
@@ -1065,15 +1074,24 @@ namespace LegionRuntime {
           ref_ready.wait();
         runtime->post_wait(proc);
 #ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(proc,
-                                        context->get_unique_task_id(),
-                                        END_INLINING);
+        LegionLogging::log_inline_wait_end(proc,
+                                           context->get_unique_task_id(),
+                                           ref_ready);
 #endif
 #ifdef LEGION_PROF
         LegionProf::register_event(context->get_unique_task_id(),
                                    PROF_END_WAIT);
 #endif
       }
+#ifdef LEGION_LOGGING
+      else
+      {
+        Processor proc = context->get_executing_processor();
+        LegionLogging::log_inline_nowait(proc,
+                                         context->get_unique_task_id(),
+                                         ref_ready);
+      }
+#endif
       valid = true;
     }
 
@@ -1147,9 +1165,8 @@ namespace LegionRuntime {
     void PhysicalRegion::Impl::unmap_region(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(mapped);
-#endif
+      if (!mapped)
+        return;
       // Before unmapping, make sure any previous mappings have finished
       wait_until_valid();
       // Unlock our lock now that we're done
@@ -1555,31 +1572,34 @@ namespace LegionRuntime {
       // work on the processor.
       if (disable)
       {
+        // Clearly if we're here the idle task is enabled
         AutoLock i_lock(idle_lock);
-        if (idle_task_enabled)
-        {
-          // The condition for shutting down the idle task
-          // is as follows:
-          // We have no dependence analyses to perform
-          //   AND
-          // (( We have enough pending tasks 
-          //      AND
-          //    We have a currently executing task)
-          //      OR
-          //   We have nothing in ready queues )
+        // The condition for shutting down the idle task
+        // is as follows:
+        // We have no dependence analyses to perform
+        //   AND
+        // We have nothing in our local ready queue
+        //   AND
+        // (( We have enough pending tasks 
+        //      AND
+        //    We have a currently executing task)
+        //      OR
+        //   We have nothing in mapper ready queues )
 
-          // Check to see if the dependence queue is empty
-          AutoLock d_lock(dependence_lock);
-          bool all_empty = true;
-          for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
+        // Check to see if the dependence queue is empty
+        AutoLock d_lock(dependence_lock);
+        bool all_empty = true;
+        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
+        {
+          if (!dependence_queues[idx].empty())
           {
-            if (!dependence_queues[idx].empty())
-            {
-              all_empty = false;
-              break;
-            }
+            all_empty = false;
+            break;
           }
-          if (all_empty)
+        }
+        if (all_empty)
+        {
+          if (local_ready_queue.empty())
           {
             // Now check to see either we have enough pending
             // or if we have nothing in our ready queues
@@ -1592,7 +1612,6 @@ namespace LegionRuntime {
             else
             {
               // Check to see if the ready queues are empty 
-              all_empty = local_ready_queue.empty();
               for (unsigned idx = 0; all_empty &&
                     (idx < ready_queues.size()); idx++)
               {
@@ -1909,6 +1928,8 @@ namespace LegionRuntime {
     {
       std::vector<Operation*> ops;
       bool remaining_ops = false;
+      UserEvent trigger_event;
+      bool needs_trigger = false;
       {
         AutoLock d_lock(dependence_lock);
         // An important optimization here is that we always pull
@@ -1937,10 +1958,15 @@ namespace LegionRuntime {
         // epoch that we can trigger.
         if (!remaining_ops && gc_epoch_event.exists())
         {
-          gc_epoch_trigger.trigger();
+          trigger_event = gc_epoch_trigger;
+          needs_trigger = true;
           gc_epoch_event = Event::NO_EVENT;
         }
       }
+      // Don't trigger the event while holding the lock
+      // You never know what the low-level runtime might decide to do
+      if (needs_trigger)
+        trigger_event.trigger();
 
       // Ask each of the operations to issue their mapping task
       // onto the utility processor
@@ -3423,14 +3449,6 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       // First log information about the machine 
       const std::set<Processor> &all_procs = machine->get_all_processors();
-      // Log all the processors
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
-            it != all_procs.end(); it++)
-      {
-        Processor util = it->get_utility_processor();
-        Processor::Kind kind = machine->get_processor_kind(*it);
-        LegionLogging::log_processor(*it, util, kind);
-      }
       // Log all the memories
       const std::set<Memory> &all_mems = machine->get_all_memories();
       for (std::set<Memory>::const_iterator it = all_mems.begin();
@@ -3555,6 +3573,7 @@ namespace LegionRuntime {
       LegionSpy::log_top_index_space(space.id);
 #endif
       forest->create_index_space(domain);
+      ctx->register_index_space_creation(space);
       return space;
     }
 
@@ -4958,9 +4977,9 @@ namespace LegionRuntime {
         if (!mapped_event.has_triggered())
         {
 #ifdef LEGION_LOGGING
-          LegionLogging::log_timing_event(proc,
-                                          ctx->get_unique_task_id(), 
-                                          BEGIN_INLINING);
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
 #endif
 #ifdef LEGION_PROF
           LegionProf::register_event(ctx->get_unique_task_id(),
@@ -4970,15 +4989,22 @@ namespace LegionRuntime {
           mapped_event.wait();
           post_wait(proc);
 #ifdef LEGION_LOGGING
-          LegionLogging::log_timing_event(proc,
-                                          ctx->get_unique_task_id(),
-                                          END_INLINING);
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
 #endif
 #ifdef LEGION_PROF
           LegionProf::register_event(ctx->get_unique_task_id(),
                                      PROF_END_WAIT);
 #endif
         }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -5191,7 +5217,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      Barrier result = Barrier::create_barrier(participants+1);
+      Barrier result = Barrier::create_barrier(participants);
       return PhaseBarrier(result, participants);
     }
 
@@ -5229,12 +5255,10 @@ namespace LegionRuntime {
 #endif
       Barrier bar = pb.phase_barrier;
       // Mark that one of the expected arrivals has arrived
-      bar.arrive();
+      // TODO: put this back in once Sean fixes barriers
+      //bar.arrive();
       Barrier new_bar = bar.advance_barrier();
-      // Add one to the expected arrival accounts for the next advance call
-      unsigned participants = pb.participant_count();
-      return PhaseBarrier(new_bar.alter_arrival_count(participants+1), 
-                          participants);
+      return PhaseBarrier(new_bar, pb.participant_count());
     }
 
     //--------------------------------------------------------------------------
@@ -6580,9 +6604,9 @@ namespace LegionRuntime {
           if (!mapped_event.has_triggered())
           {
 #ifdef LEGION_LOGGING
-            LegionLogging::log_timing_event(proc,
-                                            ctx->get_unique_task_id(), 
-                                            BEGIN_INLINING);
+            LegionLogging::log_inline_wait_begin(proc,
+                                                 ctx->get_unique_task_id(), 
+                                                 mapped_event);
 #endif
 #ifdef LEGION_PROF
             LegionProf::register_event(ctx->get_unique_task_id(),
@@ -6592,15 +6616,23 @@ namespace LegionRuntime {
             mapped_event.wait();
             post_wait(proc);
 #ifdef LEGION_LOGGING
-            LegionLogging::log_timing_event(proc,
-                                            ctx->get_unique_task_id(),
-                                            END_INLINING);
+            LegionLogging::log_inline_wait_end(proc,
+                                               ctx->get_unique_task_id(),
+                                               mapped_event);
 #endif
 #ifdef LEGION_PROF
             LegionProf::register_event(ctx->get_unique_task_id(),
                                        PROF_END_WAIT);
 #endif
           }
+#ifdef LEGION_LOGGING
+          else
+          {
+            LegionLogging::log_inline_nowait(proc,
+                                             ctx->get_unique_task_id(), 
+                                             mapped_event);
+          }
+#endif
         }
       }
     }
@@ -8040,9 +8072,25 @@ namespace LegionRuntime {
       // table for this uid
       if (table.find(uid) == table.end())
       {
+        if (options.leaf && options.inner)
+        {
+          log_run(LEVEL_ERROR,"Task variant %s (ID %d) is not permitted to "
+                              "be both inner and leaf tasks simultaneously.",
+                              options.name, uid);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INNER_LEAF_MISMATCH);
+        }
         TaskVariantCollection *collec = 
           new TaskVariantCollection(uid, options.name, 
-                      options.leaf, options.idempotent, return_size);
+            options.leaf, 
+#ifdef LEGION_SPY
+            false, // no inner optimizations for analysis
+#else
+            options.inner, 
+#endif
+            options.idempotent, return_size);
 #ifdef DEBUG_HIGH_LEVEL
         assert(collec != NULL);
 #endif
@@ -8062,6 +8110,17 @@ namespace LegionRuntime {
           assert(false);
 #endif
           exit(ERROR_LEAF_MISMATCH);
+        }
+        if (table[uid]->inner != options.inner)
+        {
+          log_run(LEVEL_ERROR,"Tasks of variant %s have different inner "
+                              "options.  All tasks of the "
+                              "same variant must all be inner tasks, or "
+                              "all be not inner tasks.", table[uid]->name);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INNER_MISMATCH);
         }
         if (table[uid]->idempotent != options.idempotent)
         {

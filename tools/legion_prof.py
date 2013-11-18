@@ -702,6 +702,13 @@ class Memory(object):
         assert inst not in self.instances
         self.instances.add(inst)
 
+    def __repr__(self):
+        return 'Memory %s' % hex(self.mem)
+
+    def print_stats(self):
+        print self
+        print "    Total Instances: %d" % len(self.instances)
+
     def get_title(self):
         title = ""
         if self.kind == 0:
@@ -1077,6 +1084,8 @@ class StatGatherer(object):
         self.scheduler = CallTracker()
         self.gcs = CallTracker()
         self.executing_task = list()
+        self.dependence_analysis = CallTracker()
+        self.mapping_analysis = CallTracker()
 
     def initialize_variant(self, var):
         assert var not in self.variants
@@ -1089,30 +1098,37 @@ class StatGatherer(object):
     def update_inline_dep_analysis(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_inline_dep_analysis(cum, non_cum)
+        self.dependence_analysis.increment(cum, non_cum)
 
     def update_inline_mappings(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_inline_mappings(cum, non_cum)
+        self.mapping_analysis.increment(cum, non_cum)
 
     def update_close_dep_analysis(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_close_dep_analysis(cum, non_cum)
+        self.dependence_analysis.increment(cum, non_cum)
 
     def update_close_operations(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_close_operations(cum, non_cum)
+        self.mapping_analysis.increment(cum, non_cum)
 
     def update_dependence_analysis(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_dependence_analysis(cum, non_cum)
+        self.dependence_analysis.increment(cum, non_cum)
 
     def update_premappings(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_premappings(cum, non_cum)
+        self.mapping_analysis.increment(cum, non_cum)
 
     def update_mapping_analysis(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_mapping_analysis(cum, non_cum)
+        self.mapping_analysis.increment(cum, non_cum)
 
     def update_post(self, var, cum, non_cum):
         assert var in self.variants
@@ -1153,6 +1169,12 @@ class StatGatherer(object):
         if not self.gcs.is_empty():
             print "  Garbage Collection (META):"
             self.gcs.print_stats(total_time)
+        if not self.dependence_analysis.is_empty():
+            print "  Total Dependence Analyses (META):"
+            self.dependence_analysis.print_stats(total_time)
+        if not self.mapping_analysis.is_empty():
+            print "  Total Mapping Analyses (META):"
+            self.mapping_analysis.print_stats(total_time)
 
 class State(object):
     def __init__(self):
@@ -1188,7 +1210,7 @@ class State(object):
             variant = self.task_variants[task_id],
             uid = uid,
             point = Point(dim, p0, p1, p2),
-            color_string = color_helper(task_id, len(self.task_variants)))
+            color_string = color_helper(task_id, task_id if task_id > len(self.task_variants) else len(self.task_variants)))
 
     def create_unique_map(self, proc_id, uid, parent_uid):
         assert uid not in self.unique_ops
@@ -1233,9 +1255,10 @@ class State(object):
     def create_instance(self, iid, mem, redop, bf, time):
         if iid not in self.instances:
             self.instances[iid] = Instance(iid)
-        assert mem in self.memories
         self.instances[iid].set_create(self.memories[mem],
                                        redop, bf, time)
+        assert mem in self.memories
+        self.memories[mem].add_instance(self.instances[iid])
 
     def add_instance_field(self, iid, fid, size):
         assert iid in self.instances
@@ -1264,6 +1287,14 @@ class State(object):
         print '****************************************************'
         for p,proc in sorted(self.processors.iteritems()):
             proc.print_stats()
+        print
+
+    def print_memory_stats(self):
+        print '****************************************************'
+        print '   MEMORY STATS'
+        print '****************************************************'
+        for m,mem in sorted(self.memories.iteritems()):
+            mem.print_stats()
         print
 
     def print_task_stats(self, cummulative, verbose):
@@ -1483,6 +1514,9 @@ def main():
 
     # Print the per-processor statistics
     state.print_processor_stats()
+
+    # Print the per-memory statistics
+    state.print_memory_stats()
 
     # Print the per-task statistics
     state.print_task_stats(cummulative, verbose)

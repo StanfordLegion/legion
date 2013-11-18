@@ -33,6 +33,14 @@
 #include <deque>
 #include <vector>
 
+// If we enable field tree acceleration
+// then enable it for both the logical and
+// physical tree analyses.
+#ifdef FIELD_TREE
+#define LOGICAL_FIELD_TREE
+#define PHYSICAL_FIELD_TREE
+#endif
+
 #define AUTO_GENERATE_ID   UINT_MAX
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
 #define MAX_FIELDS         2048 // must be divisible by 2^FIELD_SHIFT
@@ -53,7 +61,7 @@
 // Default number of contexts made for each runtime instance
 #define DEFAULT_CONTEXTS        64 
 // Maximum number of sub-tasks per task at a time
-#define DEFAULT_MAX_TASK_WINDOW         1024
+#define DEFAULT_MAX_TASK_WINDOW         4096 
 // How many tasks to group together for runtime operations
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE 1
 // Scheduling granularity for how many operations to
@@ -174,11 +182,13 @@ namespace LegionRuntime {
       ERROR_COPY_SPACE_MISMATCH = 91,
       ERROR_INVALID_COPY_PRIVILEGE = 92,
       ERROR_INVALID_PARTITION_COLOR = 93,
+      ERROR_INNER_MISMATCH = 94,
+      ERROR_INNER_LEAF_MISMATCH = 95,
     };
 
     // enum and namepsaces don't really get along well
     enum PrivilegeMode {
-      NO_ACCESS       = 0x00000000,
+      NO_ACCESS       = 0x00000000, // Deprecated: use the NO_ACCESS_FLAG
       READ_ONLY       = 0x00000001,
       READ_WRITE      = 0x00000111,
       WRITE_ONLY      = 0x00000010, // same as WRITE_DISCARD
@@ -201,6 +211,13 @@ namespace LegionRuntime {
       ATOMIC       = 1,
       SIMULTANEOUS = 2,
       RELAXED      = 3,
+    };
+
+    // Optional region requirement flags
+    enum {
+      NO_FLAG         = 0x00000000,
+      VERIFIED_FLAG  = 0x00000001,
+      NO_ACCESS_FLAG  = 0x00000002,
     };
 
     enum HandleType {
@@ -349,6 +366,7 @@ namespace LegionRuntime {
     class InstanceView;
     class MappingRef;
     class InstanceRef;
+    class InnerTaskView;
     class ReductionManager;
     class ListReductionManager;
     class FoldReductionManager;
@@ -399,6 +417,7 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
+    typedef int TaskPriority;
     typedef unsigned int Color;
     typedef unsigned int IndexPartition;
     typedef unsigned int FieldID;

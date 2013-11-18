@@ -13,12 +13,6 @@
  * limitations under the License.
  */
 
-#define GASNET_PAR
-#include <gasnet.h>
-
-#define GASNETT_THREAD_SAFE
-#include <gasnet_tools.h>
-
 #include "activemsg.h"
 #include "utilities.h"
 
@@ -28,6 +22,8 @@
 
 #include <queue>
 #include <cassert>
+
+#include "lowlevel_impl.h"
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
@@ -165,6 +161,16 @@ public:
 	OutgoingMessage *hdr;
 	hdr = out_long_hdrs.front();
 
+	// no payload?  this happens when a short/medium message needs to be ordered with long messages
+	if(hdr->payload_size == 0) {
+	  out_long_hdrs.pop();
+	  gasnet_hsl_unlock(&mutex);
+	  send_short(hdr);
+	  delete hdr;
+	  count++;
+	  continue;
+	}
+
 	// do we have enough room in the current LMB?
 	assert(hdr->payload_size <= LMB_SIZE);
 	if((cur_write_offset + hdr->payload_size) <= LMB_SIZE) {
@@ -239,15 +245,17 @@ public:
     return count;
   }
 
-  void enqueue_message(OutgoingMessage *hdr)
+  void enqueue_message(OutgoingMessage *hdr, bool in_order)
   {
     // need to hold the mutex in order to push onto one of the queues
     gasnet_hsl_lock(&mutex);
 
-    if(hdr->payload_size > gasnet_AMMaxMedium())
-      out_long_hdrs.push(hdr);
-    else
+    // messages that don't need space in the LMB can progress when the LMB is full
+    //  (unless they need to maintain ordering with long packets)
+    if(!in_order && (hdr->payload_size <= gasnet_AMMaxMedium()))
       out_short_hdrs.push(hdr);
+    else
+      out_long_hdrs.push(hdr);
     // Signal in case there is a sleeping sender
     gasnett_cond_signal(&cond);
 
@@ -596,12 +604,26 @@ protected:
 			    hdr->args[0], hdr->args[1], hdr->args[2],
 			    hdr->args[3], hdr->args[4], hdr->args[5]);
       break;
+    case 7:
+      gasnet_AMRequestLong7(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6]);
+      break;
     case 8:
       gasnet_AMRequestLong8(peer, hdr->msgid,
                             hdr->payload, msg_size, dest_ptr,
                             hdr->args[0], hdr->args[1], hdr->args[2],
                             hdr->args[3], hdr->args[4], hdr->args[5],
                             hdr->args[6], hdr->args[7]);
+      break;
+    case 9:
+      gasnet_AMRequestLong9(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8]);
       break;
     case 10:
       gasnet_AMRequestLong10(peer, hdr->msgid,
@@ -611,6 +633,14 @@ protected:
                             hdr->args[6], hdr->args[7], hdr->args[8],
                             hdr->args[9]);
       break;
+    case 11:
+      gasnet_AMRequestLong11(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10]);
+      break;
     case 12:
       gasnet_AMRequestLong12(peer, hdr->msgid,
                             hdr->payload, msg_size, dest_ptr,
@@ -618,6 +648,15 @@ protected:
                             hdr->args[3], hdr->args[4], hdr->args[5],
                             hdr->args[6], hdr->args[7], hdr->args[8],
                             hdr->args[9], hdr->args[10], hdr->args[11]);
+      break;
+    case 13:
+      gasnet_AMRequestLong13(peer, hdr->msgid,
+			    hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10], hdr->args[11],
+			    hdr->args[12]);
       break;
     case 14:
       gasnet_AMRequestLong14(peer, hdr->msgid,
@@ -627,6 +666,15 @@ protected:
                             hdr->args[6], hdr->args[7], hdr->args[8],
                             hdr->args[9], hdr->args[10], hdr->args[11],
 			    hdr->args[12], hdr->args[13]);
+      break;
+    case 15:
+      gasnet_AMRequestLong15(peer, hdr->msgid,
+                            hdr->payload, msg_size, dest_ptr,
+                            hdr->args[0], hdr->args[1], hdr->args[2],
+                            hdr->args[3], hdr->args[4], hdr->args[5],
+                            hdr->args[6], hdr->args[7], hdr->args[8],
+                            hdr->args[9], hdr->args[10], hdr->args[11],
+                            hdr->args[12], hdr->args[13], hdr->args[14]);
       break;
     case 16:
       gasnet_AMRequestLong16(peer, hdr->msgid,
@@ -792,9 +840,15 @@ void start_polling_threads(int count)
   num_polling_threads = count;
   polling_threads = new pthread_t[count];
 
-  for(int i = 0; i < count; i++)
+  for(int i = 0; i < count; i++) {
+    pthread_attr_t attr;
+    CHECK_PTHREAD( pthread_attr_init(&attr) );
+    if(LegionRuntime::LowLevel::proc_assignment)
+      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM polling thread");    
     CHECK_PTHREAD( pthread_create(&polling_threads[i], 0, 
 				  gasnet_poll_thread_loop, 0) );
+    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+  }
 }
 
 static void* sender_thread_loop(void *index)
@@ -814,8 +868,13 @@ void start_sending_threads(void)
   for (int i = 0; i < gasnet_nodes(); i++)
   {
     if (i == gasnet_mynode()) continue;
+    pthread_attr_t attr;
+    CHECK_PTHREAD( pthread_attr_init(&attr) );
+    if(LegionRuntime::LowLevel::proc_assignment)
+      LegionRuntime::LowLevel::proc_assignment->bind_thread(-1, &attr, "AM sender thread");    
     CHECK_PTHREAD( pthread_create(&sending_threads[i], 0,
                                   sender_thread_loop, (void*)i));
+    CHECK_PTHREAD( pthread_attr_destroy(&attr) );
   }
 }
 	
@@ -832,7 +891,7 @@ void enqueue_message(gasnet_node_t target, int msgid,
 
   hdr->set_payload((void *)payload, payload_size, payload_mode);
 
-  endpoints[target]->enqueue_message(hdr);
+  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
 }
 
 void handle_long_msgptr(gasnet_node_t source, void *ptr)

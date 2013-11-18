@@ -95,7 +95,7 @@ namespace LegionRuntime {
     class UserEvent : public Event {
     public:
       static UserEvent create_user_event(void);
-      void trigger(void) const;
+      void trigger(Event wait_on = Event::NO_EVENT) const;
     };
 
     // a Barrier is similar to a UserEvent, except that it has a count of how
@@ -103,13 +103,18 @@ namespace LegionRuntime {
     //  occurs
     class Barrier : public Event {
     public:
+      typedef unsigned long long timestamp_t; // used to avoid race conditions with arrival adjustments
+
+      timestamp_t timestamp;
+
       static Barrier create_barrier(unsigned expected_arrivals);
       void destroy_barrier(void);
 
       Barrier advance_barrier(void) const;
       Barrier alter_arrival_count(int delta) const;
+      Event get_previous_phase(void) const;
 
-      void arrive(unsigned count = 1) const;
+      void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT) const;
     };
 
     class Lock {
@@ -184,7 +189,7 @@ namespace LegionRuntime {
       };
 
       Event spawn(TaskFuncID func_id, const void *args, size_t arglen,
-		  Event wait_on = Event::NO_EVENT) const;
+		  Event wait_on = Event::NO_EVENT, int priority = 0) const;
     };
 
     class Memory {

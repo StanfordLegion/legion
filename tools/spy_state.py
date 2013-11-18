@@ -659,10 +659,14 @@ class TaskOp(object):
               self.enclosing.add_adep(other_op, self, other_req.index, req.index, dtype)
 
     def add_logical_incoming(self, op):
+        if op == self:
+            return
         assert op <> self
         self.logical_incoming.add(op)
 
     def add_logical_outgoing(self, op):
+        if op == self:
+            return
         assert op <> self
         self.logical_outgoing.add(op)
 
@@ -832,7 +836,7 @@ class Deletion(object):
         self.state = state
         self.uid = uid
         self.enclosing = enclosing
-        self.logical_incoming = set()
+        self.logical_outgoing = set()
         self.name = "Deletion "+str(uid)
 
     def find_dependences(self, op):
@@ -844,12 +848,12 @@ class Deletion(object):
         pass
 
     def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
         # Should never happen
         assert False
+
+    def add_logical_outgoing(self, op): 
+        assert op <> self
+        self.logical_outgoing.add(op)
 
     def has_path(self, target):
         if target == self:
@@ -1331,10 +1335,10 @@ class InstanceManager(object):
         self.reduce_users = dict()
 
     def add_task_user(self, handle, task_inst, idx):
-        if handle not in self.task_users:
-            self.task_users[handle] = TaskUser(task_inst, idx)
-        else:
-            self.task_users[handle].add_index(idx)
+        #if handle not in self.task_users:
+        #    self.task_users[handle] = TaskUser(task_inst, idx)
+        #else:
+        #    self.task_users[handle].add_index(idx)
         task_inst.set_manager(idx, self)
 
     def add_map_user(self, uid, mapping):
@@ -1379,7 +1383,7 @@ class InstanceManager(object):
                     continue
                 if (m2.task_inst,u1.task_inst) in self.dependences:
                     continue
-                self.task_map_analsysis(u1,m2)
+                self.task_map_analysis(u1,m2)
             for h2,c2 in self.copy_users.iteritems():
                 if (u1.task_inst,c2.op) in self.dependences:
                     continue
@@ -1451,9 +1455,9 @@ class InstanceManager(object):
     def task_map_analysis(self, t, m):
         for idx in t.indexes:
             req1 = t.task_inst.get_requirement(idx)
-            req2 = m.req
+            req2 = m.task_inst.req
             self.req_req_analysis(req1,req2,"index "+str(idx)+" of task instance "+str(t.task_inst.name),
-                                            "mapping "+str(m.uid))
+                                            "mapping "+str(m.task_inst.uid))
         
     def task_copy_analysis(self, t, c):
         for idx in t.indexes:
@@ -1468,15 +1472,15 @@ class InstanceManager(object):
                                          "reduce operation "+str(r.op.uid))
 
     def map_map_analysis(self, m1, m2):
-        req1 = m1.req
-        req2 = m2.req
-        self.req_req_analysis(req1,req2,"mapping "+str(m1.uid), "mapping "+str(m2.uid))
+        req1 = m1.task_inst.req
+        req2 = m2.task_inst.req
+        self.req_req_analysis(req1,req2,"mapping "+str(m1.task_inst.uid), "mapping "+str(m2.task_inst.uid))
 
     def map_copy_analysis(self, m, c):
-        self.req_op_analysis(m.req, c, "mapping "+str(m.uid), "copy operation "+str(c.op.uid))
+        self.req_op_analysis(m.task_inst.req, c, "mapping "+str(m.task_inst.uid), "copy operation "+str(c.op.uid))
 
     def map_reduce_analysis(self, m, r):
-        self.req_op_analysis(m.req, r, "mapping "+str(m.uid), "reduce operation "+str(r.op.uid))
+        self.req_op_analysis(m.task_inst.req, r, "mapping "+str(m.task_inst.uid), "reduce operation "+str(r.op.uid))
 
     def copy_copy_analysis(self, c1, c2):
         self.op_op_analysis(c1, c2, "copy operation "+str(c1.op.uid), "copy_operation "+str(c2.op.uid))
@@ -1703,8 +1707,11 @@ class ReductionManager(object):
 
     def add_task_user(self, handle, task_inst, idx):
         assert handle not in self.task_users
-        self.task_users[handle] = TaskUser(task_inst, idx)
+        #self.task_users[handle] = TaskUser(task_inst, idx)
         task_inst.set_manager(idx, self)
+
+    def add_map_user(self, uid, mapping):
+        mapping.set_manager(self)
 
     def add_reduce_user(self, reduce_op, writing):
         self.reduce_users.add(ReduceUser(reduce_op, writing))
@@ -1914,6 +1921,10 @@ class State(object):
         self.region_trees = dict()
         self.task_instances = dict()
         self.task_ops = dict()
+        self.slice_index = dict()
+        self.slice_slice = dict()
+        self.point_slice = dict()
+        self.point_point = dict()
         self.mappings = dict()
         self.deletions = dict()
         self.events = dict()
@@ -2030,14 +2041,15 @@ class State(object):
         self.task_instances[parent_handle].append_op(task_op)
         return True
 
-    def add_mapping(self, uid, pid, ctx, hid, gen):
+    def add_mapping(self, uid, pid, ctx, hid, gen, implicit):
         parent_handle = TaskHandle(pid, ctx, hid, gen)
         if parent_handle not in self.task_instances:
             return False
         mapping = Mapping(self, uid, self.task_instances[parent_handle])
         assert uid not in self.mappings
         self.mappings[uid] = mapping
-        self.task_instances[parent_handle].append_op(mapping)
+        if not implicit:
+            self.task_instances[parent_handle].append_op(mapping)
         return True
 
     def add_deletion(self, uid, pid, ctx, hid, gen):
@@ -2051,9 +2063,35 @@ class State(object):
         return True
 
     def add_name(self, uid, name):
+        # Who cares if we miss some names
         if uid not in self.task_ops:
-            return False
+            return True 
         self.task_ops[uid].name = name
+        return True
+    
+    def add_index_slice(self, index_id, slice_id):
+        if index_id not in self.task_ops:
+            return False
+        self.slice_index[slice_id] = index_id
+        return True
+
+    def add_slice_slice(self, slice_id1, slice_id2):
+        if slice_id1 not in self.slice_index and slice_id1 not in self.slice_slice:
+            return False
+        assert slice_id1 <> slice_id2
+        self.slice_slice[slice_id2] = slice_id1
+        return True
+
+    def add_slice_point(self, slice_id, point_id):
+        if slice_id not in self.slice_slice and slice_id not in self.slice_index:
+            return False
+        self.point_slice[point_id] = slice_id
+        return True
+
+    def add_point_point(self, point_id1, point_id2):
+        if point_id1 <> point_id2 and point_id1 not in self.point_point:
+            return False
+        self.point_point[point_id2] = point_id1
         return True
 
     def add_requirement(self, uid, index, is_reg, ispace, fspace, tid, priv, coher, redop):
@@ -2075,6 +2113,10 @@ class State(object):
         return True
 
     def add_mapping_dependence(self, pid, ctx, hid, gen, prev_id, pidx, next_id, nidx, dtype):
+        if not self.has_op(prev_id):
+            return False
+        if not self.has_op(next_id):
+            return False
         prev_op = self.get_op(prev_id)
         next_op = self.get_op(next_id)
         handle = TaskHandle(pid, ctx, hid, gen)
@@ -2096,16 +2138,21 @@ class State(object):
         return True
 
     def add_task_instance(self, uid, ctx, hid, gen, index_space, point, startid, startgen, termid, termgen):
-        if uid not in self.task_ops:
+        if uid not in self.point_slice and uid not in self.point_point:
             return False
+        if uid in self.point_point:
+            enclosing_uid = self.point_point[uid]
+        else:
+            enclosing_uid = self.find_enclosing_point_uid(uid)
+        assert enclosing_uid in self.task_ops
         handle = TaskHandle(uid, ctx, hid, gen) 
         if handle not in self.task_instances:
-            self.task_instances[handle] = TaskInstance(self, handle, self.task_ops[uid], index_space)
+            self.task_instances[handle] = TaskInstance(self, handle, self.task_ops[enclosing_uid], index_space)
         start_event = self.get_event(EventHandle(startid,startgen))
         term_event = self.get_event(EventHandle(termid,termgen))
         task_inst = self.task_instances[handle]
         task_inst.update_info(point, start_event, term_event)
-        self.task_ops[uid].add_instance(point,task_inst)
+        self.task_ops[enclosing_uid].add_instance(point,task_inst)
         start_event.add_physical_outgoing(task_inst)
         term_event.add_physical_incoming(task_inst)
         return True
@@ -2271,6 +2318,15 @@ class State(object):
         self.task_instances[handle].set_end_time(end)
         return True
 
+    def has_op(self, uid):
+        if uid in self.mappings:
+            return True
+        elif uid in self.deletions:
+            return True
+        elif uid in self.task_ops:
+            return True
+        return False
+
     def get_op(self, uid):
         if uid in self.mappings:
             return self.mappings[uid]
@@ -2279,6 +2335,16 @@ class State(object):
         else:
             assert uid in self.task_ops
             return self.task_ops[uid]
+
+    def find_enclosing_point_uid(self, uid):
+        assert uid in self.point_slice
+        return self.find_enclosing_slice_uid(self.point_slice[uid])
+
+    def find_enclosing_slice_uid(self, uid):
+        assert uid in self.slice_slice or uid in self.slice_index
+        if uid in self.slice_index:
+            return self.slice_index[uid];
+        return find_enclosing_slice_uid(self.slice_slice[uid])
 
     def get_event(self, handle):
         if handle not in self.events:

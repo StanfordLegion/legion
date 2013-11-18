@@ -86,7 +86,11 @@ LD_FLAGS += -L/opt/cray/pmi/4.0.1-1.0000.9421.73.3.gem/lib64/
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR)
+ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
+else
+LD_FLAGS	+= -lpthread
+endif
 
 # Falgs for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
@@ -160,9 +164,9 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g -march=native #-ggdb -Wall
 else
-CC_FLAGS	+= -O2 
+CC_FLAGS	+= -O2 -march=native
 endif
 
 

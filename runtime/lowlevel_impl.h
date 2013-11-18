@@ -21,12 +21,6 @@
 #include <assert.h>
 
 #ifndef NO_INCLUDE_GASNET
-#define GASNET_PAR
-#include <gasnet.h>
-
-#define GASNETT_THREAD_SAFE
-#include <gasnet_tools.h>
-
 #include "activemsg.h"
 #endif
 
@@ -103,19 +97,25 @@ namespace LegionRuntime {
 
     class AutoHSLLock {
     public:
-      AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
+      AutoHSLLock(gasnet_hsl_t &mutex, const char *_profile = 0)
+       : mutexp(&mutex), held(true), profile(_profile)
       { 
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
+	if(profile) t1 = TimeStamp::get_current_time_in_nanos();
 	gasnet_hsl_lock(mutexp); 
+	if(profile) t2 = TimeStamp::get_current_time_in_nanos();
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
-      AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
+      AutoHSLLock(gasnet_hsl_t *_mutexp, const char *_profile = 0)
+       : mutexp(_mutexp), held(true), profile(_profile)
       { 
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
+	if(profile) t1 = TimeStamp::get_current_time_in_nanos();
 	gasnet_hsl_lock(mutexp); 
+	if(profile) t2 = TimeStamp::get_current_time_in_nanos();
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
@@ -123,6 +123,10 @@ namespace LegionRuntime {
       {
 	if(held)
 	  gasnet_hsl_unlock(mutexp);
+	if(profile) {
+          t3 = TimeStamp::get_current_time_in_nanos();
+          printf("mutex profile: %s = %10lld %10lld\n", profile, t2-t1, t3-t2);
+        }
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK OUT %p", mutexp);
 	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
       }
@@ -141,6 +145,8 @@ namespace LegionRuntime {
     protected:
       gasnet_hsl_t *mutexp;
       bool held;
+      const char *profile;
+      unsigned long long t1, t2, t3;
     };
 
     // for each of the ID-based runtime objects, we're going to have an
@@ -164,6 +170,7 @@ namespace LegionRuntime {
       Atomic(T _value) : value(_value)
       {
 	gasnet_hsl_init(&mutex);
+	//printf("%d: atomic %p = %d\n", gasnet_mynode(), this, value);
       }
 
       T get(void) const { return (*((volatile T*)(&value))); }
@@ -171,7 +178,9 @@ namespace LegionRuntime {
       void decrement(void)
       {
 	AutoHSLLock a(mutex);
+	//T old_value(value);
 	value--;
+	//printf("%d: atomic %p %d -> %d\n", gasnet_mynode(), this, old_value, value);
       }
 
     protected:
@@ -179,6 +188,37 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex;
     };
 
+    // prioritized list that maintains FIFO order within a priority level
+    template <typename T>
+    class pri_list : public std::list<T> {
+    public:
+      void pri_insert(T to_add) {
+        // Common case: if the guy on the back has our priority or higher then just
+        // put us on the back too.
+        if (this->empty() || (this->back()->priority >= to_add->priority))
+          this->push_back(to_add);
+        else
+        {
+          // Uncommon case: go through the list until we find someone
+          // who has a priority lower than ours.  We know they
+          // exist since we saw them on the back.
+          bool inserted = false;
+          for (typename std::list<T>::iterator it = this->begin();
+                it != this->end(); it++)
+          {
+            if ((*it)->priority < to_add->priority)
+            {
+              this->insert(it, to_add);
+              inserted = true;
+              break;
+            }
+          }
+          // Technically we shouldn't need this, but just to be safe
+          assert(inserted);
+        }
+      }
+    };
+     
     class ID {
     public:
       // two forms of bit pack for IDs:
@@ -413,6 +453,25 @@ namespace LegionRuntime {
       Lock::Impl *lock;
     };
 
+    class ProcessorAssignment {
+    public:
+      ProcessorAssignment(int _num_local_procs);
+
+      // binds a thread to the right set of cores based (-1 = not a local proc)
+      void bind_thread(int core_id, pthread_attr_t *attr, const char *debug_name = 0);
+
+    protected:
+      // physical configuration of processors
+      typedef std::map<int, std::vector<int> > NodeProcMap;
+      typedef std::map<int, NodeProcMap> SystemProcMap;
+
+      int num_local_procs;
+      bool valid;
+      std::vector<int> local_proc_assignments;
+      cpu_set_t leftover_procs;
+    };
+    extern ProcessorAssignment *proc_assignment;
+
     extern Processor::TaskIDTable task_id_table;
 
     class UtilityProcessor;
@@ -430,7 +489,8 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event) = 0;
+			      Event start_event, Event finish_event,
+                              int priority) = 0;
 
       void finished(void)
       {
@@ -457,7 +517,7 @@ namespace LegionRuntime {
       PreemptableThread(void) {}
       virtual ~PreemptableThread(void) {}
 
-      void start_thread(void);
+      void start_thread(size_t stack_size, int core_id, const char *debug_name);
 
       static bool preemptable_sleep(Event wait_for, bool block = false);
 
@@ -479,12 +539,13 @@ namespace LegionRuntime {
                        int _num_worker_threads = 1);
       virtual ~UtilityProcessor(void);
 
-      void start_worker_threads(void);
+      void start_worker_threads(size_t stack_size);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event);
+			      Event start_event, Event finish_event,
+                              int priority);
 
       void request_shutdown(void);
 
@@ -512,7 +573,7 @@ namespace LegionRuntime {
       UtilityTask *idle_task;
 
       std::set<UtilityThread *> threads;
-      std::queue<UtilityTask *> tasks;
+      std::list<UtilityTask *> tasks;
       std::set<Processor::Impl *> idle_procs;
       std::set<Processor::Impl *> procs_in_idle_task;
     };
@@ -736,21 +797,28 @@ namespace LegionRuntime {
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
 
       // record that the event has triggered and notify anybody who cares
-      void trigger(Event::gen_t gen_triggered, int trigger_node);
+      void trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on = NO_EVENT);
+
+      // used to adjust a barrier's arrival count either up or down
+      // if delta > 0, timestamp is current time (on requesting node)
+      // if delta < 0, timestamp says which positive adjustment this arrival must wait for
+      void adjust_arrival(Event::gen_t barrier_gen, int delta, 
+			  Barrier::timestamp_t timestamp, Event wait_on = NO_EVENT);
 
       class EventWaiter {
       public:
-	virtual void event_triggered(void) = 0;
+        EventWaiter(void) : next_waiter(0)  {}
+	virtual bool event_triggered(void) = 0;
 	virtual void print_info(void) = 0;
+        EventWaiter *next_waiter;
       };
 
-      void add_waiter(Event event, EventWaiter *waiter);
+      void add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed = false);
 
     public: //protected:
       Event me;
       unsigned owner;
-      Event::gen_t generation, gen_subscribed;
-      bool in_use;
+      Event::gen_t generation, gen_subscribed, free_generation;
       Event::Impl *next_free;
       static Event::Impl *first_free;
       static gasnet_hsl_t freelist_mutex;
@@ -758,7 +826,15 @@ namespace LegionRuntime {
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
       uint64_t remote_waiters; // bitmask of which remote nodes are waiting on the event
-      std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
+      static const size_t NUM_LOCAL_WAIT_LISTS = 8;
+      EventWaiter *local_wait_heads[NUM_LOCAL_WAIT_LISTS];
+      EventWaiter **local_wait_tailps[NUM_LOCAL_WAIT_LISTS];
+
+      // for barriers
+      unsigned base_arrival_count, current_arrival_count;
+
+      class PendingUpdates;
+      std::map<Event::gen_t, PendingUpdates *> pending_updates;
     };
 
     class IndexSpace::Impl {

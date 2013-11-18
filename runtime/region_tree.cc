@@ -869,11 +869,61 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionTreeForest::register_physical_region(
+                                                        RegionTreeContext ctx,
+                                                        InnerTaskView *in_view,
+                                                        const MappingRef &ref,
+                                                        RegionRequirement &req,
+                                                        unsigned index,
+                                                        Mappable *mappable,
+                                                        Processor local_proc,
+                                                        Event term_event
+#ifdef DEBUG_HIGH_LEVEL
+                                                        , const char *log_name
+                                                        , UniqueID uid
+                                                        , RegionTreePath &path
+#endif
+                                                        )
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
+      assert(ref.has_ref());
+#endif
+      RegionNode *child_node = get_node(req.region);
+      FieldMask user_mask = 
+        child_node->column_source->get_field_mask(req.privilege_fields);
+      // Construct the mappable info
+      MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask);
+      // Construct the user
+      PhysicalUser user(RegionUsage(req), user_mask, term_event);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceRef result = child_node->register_region(&info, user,
+                                        ref.get_view(), ref.get_mask(),
+                                        in_view);
+      RegionTreeNode *start_node = child_node;
+      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
+        start_node = start_node->get_parent();
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     start_node, ctx.get_id(), 
+                                     false/*before*/, false/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
+      return result;
+#else
+      return child_node->register_region(&info, user, 
+                                         ref.get_view(), 
+                                         ref.get_mask(), in_view);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::initialize_physical_context(
                                                 RegionTreeContext ctx,
                                                 const RegionRequirement &req,
                                                 PhysicalManager *manager,
-                                                UniqueID uid, Event term_event,
+                                                Event term_event,
                                                 Processor local_proc,
                             std::map<PhysicalManager*,PhysicalView*> &top_views)
     //--------------------------------------------------------------------------
@@ -950,6 +1000,83 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionTreeForest::initialize_physical_context(
+                                                RegionTreeContext ctx,
+                                                const RegionRequirement &req,
+                                                PhysicalManager *manager,
+                            std::map<PhysicalManager*,PhysicalView*> &top_views,
+                                                Processor local_proc,
+                                                const InnerTaskView *inner_view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *top_node = get_node(req.region);
+      FieldMask valid_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      PhysicalView *new_view = NULL;
+      if (manager->is_reduction_manager())
+      {
+        std::map<PhysicalManager*,PhysicalView*>::const_iterator finder = 
+          top_views.find(manager);
+        if (finder == top_views.end())
+        {
+          new_view = manager->as_reduction_manager()->create_view();
+          top_views[manager] = new_view;
+        }
+        else
+          new_view = finder->second;
+      }
+      else
+      {
+        InstanceManager *inst_manager = manager->as_instance_manager();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(inst_manager != NULL);
+#endif
+        std::map<PhysicalManager*,PhysicalView*>::const_iterator finder = 
+          top_views.find(manager);
+        InstanceView *top_view = NULL;
+        if (finder == top_views.end())
+        {
+          top_view = inst_manager->create_top_view();
+          top_views[manager] = top_view;
+        }
+        else
+          top_view = finder->second->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(top_view != NULL);
+#endif
+        // Now walk from the top view down to the where the 
+        // node is that we're initializing
+        // First compute the path
+        std::vector<Color> path;
+#ifdef DEBUG_HIGH_LEVEL
+        bool result = 
+#endif
+        compute_index_path(inst_manager->region_node->row_source->handle,
+                           top_node->row_source->handle, path);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result);
+        assert(!path.empty());
+#endif
+        // Note we don't need to traverse the last element
+        for (int idx = int(path.size())-2; idx >= 0; idx--)
+          top_view = top_view->get_subview(path[idx]);
+        // Once we've made it down to the child we are done
+#ifdef DEBUG_HIGH_LEVEL
+        assert(top_view->logical_node == top_node);
+#endif
+        new_view = top_view;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(new_view != NULL);
+#endif
+      return top_node->seed_state(ctx.get_id(), new_view, valid_mask,
+                            local_proc, inner_view);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_physical_context(RegionTreeContext ctx,
                                                        LogicalRegion handle)
     //--------------------------------------------------------------------------
@@ -1010,7 +1137,8 @@ namespace LegionRuntime {
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
                                         const InstanceRef &src_ref,
-                                        const InstanceRef &dst_ref)
+                                        const InstanceRef &dst_ref,
+                                        Event precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1037,15 +1165,31 @@ namespace LegionRuntime {
       dst_view->manager->compute_copy_offsets(dst_mask, dst_fields);
 
       Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
-                                           dst_ref.get_ready_event());
-#ifdef LEGION_SPY
+                                           dst_ref.get_ready_event(),
+                                           precondition);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       if (!copy_pre.exists())
       {
         UserEvent new_copy_pre = UserEvent::create_user_event();
         new_copy_pre.trigger();
         copy_pre = new_copy_pre;
       }
-      LegionSpy::log_event_dependences(preconditions, copy_pre);
+#endif
+#ifdef LEGION_LOGGING
+      {
+        Processor exec_proc = Machine::get_executing_processor();
+        LegionLogging::log_event_dependence(exec_proc, 
+            src_ref.get_ready_event(), copy_pre);
+        LegionLogging::log_event_dependence(exec_proc,
+            dst_ref.get_ready_event(), copy_pre);
+        LegionLogging::log_event_dependence(exec_proc,
+            precondition, copy_pre);
+      }
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+      LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+      LegionSpy::log_event_dependence(precondition, copy_pre);
 #endif
       Domain copy_domain = src_node->get_domain();
 #ifdef DEBUG_HIGH_LEVEL
@@ -1053,6 +1197,8 @@ namespace LegionRuntime {
       assert(copy_domain == dst_node->get_domain());
 #endif
       Event result = copy_domain.copy(src_fields, dst_fields, copy_pre);
+      // Note we don't need to add the copy users because
+      // we already mapped these regions as part of the CopyOp.
 #ifdef LEGION_SPY
       if (!result.exists())
       {
@@ -1127,6 +1273,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::send_tree_shape(const IndexSpaceRequirement &req,
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(req.handle);
+      node->send_node(target, true/*up*/, true/*down*/);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::send_tree_shape(const RegionRequirement &req,
                                            AddressSpaceID target)
     //--------------------------------------------------------------------------
@@ -1151,6 +1306,35 @@ namespace LegionRuntime {
         // Finally the top node of the region tree
         reg_node->send_node(target);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::send_tree_shape(IndexSpace handle, 
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      node->send_node(target, true/*up*/, true/*down*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::send_tree_shape(FieldSpace handle,
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->send_node(target);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::send_tree_shape(LogicalRegion handle,
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      node->row_source->send_node(target, true/*up*/, true/*down*/);
+      node->column_source->send_node(target);
+      node->send_node(target);
     }
 
     //--------------------------------------------------------------------------
@@ -2491,7 +2675,8 @@ namespace LegionRuntime {
           destruction_set.insert(target);
         }
         // If we need to go down, make a copy of the valid children
-        valid_copy = valid_map;
+        if (down)
+          valid_copy = valid_map;
       }
       if (down)
       {
@@ -4128,15 +4313,54 @@ namespace LegionRuntime {
         {
           // Mark whether the closer is allowed to leave the child open
           closer.permit_leave_open = it->leave_open;
-          if (!node->close_physical_child(closer, state,
-                                          it->close_mask,
-                                          it->target_child,
-                                          next_child,
-                                          it->allow_next))
+          // Handle a special case where we've arrive at our destination
+          // node and it is a partition.  If we're permitted to leave
+          // the partition open, then don't actually close the partition
+          // but instead siphon each of its open children.  This handles
+          // the case of leaving open a read-only partition.
+          if (!has_child && !node->is_region() && it->leave_open)
           {
-            // If we failed, release the state before returning
+            // Release our state
             node->release_physical_state(state);
-            return false;
+            RegionTreeNode *child_node = node->get_tree_child(it->target_child);
+            // Acquire the child's state
+            PhysicalState &child_state = 
+              child_node->acquire_physical_state(info->ctx, true/*exclusive*/);
+            // Make a new node for closing the child 
+            PhysicalCloser child_closer(info, true/*leave open*/, 
+                                        closer.handle);
+            // Have the child select it's targets
+            if (!child_node->select_close_targets(child_closer, child_state,
+                                                  it->close_mask, false))
+            {
+              // Couldn't close the region
+              child_node->release_physical_state(child_state);
+              return false;
+            }
+            // Now do the close operation
+            child_node->siphon_physical_children(child_closer, child_state,
+                                                 it->close_mask, 
+                                                 -1/*next child*/,
+                                                 false/*allow next*/);
+            // Finally update the node's state
+            child_closer.update_node_views(child_node, child_state);
+            // Release the child's state
+            child_node->release_physical_state(child_state);
+            // Reacquire our state before continuing
+            node->acquire_physical_state(state, true/*exclusive*/);
+          }
+          else
+          {
+            if (!node->close_physical_child(closer, state,
+                                            it->close_mask,
+                                            it->target_child,
+                                            (has_child ? int(next_child) : -1),
+                                            it->allow_next))
+            {
+              // If we failed, release the state before returning
+              node->release_physical_state(state);
+              return false;
+            }
           }
         }
         FieldMask next_valid;
@@ -4321,7 +4545,9 @@ namespace LegionRuntime {
       // Filter out any memories that are not visible from 
       // the target processor if there is a processor that 
       // we're targeting (e.g. never do this for premaps)
-      if (!chosen_order.empty() && target_proc.exists())
+      // We can also skip this if region requirement has a NO_ACCESS_FLAG
+      if (!chosen_order.empty() && target_proc.exists() &&
+          !(info->req.flags & NO_ACCESS_FLAG))
       {
         Machine *machine = Machine::get_machine();
         const std::set<Memory> &visible_memories = 
@@ -4450,7 +4676,10 @@ namespace LegionRuntime {
           // Do this if we couldn't find a better choice
           // Note we can't do this in the read-only case because we might 
           // end up issuing multiple copies to the same location.
-          if (!IS_READ_ONLY(usage))
+          // On second thought this might be ok since they are both 
+          // reading and anybody else who mutates this instance will
+          // see both copies because of mapping dependences.
+          // if (!IS_READ_ONLY(usage))
           {
             // These are instances which have space for all the required fields
             // but only a subset of those fields contain valid data.
@@ -4796,6 +5025,47 @@ namespace LegionRuntime {
     {
       // Initialize the version of all fields to zero
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
+#ifdef LOGICAL_FIELD_TREE
+      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalState::LogicalState(const LogicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // The only place this is called is when we are putting a 
+      // new logical state in the list of logical states so we 
+      // only need to copy over the field versions and make new
+      // field trees if necessary.
+      // Only copy over the field versions
+      field_versions = rhs.field_versions;
+#ifdef LOGICAL_FIELD_TREE
+      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalState::~LogicalState(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LOGICAL_FIELD_TREE
+      delete curr_epoch_users;
+      curr_epoch_users = NULL;
+      delete prev_epoch_users;
+      prev_epoch_users = NULL;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalState& LogicalState::operator=(const LogicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -4805,9 +5075,239 @@ namespace LegionRuntime {
       field_versions.clear();
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
       field_states.clear();
+#ifndef LOGICAL_FIELD_TREE
       curr_epoch_users.clear();
       prev_epoch_users.clear();
+#else
+      // Free up the old field trees and make new ones
+      delete curr_epoch_users;
+      delete prev_epoch_users;
+      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
+#endif
       close_operations.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalDepAnalyzer::LogicalDepAnalyzer(const LogicalUser &u,
+                                           const FieldMask &check_mask,
+                                           bool validates)
+      : user(u), validates_regions(validates), dominator_mask(check_mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    bool LogicalDepAnalyzer::analyze(const LogicalUser &prev_user)
+    //--------------------------------------------------------------------------
+    {
+      DependenceType dtype = check_dependence_type(prev_user.usage, user.usage);
+      bool validate = validates_regions;
+      bool keep_prev_user = true;
+      switch (dtype)
+      {
+        case NO_DEPENDENCE:
+          {
+            // No dependence so remove bits from the dominator mask
+            dominator_mask -= prev_user.field_mask;
+            break;
+          }
+        case ANTI_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          {
+            // Mark that these kinds of dependences are not allowed
+            // to validate region inputs
+            validate = false;
+            // No break so we register dependences just like
+            // a true dependence
+          }
+        case TRUE_DEPENDENCE:
+          {
+#ifdef LEGION_LOGGING
+            LegionLogging::log_mapping_dependence(
+                Machine::get_executing_processor(),
+                user.op->get_parent()->get_unique_task_id(),
+                prev_user.uid, prev_user.idx, 
+                user.uid, user.idx, dtype);
+#endif
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(
+                user.op->get_parent()->get_unique_task_id(),
+                prev_user.uid, prev_user.idx, 
+                user.uid, user.idx, dtype);
+#endif
+            // Do this after the logging since we might 
+            // update the iterator.
+            // If we can validate a region record which of our
+            // predecessors regions we are validating, otherwise
+            // just register a normal dependence
+            if (validate)
+            {
+              if (user.op->register_region_dependence(prev_user.op, 
+                                                      prev_user.gen, 
+                                                      prev_user.idx))
+              {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+                // Now we can prune it from the list
+                keep_prev_user = false;
+#endif
+              }
+            }
+            else
+            {
+              if (user.op->register_dependence(prev_user.op, prev_user.gen))
+              {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+                // Now we can prune it from the list
+                keep_prev_user = false;
+#endif
+              }
+            }
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      return keep_prev_user;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldMask LogicalDepAnalyzer::get_dominator_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return dominator_mask; 
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalOpAnalyzer::LogicalOpAnalyzer(Operation *o)
+      : op(o)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalOpAnalyzer::analyze(const LogicalUser &prev_user)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_LOGGING
+      LegionLogging::log_mapping_dependence(
+            Machine::get_executing_processor(),
+            op->get_parent()->get_unique_task_id(),
+            prev_user.uid, prev_user.idx, op->get_unique_op_id(),
+            0/*idx*/, TRUE_DEPENDENCE);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_mapping_dependence(
+            op->get_parent()->get_unique_task_id(),
+            prev_user.uid, prev_user.idx, op->get_unique_op_id(),
+            0/*idx*/, TRUE_DEPENDENCE);
+#endif
+      if (op->register_dependence(prev_user.op, prev_user.gen))
+      {
+        // Prune it from the list
+        return false;
+      }
+      // Otherwise it can stay
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalFilter::LogicalFilter(const FieldMask &mask,
+                                 FieldTree<LogicalUser> *t /*= NULL*/)
+      : filter_mask(mask), target(t), reinsert_count(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalFilter::analyze(LogicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (target == NULL)
+      {
+        user.field_mask -= filter_mask;
+        if (!user.field_mask)
+        {
+          // Otherwise remove the mapping reference
+          // and then remove it from the list
+          user.op->remove_mapping_reference(user.gen);
+        }
+        else
+        {
+          reinsert.push_back(user);
+          reinsert_count++;
+        }
+        return false;
+      }
+      else
+      {
+        FieldMask overlap = user.field_mask & filter_mask;
+        if (!!overlap)
+        {
+          // Insert a copy into the target
+          LogicalUser copy = user;
+          copy.field_mask = overlap;
+          // Add a mapping reference before inserting
+          copy.op->add_mapping_reference(copy.gen);
+          target->insert(copy);
+        }
+        else
+          return true; // No overlap so we can keep it
+        // Remove any dominated fields
+        user.field_mask -= filter_mask;
+        if (!user.field_mask)
+        {
+          // Remove the mapping reference
+          user.op->remove_mapping_reference(user.gen);
+        }
+        else
+        {
+          // Put it on the list to reinsert
+          reinsert.push_back(user);
+          reinsert_count++;
+        }
+        // Always remove it if we remove fields so that
+        // it can be reinserted
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalFilter::begin_node(FieldTree<LogicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Save the reinsert count from the next level up
+      reinsert_stack.push_back(reinsert_count);
+      reinsert_count = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalFilter::end_node(FieldTree<LogicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Reinsert any users from this node that 
+      for (unsigned idx = 0; idx < reinsert_count; idx++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!reinsert.empty());
+#endif
+        // Don't recurse when inserting as it may lead to 
+        // long chains of unused nodes in the field tree
+        node->insert(reinsert.back(), false/*recurse*/);
+        reinsert.pop_back();
+      }
+      // Then restore the reinsert count from the next level up
+      reinsert_count = reinsert_stack.back();
+      reinsert_stack.pop_back();
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalFieldInvalidator::analyze(const LogicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      user.op->remove_mapping_reference(user.gen);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4970,6 +5470,89 @@ namespace LegionRuntime {
     {
     }
 
+#ifdef LOGICAL_FIELD_TREE
+    //--------------------------------------------------------------------------
+    void LogicalCloser::begin_node(FieldTree<LogicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Save the reinsert count from the next level up
+      reinsert_stack.push_back(reinsert_count);
+      reinsert_count = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::end_node(FieldTree<LogicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Reinsert any users from this node that we pulled out
+      for (unsigned idx = 0; idx < reinsert_count; idx++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!reinsert.empty());
+#endif
+        // Don't recurse when reinserting into the tree
+        // as it may lead to long chains of unused nodes.
+        node->insert(reinsert.back(), false/*recurse*/);
+        reinsert.pop_back();
+      }
+      // Then restore the reinsert count from the next level up
+      reinsert_count = reinsert_stack.back();
+      reinsert_stack.pop_back();
+    } 
+
+    //--------------------------------------------------------------------------
+    bool LogicalCloser::analyze(LogicalUser &prev_user)
+    //--------------------------------------------------------------------------
+    {
+      if (current)
+      {
+        FieldMask overlap = local_closing_mask & prev_user.field_mask;
+        if (!overlap)
+          return true;
+        closed_users.push_back(prev_user);
+        closed_users.back().field_mask = overlap;
+        // Remove the close set of fields from this user
+        prev_user.field_mask -= overlap;
+        // If it's empty, remove it from the list and let
+        // the mapping reference go up the tree with it.
+        // Otherwise add a new mapping reference.
+        if (!!prev_user.field_mask)
+        {
+          prev_user.op->add_mapping_reference(prev_user.gen);
+          reinsert.push_back(prev_user);
+          reinsert_count++;
+        }
+        return false; // don't keep it
+      }
+      else
+      {
+        if (has_non_dominator)
+        {
+          FieldMask overlap = local_non_dominator_mask & prev_user.field_mask;
+          if (!!overlap)
+          {
+            closed_users.push_back(prev_user);
+            closed_users.back().field_mask = overlap;
+            // Add a mapping reference for the part that went back up the tree
+            prev_user.op->add_mapping_reference(prev_user.gen);
+          }
+        }
+        prev_user.field_mask -= local_closing_mask;
+        if (!prev_user.field_mask)
+        {
+          // Remove the mapping reference
+          prev_user.op->remove_mapping_reference(prev_user.gen);
+        }
+        else
+        {
+          reinsert.push_back(prev_user);
+          reinsert_count++;
+        }
+        return false; // don't keep it
+      }
+    }
+#endif
+
     //--------------------------------------------------------------------------
     PhysicalCloser::PhysicalCloser(MappableInfo *in, bool open, LogicalRegion h)
       : info(in), handle(h), permit_leave_open(open), targets_selected(false)
@@ -5090,6 +5673,533 @@ namespace LegionRuntime {
     {
       node->update_valid_views(state, info->traversal_mask,
                                dirty_mask, upper_targets);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    PhysicalDepAnalyzer<FILTER>::PhysicalDepAnalyzer(const PhysicalUser &u,
+                                             const FieldMask &mask,
+                                             RegionTreeNode *node,
+                                             std::set<Event> &wait)
+      : user(u), logical_node(node), wait_on(wait), reinsert_count(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    bool PhysicalDepAnalyzer<FILTER>::analyze(PhysicalUser &prev_user)
+    //--------------------------------------------------------------------------
+    {
+      if (prev_user.term_event == user.term_event)
+      {
+        if (FILTER)
+          non_dominated |= (prev_user.field_mask & user.field_mask);
+        return true;;
+      }
+      if (user.child >= 0)
+      {
+        // Same child, already done the analysis
+        if (user.child == prev_user.child)
+        {
+          if (FILTER)
+            non_dominated |= (prev_user.field_mask & user.field_mask);
+          return true;
+        }
+        // Disjoint children
+        if ((prev_user.child >= 0) && 
+            logical_node->are_children_disjoint(unsigned(user.child),
+                                                unsigned(prev_user.child)))
+        {
+          if (FILTER)
+            non_dominated |= (prev_user.field_mask & user.field_mask);
+          return true;
+        }
+      }
+      // Now we need to actually do a dependence check
+      DependenceType dt = check_dependence_type(prev_user.usage, user.usage);
+      switch (dt)
+      {
+        case NO_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          {
+            // No actualy dependence
+            if (FILTER)
+              non_dominated |= (prev_user.field_mask & user.field_mask);
+            return true;
+          }
+        case TRUE_DEPENDENCE:
+        case ANTI_DEPENDENCE:
+          {
+            // Actual dependence
+            wait_on.insert(prev_user.term_event);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // If we made it here we have a true dependence, see if we are filtering
+      if (FILTER)
+      {
+        FieldMask overlap = prev_user.field_mask & user.field_mask;
+        filtered_users.push_back(prev_user);
+        filtered_users.back().field_mask = overlap;
+        prev_user.field_mask -= user.field_mask;
+        // Save this one to be put back on the list if its mask is not empty
+        if (!!prev_user.field_mask)
+        {
+          reinsert.push_back(prev_user);
+          reinsert_count++;
+        }
+        return false; // don't keep this one since it has changed
+      }
+      else
+        return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void PhysicalDepAnalyzer<FILTER>::begin_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      if (FILTER)
+      {
+        // Save the reinsert count from the next level up
+        reinsert_stack.push_back(reinsert_count);
+        reinsert_count = 0;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void PhysicalDepAnalyzer<FILTER>::end_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      if (FILTER)
+      {
+        // Reinsert any users from this node that 
+        for (unsigned idx = 0; idx < reinsert_count; idx++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!reinsert.empty());
+#endif
+          // Don't recurse when inserting as it may lead to 
+          // long chains of unused nodes in the field tree
+          node->insert(reinsert.back(), false/*recurse*/);
+          reinsert.pop_back();
+        }
+        // Then restore the reinsert count from the next level up
+        reinsert_count = reinsert_stack.back();
+        reinsert_stack.pop_back();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void PhysicalDepAnalyzer<FILTER>::insert_filtered_users(
+                                                FieldTree<PhysicalUser> *target)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < filtered_users.size(); idx++)
+      {
+        target->insert(filtered_users[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    InnerDepAnalyzer<FILTER>::InnerDepAnalyzer(const PhysicalUser &u,
+                                               const FieldMask &mask,
+                                               RegionTreeNode *node,
+                                               InnerTaskView *inner)
+      : user(u), logical_node(node), inner_view(inner), reinsert_count(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    bool InnerDepAnalyzer<FILTER>::analyze(PhysicalUser &prev_user)
+    //--------------------------------------------------------------------------
+    {
+      if (prev_user.term_event == user.term_event)
+      {
+        if (FILTER)
+          non_dominated |= (prev_user.field_mask & user.field_mask);
+        return true;;
+      }
+      if (user.child >= 0)
+      {
+        // Same child, already done the analysis
+        if (user.child == prev_user.child)
+        {
+          if (FILTER)
+            non_dominated |= (prev_user.field_mask & user.field_mask);
+          return true;
+        }
+        // Disjoint children
+        if ((prev_user.child >= 0) && 
+            logical_node->are_children_disjoint(unsigned(user.child),
+                                                unsigned(prev_user.child)))
+        {
+          if (FILTER)
+            non_dominated |= (prev_user.field_mask & user.field_mask);
+          return true;
+        }
+      }
+      // Now we need to actually do a dependence check
+      DependenceType dt = check_dependence_type(prev_user.usage, user.usage);
+      switch (dt)
+      {
+        case NO_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          {
+            // No actualy dependence
+            if (FILTER)
+              non_dominated |= (prev_user.field_mask & user.field_mask);
+            return true;
+          }
+        case TRUE_DEPENDENCE:
+        case ANTI_DEPENDENCE:
+          {
+            // Actual dependence
+            inner_view->add_user(prev_user, user.child);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // If we made it here we have a true dependence, see if we are filtering
+      if (FILTER)
+      {
+        FieldMask overlap = prev_user.field_mask & user.field_mask;
+        filtered_users.push_back(prev_user);
+        filtered_users.back().field_mask = overlap;
+        prev_user.field_mask -= user.field_mask;
+        // Save this one to be put back on the list if its mask is not empty
+        if (!!prev_user.field_mask)
+        {
+          reinsert.push_back(prev_user);
+          reinsert_count++;
+        }
+        return false; // don't keep this one since it has changed
+      }
+      else
+        return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void InnerDepAnalyzer<FILTER>::begin_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      if (FILTER)
+      {
+        // Save the reinsert count from the next level up
+        reinsert_stack.push_back(reinsert_count);
+        reinsert_count = 0;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void InnerDepAnalyzer<FILTER>::end_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      if (FILTER)
+      {
+        // Reinsert any users from this node that 
+        for (unsigned idx = 0; idx < reinsert_count; idx++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!reinsert.empty());
+#endif
+          // Don't recurse when inserting as it may lead to 
+          // long chains of unused nodes in the field tree
+          node->insert(reinsert.back(), false/*recurse*/);
+          reinsert.pop_back();
+        }
+        // Then restore the reinsert count from the next level up
+        reinsert_count = reinsert_stack.back();
+        reinsert_stack.pop_back();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool FILTER>
+    void InnerDepAnalyzer<FILTER>::insert_filtered_users(
+                                                FieldTree<PhysicalUser> *target)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < filtered_users.size(); idx++)
+      {
+        target->insert(filtered_users[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InnerBelowAnalyzer::InnerBelowAnalyzer(InnerTaskView *inner)
+      : inner_view(inner)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerBelowAnalyzer::analyze(const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      inner_view->add_user_below(user);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalFilter::PhysicalFilter(const FieldMask &mask)
+      : filter_mask(mask), reinsert_count(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalFilter::analyze(PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      user.field_mask -= filter_mask;
+      if (!!user.field_mask)
+      {
+        reinsert.push_back(user);
+        reinsert_count++;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalFilter::begin_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Save the reinsert count from the next level up
+      reinsert_stack.push_back(reinsert_count);
+      reinsert_count = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalFilter::end_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Reinsert any users from this node that 
+      for (unsigned idx = 0; idx < reinsert_count; idx++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!reinsert.empty());
+#endif
+        // Don't recurse when inserting as it may lead to 
+        // long chains of unused nodes in the field tree
+        node->insert(reinsert.back(), false/*recurse*/);
+        reinsert.pop_back();
+      }
+      // Then restore the reinsert count from the next level up
+      reinsert_count = reinsert_stack.back();
+      reinsert_stack.pop_back();
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool READING, bool REDUCE, bool TRACK, bool ABOVE>
+    PhysicalCopyAnalyzer<READING,REDUCE,TRACK,ABOVE>::PhysicalCopyAnalyzer(
+                                               const FieldMask &mask,
+                                               ReductionOpID r,
+                                               std::set<Event> &wait, 
+                                               int c, 
+                                               RegionTreeNode *node)
+      : copy_mask(mask), redop(r), local_color(c), 
+        logical_node(node), wait_on(wait)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!ABOVE || (local_color >= 0));
+      assert(!ABOVE || (logical_node != NULL));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool READING, bool REDUCE, bool TRACK, bool ABOVE>
+    bool PhysicalCopyAnalyzer<READING,REDUCE,TRACK,ABOVE>::analyze(
+                                                      const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (READING)
+      {
+        if (IS_READ_ONLY(user.usage))
+        {
+          if (TRACK)
+            non_dominated |= (user.field_mask & copy_mask);
+          return true;
+        }
+        // Note this is enough to guarantee
+        if (ABOVE)
+        {
+          if (user.child == local_color)
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+          if ((user.child >= 0) &&
+              logical_node->are_children_disjoint(unsigned(local_color),
+                                                  unsigned(user.child)))
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+        }
+        // Otherwise register a dependence
+        wait_on.insert(user.term_event);
+        return true;
+      }
+      else if (REDUCE)
+      {
+        if (IS_REDUCE(user.usage) && (user.usage.redop == redop))
+        {
+          if (TRACK)
+            non_dominated |= (user.field_mask & copy_mask);
+          return true;
+        }
+        if (ABOVE)
+        {
+          if (user.child == local_color)
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+          if ((user.child >= 0) && 
+              logical_node->are_children_disjoint(unsigned(local_color),
+                                                  unsigned(user.child)))
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+        }
+        // Otherwise register a dependence
+        wait_on.insert(user.term_event);
+        return true;
+      }
+      else
+      {
+        if (ABOVE)
+        {
+          if (user.child == local_color)
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+          if ((user.child >= 0) && 
+              logical_node->are_children_disjoint(unsigned(local_color),
+                                                  unsigned(user.child)))
+          {
+            if (TRACK)
+              non_dominated |= (user.field_mask & copy_mask);
+            return true;
+          }
+        }
+        // Register a dependence
+        wait_on.insert(user.term_event);
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ABOVE>
+    WARAnalyzer<ABOVE>::WARAnalyzer(int color/*=-1*/, 
+                                    RegionTreeNode *node/*= NULL*/)
+      : local_color(color), logical_node(node), has_war(false)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!ABOVE || (local_color >= 0));
+      assert(!ABOVE || (logical_node != NULL));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ABOVE>
+    bool WARAnalyzer<ABOVE>::analyze(const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (has_war)
+        return true;
+      if (ABOVE)
+      {
+        if (local_color == user.child)
+          return true;
+        if ((user.child >= 0) &&
+            logical_node->are_children_disjoint(unsigned(local_color),
+                                                unsigned(user.child)))
+          return true;
+      }
+      has_war = IS_READ_ONLY(user.usage);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalUnpacker::PhysicalUnpacker(FieldSpaceNode *node,
+                                       AddressSpaceID src,
+                                       std::map<Event,FieldMask> &events)
+      : field_node(node), source(src), 
+        deferred_events(events), reinsert_count(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalUnpacker::begin_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Translate the field mask
+      field_node->transform_field_mask(node->local_mask, source);
+      // Save the reinsert count from the next level up
+      reinsert_stack.push_back(reinsert_count);
+      reinsert_count = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalUnpacker::end_node(FieldTree<PhysicalUser> *node)
+    //--------------------------------------------------------------------------
+    {
+      // Reinsert any users from this node that 
+      for (unsigned idx = 0; idx < reinsert_count; idx++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!reinsert.empty());
+#endif
+        // Don't recurse when inserting as it may lead to 
+        // long chains of unused nodes in the field tree
+        node->insert(reinsert.back(), false/*recurse*/);
+        reinsert.pop_back();
+      }
+      // Then restore the reinsert count from the next level up
+      reinsert_count = reinsert_stack.back();
+      reinsert_stack.pop_back();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalUnpacker::analyze(PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      // Note transforming the field mask doesn't change it's
+      // precision unless it is a single field
+      field_node->transform_field_mask(user.field_mask, source);
+      if (FieldMask::pop_count(user.field_mask) == 1)
+      {
+        reinsert.push_back(user);
+        reinsert_count++;
+        return false;
+      }
+      else
+        return true; // keep it
     }
 
     /////////////////////////////////////////////////////////////
@@ -5317,11 +6427,20 @@ namespace LegionRuntime {
         if (!closer.closed_users.empty())
         {
           // Add the closed users to the prev epoch users, we already
-          // registered dependences on them as part of the
+          // registered mapping dependences on them as part of the
           // closing process so we don't need to do it again
+#ifndef LOGICAL_FIELD_TREE
           state.prev_epoch_users.insert(state.prev_epoch_users.end(),
                                         closer.closed_users.begin(),
                                         closer.closed_users.end());
+#else
+          for (std::deque<LogicalUser>::const_iterator it = 
+                closer.closed_users.begin(); it != 
+                closer.closed_users.end(); it++)
+          {
+            state.prev_epoch_users->insert(*it);
+          }
+#endif
         }
         if (!closer.close_operations.empty())
         {
@@ -5331,10 +6450,14 @@ namespace LegionRuntime {
         }
         // Record any close operations that need to be done
         record_close_operations(state, path, user.field_mask, depth); 
-        // Add ourselves to the current epoch
-        state.curr_epoch_users.push_back(user);
         // Record a mapping reference on this operation
         user.op->add_mapping_reference(user.gen);
+#ifndef LOGICAL_FIELD_TREE
+        // Add ourselves to the current epoch
+        state.curr_epoch_users.push_back(user);
+#else
+        state.curr_epoch_users->insert(user);
+#endif
       }
       else
       {
@@ -5367,11 +6490,20 @@ namespace LegionRuntime {
         if (!closer.closed_users.empty())
         {
           // Add the closed users to the prev epoch users, we already
-          // registered dependences on them as part of the
+          // registered mapping dependences on them as part of the
           // closing process so we don't need to do it again
+#ifndef LOGICAL_FIELD_TREE
           state.prev_epoch_users.insert(state.prev_epoch_users.end(),
                                         closer.closed_users.begin(),
                                         closer.closed_users.end());
+#else
+          for (std::deque<LogicalUser>::const_iterator it = 
+                closer.closed_users.begin(); it != 
+                closer.closed_users.end(); it++)
+          {
+            state.prev_epoch_users->insert(*it);
+          }
+#endif
         }
         if (!closer.close_operations.empty())
         {
@@ -5410,9 +6542,13 @@ namespace LegionRuntime {
       {
         // We've arrived where we're going,
         // add ourselves as a user
-        state.curr_epoch_users.push_back(user);
         // Record a mapping reference on this operation
         user.op->add_mapping_reference(user.gen);
+#ifndef LOGICAL_FIELD_TREE
+        state.curr_epoch_users.push_back(user);
+#else
+        state.curr_epoch_users->insert(user);
+#endif
       }
       else
       {
@@ -5447,6 +6583,7 @@ namespace LegionRuntime {
         perform_dependence_checks(closer.user, state.prev_epoch_users,
             non_dominator_mask, closer.validates);
       // Now get the epoch users that we need to send back up the tree
+#ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
             state.curr_epoch_users.begin(); it !=
             state.curr_epoch_users.end(); /*nothing*/)
@@ -5505,6 +6642,20 @@ namespace LegionRuntime {
         else
           it++;
       }
+#else
+      // Set up the fields for using the closer as an analyzer
+      closer.current = true;
+      closer.has_non_dominator = has_non_dominator;
+      closer.local_closing_mask = closing_mask;
+      closer.local_non_dominator_mask = non_dominator_mask;
+      closer.reinsert_count = 0;
+      // First filter the current epoch users 
+      state.curr_epoch_users->analyze<LogicalCloser>(closing_mask, closer);
+      // Now filter the previous epoch users
+      closer.current = false;
+      closer.reinsert_count = 0;
+      state.prev_epoch_users->analyze<LogicalCloser>(closing_mask, closer);
+#endif
       // Filter out any close operations being done on the closed fields
       filter_close_operations(state, closing_mask);
       // Advance the versions of all the closed fields
@@ -5569,7 +6720,7 @@ namespace LegionRuntime {
                 const bool needs_upgrade = HAS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, *it, next_child,
-                                         true/*allow next child*/,
+                                         true/*allow next*/,
                                          needs_upgrade, 
                                          false/*permit leave open*/,
                                          record_close_operations,
@@ -5592,7 +6743,7 @@ namespace LegionRuntime {
               // Close up any open partitions that conflict with ours
               FieldMask already_open;
               perform_close_operations(closer, current_mask, *it, next_child,
-                                       true/*allow next child*/,
+                                       true/*allow next*/,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
                                        record_close_operations,
@@ -5694,7 +6845,8 @@ namespace LegionRuntime {
                   // Cases 3 and 4
                   FieldMask already_open;
                   perform_close_operations(closer, current_mask, *it, 
-                                           next_child, true/*allow next*/,
+                                           next_child, 
+                                           true/*allow next*/,
                                            true/*needs upgrade*/,
                                            false/*permit leave open*/,
                                            record_close_operations,
@@ -5718,7 +6870,7 @@ namespace LegionRuntime {
                 // Closing everything up, so just do it
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, *it, next_child,
-                                         true/*allow next child*/,
+                                         true/*allow next*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
                                          record_close_operations,
@@ -5949,7 +7101,12 @@ namespace LegionRuntime {
       {
         FieldMask close_mask = it->close_mask & field_mask;
         if (!!close_mask)
-          path.record_close_operation(depth, *it);
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!(close_mask - field_mask));
+#endif
+          path.record_close_operation(depth, *it, close_mask);
+        }
       }
     }
 
@@ -5959,6 +7116,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       std::map<VersionID,FieldMask> new_versions;
+      std::vector<VersionID> to_delete;
       for (std::map<VersionID,FieldMask>::iterator it = 
             state.field_versions.begin(); it !=
             state.field_versions.end(); it++)
@@ -5968,7 +7126,15 @@ namespace LegionRuntime {
         {
           it->second -= field_mask;
           new_versions[(it->first+1)] = overlap;
+          if (!it->second)
+            to_delete.push_back(it->first);
         }
+      }
+      // Delete any versions that need to be deleted before adding new versions
+      for (std::vector<VersionID>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        state.field_versions.erase(*it);
       }
       // Update the versions with the new versions
       for (std::map<VersionID,FieldMask>::const_iterator it = 
@@ -5988,6 +7154,7 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
             state.prev_epoch_users.begin(); it != 
             state.prev_epoch_users.end(); /*nothing*/)
@@ -6002,6 +7169,10 @@ namespace LegionRuntime {
         else
           it++; // still has non-dominated fields
       }
+#else
+      LogicalFilter filter(field_mask);
+      state.prev_epoch_users->analyze<LogicalFilter>(field_mask, filter);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6009,36 +7180,41 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
               state.curr_epoch_users.begin(); it !=
               state.curr_epoch_users.end(); /*nothing*/)
+      {
+        FieldMask local_dom = it->field_mask & field_mask;
+        if (!!local_dom)
         {
-          FieldMask local_dom = it->field_mask & field_mask;
-          if (!!local_dom)
-          {
-            // Move a copy over to the previous epoch users for
-            // the fields that were dominated
-            state.prev_epoch_users.push_back(*it);
-            state.prev_epoch_users.back().field_mask = local_dom;
-            // Add a mapping reference
-            it->op->add_mapping_reference(it->gen);
-          }
-          else
-          {
-            it++;
-            continue;
-          }
-          // Update the field mask with the non-dominated fields
-          it->field_mask -= field_mask;
-          if (!it->field_mask)
-          {
-            // Remove the mapping reference
-            it->op->remove_mapping_reference(it->gen);
-            it = state.curr_epoch_users.erase(it); // empty so erase it
-          }
-          else
-            it++; // not empty so keep going
+          // Move a copy over to the previous epoch users for
+          // the fields that were dominated
+          state.prev_epoch_users.push_back(*it);
+          state.prev_epoch_users.back().field_mask = local_dom;
+          // Add a mapping reference
+          it->op->add_mapping_reference(it->gen);
         }
+        else
+        {
+          it++;
+          continue;
+        }
+        // Update the field mask with the non-dominated fields
+        it->field_mask -= field_mask;
+        if (!it->field_mask)
+        {
+          // Remove the mapping reference
+          it->op->remove_mapping_reference(it->gen);
+          it = state.curr_epoch_users.erase(it); // empty so erase it
+        }
+        else
+          it++; // not empty so keep going
+      }
+#else
+      LogicalFilter filter(field_mask, state.prev_epoch_users);
+      state.curr_epoch_users->analyze<LogicalFilter>(field_mask, filter);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6139,8 +7315,10 @@ namespace LegionRuntime {
       // Technically these should already be empty
       assert(state.field_versions.size() == 1);
       assert(state.field_states.empty());
+#ifndef LOGICAL_FIELD_TREE
       assert(state.curr_epoch_users.empty());
       assert(state.prev_epoch_users.empty());
+#endif
       assert(state.close_operations.empty());
 #endif
       state.reset();
@@ -6154,6 +7332,7 @@ namespace LegionRuntime {
       assert(ctx < logical_state_size);
 #endif
       LogicalState &state = logical_states[ctx];     
+#ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::const_iterator it = 
             state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); it++)
@@ -6166,6 +7345,14 @@ namespace LegionRuntime {
       {
         it->op->remove_mapping_reference(it->gen); 
       }
+#else
+      LogicalFieldInvalidator invalidator;
+      FieldMask all_ones(FIELD_ALL_ONES);
+      state.curr_epoch_users->
+        analyze<LogicalFieldInvalidator>(all_ones, invalidator);
+      state.prev_epoch_users->
+        analyze<LogicalFieldInvalidator>(all_ones, invalidator);
+#endif
       state.reset();
     }
 
@@ -6178,6 +7365,7 @@ namespace LegionRuntime {
       assert(ctx < logical_state_size);
 #endif
       LogicalState &state = logical_states[ctx];
+#ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
             state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); /*nothing*/)
@@ -6242,6 +7430,11 @@ namespace LegionRuntime {
         else
           it++;
       }
+#else
+      LogicalOpAnalyzer analyzer(op);
+      state.curr_epoch_users->analyze<LogicalOpAnalyzer>(field_mask, analyzer);
+      state.prev_epoch_users->analyze<LogicalOpAnalyzer>(field_mask, analyzer);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6566,7 +7759,7 @@ namespace LegionRuntime {
 #endif
       FieldMask up_mask = valid_mask - state.dirty_mask;
       RegionTreeNode *parent = get_parent();
-      if (!!up_mask && (parent != NULL))
+      if ((!!up_mask || needs_space) && (parent != NULL))
       {
         // Acquire the parent nodes physical state in read-only mode
         PhysicalState &parent_state = 
@@ -7487,6 +8680,7 @@ namespace LegionRuntime {
       release_physical_state(state);
     }
 
+#ifndef LOGICAL_FIELD_TREE
     //--------------------------------------------------------------------------
     /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
         const LogicalUser &user, std::list<LogicalUser> &prev_users,
@@ -7546,8 +8740,12 @@ namespace LegionRuntime {
                 if (user.op->register_region_dependence(it->op, 
                                                         it->gen, it->idx))
                 {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                   // Now we can prune it from the list and continue
                   it = prev_users.erase(it);
+#else
+                  it++;
+#endif
                   continue;
                 }
               }
@@ -7555,8 +8753,12 @@ namespace LegionRuntime {
               {
                 if (user.op->register_dependence(it->op, it->gen))
                 {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                   // Now we can prune it from the list and continue
                   it = prev_users.erase(it);
+#else
+                  it++;
+#endif
                   continue;
                 }
               }
@@ -7570,6 +8772,21 @@ namespace LegionRuntime {
       }
       return dominator_mask;
     }
+#else
+    //--------------------------------------------------------------------------
+    /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
+        const LogicalUser &user, FieldTree<LogicalUser> *users,
+        const FieldMask &check_mask, bool validates_regions)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask user_check_mask = user.field_mask & check_mask;
+      if (!user_check_mask)
+        return user_check_mask;
+      LogicalDepAnalyzer analyzer(user, check_mask, validates_regions);
+      users->analyze<LogicalDepAnalyzer>(user_check_mask, analyzer);
+      return analyzer.get_dominator_mask();
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Region Node 
@@ -8012,6 +9229,101 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionNode::register_region(MappableInfo *info,
+                                            PhysicalUser &user,
+                                            PhysicalView *view,
+                                            const FieldMask &needed_fields,
+                                            InnerTaskView *inner_view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view != NULL);
+#endif
+      PhysicalState &state = 
+        acquire_physical_state(info->ctx, true/*exclusive*/);
+      // This mirrors the if-else statement in MappingTraverser::visit_region
+      // for handling the different instance and reduction cases
+      if (!IS_REDUCE(info->req))
+      {
+        InstanceView *new_view = view->as_instance_view();
+        // Issue updates for any fields which needed to be brought up
+        // to date with the current versions of those fields
+        // (assuming we are not write discard)
+        if (!IS_WRITE_ONLY(info->req) && !!needed_fields) 
+          issue_update_copies(state, info, new_view, needed_fields);
+
+        // If we mapped the region close up any partitions
+        // below that might have valid data that we need for
+        // this instance.  We only need to do this for 
+        // non-read-only tasks, since the read-only close
+        // operations happened during the pre-mapping step.
+        if (!IS_READ_ONLY(info->req))
+        {
+          if (IS_WRITE_ONLY(info->req))
+          {
+            // If we're write only then we can just
+            // invalidate everything below and update
+            // the valid instance views.  Note we
+            // can't be holding the physical state lock
+            // when going down the tree so release it 
+            // and then reacquire it
+            release_physical_state(state);
+            PhysicalInvalidator invalidator(info->ctx, user.field_mask);
+            visit_node(&invalidator);
+            // Re-acquire the physical state
+            acquire_physical_state(state, true/*exclusive*/);
+            update_valid_views(state, user.field_mask, 
+                               true/*dirty*/, new_view);
+          }
+          else
+          {
+            PhysicalCloser closer(info, false/*leave open*/, handle);
+            closer.add_target(new_view);
+            // Mark the dirty mask with our bits since we're 
+            closer.update_dirty_mask(user.field_mask);
+            // writing and the closer will 
+            siphon_physical_children(closer, state, user.field_mask,
+                                      -1/*next child*/, false/*allow next*/);
+            // Now update the valid views and the dirty mask
+            closer.update_node_views(this, state);
+          }
+        }
+        else
+        {
+          // Otherwise just issue a non-dirty update for the user fields
+          update_valid_views(state, user.field_mask,
+                             false/*dirty*/, new_view);
+        }
+
+        // Flush any reductions that need to be flushed
+        flush_reductions(state, user.field_mask,
+                         info->req.redop, info);
+        // Release our hold on the state
+        release_physical_state(state);
+        // Now add ourselves as a user of this region
+        return new_view->add_user(user, info->local_proc, inner_view);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        // should never have needed fields for reductions
+        assert(!needed_fields); 
+#endif
+        ReductionView *new_view = view->as_reduction_view();
+        // Flush any reductions that need to be flushed
+        flush_reductions(state, user.field_mask,
+                         info->req.redop, info);
+        // If there was a needed close for this reduction then
+        // it was performed as part of the premapping operation
+        update_reduction_views(state, user.field_mask, new_view);
+        // Release our hold on the state
+        release_physical_state(state);
+        // Now we can add ourselves as a user of this region
+        return new_view->add_user(user, info->local_proc, inner_view);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionNode::seed_state(ContextID ctx, PhysicalUser &user,
                                        PhysicalView *new_view,
                                        Processor local_proc)
@@ -8030,6 +9342,30 @@ namespace LegionRuntime {
         update_valid_views(state, user.field_mask, 
                            HAS_WRITE(user.usage), view);
         view->add_user(user, local_proc);
+      }
+      release_physical_state(state);
+      return InstanceRef(Event::NO_EVENT, Lock::NO_LOCK, new_view);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef RegionNode::seed_state(ContextID ctx, PhysicalView *new_view,
+                                const FieldMask &valid_mask,
+                                Processor local_proc, 
+                                const InnerTaskView *inner_view)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      if (new_view->is_reduction_view())
+      {
+        ReductionView *view = new_view->as_reduction_view();
+        update_reduction_views(state, valid_mask, view);
+        view->initialize_view(inner_view, local_proc);
+      }
+      else
+      {
+        InstanceView *view = new_view->as_instance_view();
+        update_valid_views(state, valid_mask, false/*dirty*/, view);
+        view->initialize_view(inner_view, local_proc);
       }
       release_physical_state(state);
       return InstanceRef(Event::NO_EVENT, Lock::NO_LOCK, new_view);
@@ -8992,7 +10328,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreePath::record_close_operation(unsigned depth,
-                                                const CloseInfo &info)
+                                                const CloseInfo &info,
+                                                const FieldMask &close_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9000,6 +10337,7 @@ namespace LegionRuntime {
       assert(depth <= max_depth);
 #endif     
       close_operations[depth].push_back(info);
+      close_operations[depth].back().close_mask = close_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -9094,7 +10432,7 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
         LegionProf::register_instance_deletion(instance.id);
 #endif
-#ifdef DISABLE_GC
+#ifndef DISABLE_GC
         instance.destroy();
 #endif
         instance = PhysicalInstance::NO_INST;
@@ -9785,8 +11123,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalView::defer_collect_user(Event term_event, Processor p,
-                                          bool gc_epoch)
+    void PhysicalView::defer_collect_user(Event term_event, 
+                                          const FieldMask &mask, 
+                                          Processor p, bool gc_epoch)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -9795,6 +11134,7 @@ namespace LegionRuntime {
         PhysicalView *proxy_this = this;
         rez.serialize(proxy_this);
         rez.serialize(term_event);
+        rez.serialize(mask);
       }
       // Add a gc reference onto the object
       add_gc_reference();
@@ -9827,8 +11167,10 @@ namespace LegionRuntime {
       derez.deserialize(view);
       Event term_event;
       derez.deserialize(term_event);
+      FieldMask term_mask;
+      derez.deserialize(term_mask);
       // Remove the user
-      view->collect_user(term_event);
+      view->collect_user(term_event, term_mask);
       // Then remove the gc reference on the object
       if (view->remove_gc_reference())
         delete view;
@@ -9908,6 +11250,12 @@ namespace LegionRuntime {
                                InstanceView *par)
       : PhysicalView(ctx, did, own_addr, own_did, node), 
         manager(man), parent(par)
+#ifdef PHYSICAL_FIELD_TREE
+        , curr_epoch_users(
+            new FieldTree<PhysicalUser>(FieldMask(FIELD_ALL_ONES)))
+        , prev_epoch_users(
+            new FieldTree<PhysicalUser>(FieldMask(FIELD_ALL_ONES)))
+#endif
     //--------------------------------------------------------------------------
     {
       // If we're the top of the tree and the owner make the instance lock
@@ -9929,6 +11277,9 @@ namespace LegionRuntime {
     InstanceView::InstanceView(const InstanceView &rhs)
       : PhysicalView(NULL, 0, 0, 0, NULL),
         manager(NULL), parent(NULL)
+#ifdef PHYSICAL_FIELD_TREE
+        , curr_epoch_users(NULL), prev_epoch_users(NULL)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9952,6 +11303,10 @@ namespace LegionRuntime {
         if (it->second->remove_resource_reference())
           delete it->second;
       }
+#ifdef PHYSICAL_FIELD_TREE
+      delete curr_epoch_users;
+      delete prev_epoch_users;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10066,6 +11421,7 @@ namespace LegionRuntime {
         return true;
       // Do the local analysis
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
+#ifndef PHYSICAL_FIELD_TREE
       for (std::list<PhysicalUser>::const_iterator it = 
             curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
       {
@@ -10075,6 +11431,45 @@ namespace LegionRuntime {
           return true;
       }
       return false;
+#else
+      WARAnalyzer<false> analyzer;
+      curr_epoch_users->analyze(user_mask, analyzer);
+      return analyzer.has_war_dependence();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::initialize_view(const InnerTaskView *inner_view,
+                                       Processor local_proc)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Event,FieldMask> defer_events;
+      {
+        AutoLock v_lock(view_lock);
+        for (std::deque<PhysicalUser>::const_iterator it = 
+              inner_view->users.begin(); it != inner_view->users.end(); it++)
+        {
+#ifndef PHYSICAL_FIELD_TREE
+          curr_epoch_users.push_back(*it);
+#else
+          curr_epoch_users->insert(*it);
+#endif
+          std::map<Event,FieldMask>::iterator finder = 
+            defer_events.find(it->term_event);
+          if (finder == defer_events.end())
+            defer_events[it->term_event] = it->field_mask;
+          else
+            finder->second |= it->field_mask;
+        }
+      }
+      // Now launch the defer operations
+      for (std::map<Event,FieldMask>::const_iterator it = 
+            defer_events.begin(); it != defer_events.end(); it++)
+      {
+        defer_collect_user(it->first, it->second, local_proc, true/*gc epoch*/);
+      }
+      // Then update all of the children
+      inner_view->initialize_children(this, local_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -10134,7 +11529,8 @@ namespace LegionRuntime {
       // Note we can ignore the wait on set here since we are just
       // registering the user and filtering previous users
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, copy_mask, 
+                         exec_proc, true/*gc epoch*/);
       // If we're remote, send back the user to the owner 
       if (owner_did != did)
         send_back_user(user);
@@ -10158,7 +11554,8 @@ namespace LegionRuntime {
       }
       add_local_user(wait_on_events, user);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, user.field_mask,
+                         exec_proc, true/*gc epoch*/);
       // If we're remote, send back the user to the owner
       if (owner_did != did)
         send_back_user(user);
@@ -10192,6 +11589,73 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef InstanceView::add_user(PhysicalUser &user, Processor exec_proc,
+                                       InnerTaskView *inner_view)
+    //--------------------------------------------------------------------------
+    {
+      if (parent != NULL)
+      {
+        // Set our color
+        user.child = logical_node->get_color();
+        parent->add_user_above(inner_view, user);
+        // Restore the bottom color
+        user.child = -1;
+      }
+      add_local_user(inner_view, user);
+      // Launch the garbage collection task
+      defer_collect_user(user.term_event, user.field_mask,
+                         exec_proc, true/*gc epoch*/);
+      // If we're remote, send back the user to the owner
+      if (owner_did != did)
+        send_back_user(user);
+      // Notify all our subscribers and then have
+      // our parent's do the same thing
+      std::set<AddressSpaceID> notified;
+      notify_subscribers(notified, user);
+      std::set<Event> wait_on_events;
+      inner_view->find_wait_on_events(wait_on_events);
+      // At this point tasks shouldn't be allowed to wait on themselves
+#ifdef DEBUG_HIGH_LEVEL
+      assert(wait_on_events.find(user.term_event) == wait_on_events.end());
+#endif
+      // Make the instance ref
+      Event ready_event = Event::merge_events(wait_on_events);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+      if (!ready_event.exists())
+      {
+        UserEvent new_ready_event = UserEvent::create_user_event();
+        new_ready_event.trigger();
+        ready_event = new_ready_event;
+      }
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependences(
+          Machine::get_executing_processor(), wait_on_events, ready_event);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(wait_on_events, ready_event);
+#endif
+      Lock needed_lock = IS_ATOMIC(user.usage) ? inst_lock : Lock::NO_LOCK;
+      // For inner views we also have to go down all the children
+      // and find their views also. Take a snapshot of the children
+      // and then traverse them.
+      std::map<Color,InstanceView*> children_copy;
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        children_copy = children;
+      }
+      for (std::map<Color,InstanceView*>::const_iterator it = 
+            children_copy.begin(); it != children_copy.end(); it++)
+      {
+        // Make new inner task view
+        InnerTaskView *new_inner_view = new InnerTaskView(it->first);
+        inner_view->add_child_view(new_inner_view);
+        it->second->find_inner_views_below(new_inner_view, user.field_mask);
+      }
+      return InstanceRef(ready_event, needed_lock, ViewHandle(this));
+    }
+
+    //--------------------------------------------------------------------------
     void InstanceView::notify_activate(void)
     //--------------------------------------------------------------------------
     {
@@ -10217,30 +11681,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::collect_user(Event term_event)
+    void InstanceView::collect_user(Event term_event, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       if (parent != NULL)
-        parent->collect_user(term_event);
+        parent->collect_user(term_event, mask);
       AutoLock v_lock(view_lock);
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(term_event);
-      // Note it's possible on remote nodes to have multiple
-      // collection tasks, for the same user since we aren't
-      // smart about launching collection tasks for users when
-      // we unpack them.  Therefore, just skip collections
-      // which can't find the termination user.
+      std::set<Event>::iterator finder = event_references.find(term_event);
       if (finder != event_references.end())
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder->second > 0);
-#endif
-        finder->second--;
-        if (finder->second == 0)
-        {
-          event_references.erase(finder);
-          filter_local_users(term_event);
-        }
+        filter_local_users(term_event, mask);
+        event_references.erase(finder);
       }
     }
 
@@ -10267,7 +11718,7 @@ namespace LegionRuntime {
       // This will go up and also add the user locally
       add_user_above(dummy_wait_on, user);
       // The launch the garbage collection task
-      defer_collect_user(user.term_event, 
+      defer_collect_user(user.term_event, user.field_mask, 
                          Machine::get_executing_processor(), false/*gc epoch*/);
     }
 
@@ -10289,7 +11740,7 @@ namespace LegionRuntime {
       // This will go up and also add the user locally
       add_user_above(dummy_wait_on, user);
       // Then launch the garbage collection task
-      defer_collect_user(user.term_event,
+      defer_collect_user(user.term_event, user.field_mask,
                          Machine::get_executing_processor(), false/*gc epoch*/);
     } 
 
@@ -10311,14 +11762,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void InstanceView::add_user_above(InnerTaskView *inner_view,
+                                      PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (parent != NULL)
+      {
+        // Save the child and replace with our child 
+        int local_child = user.child;
+        user.child = logical_node->get_color();
+        parent->add_user_above(inner_view, user);
+        // Restore the child
+        user.child = local_child;
+      }
+      add_local_user(inner_view, user);
+    }
+
+    //--------------------------------------------------------------------------
     void InstanceView::add_local_user(std::set<Event> &wait_on,
                                       const PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
-      FieldMask non_dominated;
-      std::deque<PhysicalUser> new_prev_users;
       // Need the lock when doing this analysis
       AutoLock v_lock(view_lock);
+#ifndef PHYSICAL_FIELD_TREE
+      FieldMask non_dominated;
+      std::deque<PhysicalUser> new_prev_users;
       for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
             it != curr_epoch_users.end(); /*nothing*/)
       {
@@ -10356,7 +11825,7 @@ namespace LegionRuntime {
           }
         }
         // Now we need to do a dependence analysis
-        DependenceType dt = check_dependence_type(user.usage, it->usage);
+        DependenceType dt = check_dependence_type(it->usage, user.usage);
         switch (dt)
         {
           case NO_DEPENDENCE:
@@ -10424,7 +11893,7 @@ namespace LegionRuntime {
           if (it->field_mask * non_dominated)
             continue;
           // Now we need to do an actual dependence analysis
-          DependenceType dt = check_dependence_type(user.usage, it->usage);
+          DependenceType dt = check_dependence_type(it->usage, user.usage);
           switch (dt)
           {
             case NO_DEPENDENCE:
@@ -10450,13 +11919,245 @@ namespace LegionRuntime {
         prev_epoch_users.push_back(new_prev_users[idx]);
       // Add ourselves to the list of current users
       curr_epoch_users.push_back(user);
+#else
+      // First do the analysis on the current epcoh users and filter
+      // out any that can be sent back to the previous epoch users
+      PhysicalDepAnalyzer<true> curr_analyzer(user, user.field_mask,
+                                              logical_node, wait_on);
+      curr_epoch_users->analyze(user.field_mask, curr_analyzer);
+      FieldMask non_dominated = curr_analyzer.get_non_dominated_mask();
+      FieldMask dominated = user.field_mask - non_dominated;
+      // Filter any dominated users from the previous users
+      if (!!dominated)
+      {
+        PhysicalFilter filter(dominated);
+        prev_epoch_users->analyze<PhysicalFilter>(dominated, filter);
+      }
+      // If we didn't dominate all the field do another analysis
+      // on the previous epoch users for the non-dominated fields
+      if (!!non_dominated)
+      {
+        PhysicalDepAnalyzer<false> prev_analyzer(user, non_dominated,
+                                                 logical_node, wait_on);
+        prev_epoch_users->analyze(non_dominated, prev_analyzer);
+      }
+      // Now we can add the filtered users into the previous users
+      curr_analyzer.insert_filtered_users(prev_epoch_users);
+      // Add our user to the list of current users
+      curr_epoch_users->insert(user);
+#endif
       // Also update the event references
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(user.term_event);
-      if (finder == event_references.end())
-        event_references[user.term_event] = 1;
-      else
-        finder->second++;
+      event_references.insert(user.term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::add_local_user(InnerTaskView *inner_view,
+                                      const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      // Need the lock when doing this analysis
+      AutoLock v_lock(view_lock);
+#ifndef PHYSICAL_FIELD_TREE
+      FieldMask non_dominated;
+      std::deque<PhysicalUser> new_prev_users;
+      for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
+            it != curr_epoch_users.end(); /*nothing*/)
+      {
+        FieldMask overlap = user.field_mask & it->field_mask;
+        // Disjoint fields, keep going
+        if (!overlap)
+        {
+          it++;
+          continue;
+        } 
+        // If they are the same user then keep going
+        if (user.term_event == it->term_event)
+        {
+          non_dominated |= overlap;
+          it++;
+          continue;
+        }
+        if (user.child >= 0)
+        {
+          // Same child, already done the analysis
+          if (user.child == it->child)
+          {
+            non_dominated |= overlap;
+            it++;
+            continue;
+          }
+          // Disjoint children, keep going
+          if ((it->child >= 0) && 
+              logical_node->are_children_disjoint(unsigned(user.child),
+                                                  unsigned(it->child)))
+          {
+            non_dominated |= overlap;
+            it++;
+            continue;
+          }
+        }
+        // Now we need to do a dependence analysis
+        DependenceType dt = check_dependence_type(it->usage, user.usage);
+        switch (dt)
+        {
+          case NO_DEPENDENCE:
+          case ATOMIC_DEPENDENCE:
+          case SIMULTANEOUS_DEPENDENCE:
+            {
+              // No actual dependence
+              non_dominated |= overlap;
+              it++;
+              continue;
+            }
+          case TRUE_DEPENDENCE:
+          case ANTI_DEPENDENCE:
+            {
+              // Actual dependence
+              inner_view->add_user(*it, user.child);
+              // Move the user back to the previous epoch
+              new_prev_users.push_back(*it);
+              new_prev_users.back().field_mask = overlap;
+              it->field_mask -= user.field_mask;
+              if (!it->field_mask)
+                it = curr_epoch_users.erase(it);
+              else
+                it++;
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+      }
+      FieldMask dominated = user.field_mask - non_dominated;
+      // Filter any dominated users
+      if (!!dominated)
+      {
+        for (std::list<PhysicalUser>::iterator it = prev_epoch_users.begin();
+              it != prev_epoch_users.end(); /*nothing*/)
+        {
+          it->field_mask -= dominated;
+          if (!it->field_mask)
+            it = prev_epoch_users.erase(it);
+          else
+            it++;
+        }
+        // If this is not read-only then update the versions of
+        // the dominated fields.
+        if (!IS_READ_ONLY(user.usage))
+          update_versions(dominated);
+      }
+      if (!!non_dominated)
+      {
+        for (std::list<PhysicalUser>::const_iterator it = 
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+        { 
+          if (user.term_event == it->term_event)
+            continue;
+          if (user.child >= 0)
+          {
+            if (user.child == it->child)
+              continue;
+            if ((it->child >= 0) &&
+                logical_node->are_children_disjoint(unsigned(user.child),
+                                                    unsigned(it->child)))
+              continue;
+          }
+          if (it->field_mask * non_dominated)
+            continue;
+          // Now we need to do an actual dependence analysis
+          DependenceType dt = check_dependence_type(it->usage, user.usage);
+          switch (dt)
+          {
+            case NO_DEPENDENCE:
+            case ATOMIC_DEPENDENCE:
+            case SIMULTANEOUS_DEPENDENCE:
+              {
+                break;
+              }
+            case TRUE_DEPENDENCE:
+            case ANTI_DEPENDENCE:
+              {
+                // Actual dependence
+                inner_view->add_user(*it, user.child);
+                break;
+              }
+            default:
+              assert(false); // should never get here
+          }
+        }
+      }
+      // Add the new previous users to previous epoch list
+      for (unsigned idx = 0; idx < new_prev_users.size(); idx++)
+        prev_epoch_users.push_back(new_prev_users[idx]);
+      // Add ourselves to the list of current users
+      curr_epoch_users.push_back(user);
+#else
+      // First do the analysis on the current epcoh users and filter
+      // out any that can be sent back to the previous epoch users
+      InnerDepAnalyzer<true> curr_analyzer(user, user.field_mask,
+                                              logical_node, inner_view);
+      curr_epoch_users->analyze(user.field_mask, curr_analyzer);
+      FieldMask non_dominated = curr_analyzer.get_non_dominated_mask();
+      FieldMask dominated = user.field_mask - non_dominated;
+      // Filter any dominated users from the previous users
+      if (!!dominated)
+      {
+        PhysicalFilter filter(dominated);
+        prev_epoch_users->analyze<PhysicalFilter>(dominated, filter);
+      }
+      // If we didn't dominate all the field do another analysis
+      // on the previous epoch users for the non-dominated fields
+      if (!!non_dominated)
+      {
+        InnerDepAnalyzer<false> prev_analyzer(user, non_dominated,
+                                                 logical_node, inner_view);
+        prev_epoch_users->analyze(non_dominated, prev_analyzer);
+      }
+      // Now we can add the filtered users into the previous users
+      curr_analyzer.insert_filtered_users(prev_epoch_users);
+      // Add our user to the list of current users
+      curr_epoch_users->insert(user);
+#endif
+      // Also update the event references
+      event_references.insert(user.term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::find_inner_views_below(InnerTaskView *inner_view,
+                                              const FieldMask &field_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Color,InstanceView*> children_copy;
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+#ifndef PHYSICAL_FIELD_TREE
+        for (std::list<PhysicalUser>::const_iterator it = 
+              curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
+        {
+          if (!(field_mask * it->field_mask))
+            inner_view->add_user_below(*it);
+        }
+        for (std::list<PhysicalUser>::const_iterator it =
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+        {
+          if (!(field_mask * it->field_mask))
+            inner_view->add_user_below(*it);
+        }
+#else
+        InnerBelowAnalyzer below_analyzer(inner_view);
+        curr_epoch_users->analyze(field_mask, below_analyzer);
+        prev_epoch_users->analyze(field_mask, below_analyzer);
+#endif
+        // Copy the child mask
+        children_copy = children;
+      }
+      for (std::map<Color,InstanceView*>::const_iterator it = 
+            children_copy.begin(); it != children_copy.end(); it++)
+      {
+        InnerTaskView *new_inner_view = new InnerTaskView(it->first);
+        inner_view->add_child_view(new_inner_view);
+        it->second->find_inner_views_below(new_inner_view, field_mask);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10470,6 +12171,7 @@ namespace LegionRuntime {
                                             wait_on, writing, redop, copy_mask);
       // Now do the analysis for ourselves
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
+#ifndef PHYSICAL_FIELD_TREE
       if (!writing)
       {
         FieldMask non_dominated;
@@ -10545,6 +12247,41 @@ namespace LegionRuntime {
           wait_on.insert(it->term_event);
         }
       }
+#else
+      if (!writing)
+      {
+        PhysicalCopyAnalyzer<true,false,true,false> 
+          copy_analyzer(copy_mask, 0, wait_on);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
+        if (!!non_dominated)
+        {
+          PhysicalCopyAnalyzer<true,false,false,false>
+            prev_analyzer(copy_mask, 0, wait_on);
+          prev_epoch_users->analyze(non_dominated, prev_analyzer);
+        }
+      }
+      else if (redop > 0)
+      {
+        PhysicalCopyAnalyzer<false,true,true,false>
+          copy_analyzer(copy_mask, redop, wait_on);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
+        if (!!non_dominated)
+        {
+          PhysicalCopyAnalyzer<false,true,false,false>
+            prev_analyzer(copy_mask, redop, wait_on);
+          prev_epoch_users->analyze(non_dominated, prev_analyzer);
+        }
+      }
+      else
+      {
+        // No need to track since we know we'll dominate everyone
+        PhysicalCopyAnalyzer<false,false,false,false>
+          copy_analyzer(copy_mask, 0, wait_on);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10561,6 +12298,7 @@ namespace LegionRuntime {
       // Now do the analysis for ourselves
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       const int local_color = child_color;
+#ifndef PHYSICAL_FIELD_TREE
       // Similar to above analysis with some extra checks on children
       if (!writing)
       {
@@ -10701,6 +12439,41 @@ namespace LegionRuntime {
           }
         }
       }
+#else
+      if (!writing)
+      {
+        PhysicalCopyAnalyzer<true,false,true,true> 
+          copy_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
+        if (!!non_dominated)
+        {
+          PhysicalCopyAnalyzer<true,false,false,true>
+            prev_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
+          prev_epoch_users->analyze(non_dominated, prev_analyzer);
+        }
+      }
+      else if (redop > 0)
+      {
+        PhysicalCopyAnalyzer<false,true,true,true>
+          copy_analyzer(copy_mask, redop, wait_on, local_color, logical_node);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
+        if (!!non_dominated)
+        {
+          PhysicalCopyAnalyzer<false,true,false,true>
+            prev_analyzer(copy_mask, redop, wait_on, local_color, logical_node);
+          prev_epoch_users->analyze(non_dominated, prev_analyzer);
+        }
+      }
+      else
+      {
+        // No need to track since we know we'll dominate everyone
+        PhysicalCopyAnalyzer<false,false,false,true>
+          copy_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
+        curr_epoch_users->analyze(copy_mask, copy_analyzer);
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10715,6 +12488,7 @@ namespace LegionRuntime {
         return true;
       int local_color = child_color;
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
+#ifndef PHYSICAL_FIELD_TREE
       for (std::list<PhysicalUser>::const_iterator it = 
             curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
       {
@@ -10730,6 +12504,11 @@ namespace LegionRuntime {
           return true;
       }
       return false; 
+#else
+      WARAnalyzer<true> analyzer(local_color, logical_node);
+      curr_epoch_users->analyze(user_mask, analyzer);
+      return analyzer.has_war_dependence();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10768,13 +12547,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::filter_local_users(Event term_event)
+    void InstanceView::filter_local_users(Event term_event, 
+                                          const FieldMask &term_mask)
     //--------------------------------------------------------------------------
     {
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
-#ifndef LEGION_SPY
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING)
       // should already be holding the lock when this is called
+#ifndef PHYSICAL_FIELD_TREE
       for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
             it != curr_epoch_users.end(); /*nothing*/)
       {
@@ -10791,6 +12572,11 @@ namespace LegionRuntime {
         else
           it++;
       }
+#else
+      PhysicalEventFilter filter(term_event);
+      curr_epoch_users->analyze<PhysicalEventFilter>(term_mask, filter);
+      prev_epoch_users->analyze<PhysicalEventFilter>(term_mask, filter);
+#endif
 #endif
     }
 
@@ -10947,6 +12733,7 @@ namespace LegionRuntime {
     {
       RezCheck z(rez);
       rez.serialize(inst_lock);
+#ifndef PHYSICAL_FIELD_TREE
       rez.serialize(curr_epoch_users.size());
       for (std::list<PhysicalUser>::const_iterator it = 
             curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
@@ -10959,6 +12746,10 @@ namespace LegionRuntime {
       {
         rez.serialize(*it);
       }
+#else
+      curr_epoch_users->pack_field_tree(rez);
+      prev_epoch_users->pack_field_tree(rez);
+#endif
       rez.serialize(current_versions.size());
       for (std::map<VersionID,FieldMask>::const_iterator it = 
             current_versions.begin(); it != current_versions.end(); it++)
@@ -10975,9 +12766,11 @@ namespace LegionRuntime {
     {
       DerezCheck z(derez);
       derez.deserialize(inst_lock);
+      FieldSpaceNode *field_node = manager->region_node->column_source;
+      std::map<Event,FieldMask> deferred_events;
+#ifndef PHYSICAL_FIELD_TREE
       size_t num_current;
       derez.deserialize(num_current);
-      FieldSpaceNode *field_node = manager->region_node->column_source;
       for (unsigned idx = 0; idx < num_current; idx++)
       {
         PhysicalUser user;
@@ -10986,7 +12779,8 @@ namespace LegionRuntime {
         field_node->transform_field_mask(user.field_mask, source);
         curr_epoch_users.push_back(user);
         // We only need to launch things once for each event
-        event_references[user.term_event] = 1;
+        event_references.insert(user.term_event);
+        deferred_events[user.term_event] |= user.field_mask;
       }
       size_t num_previous;
       derez.deserialize(num_previous);
@@ -10998,8 +12792,20 @@ namespace LegionRuntime {
         field_node->transform_field_mask(user.field_mask, source);
         prev_epoch_users.push_back(user);
         // We only need to have one reference for each event
-        event_references[user.term_event] = 1;
+        event_references.insert(user.term_event);
+        deferred_events[user.term_event] |= user.field_mask;
       }
+#else
+      // Unpack the field trees
+      curr_epoch_users->unpack_field_tree(derez);
+      prev_epoch_users->unpack_field_tree(derez);
+      // Now transform all the field masks and get the
+      // set of events and field masks on which
+      // to defer garbage collection.
+      PhysicalUnpacker unpacker(field_node, source, deferred_events); 
+      curr_epoch_users->analyze(FieldMask(FIELD_ALL_ONES), unpacker);
+      prev_epoch_users->analyze(FieldMask(FIELD_ALL_ONES), unpacker);
+#endif
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx = 0; idx < num_versions; idx++)
@@ -11015,13 +12821,10 @@ namespace LegionRuntime {
       // Now launch the waiting deferred events.  We wait until
       // here to do it so we don't need to hold the lock while unpacking
       Processor gc_proc = Machine::get_executing_processor();
-      for (std::map<Event,unsigned>::const_iterator it = 
-            event_references.begin(); it != event_references.end(); it++)
+      for (std::map<Event,FieldMask>::const_iterator it = 
+            deferred_events.begin(); it != deferred_events.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(it->second == 1);
-#endif
-        defer_collect_user(it->first, gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->first, it->second, gc_proc, false/*gc epoch*/);
       }
     }
 
@@ -11253,6 +13056,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ReductionView::initialize_view(const InnerTaskView *inner_view,
+                                        Processor local_proc)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock v_lock(view_lock);
+        for (std::deque<PhysicalUser>::const_iterator it = 
+              inner_view->users.begin(); it != inner_view->users.end(); it++)
+        {
+          if (IS_READ_ONLY(it->usage))
+            reading_users.push_back(*it);
+          else
+            reduction_users.push_back(*it);
+        }
+      }
+      // Now defer the collection of the users
+      for (std::deque<PhysicalUser>::const_iterator it = 
+            inner_view->users.begin(); it != inner_view->users.end(); it++)
+      {
+        defer_collect_user(it->term_event, it->field_mask, 
+                            local_proc, true/*gc epoch*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool ReductionView::is_reduction_view(void) const
     //--------------------------------------------------------------------------
     {
@@ -11308,14 +13136,9 @@ namespace LegionRuntime {
         notify_subscribers(user);
       }
       // Update the reference users
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(copy_term);
-      if (finder == event_references.end())
-        event_references[copy_term] = 1;
-      else
-        finder->second++;
+      event_references.insert(copy_term);
       // Launch the garbage collection task
-      defer_collect_user(copy_term, exec_proc, true/*gc epoch*/);
+      defer_collect_user(copy_term, mask, exec_proc, true/*gc epoch*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11336,14 +13159,56 @@ namespace LegionRuntime {
         wait_on.insert(it->term_event);
       }
       // Update the reference users
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(user.term_event);
-      if (finder == event_references.end())
-        event_references[user.term_event] = 1;
-      else
-        finder->second++;
+      event_references.insert(user.term_event);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, user.field_mask,
+                         exec_proc, true/*gc epoch*/);
+      if (owner_did != did)
+        send_back_user(user);
+      notify_subscribers(user);
+      // Return our result
+      Event result = Event::merge_events(wait_on);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependences(
+          Machine::get_executing_processor(), wait_on, result);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(wait_on, result);
+#endif
+      return InstanceRef(result, Lock::NO_LOCK, ViewHandle(this));
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef ReductionView::add_user(PhysicalUser &user, Processor exec_proc,
+                                        InnerTaskView *inner_view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(IS_REDUCE(user.usage));
+      assert(user.usage.redop == manager->redop);
+#endif
+      AutoLock v_lock(view_lock);
+      reduction_users.push_back(user);
+      // Wait on any readers currently reading the instance
+      std::set<Event> wait_on;
+      for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
+            it != reading_users.end(); it++)
+      {
+        inner_view->add_user(*it, -1/*local node*/);
+      }
+      // Update the reference users
+      event_references.insert(user.term_event);
+      // Launch the garbage collection task
+      defer_collect_user(user.term_event, user.field_mask,
+                         exec_proc, true/*gc epoch*/);
       if (owner_did != did)
         send_back_user(user);
       notify_subscribers(user);
@@ -11442,23 +13307,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::collect_user(Event term_event)
+    void ReductionView::collect_user(Event term_event, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(term_event);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != event_references.end());
-      assert(finder->second > 0);
-#endif
-      finder->second--;
-      if (finder->second == 0)
+      std::set<Event>::iterator finder = event_references.find(term_event);
+      if (finder != event_references.end())
       {
         event_references.erase(finder);
         // Do not do this if we are in LegionSpy so we can see 
         // all of the dependences
-#ifndef LEGION_SPY
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING)
         for (std::list<PhysicalUser>::iterator it = reduction_users.begin();
               it != reduction_users.end(); /*nothing*/)
         {
@@ -11503,14 +13362,9 @@ namespace LegionRuntime {
         reading_users.push_back(user);
       }
       // Update the reference users
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(user.term_event);
-      if (finder == event_references.end())
-        event_references[user.term_event] = 1;
-      else
-        finder->second++;
+      event_references.insert(user.term_event);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event,
+      defer_collect_user(user.term_event, user.field_mask,
                          Machine::get_executing_processor(), false/*gc epoch*/);
     }
 
@@ -11536,14 +13390,9 @@ namespace LegionRuntime {
         reading_users.push_back(user);
       }
       // Update the reference users
-      std::map<Event,unsigned>::iterator finder = 
-        event_references.find(user.term_event);
-      if (finder == event_references.end())
-        event_references[user.term_event] = 1;
-      else
-        finder->second++;
+      event_references.insert(user.term_event);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event,
+      defer_collect_user(user.term_event, user.field_mask,
                          Machine::get_executing_processor(), false/*gc epoch*/);
     }
 
@@ -11682,12 +13531,7 @@ namespace LegionRuntime {
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
         reduction_users.push_back(user);
-        std::map<Event,unsigned>::iterator finder = 
-          event_references.find(user.term_event);
-        if (finder == event_references.end())
-          event_references[user.term_event] = 1;
-        else
-          finder->second++;
+        event_references.insert(user.term_event);
       }
       size_t num_reading;
       derez.deserialize(num_reading);
@@ -11698,12 +13542,7 @@ namespace LegionRuntime {
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
         reading_users.push_back(user);
-        std::map<Event,unsigned>::iterator finder = 
-          event_references.find(user.term_event);
-        if (finder == event_references.end())
-          event_references[user.term_event] = 1;
-        else
-          finder->second++;
+        event_references.insert(user.term_event);
       }
       // Now launch the waiting deferred events.  We wait until
       // here to do it so we don't need to hold the lock while unpacking
@@ -11711,12 +13550,14 @@ namespace LegionRuntime {
       for (std::list<PhysicalUser>::const_iterator it = 
             reduction_users.begin(); it != reduction_users.end(); it++)
       {
-        defer_collect_user(it->term_event, gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->term_event, it->field_mask,
+                           gc_proc, false/*gc epoch*/);
       }
       for (std::list<PhysicalUser>::const_iterator it = 
             reading_users.begin(); it != reading_users.end(); it++)
       {
-        defer_collect_user(it->term_event, gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->term_event, it->field_mask,
+                           gc_proc, false/*gc epoch*/);
       }
     }
 
@@ -11927,13 +13768,25 @@ namespace LegionRuntime {
         std::set<PhysicalManager*> needed_managers;
         if (manager->is_reduction_manager())
         {
-          DistributedID did = manager->as_reduction_manager()->
+          ReductionManager *reduc_manager = manager->as_reduction_manager();
+          // First send the tree infromation for the manager
+          reduc_manager->region_node->row_source->
+            send_node(target,true/*up*/,true/*down*/);
+          reduc_manager->region_node->column_source->send_node(target);
+          reduc_manager->region_node->send_node(target);
+          DistributedID did = reduc_manager->
                                 send_manager(target, needed_managers);
           rez.serialize(did);
         }
         else
         {
-          DistributedID did = manager->as_instance_manager()->
+          InstanceManager *inst_manager = manager->as_instance_manager();
+          // First send the tree infromation for the manager
+          inst_manager->region_node->row_source->
+            send_node(target,true/*up*/,true/*down*/);
+          inst_manager->region_node->column_source->send_node(target);
+          inst_manager->region_node->send_node(target);
+          DistributedID did = inst_manager->
                                 send_manager(target, needed_managers);
           rez.serialize(did);
         }
@@ -11985,6 +13838,124 @@ namespace LegionRuntime {
       }
       else
         return InstanceRef();
+    }
+
+    //--------------------------------------------------------------------------
+    InnerTaskView::InnerTaskView(Color color)
+      : local_color(color)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InnerTaskView::InnerTaskView(const InnerTaskView &rhs)
+      : local_color(rhs.local_color)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerTaskView::~InnerTaskView(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<InnerTaskView*>::const_iterator it = child_views.begin();
+            it != child_views.end(); it++)
+      {
+        delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::add_user(const PhysicalUser &user, int child)
+    //--------------------------------------------------------------------------
+    {
+      users.push_back(user);
+      // If our child is not -1, then we are up above our original
+      // node so mark the user as having come from our original node
+      if (child >= 0)
+        users.back().child = -1;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::find_wait_on_events(std::set<Event> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to look at this local node
+      for (unsigned idx = 0; idx < users.size(); idx++)
+        wait_on.insert(users[idx].term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::add_child_view(InnerTaskView *child)
+    //--------------------------------------------------------------------------
+    {
+      child_views.insert(child);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::add_user_below(const PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      users.push_back(user);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::initialize_children(InstanceView *view,
+                                            Processor local_proc) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<InnerTaskView*>::const_iterator it = child_views.begin();
+            it != child_views.end(); it++)
+      {
+        InstanceView *child = view->get_subview((*it)->local_color);
+        child->initialize_view((*it), local_proc);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::pack_inner_view(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(users.size());
+      for (unsigned idx = 0; idx < users.size(); idx++)
+        rez.serialize(users[idx]);
+      rez.serialize(child_views.size());
+      for (std::set<InnerTaskView*>::const_iterator it = child_views.begin();
+            it != child_views.end(); it++)
+      {
+        rez.serialize((*it)->local_color);
+        (*it)->pack_inner_view(rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerTaskView::unpack_inner_view(Deserializer &derez, 
+                                  RegionTreeForest *context, FieldSpace handle,
+                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_users;
+      derez.deserialize(num_users);
+      FieldSpaceNode *field_node = context->get_node(handle);
+      for (unsigned idx = 0; idx < num_users; idx++)
+      {
+        PhysicalUser user;
+        derez.deserialize(user);
+        field_node->transform_field_mask(user.field_mask, source);
+        users.push_back(user);
+      }
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        Color child_color;
+        derez.deserialize(child_color);
+        InnerTaskView *child = new InnerTaskView(child_color);
+        child_views.insert(child);
+        child->unpack_inner_view(derez, context, handle, source);
+      }
     }
 
   }; // namespace HighLevel

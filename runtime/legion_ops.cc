@@ -84,7 +84,11 @@ namespace LegionRuntime {
       trigger_commit_invoked = false;
       track_parent = false;
       parent_ctx = NULL;
+      need_completion_trigger = true;
       completion_event = UserEvent::create_user_event();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
     }
     
     //--------------------------------------------------------------------------
@@ -177,6 +181,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx != NULL);
+      assert(completion_event.exists());
 #endif
       parent_ctx = ctx;
       track_parent = track;
@@ -228,6 +233,10 @@ namespace LegionRuntime {
     void Operation::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      unique_op_id, COMPLETE_OPERATION);
+#endif
       complete_operation();
     }
 
@@ -382,10 +391,6 @@ namespace LegionRuntime {
     void Operation::complete_operation(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
-                                      unique_op_id, COMPLETE_OPERATION);
-#endif
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
@@ -406,7 +411,8 @@ namespace LegionRuntime {
           need_trigger = true;
         }
       }
-      completion_event.trigger();
+      if (need_completion_trigger)
+        completion_event.trigger();
       // Tell our parent that we are complete
       if (track_parent)
         parent_ctx->register_child_complete(this); 
@@ -1479,15 +1485,20 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
-      LegionLogging::log_event_dependence(
-          Machine::get_executing_processor(),
-          parent_ctx->get_start_event(), result.get_ready_event());
       LegionLogging::log_operation_events(
           Machine::get_executing_processor(),
-          unique_op_id, result.get_ready_event(), termination_event);
+          unique_op_id, Event::NO_EVENT, result.get_ready_event());
       LegionLogging::log_event_dependence(
           Machine::get_executing_processor(),
           termination_event, parent_ctx->get_task_completion());
+      LegionLogging::log_event_dependence(
+          Machine::get_executing_processor(),
+          result.get_ready_event(),
+          completion_event);
+      LegionLogging::log_event_dependence(
+          Machine::get_executing_processor(),
+          completion_event,
+          termination_event);
       LegionLogging::log_physical_user(
           Machine::get_executing_processor(),
           result.get_handle().get_view()->get_manager()->get_instance(),
@@ -1760,16 +1771,39 @@ namespace LegionRuntime {
         src_requirements[idx].copy_without_mapping_info(
             launcher.src_requirements[idx]);
         src_requirements[idx].initialize_mapping_fields();
+        src_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_requirements[idx].copy_without_mapping_info(
             launcher.dst_requirements[idx]);
         dst_requirements[idx].initialize_mapping_fields();
+        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
       reservation_requests = launcher.reservation_requests;
       wait_barriers = launcher.wait_barriers;
-      arrive_barriers = launcher.arrive_barriers;
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        // TODO: Put this back in once Sean fixes barriers
+#if 0
+        arrive_barriers.push_back(
+            PhaseBarrier(it->phase_barrier.alter_arrival_count(1),
+                         it->participants));
+#else
+        arrive_barriers.push_back(*it);
+#endif
+#ifdef LEGION_LOGGING
+        LegionLogging::log_event_dependence(
+            Machine::get_executing_processor(),
+            it->phase_barrier, arrive_barriers.back().phase_barrier);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(it->phase_barrier,
+                                arrive_barriers.back().phase_barrier);
+#endif
+      }
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
@@ -1976,6 +2010,11 @@ namespace LegionRuntime {
     {
       deactivate_operation();
       // Clear out our region tree state
+      src_requirements.clear();
+      dst_requirements.clear();
+      reservation_requests.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
       src_privilege_paths.clear();
       dst_privilege_paths.clear();
       src_mapping_paths.clear();
@@ -2149,6 +2188,68 @@ namespace LegionRuntime {
       // made all the destination regions.
       if (map_success)
       {
+        // First get the set of barriers we need to wait on before
+        // we can start running this copy.
+        Event sync_precondition = Event::NO_EVENT;
+        if (!wait_barriers.empty())
+        {
+          std::set<Event> barrier_preconditions;
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                wait_barriers.begin(); it != wait_barriers.end(); it++)
+          {
+            Event e = it->phase_barrier.get_previous_phase(); 
+            barrier_preconditions.insert(e);
+          }
+          sync_precondition = Event::merge_events(barrier_preconditions);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+          if (!sync_precondition.exists())
+          {
+            UserEvent new_pre = UserEvent::create_user_event();
+            new_pre.trigger();
+            sync_precondition = new_pre;
+          }
+#endif
+#ifdef LEGION_LOGGING
+          LegionLogging::log_event_dependences(
+              Machine::get_executing_processor(), barrier_preconditions,
+                                              sync_precondition);
+#endif
+#ifdef LEGION_SPY
+          LegionSpy::log_event_dependences(barrier_preconditions,
+                                           sync_precondition);
+#endif
+        }
+        // Now chain any lock acquisitions we need to do onto the
+        // barrier precondition.  Put these in a map so we can
+        // sort them by their lock IDs to avoid deadlock.
+        std::map<Lock,unsigned> required_locks;
+        if (!reservation_requests.empty())
+        {
+          for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
+          {
+            Lock req_lock = 
+              reservation_requests[idx].reservation.reservation_lock;
+#ifdef DEBUG_HIGH_LEVEL
+            assert(required_locks.find(req_lock) == required_locks.end());
+#endif
+            required_locks[req_lock] = idx;
+          }
+          for (std::map<Lock,unsigned>::const_iterator it = 
+                required_locks.begin(); it != required_locks.end(); it++)
+          {
+            const ReservationRequest &req = reservation_requests[it->second]; 
+            Event next = it->first.lock(req.mode, req.exclusive,
+                                          sync_precondition);
+#ifdef LEGION_LOGGING
+            LegionLogging::log_event_dependence(
+                Machine::get_executing_processor(), sync_precondition, next);
+#endif
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependence(sync_precondition, next);
+#endif
+            sync_precondition = next;
+          }
+        }
         std::set<Event> copy_complete_events;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -2197,7 +2298,7 @@ namespace LegionRuntime {
                                          dst_contexts[idx],
                                          src_requirements[idx],
                                          dst_requirements[idx],
-                                         src_ref, dst_ref));
+                                         src_ref, dst_ref, sync_precondition));
         }
 #ifdef LEGION_LOGGING
         LegionLogging::log_timing_event(Machine::get_executing_processor(),
@@ -2206,21 +2307,74 @@ namespace LegionRuntime {
         // Launch the complete task if necessary 
         Event copy_complete_event = 
           Event::merge_events(copy_complete_events);
-        if (!copy_complete_event.has_triggered())
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+        if (!copy_complete_event.exists())
         {
-          Processor util = local_proc.get_utility_processor();
-          CopyOp *proxy_this = this;
-          util.spawn(COPY_COMPLETE_ID, &proxy_this, 
-                      sizeof(proxy_this), copy_complete_event);
+          UserEvent new_copy_complete = UserEvent::create_user_event();
+          new_copy_complete.trigger();
+          copy_complete_event = new_copy_complete;
         }
-        else
-          complete_copy();
+#endif
+#ifdef LEGION_LOGGING
+        LegionLogging::log_event_dependences(Machine::get_executing_processor(),
+                                    copy_complete_events, copy_complete_event);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependences(copy_complete_events, 
+                                         copy_complete_event);
+#endif
+        // Chain all the unlock and barrier arrivals off of the
+        // copy complete event
+        if (!arrive_barriers.empty())
+        {
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+          {
+            it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
+#ifdef LEGION_LOGGING
+            LegionLogging::log_event_dependence(
+                Machine::get_executing_processor(),       
+                copy_complete_event, it->phase_barrier);
+#endif
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependence(copy_complete_event, 
+                                            it->phase_barrier);
+#endif
+          }
+        }
+
+        // Handle any unlock operations
+        if (!required_locks.empty())
+        {
+          for (std::map<Lock,unsigned>::const_iterator it = 
+                required_locks.begin(); it != required_locks.end(); it++)
+          {
+            it->first.unlock(copy_complete_event);
+          }
+        }
 
         // Mark that we completed mapping
         complete_mapping();
         // Notify the mapper if it wanted to be notified
         if (notify)
           runtime->invoke_mapper_notify_result(local_proc, this);
+
+        // Handle the case for marking when the copy completes
+        if (!copy_complete_event.has_triggered())
+        {
+          // Issue a deferred trigger on our completion event
+          // and mark that we are no longer responsible for
+          // triggering our completion event.
+          completion_event.trigger(copy_complete_event);
+          need_completion_trigger = false;
+          Processor util = local_proc.get_utility_processor();
+          CopyOp *proxy_this = this;
+          util.spawn(COPY_COMPLETE_ID, &proxy_this, 
+                      sizeof(proxy_this), copy_complete_event,
+                      parent_ctx->task_priority);
+        }
+        else
+          complete_copy();
       }
       else
       {
@@ -2570,7 +2724,7 @@ namespace LegionRuntime {
                                        get_utility_processor();
           FenceOp *proxy_this = this;
           util.spawn(FENCE_COMPLETE_ID, &proxy_this,
-                     sizeof(proxy_this), wait_on);
+                     sizeof(proxy_this), wait_on, parent_ctx->task_priority);
         }
         else
           complete_execution_fence();
@@ -2885,6 +3039,11 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+#ifdef LEGION_LOGGING
+      LegionLogging::log_operation_events(
+          Machine::get_executing_processor(),
+          unique_op_id, Event::NO_EVENT, completion_event);
+#endif
       // Commit this operation
       commit_operation();
       // Then deactivate it
@@ -2931,6 +3090,9 @@ namespace LegionRuntime {
                              const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
       initialize_operation(ctx, true/*track*/);
       reference = ref;
       requirement.copy_without_mapping_info(parent_ctx->regions[idx]);
@@ -2997,6 +3159,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3020,6 +3185,9 @@ namespace LegionRuntime {
     void CloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
@@ -3046,6 +3214,9 @@ namespace LegionRuntime {
     bool CloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
@@ -3072,12 +3243,9 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
-      LegionLogging::log_event_dependence(
-          Machine::get_executing_processor(),
-          parent_ctx->get_start_event(), close_event);
       LegionLogging::log_operation_events(
           Machine::get_executing_processor(),
-          unique_op_id, close_event, parent_ctx->get_task_completion());
+          unique_op_id, Event::NO_EVENT, close_event);
       LegionLogging::log_physical_user(
           Machine::get_executing_processor(),
           reference.get_handle().get_view()->get_manager()->get_instance(),
@@ -3101,11 +3269,16 @@ namespace LegionRuntime {
       // See if we need to defer completion of the close operation
       if (!close_event.has_triggered())
       {
+        // Issue a deferred trigger of our completion event and mark
+        // that we are no longer responsible for triggering it
+        // when we are complete.
+        completion_event.trigger(close_event);
+        need_completion_trigger = false;
         CloseOp *proxy_this = this;
         Processor util = parent_ctx->get_executing_processor().
                                      get_utility_processor();
         util.spawn(CLOSE_COMPLETE_ID, &proxy_this, 
-                   sizeof(proxy_this), close_event);
+                   sizeof(proxy_this), close_event, parent_ctx->task_priority);
       }
       else
       {

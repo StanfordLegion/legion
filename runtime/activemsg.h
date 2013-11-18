@@ -19,6 +19,12 @@
 #ifndef ACTIVEMSG_H
 #define ACTIVEMSG_H
 
+#define GASNET_PAR
+#include <gasnet.h>
+
+#define GASNETT_THREAD_SAFE
+#include <gasnet_tools.h>
+
 #ifdef CHECK_REENTRANT_MESSAGES
 GASNETT_THREADKEY_DECLARE(in_handler);
 #endif

@@ -542,6 +542,8 @@ namespace LegionRuntime {
       void arrive(unsigned count = 0);
       void wait(void);
     public:
+      // for debug
+      Barrier get_barrier(void) const { return phase_barrier; }
       unsigned participant_count(void) const { return participants; }
     private:
       Barrier phase_barrier;
@@ -678,7 +680,7 @@ namespace LegionRuntime {
       LogicalRegion parent; /**< parent region to derive privileges from*/
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
-      bool verified; /**< have privileges been statically verified*/
+      unsigned flags; /**< optional flags set for region requirements*/
       HandleType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
     public:
@@ -1291,6 +1293,7 @@ namespace LegionRuntime {
       bool                                spawn_task;
       bool                                map_locally;
       bool                                profile_task;
+      TaskPriority                        task_priority;
     public:
       // Profiling information for the task
       unsigned long long                  start_time;
@@ -1394,8 +1397,9 @@ namespace LegionRuntime {
       FRIEND_ALL_RUNTIME_CLASSES
       TaskVariantCollection(Processor::TaskFuncID uid, 
                             const char *n, const bool lf,
+                            const bool in,
                             const bool idem, size_t ret)
-        : user_id(uid), name(n), leaf(lf), 
+        : user_id(uid), name(n), leaf(lf), inner(in), 
           idempotent(idem), return_size(ret) { }
       void add_variant(Processor::TaskFuncID low_id, 
                        Processor::Kind kind, bool single, bool index,
@@ -1442,6 +1446,7 @@ namespace LegionRuntime {
       const Processor::TaskFuncID user_id;
       const char *name;
       const bool leaf;
+      const bool inner;
       const bool idempotent;
       const size_t return_size;
     protected:
@@ -2048,6 +2053,9 @@ namespace LegionRuntime {
      * A class for describing the configuration options
      * for a task being registered with the runtime.  
      * Leaf tasks must not contain any calls to the runtime.
+     * Inner tasks must never touch any of the data for 
+     * which they have privileges which is identical to
+     * the Sequoia definition of an inner task.
      * Idempotent tasks must have no side-effects outside
      * of the kind that Legion can analyze (i.e. writing
      * regions).  The name given to a task will be used
@@ -2056,10 +2064,12 @@ namespace LegionRuntime {
     struct TaskConfigOptions {
     public:
       TaskConfigOptions(bool leaf = false,
+                        bool inner = false,
                         bool idempotent = false,
                         const char *name = NULL);
     public:
       bool leaf;
+      bool inner;
       bool idempotent;
       const char *name;
     };
@@ -3097,6 +3107,8 @@ namespace LegionRuntime {
        * @param leaf whether the task is a leaf task (makes no runtime calls)
        * @param name for the task in error messages
        * @param vid the variant ID to assign to the task
+       * @param inner whether the task is an inner task
+       * @param idempotent whether the task is idempotent
        * @return the ID where the task was assigned
        */
       template<typename T,
@@ -3107,7 +3119,9 @@ namespace LegionRuntime {
       static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
                                          bool leaf = false,
                                          const char *name = NULL,
-                                         VariantID vid = AUTO_GENERATE_ID);
+                                         VariantID vid = AUTO_GENERATE_ID,
+                                         bool inner = false,
+                                         bool idempotent = false);
       /**
        * @deprecated
        * Register a single task with a void return type for the given
@@ -3118,6 +3132,8 @@ namespace LegionRuntime {
        * @param leaf whether the task is a leaf task (makes no runtime calls)
        * @param name for the task in error messages
        * @param vid the variant ID to assign to the task
+       * @param inner whether the task is an inner task
+       * @param idempotent whether the task is idempotent
        * @return the ID where the task was assigned
        */
       template<
@@ -3128,7 +3144,9 @@ namespace LegionRuntime {
       static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
                                          bool leaf = false,
                                          const char *name = NULL,
-                                         VariantID vid = AUTO_GENERATE_ID);
+                                         VariantID vid = AUTO_GENERATE_ID,
+                                         bool inner = false,
+                                         bool idempotent = false);
       /**
        * @deprecated
        * Register an index space task with a template return type
@@ -3140,6 +3158,8 @@ namespace LegionRuntime {
        * @param leaf whether the task is a leaf task (makes no runtime calls)
        * @param name for the task in error messages
        * @param vid the variant ID to assign to the task
+       * @param inner whether the task is an inner task
+       * @param idempotent whether the task is idempotent
        * @return the ID where the task was assigned
        */
       template<typename T,
@@ -3150,7 +3170,9 @@ namespace LegionRuntime {
       static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
                                         bool leaf = false,
                                         const char *name = NULL,
-                                        VariantID vid = AUTO_GENERATE_ID); 
+                                        VariantID vid = AUTO_GENERATE_ID,
+                                        bool inner = false,
+                                        bool idempotent = false); 
       /**
        * @deprecated
        * Register an index space task with a void return type
@@ -3162,6 +3184,8 @@ namespace LegionRuntime {
        * @param leaf whether the task is a leaf task (makes no runtime calls)
        * @param name for the task in error messages
        * @param vid the variant ID to assign to the task
+       * @param inner whether the task is an inner task
+       * @param idempotent whether the task is idempotent
        * @return the ID where the task was assigned
        */
       template<
@@ -3173,7 +3197,9 @@ namespace LegionRuntime {
       static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
                                         bool leaf = false,
                                         const char *name = NULL,
-                                        VariantID vid = AUTO_GENERATE_ID);
+                                        VariantID vid = AUTO_GENERATE_ID,
+                                        bool inner = false,
+                                        bool idempotent = false);
     public:
       /**
        * Provide a mechanism for finding the high-level runtime
@@ -4503,7 +4529,9 @@ namespace LegionRuntime {
                                                     Processor::Kind proc_kind, 
                                                     bool leaf/*= false*/, 
                                                     const char *name/*= NULL*/,
-                                                    VariantID vid/*= AUTO*/)
+                                                    VariantID vid/*= AUTO*/,
+                                                    bool inner/*= false*/,
+                                                    bool idempotent/*= false*/)
     //--------------------------------------------------------------------------
     {
       if (name == NULL)
@@ -4519,7 +4547,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_task_wrapper<T,TASK_PTR>,  
               LegionTaskWrapper::high_level_inline_task_wrapper<T,TASK_PTR>,
               id, proc_kind, true/*single*/, false/*index space*/, vid,
-              sizeof(T), TaskConfigOptions(leaf, false/*idempotent*/, name));
+              sizeof(T), TaskConfigOptions(leaf, inner, idempotent, name));
     }
 
     //--------------------------------------------------------------------------
@@ -4532,7 +4560,9 @@ namespace LegionRuntime {
                                                      Processor::Kind proc_kind, 
                                                      bool leaf/*= false*/, 
                                                      const char *name/*= NULL*/,
-                                                     VariantID vid/*= AUTO*/)
+                                                     VariantID vid/*= AUTO*/,
+                                                     bool inner/*= false*/,
+                                                     bool idempotent/*= false*/)
     //--------------------------------------------------------------------------
     {
       if (name == NULL)
@@ -4548,7 +4578,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_task_wrapper<TASK_PTR>,
               LegionTaskWrapper::high_level_inline_task_wrapper<TASK_PTR>,
               id, proc_kind, true/*single*/, false/*index space*/, vid,
-              0/*size*/, TaskConfigOptions(leaf, false/*idempotent*/, name));
+              0/*size*/, TaskConfigOptions(leaf, inner, idempotent, name));
     }
 
     //--------------------------------------------------------------------------
@@ -4561,7 +4591,9 @@ namespace LegionRuntime {
                                                     Processor::Kind proc_kind, 
                                                     bool leaf/*= false*/, 
                                                     const char *name/*= NULL*/,
-                                                    VariantID vid/*= AUTO*/)
+                                                    VariantID vid/*= AUTO*/,
+                                                    bool inner/*= false*/,
+                                                    bool idempotent/*= false*/)
     //--------------------------------------------------------------------------
     {
       if (name == NULL)
@@ -4577,7 +4609,7 @@ namespace LegionRuntime {
           LegionTaskWrapper::high_level_index_task_wrapper<RT,TASK_PTR>,  
           LegionTaskWrapper::high_level_inline_index_task_wrapper<RT,TASK_PTR>,
           id, proc_kind, false/*single*/, true/*index space*/, vid,
-          sizeof(RT), TaskConfigOptions(leaf, false/*idempotent*/, name));
+          sizeof(RT), TaskConfigOptions(leaf, inner, idempotent, name));
     }
 
     //--------------------------------------------------------------------------
@@ -4591,7 +4623,9 @@ namespace LegionRuntime {
                                                     Processor::Kind proc_kind, 
                                                     bool leaf/*= false*/, 
                                                     const char *name/*= NULL*/,
-                                                    VariantID vid/*= AUTO*/)
+                                                    VariantID vid/*= AUTO*/,
+                                                    bool inner/*= false*/,
+                                                    bool idempotent/*= false*/)
     //--------------------------------------------------------------------------
     {
       if (name == NULL)
@@ -4607,7 +4641,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_index_task_wrapper<TASK_PTR>, 
               LegionTaskWrapper::high_level_inline_index_task_wrapper<TASK_PTR>,
               id, proc_kind, false/*single*/, true/*index space*/, vid,
-              0/*size*/, TaskConfigOptions(leaf, false/*idempotent*/, name));
+              0/*size*/, TaskConfigOptions(leaf, inner, idempotent, name));
     }
 
 

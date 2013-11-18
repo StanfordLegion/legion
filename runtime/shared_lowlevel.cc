@@ -145,7 +145,8 @@ namespace LegionRuntime {
       LockImpl*            get_free_lock(size_t data_size = 0);
       IndexSpace::Impl*  get_free_metadata(size_t num_elmts);
       IndexSpace::Impl*  get_free_metadata(IndexSpace::Impl *par, const ElementMask &mask);
-      RegionInstance::Impl*  get_free_instance(IndexSpace is, Memory m, size_t num_elmts, 
+      RegionInstance::Impl*  get_free_instance(IndexSpace is, Memory m, 
+                                               size_t num_elmts, size_t alloc_size, 
 					       const std::vector<size_t>& field_sizes,
 					       size_t elmt_size, size_t block_size,
 					       const DomainLinearization& linearization,
@@ -402,6 +403,8 @@ namespace LegionRuntime {
 	bool has_triggered(EventGeneration needed_gen);
 	// block until event has triggered
 	void wait(EventGeneration needed_gen, bool block);
+        // defer triggering of an event on another event
+        void defer_trigger(Event wait_for);
 	// create an event that won't trigger until all input events have
 	Event merge_events(const std::map<EventImpl*,Event> &wait_for);
 	// Trigger the event
@@ -503,7 +506,7 @@ namespace LegionRuntime {
         void add_utility_user(Processor p, ProcessorImpl *impl);
     public:
 	Event spawn(Processor::TaskFuncID func_id, const void * args,
-				size_t arglen, Event wait_on);
+                            size_t arglen, Event wait_on, int priority);
         void run(void);
 	void trigger(unsigned count = 1, TriggerHandle handle = 0);
 	static void* start(void *proc);
@@ -524,7 +527,10 @@ namespace LegionRuntime {
 		size_t arglen;
 		Event wait;
 		EventImpl *complete;
+                int priority;
 	};
+    private:
+        void add_to_ready_queue(const TaskDesc &desc);
     public:
         pthread_attr_t attr; // For setting pthread parameters when starting the thread
     private:
@@ -696,6 +702,20 @@ namespace LegionRuntime {
         }
     }
 
+    void EventImpl::defer_trigger(Event wait_for)
+    {
+        EventImpl *src_impl = Runtime::get_runtime()->get_event_impl(wait_for);
+        bool trigger_now = true;
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+        // Trigger the event now unless we can register a dependence
+        if ((src_impl != this) && 
+            src_impl->register_dependent(this, wait_for.gen))
+          trigger_now = false;
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+        if (trigger_now)
+          trigger();
+    }
+
     Event EventImpl::merge_events(const std::map<EventImpl*,Event> &wait_for)
     {
 	// We need the lock here so that events we've already registered
@@ -852,6 +872,8 @@ namespace LegionRuntime {
       return result;
     }
 
+    Logger::Category log_barrier("barrier");
+
     Barrier EventImpl::get_barrier(unsigned expected_arrivals)
     {
 #ifdef DEBUG_LOW_LEVEL
@@ -877,8 +899,11 @@ namespace LegionRuntime {
       if (delta < 0) // If we're deleting, make sure nothing weird happens
         assert(int(sources) > (-delta));
 #endif
+      int old_sources = sources;
       sources += delta;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      log_barrier.info("barrier %x.%d - adjust %d + %d = %d",
+		       current.id, current.gen, old_sources, delta, old_sources + delta);
       Barrier result;
       result.id = current.id;
       result.gen = current.gen;
@@ -896,12 +921,15 @@ namespace LegionRuntime {
       return impl->get_user_event();
     }
 
-    void UserEvent::trigger(void) const
+    void UserEvent::trigger(Event wait_on /*= NO_EVENT*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       if (!id) return;
       EventImpl *impl = Runtime::get_runtime()->get_event_impl(*this);
-      impl->trigger();
+      if (wait_on.exists())
+        impl->defer_trigger(wait_on);
+      else
+        impl->trigger();
     }
 
     ////////////////////////////////////////////////////////
@@ -912,7 +940,9 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       EventImpl *impl = Runtime::get_runtime()->get_free_event();
-      return impl->get_barrier(expected_arrivals);
+      Barrier b = impl->get_barrier(expected_arrivals);
+      log_barrier.info("barrier %x.%d - create %d", b.id, b.gen, expected_arrivals);
+      return b;
     }
 
     void Barrier::destroy_barrier(void)
@@ -937,12 +967,27 @@ namespace LegionRuntime {
       return *this;
     }
 
-    void Barrier::arrive(unsigned count /*=1*/) const
+    Event Barrier::get_previous_phase(void) const
+    {
+      Event result = *this;
+      result.gen--;
+      return result;
+    }
+
+    void Barrier::arrive(unsigned count /*=1*/, Event wait_on /*= Event::NO_EVENT*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       if (!id) return;
       EventImpl *impl = Runtime::get_runtime()->get_event_impl(*this);
-      impl->trigger(count);
+      log_barrier.info("barrier %x.%d - arrive %d", this->id, this->gen, count);
+      if (wait_on.exists())
+      {
+        // Not the most efficient way to do this, but it works for now
+        for (unsigned idx = 0; idx < count; idx++)
+          impl->defer_trigger(wait_on);
+      }
+      else
+        impl->trigger(count);
     }
 
     ////////////////////////////////////////////////////////
@@ -1431,11 +1476,11 @@ namespace LegionRuntime {
     // Processor Impl at top due to use in event
     
     Event Processor::spawn(Processor::TaskFuncID func_id, const void * args,
-				size_t arglen, Event wait_on) const
+                            size_t arglen, Event wait_on, int priority) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 	ProcessorImpl *p = Runtime::get_runtime()->get_processor_impl(*this);
-	return p->spawn(func_id, args, arglen, wait_on);
+	return p->spawn(func_id, args, arglen, wait_on, priority);
     }
 
     Processor Processor::get_utility_processor(void) const
@@ -1479,7 +1524,7 @@ namespace LegionRuntime {
     }
 
     Event ProcessorImpl::spawn(Processor::TaskFuncID func_id, const void * args,
-				size_t arglen, Event wait_on)
+				size_t arglen, Event wait_on, int priority)
     {
 	TaskDesc task;
 	task.func_id = func_id;
@@ -1488,6 +1533,7 @@ namespace LegionRuntime {
 	task.arglen = arglen;
 	task.wait = wait_on;
 	task.complete = Runtime::get_runtime()->get_free_event();
+        task.priority = priority;
 	Event result = task.complete->get_event();
 
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1501,7 +1547,7 @@ namespace LegionRuntime {
 			DPRINT2("Registering task %d on processor %d ready queue\n",func_id,proc.id);
 #endif
 			// Failed to register which means it is ready to execute
-			ready_queue.push_back(task);
+                        add_to_ready_queue(task);
 			// If it wasn't registered, then the event triggered
 			// Notify the processor thread in case it is waiting
 			PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
@@ -1521,12 +1567,37 @@ namespace LegionRuntime {
 		DPRINT2("Putting task %d on processor %d ready queue\n",func_id,proc.id);
 #endif
 		// Put it on the ready queue
-		ready_queue.push_back(task);
+                add_to_ready_queue(task);
 		// Signal the thread there is a task to run in case it is waiting
 		PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
 	return result;
+    }
+
+    void ProcessorImpl::add_to_ready_queue(const TaskDesc &task)
+    {
+      // Better already hold the lock when calling this method
+      // Common case
+      if (ready_queue.empty() || (ready_queue.back().priority >= task.priority))
+        ready_queue.push_back(task);
+      else
+      {
+        bool inserted = false;
+        for (std::list<TaskDesc>::iterator it = ready_queue.begin();
+              it != ready_queue.end(); it++)
+        {
+          if (it->priority < task.priority)
+          {
+            ready_queue.insert(it, task);
+            inserted = true;
+            break;
+          }
+        }
+        // Technically we shouldn't need this but whatever
+        if (!inserted)
+          ready_queue.push_back(task);
+      }
     }
 
     Processor ProcessorImpl::get_utility_processor(void) const
@@ -2503,14 +2574,16 @@ namespace LegionRuntime {
 
     class RegionInstance::Impl : public Triggerable { 
     public:
-        Impl(int idx, IndexSpace r, Memory m, size_t num, 
+        Impl(int idx, IndexSpace r, Memory m, size_t num, size_t alloc, 
 	     const std::vector<size_t>& _field_sizes,
 	     size_t elem_size, size_t _block_size,
 	     const DomainLinearization& _dl,
 	     bool activate = false, char *base = NULL, const ReductionOpUntyped *op = NULL,
 	     RegionInstance::Impl *parent = NULL)
-	  : elmt_size(elem_size), num_elmts(num), field_sizes(_field_sizes), block_size(_block_size), linearization(_dl),
-	    reduction((op!=NULL)), list((parent!=NULL)), redop(op), parent_impl(parent), cur_entry(0), index(idx), next_handle(1)
+	  : elmt_size(elem_size), num_elmts(num), allocation_size(alloc), 
+            field_sizes(_field_sizes), block_size(_block_size), linearization(_dl),
+	    reduction((op!=NULL)), list((parent!=NULL)), redop(op), 
+            parent_impl(parent), cur_entry(0), index(idx), next_handle(1)
 	{
                 mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
 		PTHREAD_SAFE_CALL(pthread_mutex_init(mutex,NULL));
@@ -2537,7 +2610,7 @@ namespace LegionRuntime {
     public:
 	const void* read(unsigned ptr);
 	void write(unsigned ptr, const void* newval);	
-        bool activate(IndexSpace r, Memory m, size_t num_elmts, 
+        bool activate(IndexSpace r, Memory m, size_t num_elmts, size_t alloc,
 		      const std::vector<size_t>& _field_sizes, size_t elem_size, size_t _block_size,
 		      const DomainLinearization& _dl,
                       char *base, const ReductionOpUntyped *op, RegionInstance::Impl *parent);
@@ -2580,6 +2653,7 @@ namespace LegionRuntime {
 	char *base_ptr;	
 	size_t elmt_size;
 	size_t num_elmts;
+        size_t allocation_size;
         std::vector<size_t> field_sizes;
         size_t block_size;
         DomainLinearization linearization;
@@ -2648,7 +2722,7 @@ namespace LegionRuntime {
       memcpy((base_ptr + ptr),newval,elmt_size);
     }
 
-    bool RegionInstance::Impl::activate(IndexSpace r, Memory m, size_t num, 
+    bool RegionInstance::Impl::activate(IndexSpace r, Memory m, size_t num, size_t alloc, 
 					const std::vector<size_t>& _field_sizes,
 					size_t elem_size, size_t _block_size,
 					const DomainLinearization& _dl,
@@ -2663,6 +2737,7 @@ namespace LegionRuntime {
 		region = r;
 		memory = m;
 		num_elmts = num;
+                allocation_size = alloc;
 		field_sizes = _field_sizes;
 		elmt_size = elem_size;
 		block_size = _block_size;
@@ -2688,7 +2763,8 @@ namespace LegionRuntime {
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
 	active = false;
 	MemoryImpl *mem = Runtime::get_runtime()->get_memory_impl(memory);
-	mem->free_space(base_ptr,num_elmts*elmt_size);
+	mem->free_space(base_ptr,allocation_size);
+        allocation_size = 0;
 	num_elmts = 0;
 	field_sizes.clear();
 	elmt_size = 0;
@@ -3545,6 +3621,7 @@ namespace LegionRuntime {
 	IndexSpace r = { static_cast<id_t>(index) };
 	RegionInstance::Impl* impl = Runtime::get_runtime()->get_free_instance(r, m,
 									       num_elements, 
+                                                                 rounded_num_elmts*elmt_size,
 									       field_sizes,
 									       elmt_size, 
 									       block_size, dl,
@@ -4453,6 +4530,7 @@ namespace LegionRuntime {
 							     IndexSpace::NO_SPACE,
 							     m,
 							     0,
+                                                             0,
 							     std::vector<size_t>(),
 							     0,
 							     0,
@@ -4677,7 +4755,8 @@ namespace LegionRuntime {
     }
 
 
-    RegionInstance::Impl* Runtime::get_free_instance(IndexSpace r, Memory m, size_t num_elmts, 
+    RegionInstance::Impl* Runtime::get_free_instance(IndexSpace r, Memory m, 
+                                                     size_t num_elmts, size_t alloc_size,
 						     const std::vector<size_t>& field_sizes,
 						     size_t elmt_size, size_t block_size,
 						     const DomainLinearization& linearization,
@@ -4690,8 +4769,9 @@ namespace LegionRuntime {
           RegionInstance::Impl *result = free_instances.front();
           free_instances.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_inst_lock));
-          bool activated = result->activate(r, m, num_elmts, field_sizes, elmt_size, block_size, linearization,
-					    ptr, redop, parent);
+          bool activated = result->activate(r, m, num_elmts, alloc_size, 
+                                            field_sizes, elmt_size, block_size, 
+                                            linearization, ptr, redop, parent);
 #ifdef DEBUG_LOW_LEVEL
           assert(activated);
 #endif
@@ -4700,7 +4780,8 @@ namespace LegionRuntime {
 	// Nothing free so make a new one
 	PTHREAD_SAFE_CALL(pthread_rwlock_wrlock(&instance_lock));
 	unsigned int index = instances.size();
-	instances.push_back(new RegionInstance::Impl(index, r, m, num_elmts, field_sizes,
+	instances.push_back(new RegionInstance::Impl(index, r, m, num_elmts, alloc_size,
+                                                     field_sizes,
 						     elmt_size, block_size, linearization,
 						     true, ptr, redop, parent));
 	RegionInstance::Impl *result = instances[index];
@@ -4711,6 +4792,7 @@ namespace LegionRuntime {
 						       IndexSpace::NO_SPACE,
 						       m,
 						       0,
+                                                       0,
 						       std::vector<size_t>(),
 						       0,
 						       0,

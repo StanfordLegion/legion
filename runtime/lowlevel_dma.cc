@@ -51,7 +51,8 @@ namespace LegionRuntime {
 		 OASByInst *_oas_by_inst,
 		 ReductionOpID _redop_id, bool _red_fold,
 		 Event _before_copy,
-		 Event _after_copy);
+		 Event _after_copy,
+                 int priority);
 
       ~DmaRequest(void);
 
@@ -64,7 +65,7 @@ namespace LegionRuntime {
 	STATE_DONE
       };
 
-      virtual void event_triggered(void);
+      virtual bool event_triggered(void);
       virtual void print_info(void);
 
       bool check_readiness(bool just_check);
@@ -84,21 +85,23 @@ namespace LegionRuntime {
       Event after_copy;
       State state;
       Lock current_lock;
+      int priority;
     };
 
     gasnet_hsl_t queue_mutex;
     gasnett_cond_t queue_condvar;
-    std::queue<DmaRequest *> dma_queue;
+    std::list<DmaRequest *> dma_queue;
     
     DmaRequest::DmaRequest(const Domain& _domain,
 			   OASByInst *_oas_by_inst,
 			   ReductionOpID _redop_id, bool _red_fold,
 			   Event _before_copy,
-			   Event _after_copy)
+			   Event _after_copy,
+                           int _priority)
       : domain(_domain), oas_by_inst(_oas_by_inst),
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy), after_copy(_after_copy),
-	state(STATE_INIT), current_lock(Lock::NO_LOCK)
+	state(STATE_INIT), current_lock(Lock::NO_LOCK), priority(_priority)
     {
       log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
 		   this,
@@ -118,7 +121,7 @@ namespace LegionRuntime {
       delete oas_by_inst;
     }
 
-    void DmaRequest::event_triggered(void)
+    bool DmaRequest::event_triggered(void)
     {
       log_dma.info("request %p triggered in state %d (lock = %x)", this, state, current_lock.id);
 
@@ -130,6 +133,9 @@ namespace LegionRuntime {
       // this'll enqueue the DMA if it can, or wait on another event if it 
       //  can't
       check_readiness(false);
+
+      // don't delete us!
+      return false;
     }
 
     void DmaRequest::print_info(void)
@@ -237,7 +243,31 @@ namespace LegionRuntime {
 
 	// enqueue ourselves for execution
 	gasnet_hsl_lock(&queue_mutex);
-	dma_queue.push(this);
+        // Find the right place to insert this based on the priority
+        // Common case: if the guy on the back has our priority or higher
+        // then we can just put us on the back
+        if (dma_queue.empty() || (dma_queue.back()->priority >= this->priority))
+          dma_queue.push_back(this);
+        else
+        {
+          // Uncommon case: go through the list until we find someone
+          // who has a priority lower than ours.  We know they
+          // exist since we saw them on the back.
+          bool inserted = false;
+          for (std::list<DmaRequest*>::iterator it = dma_queue.begin();
+                it != dma_queue.end(); it++)
+          {
+            if ((*it)->priority < this->priority)
+            {
+              dma_queue.insert(it, this);
+              inserted = true;
+              break;
+            }
+          }
+          // Technically don't need this, but just to be safe
+          if (!inserted)
+            dma_queue.push_back(this);
+        }
 	state = STATE_QUEUED;
 	gasnett_cond_signal(&queue_condvar);
 	gasnet_hsl_unlock(&queue_mutex);
@@ -629,7 +659,7 @@ namespace LegionRuntime {
     class InstPairCopier {
     public:
       virtual void copy_field(int src_index, int dst_index, int elem_count,
-			      unsigned src_offset, unsigned dst_offset, unsigned bytes) = 0;
+                              unsigned offset_index) = 0;
       virtual void flush(void) = 0;
     };
 
@@ -667,27 +697,51 @@ namespace LegionRuntime {
     public:
       // instead of the accessro, we'll grab the implementation pointers
       //  and do address calculation ourselves
-      SpanBasedInstPairCopier(T *_span_copier, RegionInstance _src_inst, RegionInstance _dst_inst)
-	: span_copier(_span_copier), src_inst(_src_inst.impl()), dst_inst(_dst_inst.impl())
+      SpanBasedInstPairCopier(T *_span_copier, 
+                              RegionInstance _src_inst, 
+                              RegionInstance _dst_inst,
+                              OASVec &_oas_vec)
+	: span_copier(_span_copier), src_inst(_src_inst.impl()), 
+          dst_inst(_dst_inst.impl()), oas_vec(_oas_vec)
       {
 	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
 	assert(src_idata->valid);
 
 	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
 	assert(dst_idata->valid);
+
+        // Precompute our field offset information
+        src_start.resize(oas_vec.size());
+        dst_start.resize(oas_vec.size());
+        src_size.resize(oas_vec.size());
+        dst_size.resize(oas_vec.size());
+        for (unsigned idx = 0; idx < oas_vec.size(); idx++)
+        {
+          find_field_start(src_idata->field_sizes, oas_vec[idx].src_offset,
+                            oas_vec[idx].size, src_start[idx], src_size[idx]);
+          find_field_start(dst_idata->field_sizes, oas_vec[idx].dst_offset,
+                            oas_vec[idx].size, dst_start[idx], dst_size[idx]);
+        }
       }
 
       virtual void copy_field(int src_index, int dst_index, int elem_count,
-			      unsigned src_offset, unsigned dst_offset, unsigned bytes)
+                              unsigned offset_index)
       {
+        unsigned src_offset = oas_vec[offset_index].src_offset;
+        unsigned dst_offset = oas_vec[offset_index].dst_offset;
+        unsigned bytes = oas_vec[offset_index].size;
 	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
 	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
 
 	off_t src_field_start, dst_field_start;
 	int src_field_size, dst_field_size;
 
-	find_field_start(src_idata->field_sizes, src_offset, bytes, src_field_start, src_field_size);
-	find_field_start(dst_idata->field_sizes, dst_offset, bytes, dst_field_start, dst_field_size);
+	//find_field_start(src_idata->field_sizes, src_offset, bytes, src_field_start, src_field_size);
+	//find_field_start(dst_idata->field_sizes, dst_offset, bytes, dst_field_start, dst_field_size);
+        src_field_start = src_start[offset_index];
+        dst_field_start = dst_start[offset_index];
+        src_field_size = src_size[offset_index];
+        dst_field_size = dst_size[offset_index];
 
 	// if both source and dest fill up an entire field, we might be able to copy whole ranges at the same time
 	if((src_field_start == src_offset) && (src_field_size == bytes) &&
@@ -747,17 +801,27 @@ namespace LegionRuntime {
       T *span_copier;
       RegionInstance::Impl *src_inst;
       RegionInstance::Impl *dst_inst;
+      OASVec &oas_vec;
+      std::vector<off_t> src_start;
+      std::vector<off_t> dst_start;
+      std::vector<int> src_size;
+      std::vector<int> dst_size;
     };
 
     class RemoteWriteInstPairCopier : public InstPairCopier {
     public:
-      RemoteWriteInstPairCopier(RegionInstance src_inst, RegionInstance dst_inst)
-	: src_acc(src_inst.get_accessor()), dst_acc(dst_inst.get_accessor())
+      RemoteWriteInstPairCopier(RegionInstance src_inst, RegionInstance dst_inst,
+                                OASVec &_oas_vec)
+	: src_acc(src_inst.get_accessor()), dst_acc(dst_inst.get_accessor()),
+          oas_vec(_oas_vec)
       {}
 
       virtual void copy_field(int src_index, int dst_index, int elem_count,
-			      unsigned src_offset, unsigned dst_offset, unsigned bytes)
+                              unsigned offset_index)
       {
+        unsigned src_offset = oas_vec[offset_index].src_offset;
+        unsigned dst_offset = oas_vec[offset_index].dst_offset;
+        unsigned bytes = oas_vec[offset_index].size;
 	char buffer[1024];
 
 	for(int i = 0; i < elem_count; i++) {
@@ -778,14 +842,22 @@ namespace LegionRuntime {
     protected:
       RegionAccessor<AccessorType::Generic> src_acc;
       RegionAccessor<AccessorType::Generic> dst_acc;
+      OASVec &oas_vec;
     };
 
     class MemPairCopier {
     public:
       static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem);
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst) = 0;
-      virtual void flush(void) = 0;
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec) = 0;
+
+      // default behavior of flush is just to trigger the event, if it exists
+      virtual void flush(Event after_copy)
+      {
+	if(after_copy.exists())
+	  after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+      }
     };
 
     class BufferedMemPairCopier : public MemPairCopier {
@@ -803,12 +875,12 @@ namespace LegionRuntime {
 	delete[] buffer;
       }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<BufferedMemPairCopier>(this, src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<BufferedMemPairCopier>(this, src_inst, 
+                                                          dst_inst, oas_vec);
       }
-
-      virtual void flush(void) {}
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
@@ -845,12 +917,12 @@ namespace LegionRuntime {
 	assert(dst_base);
       }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<MemcpyMemPairCopier>(this, src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<MemcpyMemPairCopier>(this, src_inst, 
+                                                          dst_inst, oas_vec);
       }
-
-      virtual void flush(void) {}
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
@@ -873,7 +945,44 @@ namespace LegionRuntime {
       char *dst_base;
     };
 
-    class GPUtoFBMemPairCopier : public MemPairCopier {
+    // a MemPairCopier that keeps a list of events for component copies and doesn't trigger
+    //  the completion event until they're all done
+    class DelayedMemPairCopier : public MemPairCopier {
+    public:
+      DelayedMemPairCopier(void) {}
+      
+      virtual void flush(Event after_copy)
+      {
+	// create a merged event for all the copies and used that to perform a delayed trigger
+	//  of the after_copy event (if it exists)
+	if(after_copy.exists()) {
+	  if(events.size() > 0) {
+	    Event merged = Event::merge_events(events);
+
+	    // deferred trigger based on this merged event
+	    after_copy.impl()->trigger(after_copy.gen, gasnet_mynode(), merged);
+	  } else {
+	    // no actual copies occurred, so manually trigger event ourselves
+	    after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+	  }
+	} else {
+	  if(events.size() > 0) {
+	    // we don't have an event we can use to signal completion, so wait on the events ourself
+	    for(std::set<Event>::const_iterator it = events.begin();
+		it != events.end();
+		it++)
+	      (*it).wait(true);
+	  } else {
+	    // nothing happened and we don't need to tell anyone - life is simple
+	  }
+	}
+      }
+
+    protected:
+      std::set<Event> events;
+    };
+     
+    class GPUtoFBMemPairCopier : public DelayedMemPairCopier {
     public:
       GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
 	: gpu(_gpu)
@@ -883,20 +992,19 @@ namespace LegionRuntime {
 	assert(src_base);
       }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
+                                                          dst_inst, oas_vec);
       }
-
-      virtual void flush(void) {}
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
 	//printf("gpu write of %zd bytes\n", bytes);
 	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes, Event::NO_EVENT, e);
-	// TODO: return event for correctness
-	e.wait(true);
+	events.insert(e);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
@@ -913,8 +1021,8 @@ namespace LegionRuntime {
       const char *src_base;
       GPUProcessor *gpu;
     };
-     
-    class GPUfromFBMemPairCopier : public MemPairCopier {
+
+    class GPUfromFBMemPairCopier : public DelayedMemPairCopier {
     public:
       GPUfromFBMemPairCopier(GPUProcessor *_gpu, Memory _dst_mem)
 	: gpu(_gpu)
@@ -924,20 +1032,20 @@ namespace LegionRuntime {
 	assert(dst_base);
       }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
+                                                            dst_inst, oas_vec);
       }
-
-      virtual void flush(void) {}
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
 	//printf("gpu read of %zd bytes\n", bytes);
 	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes, Event::NO_EVENT, e);
-	// TODO: return event for correctness
-	e.wait(true);
+        events.insert(e);
+	//e.wait(true);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
@@ -955,27 +1063,27 @@ namespace LegionRuntime {
       GPUProcessor *gpu;
     };
      
-    class GPUinFBMemPairCopier : public MemPairCopier {
+    class GPUinFBMemPairCopier : public DelayedMemPairCopier {
     public:
       GPUinFBMemPairCopier(GPUProcessor *_gpu)
 	: gpu(_gpu)
       {
       }
 
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
       {
-	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, dst_inst);
+	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
+                                                            dst_inst, oas_vec);
       }
-
-      virtual void flush(void) {}
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
 	//printf("gpu write of %zd bytes\n", bytes);
 	gpu->copy_within_fb(dst_offset, src_offset, bytes, Event::NO_EVENT, e);
-	// TODO: return event for correctness
-	e.wait(true);
+	//e.wait(true);
+        events.insert(e);
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
@@ -994,15 +1102,147 @@ namespace LegionRuntime {
      
     class RemoteWriteMemPairCopier : public MemPairCopier {
     public:
-      // we don't actually need to know our memories...
-      RemoteWriteMemPairCopier(void) {}
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst)
+      RemoteWriteMemPairCopier(Memory _src_mem, Memory _dst_mem)
       {
-	return new RemoteWriteInstPairCopier(src_inst, dst_inst);
+	src_mem = _src_mem.impl();
+	src_base = (const char *)(src_mem->get_direct_ptr(0, src_mem->size));
+	assert(src_base);
+
+	dst_mem = _dst_mem.impl();
       }
 
-      virtual void flush(void) {}
+      ~RemoteWriteMemPairCopier(void)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<RemoteWriteMemPairCopier>(this, src_inst, 
+                                                              dst_inst, oas_vec);
+      }
+
+      struct PendingGather {
+	off_t dst_start;
+	off_t dst_size;
+	std::vector<std::pair<const char *, size_t> > src_spans;
+      };
+
+      static const size_t TARGET_XFER_SIZE = 4096;
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+
+	if(bytes >= TARGET_XFER_SIZE) {
+	  // large enough that we can transfer it by itself
+#ifdef DEBUG_REMOTE_WRITES
+	  printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+#endif
+	  do_remote_write(dst_mem->me, dst_offset, src_base + src_offset, bytes, Event::NO_EVENT, false /* no copy */);
+	} else {
+	  // see if this can be added to an existing gather
+	  PendingGather *g;
+	  std::map<off_t, PendingGather *>::iterator it = gathers.find(dst_offset);
+	  if(it != gathers.end()) {
+	    g = it->second;
+	    gathers.erase(it); // remove from the existing location - we'll re-add it (probably) with the updated offset
+	  } else {
+	    // nope, start a new one
+	    g = new PendingGather;
+	    g->dst_start = dst_offset;
+	    g->dst_size = 0;
+	  }
+
+	  // sanity checks
+	  assert((g->dst_start + g->dst_size) == dst_offset);
+
+	  // now see if this particular span is disjoint or can be tacked on to the end of the last one
+	  if(g->src_spans.size() > 0) {
+	    std::pair<const char *, size_t>& last_span = g->src_spans.back();
+	    if((last_span.first + last_span.second) == (src_base + src_offset)) {
+	      // append
+	      last_span.second += bytes;
+	    } else {
+	      g->src_spans.push_back(std::make_pair(src_base + src_offset, bytes));
+	    }
+	  } else {
+	    // first span
+	    g->src_spans.push_back(std::make_pair(src_base + src_offset, bytes));
+	  }
+	  g->dst_size += bytes;
+
+	  // is this span big enough to push now?
+	  if(g->dst_size >= TARGET_XFER_SIZE) {
+	    // yes, copy it
+	    copy_gather(g);
+	    delete g;
+	  } else {
+	    // no, put it back in the pending list, keyed by the next dst_offset that'll match it
+	    gathers.insert(std::make_pair(g->dst_start + g->dst_size, g));
+	  }
+	}
+      }
+
+      void copy_gather(const PendingGather *g, Event trigger = Event::NO_EVENT)
+      {
+	// build a buffer we can copy in one block to the destination
+	char *buffer = new char[g->dst_size];
+	char *pos = buffer;
+
+	// copy each of the spans
+	for(std::vector<std::pair<const char *, size_t> >::const_iterator it = g->src_spans.begin();
+	    it != g->src_spans.end();
+	    it++) {
+	  memcpy(pos, it->first, it->second);
+	  pos += it->second;
+	}
+
+#ifdef DEBUG_REMOTE_WRITES
+	printf("remote write of %zd bytes (gather -> %x:%zd)\n", g->dst_size, dst_mem->me.id, g->dst_start);
+#endif
+	do_remote_write(dst_mem->me, g->dst_start, buffer, g->dst_size, trigger, true /* make copy! */);
+
+	delete[] buffer;
+      }
+
+      virtual void flush(Event after_copy)
+      {
+	// do we have any pending gathers to push out?
+	if(gathers.size() > 0) {
+	  // push out all but the last one with events triggered
+	  while(gathers.size() > 1) {
+	    std::map<off_t, PendingGather *>::iterator it = gathers.begin();
+	    PendingGather *g = it->second;
+	    gathers.erase(it);
+
+	    copy_gather(g);
+	    delete g;
+	  }
+
+	  // for the last one, give it the 'after_copy' event to trigger on arrival
+	  std::map<off_t, PendingGather *>::iterator it = gathers.begin();
+	  PendingGather *g = it->second;
+	  gathers.erase(it);
+
+	  copy_gather(g, after_copy);
+	  delete g;
+	} else {
+	  // didn't have any pending copies, but if we have an event to trigger, send that
+	  //  to the remote side as a zero-size copy to push the data in front of it
+	  if(after_copy.exists()) {
+#ifdef DEBUG_REMOTE_WRITES
+	    printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
+#endif
+	    do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
+	  }
+	}
+      }
+
+    protected:
+      Memory::Impl *src_mem, *dst_mem;
+      const char *src_base;
+      std::map<off_t, PendingGather *> gathers;
     };
      
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem)
@@ -1047,7 +1287,7 @@ namespace LegionRuntime {
       // try as many things as we can think of
       if(dst_kind == Memory::Impl::MKIND_REMOTE) {
         assert(src_kind != Memory::Impl::MKIND_REMOTE);
-        //return new RemoteWriteMemPairCopier;
+        return new RemoteWriteMemPairCopier(src_mem, dst_mem);
       }
 
       // fallback
@@ -1065,25 +1305,30 @@ namespace LegionRuntime {
 	RegionInstance dst_inst = it->first.second;
 	OASVec& oasvec = it->second;
 
-	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst);
+	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
 
 	Arrays::Mapping<DIM, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<DIM>();
 	Arrays::Mapping<DIM, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<DIM>();
 
-	for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(orig_rect, *src_linearization); dsi; dsi++) {
-	  // dense subrect in src might not be dense in dst
-	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(dsi.subrect, *dst_linearization); dso; dso++) {
-	    Rect<1> orect = dso.image;
-	    // rectangle in input must be recalculated
+	// iterate by output rectangle first - this gives us a chance to gather data when linearizations
+	//  don't match up
+	for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(orig_rect, *dst_linearization); dso; dso++) {
+	  // dense subrect in dst might not be dense in src
+	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
+	    Rect<1> irect = dsi.image;
+	    // rectangle in output must be recalculated
 	    Rect<DIM> subrect_check;
-	    Rect<1> irect = src_linearization->image_dense_subrect(dso.subrect, subrect_check);
-	    assert(dso.subrect == subrect_check);
+	    Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
+	    assert(dsi.subrect == subrect_check);
 
-	    for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
-	      ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1,
-			      it2->src_offset, it2->dst_offset, it2->size);
+	    //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
+            for (unsigned idx = 0; idx < oasvec.size(); idx++)
+	      ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+			      //it2->src_offset, it2->dst_offset, it2->size);
 	  }
 	}
+        // Dammit Sean stop leaking things!
+        delete ipc;
       }
     }
 
@@ -1115,7 +1360,22 @@ namespace LegionRuntime {
       default: assert(0);
       };
 
-      mpc->flush();
+      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
+		   this,
+		   oas_by_inst->begin()->first.first.id, 
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id, 
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->size() - 1,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+
+      // if(after_copy.exists())
+      // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+
+      mpc->flush(after_copy);
       delete mpc;
 
 #ifdef EVEN_MORE_DEAD_DMA_CODE
@@ -1399,20 +1659,6 @@ namespace LegionRuntime {
 
       log_dma.debug("finished copy %x (%d) -> %x (%d) - %zd bytes (%zd), event=%x/%d", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size, after_copy.id, after_copy.gen);
 #endif
-      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   after_copy.id, after_copy.gen);
-
-      if(after_copy.exists())
-	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
     }
     
     bool terminate_flag = false;
@@ -1437,7 +1683,7 @@ namespace LegionRuntime {
 	// take the queue lock and try to pull an item off the front
 	if(dma_queue.size() > 0) {
 	  DmaRequest *req = dma_queue.front();
-	  dma_queue.pop();
+	  dma_queue.pop_front();
 
 	  gasnet_hsl_unlock(&queue_mutex);
 	  
@@ -1463,23 +1709,30 @@ namespace LegionRuntime {
       num_threads = count;
 
       worker_threads = new pthread_t[count];
-      for(int i = 0; i < count; i++)
+      for(int i = 0; i < count; i++) {
+	pthread_attr_t attr;
+	CHECK_PTHREAD( pthread_attr_init(&attr) );
+	if(proc_assignment)
+	  proc_assignment->bind_thread(-1, &attr, "DMA worker");
 	CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, 
 				      dma_worker_thread_loop, 0) );
+	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+      }
     }
     
     Event enqueue_dma(const Domain& domain,
 		      OASByInst *oas_by_inst,
 		      ReductionOpID redop_id, bool red_fold,
 		      Event before_copy,
-		      Event after_copy /*= Event::NO_EVENT*/)
+		      Event after_copy,
+                      int priority)
     {
       // special case - if we have everything we need, we can consider doing the
       //   copy immediately
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       DmaRequest *r = new DmaRequest(domain, oas_by_inst, redop_id, red_fold,
-				     before_copy, after_copy);
+				     before_copy, after_copy, priority);
 
       bool ready = r->check_readiness(true);
 
@@ -1552,10 +1805,26 @@ namespace LegionRuntime {
 
       OASByInst *oas_by_inst = new OASByInst;
 
+      int priority = 0;
+
       while(((idata - ((const int *)data))*sizeof(int)) < msglen) {
 	RegionInstance src_inst = ID((unsigned)*idata++).convert<RegionInstance>();
 	RegionInstance dst_inst = ID((unsigned)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
+
+        // If either one of the instances is in GPU memory increase priority
+        if (priority == 0)
+        {
+          Memory::Impl::MemoryKind src_kind = src_inst.impl()->memory.impl()->kind;
+          if (src_kind == Memory::Impl::MKIND_GPUFB)
+            priority = 1;
+          else
+          {
+            Memory::Impl::MemoryKind dst_kind = dst_inst.impl()->memory.impl()->kind;
+            if (dst_kind == Memory::Impl::MKIND_GPUFB)
+              priority = 1;
+          }
+        }
 
 	OASVec& oasvec = (*oas_by_inst)[ip];
 
@@ -1577,7 +1846,7 @@ namespace LegionRuntime {
 		   args.before_copy.id, args.before_copy.gen,
 		   args.after_copy.id, args.after_copy.gen);
 
-      enqueue_dma(domain, oas_by_inst, args.redop_id, args.red_fold, args.before_copy, args.after_copy);
+      enqueue_dma(domain, oas_by_inst, args.redop_id, args.red_fold, args.before_copy, args.after_copy, priority);
 #if 0
       if(args.before_copy.has_triggered()) {
 	RegionInstance::Impl::copy(args.source, args.target,
@@ -1671,7 +1940,14 @@ namespace LegionRuntime {
 	if(dma_node == gasnet_mynode()) {
 	  log_dma.info("performing copy on local node");
 
-	  Event ev = enqueue_dma(*this, oas_by_inst, redop_id, red_fold, wait_on, Event::NO_EVENT);
+          // If either one of the instances is in GPU memory increase priority
+          int priority = 0;
+          if (src_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
+            priority = 1;
+          else if (dst_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
+            priority = 1;
+
+	  Event ev = enqueue_dma(*this, oas_by_inst, redop_id, red_fold, wait_on, Event::NO_EVENT, priority);
 	  finish_events.insert(ev);
 	} else {
 	  // need to send dma to remote node for processing, so we need a completion event
@@ -1683,7 +1959,8 @@ namespace LegionRuntime {
 	  args.before_copy = wait_on;
 	  args.after_copy = ev;
 
-	  int msgdata[64];
+	  static const size_t MAX_MESSAGE_SIZE = 2048;
+	  int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
 
 	  // domain info goes first
 	  int *msgptr = serialize(msgdata);
@@ -1708,7 +1985,7 @@ namespace LegionRuntime {
 	  delete oas_by_inst;
 
 	  size_t msglen = ((const char *)msgptr) - ((const char *)msgdata);
-	  assert(msglen < 256);
+	  assert(msglen <= MAX_MESSAGE_SIZE);
 	  log_dma.info("performing copy on remote node (%d), event=%x/%d", dma_node, args.after_copy.id, args.after_copy.gen);
 	  RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
 	  

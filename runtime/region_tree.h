@@ -20,6 +20,7 @@
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "garbage_collection.h"
+#include "field_tree.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -190,10 +191,29 @@ namespace LegionRuntime {
                                            , RegionTreePath &path
 #endif
                                            );
+      // Same as the one above, but also records inner view information 
+      InstanceRef register_physical_region(RegionTreeContext ctx,
+                                           InnerTaskView *inner_view,
+                                           const MappingRef &ref,
+                                           RegionRequirement &req,
+                                           unsigned idx,
+                                           Mappable *mappable,
+                                           Processor local_proc,
+                                           Event term_event
+#ifdef DEBUG_HIGH_LEVEL
+                                           , const char *log_name
+                                           , UniqueID uid
+                                           , RegionTreePath &path
+#endif
+                                           );
       InstanceRef initialize_physical_context(RegionTreeContext ctx,
                     const RegionRequirement &req, PhysicalManager *manager,
-                    UniqueID uid, Event term_event, Processor local_proc,
+                    Event term_event, Processor local_proc,
                     std::map<PhysicalManager*,PhysicalView*> &top_views);
+      InstanceRef initialize_physical_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, PhysicalManager *manager,
+                    std::map<PhysicalManager*,PhysicalView*> &top_views,
+                    Processor local_proc, const InnerTaskView *inner_view);
       void invalidate_physical_context(RegionTreeContext ctx,
                                        LogicalRegion handle);
       Event close_physical_context(RegionTreeContext ctx,
@@ -213,7 +233,8 @@ namespace LegionRuntime {
                         const RegionRequirement &src_req,
                         const RegionRequirement &dst_req,
                         const InstanceRef &src_ref,
-                        const InstanceRef &dst_ref);
+                        const InstanceRef &dst_ref,
+                        Event precondition);
     public:
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
@@ -222,8 +243,13 @@ namespace LegionRuntime {
                                AddressSpaceID target,
                                std::set<PhysicalView*> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
+      void send_tree_shape(const IndexSpaceRequirement &req,
+                           AddressSpaceID target);
       void send_tree_shape(const RegionRequirement &req,
                            AddressSpaceID target);
+      void send_tree_shape(IndexSpace handle, AddressSpaceID target);
+      void send_tree_shape(FieldSpace handle, AddressSpaceID target);
+      void send_tree_shape(LogicalRegion handle, AddressSpaceID target);
       void send_back_physical_state(RegionTreeContext ctx,
                                RegionTreeContext remote_ctx,
                                RegionTreePath &path,
@@ -694,15 +720,130 @@ namespace LegionRuntime {
     struct LogicalState {
     public:
       LogicalState(void);
+      LogicalState(const LogicalState &state);
+      ~LogicalState(void);
+    public:
+      LogicalState& operator=(const LogicalState &rhs);
     public:
       void reset(void);
     public:
       std::map<VersionID,FieldMask> field_versions;
       std::list<FieldState> field_states;
+#ifndef LOGICAL_FIELD_TREE
       std::list<LogicalUser> curr_epoch_users;
       std::list<LogicalUser> prev_epoch_users;
+#else
+      FieldTree<LogicalUser> *curr_epoch_users;
+      FieldTree<LogicalUser> *prev_epoch_users;
+#endif
       std::list<CloseInfo> close_operations;
     };
+
+    /**
+     * \class LogicalDepAnalyzer
+     * A class for use with doing logical dependence
+     * analysis on field tree data structures.
+     */
+    class LogicalDepAnalyzer {
+    public:
+      LogicalDepAnalyzer(const LogicalUser &user,
+                         const FieldMask &check_mask,
+                         bool validates_regions);
+    public:
+      bool analyze(const LogicalUser &user);
+      FieldMask get_dominator_mask(void) const;
+    public:
+      inline void begin_node(FieldTree<LogicalUser> *node) { }
+      inline void end_node(FieldTree<LogicalUser> *node) { }
+    private:
+      const LogicalUser user;
+      const bool validates_regions;
+      FieldMask dominator_mask;
+    };
+
+    class LogicalOpAnalyzer {
+    public:
+      LogicalOpAnalyzer(Operation *op);
+    public:
+      bool analyze(const LogicalUser &user);
+    public:
+      inline void begin_node(FieldTree<LogicalUser> *node) { }
+      inline void end_node(FieldTree<LogicalUser> *node) { }
+    public:
+      Operation *const op;
+    };
+
+    /**
+     * \class LogicalFilter
+     * A class for helping with filtering logical users
+     * out of a field tree data structure.
+     */
+    class LogicalFilter {
+    public:
+      LogicalFilter(const FieldMask &filter_mask,
+                    FieldTree<LogicalUser> *target = NULL);
+    public:
+      bool analyze(LogicalUser &user);
+    public:
+      void begin_node(FieldTree<LogicalUser> *node);
+      void end_node(FieldTree<LogicalUser> *node);
+    private:
+      const FieldMask filter_mask;
+      FieldTree<LogicalUser> *const target;
+      std::deque<LogicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
+    };
+
+    /**
+     * \class LogicalFieldInvalidator
+     */
+    class LogicalFieldInvalidator {
+    public:
+      LogicalFieldInvalidator(void) { }
+    public:
+      bool analyze(const LogicalUser &user);
+    public:
+      inline void begin_node(FieldTree<LogicalUser> *node) { }
+      inline void end_node(FieldTree<LogicalUser> *node) { }
+    };
+
+    /**
+     * \struct LogicalCloser
+     * This structure helps keep track of the state
+     * necessary for performing a close operation
+     * on the logical region tree.
+     */
+    struct LogicalCloser {
+    public:
+      LogicalCloser(ContextID ctx, const LogicalUser &u,
+                    bool validates);
+#ifdef LOGICAL_FIELD_TREE
+    public:
+      bool analyze(LogicalUser &user);
+    public:
+      void begin_node(FieldTree<LogicalUser> *node);
+      void end_node(FieldTree<LogicalUser> *node);
+#endif
+    public:
+      ContextID ctx;
+      const LogicalUser &user;
+      bool validates;
+      // All the fields that we close for this traversal
+      FieldMask closed_mask;
+      std::deque<LogicalUser> closed_users;
+      std::deque<CloseInfo> close_operations;
+#ifdef LOGICAL_FIELD_TREE
+    public:
+      bool current;
+      bool has_non_dominator;
+      FieldMask local_closing_mask;
+      FieldMask local_non_dominator_mask;
+      std::deque<LogicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
+#endif
+    }; 
 
     /**
      * \struct PhysicalState
@@ -735,28 +876,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreeNode *node;
 #endif
-    };
-
-    /**
-     * \struct LogicalCloser
-     * This structure helps keep track of the state
-     * necessary for performing a close operation
-     * on the logical region tree.
-     */
-    struct LogicalCloser {
-    public:
-      LogicalCloser(ContextID ctx, const LogicalUser &u,
-                    bool validates);
-    public:
-      ContextID ctx;
-      const LogicalUser &user;
-      bool validates;
-      // All the fields that we close for this traversal
-      FieldMask closed_mask;
-      std::deque<LogicalUser> closed_users;
-      std::deque<CloseInfo> close_operations;
     }; 
 
+    /**
+     * \struct PhysicalCloser
+     * Class for helping with the closing of physical region trees
+     */
     struct PhysicalCloser {
     public:
       PhysicalCloser(MappableInfo *info,
@@ -786,6 +911,210 @@ namespace LegionRuntime {
       FieldMask dirty_mask;
       std::vector<InstanceView*> upper_targets;
       std::vector<InstanceView*> lower_targets;
+    }; 
+
+    /**
+     * \class PhysicalDepAnalyzer
+     * A class for helping with doing physical dependence 
+     * analysis on a physical field tree data structure.
+     * In the process it also filters out any users which
+     * should be moved back to the next epoch.
+     */
+    template<bool FILTER>
+    class PhysicalDepAnalyzer {
+    public:
+      PhysicalDepAnalyzer(const PhysicalUser &user,
+                          const FieldMask &check_mask,
+                          RegionTreeNode *logical_node,
+                          std::set<Event> &wait_on);
+    public:
+      bool analyze(PhysicalUser &user);
+      FieldMask get_non_dominated_mask(void) const { return non_dominated; }
+    public:
+      void begin_node(FieldTree<PhysicalUser> *node);
+      void end_node(FieldTree<PhysicalUser> *node);
+    public:
+      void insert_filtered_users(FieldTree<PhysicalUser> *target);
+    private:
+      const PhysicalUser user;
+      RegionTreeNode *const logical_node;
+      std::set<Event> &wait_on;
+      FieldMask non_dominated;
+    private:
+      std::deque<PhysicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
+    private:
+      std::deque<PhysicalUser> filtered_users;
+    };
+
+    /**
+     * \class InnerDepAnalyzer
+     * Same class as above except for inner task views
+     */
+    template<bool FILTER>
+    class InnerDepAnalyzer {
+    public:
+      InnerDepAnalyzer(const PhysicalUser &user,
+                       const FieldMask &check_mask,
+                       RegionTreeNode *logical_node,
+                       InnerTaskView *inner_view);
+    public:
+      bool analyze(PhysicalUser &user);
+      FieldMask get_non_dominated_mask(void) const { return non_dominated; }
+    public:
+      void begin_node(FieldTree<PhysicalUser> *node);
+      void end_node(FieldTree<PhysicalUser> *node);
+    public:
+      void insert_filtered_users(FieldTree<PhysicalUser> *target);
+    private:
+      const PhysicalUser user;
+      RegionTreeNode *const logical_node;
+      InnerTaskView *inner_view;
+      FieldMask non_dominated;
+    private:
+      std::deque<PhysicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
+    private:
+      std::deque<PhysicalUser> filtered_users;
+    };
+
+    class InnerBelowAnalyzer {
+    public:
+      InnerBelowAnalyzer(InnerTaskView *inner_view);
+    public:
+      inline void begin_node(FieldTree<PhysicalUser> *node) { }
+      inline void end_node(FieldTree<PhysicalUser> *node) { }
+    public:
+      bool analyze(const PhysicalUser &user);
+    private:
+      InnerTaskView *const inner_view;
+    };
+
+    /**
+     * \class PhysicalFilter
+     * A class for helping with doing filtering of 
+     * physical users of a physical user field tree.
+     */
+    class PhysicalFilter {
+    public:
+      PhysicalFilter(const FieldMask &filter_mask);
+    public:
+      bool analyze(PhysicalUser &user);
+    public:
+      void begin_node(FieldTree<PhysicalUser> *node);
+      void end_node(FieldTree<PhysicalUser> *node);
+    private:
+      const FieldMask filter_mask;
+      std::deque<PhysicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
+    };
+
+    /**
+     * \class PhysicalEventFilter
+     * A class for helping with garbage collection
+     * of users from the previous and current lists
+     * after they have completed.
+     */
+    class PhysicalEventFilter {
+    public:
+      PhysicalEventFilter(Event term)
+        : term_event(term) { }
+    public:
+      inline bool analyze(const PhysicalUser &user)
+      {
+        if (user.term_event == term_event)
+          return false;
+        else
+          return true;
+      }
+    public:
+      inline void begin_node(FieldTree<PhysicalUser> *node) { }
+      inline void end_node(FieldTree<PhysicalUser> *node) { }
+    private:
+      const Event term_event;
+    };
+
+    /**
+     * \class PhysicalCopyAnalyzer
+     * A class for helping with doing dependence analysis
+     * for copy operations in physical user field trees.
+     */
+    template<bool READING, bool REDUCE, bool TRACK, bool ABOVE>
+    class PhysicalCopyAnalyzer {
+    public:
+      PhysicalCopyAnalyzer(const FieldMask &copy_mask,
+                           ReductionOpID redop,
+                           std::set<Event> &wait_on, 
+                           int color = -1,
+                           RegionTreeNode *logical_node = NULL);
+    public:
+      bool analyze(const PhysicalUser &user);
+      inline const FieldMask& get_non_dominated_mask(void) const 
+        { return non_dominated; }
+    public:
+      inline void begin_node(FieldTree<PhysicalUser> *node) { }
+      inline void end_node(FieldTree<PhysicalUser> *node) { }
+    private:
+      const FieldMask copy_mask;
+      const ReductionOpID redop;
+      const int local_color;
+      RegionTreeNode *const logical_node;
+    private:
+      std::set<Event> &wait_on;
+      FieldMask non_dominated;
+    };
+
+    /**
+     * \class WARAnalyzer
+     * This class helps in doing write-after-read
+     * checks on the physical field tree data structure
+     * that stores the current epoch users.
+     */
+    template<bool ABOVE>
+    class WARAnalyzer {
+    public:
+      WARAnalyzer(int color = -1, 
+                  RegionTreeNode *node = NULL); 
+    public:
+      inline void begin_node(FieldTree<PhysicalUser> *node) { }
+      inline void end_node(FieldTree<PhysicalUser> *node) { }
+    public:
+      bool analyze(const PhysicalUser &user);
+    public:
+      inline bool has_war_dependence(void) const { return has_war; }
+    private:
+      const int local_color;
+      RegionTreeNode *const logical_node;
+    private:
+      bool has_war;
+    };
+
+    /**
+     * \class PhysicalUnpacker
+     * This class helps in restructuring and transforming
+     * field trees after they have been unpacked on a 
+     * remote node.
+     */
+    class PhysicalUnpacker {
+    public:
+      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source,
+                       std::map<Event,FieldMask> &deferred_events);
+    public:
+      void begin_node(FieldTree<PhysicalUser> *node);
+      void end_node(FieldTree<PhysicalUser> *node);
+    public:
+      bool analyze(PhysicalUser &user);
+    private:
+      FieldSpaceNode *const field_node;
+      const AddressSpaceID source;
+      std::map<Event,FieldMask> &deferred_events;
+    private:
+      std::deque<PhysicalUser> reinsert;
+      unsigned reinsert_count;
+      std::deque<unsigned> reinsert_stack;
     };
 
     /**
@@ -943,10 +1272,16 @@ namespace LegionRuntime {
       void unpack_send_state(ContextID ctx, Deserializer &derez, 
                              FieldSpaceNode *column, AddressSpaceID source);
     public:
+#ifndef LOGICAL_FIELD_TREE
       // Logical helper operations
       static FieldMask perform_dependence_checks(const LogicalUser &user, 
             std::list<LogicalUser> &users, const FieldMask &check_mask, 
             bool validates_regions);
+#else
+      static FieldMask perform_dependence_checks(const LogicalUser &user,
+            FieldTree<LogicalUser> *users, const FieldMask &check_mask,
+            bool validates_regions);
+#endif
     public:
       RegionTreeForest *const context;
     public:
@@ -1017,9 +1352,18 @@ namespace LegionRuntime {
                                   PhysicalUser &user,
                                   PhysicalView *view,
                                   const FieldMask &needed_fields);
+      InstanceRef register_region(MappableInfo *info,
+                                  PhysicalUser &user,
+                                  PhysicalView *view,
+                                  const FieldMask &needed_fields,
+                                  InnerTaskView *inner_view);
       InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
                              PhysicalView *new_view,
                              Processor local_proc);
+      InstanceRef seed_state(ContextID ctx, PhysicalView *new_view,
+                      const FieldMask &valid_mask,
+                      Processor local_proc, 
+                      const InnerTaskView *inner_view);
       Event close_state(MappableInfo *info, PhysicalUser &user,
                         const InstanceRef &target);
     public:
@@ -1134,7 +1478,8 @@ namespace LegionRuntime {
       Color get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
     public:
-      void record_close_operation(unsigned depth, const CloseInfo &info);
+      void record_close_operation(unsigned depth, const CloseInfo &info,
+                                  const FieldMask &close_mask);
       void record_before_version(unsigned depth, VersionID vid,
                                  const FieldMask &version_mask);
       void record_after_version(unsigned depth, VersionID vid,
@@ -1675,6 +2020,9 @@ namespace LegionRuntime {
                                  Processor exec_proc) = 0;
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc,
+                                   InnerTaskView *inner_view) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                              std::set<Event> &preconditions,
@@ -1683,8 +2031,10 @@ namespace LegionRuntime {
       virtual void notify_activate(void) = 0;
       virtual void garbage_collect(void) = 0;
     public:
-      void defer_collect_user(Event term_event, Processor p, bool gc_epoch);
-      virtual void collect_user(Event term_event) = 0;
+      void defer_collect_user(Event term_event, const FieldMask &mask,
+                              Processor p, bool gc_epoch);
+      virtual void collect_user(Event term_event,
+                                const FieldMask &term_mask) = 0;
       static void handle_deferred_collect(Deserializer &derez);
     public:
       void send_back_user(const PhysicalUser &user);
@@ -1741,6 +2091,8 @@ namespace LegionRuntime {
                      std::vector<Domain::CopySrcDstField> &dst_fields);
       bool has_war_dependence(const RegionUsage &usage, 
                               const FieldMask &user_mask);
+      void initialize_view(const InnerTaskView *inner_view, 
+                           Processor local_proc);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
@@ -1752,10 +2104,14 @@ namespace LegionRuntime {
                                  Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc,
+                                   InnerTaskView *inner_view);
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
-      virtual void collect_user(Event term_event);
+      virtual void collect_user(Event term_event,
+                                const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
       virtual void process_send_user(AddressSpaceID source,
@@ -1763,6 +2119,11 @@ namespace LegionRuntime {
     protected:
       void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
       void add_local_user(std::set<Event> &wait_on, const PhysicalUser &user);
+    protected:
+      void add_user_above(InnerTaskView *inner_view, PhysicalUser &user);
+      void add_local_user(InnerTaskView *inner_view, const PhysicalUser &user);
+      void find_inner_views_below(InnerTaskView *inner_view,
+                                  const FieldMask &field_mask);
     protected:
       void find_copy_preconditions(std::set<Event> &wait_on, 
                                    bool writing, ReductionOpID redop, 
@@ -1775,7 +2136,8 @@ namespace LegionRuntime {
                                     const FieldMask &user_mask,
                                     Color child_color);
       void update_versions(const FieldMask &update_mask);
-      void filter_local_users(Event term_event);
+      void filter_local_users(Event term_event,
+                              const FieldMask &term_mask);
       void notify_subscribers(std::set<AddressSpaceID> &notified, 
                               const PhysicalUser &user);
     public:
@@ -1807,11 +2169,16 @@ namespace LegionRuntime {
       std::map<Color,InstanceView*> children;
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
+#ifndef PHYSICAL_FIELD_TREE
       std::list<PhysicalUser> curr_epoch_users;
       std::list<PhysicalUser> prev_epoch_users;
+#else
+      FieldTree<PhysicalUser> *const curr_epoch_users;
+      FieldTree<PhysicalUser> *const prev_epoch_users;
+#endif
       // Keep track of how many outstanding references we have
       // for each of the user events
-      std::map<Event,unsigned> event_references;
+      std::set<Event> event_references;
       // Version information for each of the fields
       std::map<VersionID,FieldMask> current_versions;
     };
@@ -1833,6 +2200,7 @@ namespace LegionRuntime {
     public:
       void perform_reduction(PhysicalView *target, 
                              const FieldMask &copy_mask, Processor local_proc);
+      void initialize_view(const InnerTaskView *view, Processor locl_proc);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
@@ -1844,6 +2212,9 @@ namespace LegionRuntime {
                                  Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc,
+                                   InnerTaskView *inner_view);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -1856,7 +2227,8 @@ namespace LegionRuntime {
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
-      virtual void collect_user(Event term_event);
+      virtual void collect_user(Event term_event,
+                                const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
       virtual void process_send_user(AddressSpaceID source,
@@ -1883,7 +2255,7 @@ namespace LegionRuntime {
     protected:
       std::list<PhysicalUser> reduction_users;
       std::list<PhysicalUser> reading_users;
-      std::map<Event,unsigned> event_references;
+      std::set<Event> event_references;
     };
 
     /**
@@ -1969,6 +2341,38 @@ namespace LegionRuntime {
       Event ready_event;
       Lock needed_lock;
       ViewHandle handle;
+    };
+
+    /**
+     * \class InnerTaskView 
+     * This class stores information necessary for creating a new
+     * instance view as part of the inner task optimization.
+     */
+    class InnerTaskView {
+    public:
+      InnerTaskView(Color local_color); 
+      InnerTaskView(const InnerTaskView &rhs);
+      ~InnerTaskView(void);
+    public:
+      InnerTaskView& operator=(const InnerTaskView &rhs);
+    public:
+      void add_user(const PhysicalUser &user, int child);
+      void find_wait_on_events(std::set<Event> &wait_on);
+    public:
+      void add_child_view(InnerTaskView *child);
+      void add_user_below(const PhysicalUser &user);
+    public:
+      void initialize_children(InstanceView *view,
+                               Processor local_proc) const;
+    public:
+      void pack_inner_view(Serializer &rez);
+      void unpack_inner_view(Deserializer &derez, 
+                    RegionTreeForest *context, FieldSpace handle,
+                    AddressSpaceID source);
+    public:
+      const Color local_color;
+      std::deque<PhysicalUser> users;
+      std::set<InnerTaskView*> child_views;
     };
     
     /**

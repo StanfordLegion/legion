@@ -593,7 +593,7 @@ namespace LegionRuntime {
                                         LogicalRegion _parent,
 				        MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified), 
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(SINGULAR), projection(0)
     //--------------------------------------------------------------------------
     { 
@@ -618,7 +618,7 @@ namespace LegionRuntime {
                 PrivilegeMode _priv, CoherenceProperty _prop,
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified),
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     { 
@@ -643,7 +643,7 @@ namespace LegionRuntime {
                 PrivilegeMode _priv, CoherenceProperty _prop,
                 LogicalRegion _parent, MappingTagID _tag, bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified),
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -668,7 +668,7 @@ namespace LegionRuntime {
                                     LogicalRegion _parent, MappingTagID _tag, 
                                     bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified), 
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     {
@@ -693,7 +693,7 @@ namespace LegionRuntime {
                         LogicalRegion _parent, MappingTagID _tag, 
                         bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified),
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -718,7 +718,7 @@ namespace LegionRuntime {
                         LogicalRegion _parent, MappingTagID _tag, 
                         bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified),
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG),
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -742,7 +742,7 @@ namespace LegionRuntime {
 					 MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified), 
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     { 
@@ -766,7 +766,7 @@ namespace LegionRuntime {
                                          MappingTagID _tag, 
                                          bool _verified)
       : partition(pid), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified), 
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     { 
@@ -790,7 +790,7 @@ namespace LegionRuntime {
                                          MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(_priv), prop(_prop), parent(_parent),
-        redop(0), tag(_tag), verified(_verified), 
+        redop(0), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -813,7 +813,7 @@ namespace LegionRuntime {
                                          MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified), 
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     {
@@ -836,7 +836,7 @@ namespace LegionRuntime {
                                          MappingTagID _tag, 
                                          bool _verified)
       : partition(pid), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified), 
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -859,7 +859,7 @@ namespace LegionRuntime {
                                          MappingTagID _tag, 
                                          bool _verified)
       : region(_handle), privilege(REDUCE), prop(_prop), parent(_parent),
-        redop(op), tag(_tag), verified(_verified), 
+        redop(op), tag(_tag), flags(_verified ? VERIFIED_FLAG : NO_FLAG), 
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
@@ -879,7 +879,7 @@ namespace LegionRuntime {
     {
       if ((handle_type == rhs.handle_type) && (privilege == rhs.privilege) &&
           (prop == rhs.prop) && (parent == rhs.parent) && (redop == rhs.redop)
-          && (tag == rhs.tag) && (verified == rhs.verified))
+          && (tag == rhs.tag) && (flags == rhs.flags))
       {
         if (((handle_type == SINGULAR) && (region == rhs.region)) ||
             ((handle_type == PART_PROJECTION) && (partition == rhs.partition) && 
@@ -937,9 +937,9 @@ namespace LegionRuntime {
                   return false;
                 else
                 {
-                  if (verified < rhs.verified)
+                  if (flags < rhs.flags)
                     return true;
-                  else if (verified > rhs.verified)
+                  else if (flags > rhs.flags)
                     return false;
                   else
                   {
@@ -1008,7 +1008,7 @@ namespace LegionRuntime {
       parent = rhs.parent;
       redop = rhs.redop;
       tag = rhs.tag;
-      verified = rhs.verified;
+      flags = rhs.flags;
       handle_type = rhs.handle_type;
       projection = rhs.projection;
     }
@@ -1703,9 +1703,10 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskConfigOptions::TaskConfigOptions(bool l /*=false*/,
+                                         bool in /*=false*/,
                                          bool idem /*=false*/,
                                          const char *n /*=NULL*/)
-      : leaf(l), idempotent(idem), name(n)
+      : leaf(l), inner(in), idempotent(idem), name(n)
     //--------------------------------------------------------------------------
     {
     }

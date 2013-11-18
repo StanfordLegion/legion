@@ -125,6 +125,7 @@ namespace LegionRuntime {
       task->spawn_task = stealing_enabled;
       task->map_locally = task->variants->leaf; 
       task->profile_task = !profiler.profiling_complete(task);
+      task->task_priority = 0; // No prioritization
       // For selecting a target processor see if we have finished profiling
       // the given task otherwise send it to a processor of the right kind
       if (profiler.profiling_complete(task))

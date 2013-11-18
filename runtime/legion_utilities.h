@@ -409,6 +409,7 @@ namespace LegionRuntime {
       inline void unset_bit(unsigned bit);
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
     public:
       inline bool operator==(const BitMask &rhs) const;
       inline bool operator<(const BitMask &rhs) const;
@@ -475,6 +476,7 @@ namespace LegionRuntime {
       inline void unset_bit(unsigned bit);
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
     public:
       inline bool operator==(const TLBitMask &rhs) const;
       inline bool operator<(const TLBitMask &rhs) const;
@@ -1051,6 +1053,27 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 8*sizeof(T); j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              return (idx*8*sizeof(T) + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     inline const T& BitMask<T,MAX,SHIFT,MASK>::operator[](
                                                     const unsigned &idx) const
     //-------------------------------------------------------------------------
@@ -1557,6 +1580,27 @@ namespace LegionRuntime {
 #endif
       unsigned idx = bit >> SHIFT;
       return (bit_vector[idx] & (1ULL << (bit & MASK)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 8*sizeof(T); j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+            {
+              return (idx*8*sizeof(T) + j);
+            }
+          }
+        }
+      }
+      return -1;
     }
 
     //-------------------------------------------------------------------------

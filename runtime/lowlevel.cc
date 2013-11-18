@@ -38,6 +38,7 @@ GASNETT_THREADKEY_DEFINE(gpu_thread);
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 // Implementation of Detailed Timer
 namespace LegionRuntime {
@@ -75,6 +76,7 @@ namespace LegionRuntime {
       DESTROY_LOCK_MSGID,
       REMOTE_REDLIST_MSGID,
       MACHINE_SHUTDOWN_MSGID,
+      BARRIER_ADJUST_MSGID,
     };
 
     // detailed timer stuff
@@ -812,12 +814,17 @@ namespace LegionRuntime {
       owner = _init_owner;
       generation = 0;
       gen_subscribed = 0;
-      in_use = false;
+      free_generation = 0;
       next_free = 0;
       mutex = new gasnet_hsl_t;
       //printf("[%d] MUTEX INIT %p\n", gasnet_mynode(), mutex);
       gasnet_hsl_init(mutex);
       remote_waiters = 0;
+      base_arrival_count = current_arrival_count = 0;
+      for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
+        local_wait_heads[i] = 0;
+        local_wait_tailps[i] = local_wait_heads + i;
+      }
     }
 
     struct EventSubscribeArgs {
@@ -907,8 +914,10 @@ namespace LegionRuntime {
 	  Event::Impl *e = &(n->events[j]);
 	  AutoHSLLock a2(e->mutex);
 
-	  if(!e->in_use) continue;
+	  if(e->generation >= e->free_generation) continue;
 
+          assert(0);
+#ifdef FIX_THIS_LATER
 	  printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
 		 e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
 		 e->local_waiters.size());
@@ -922,6 +931,7 @@ namespace LegionRuntime {
 	      (*it2)->print_info();
 	    }
 	  }
+#endif
 	}
       }
       printf("DONE\n");
@@ -951,12 +961,33 @@ namespace LegionRuntime {
       return e->has_triggered(gen);
     }
 
-    class EventMerger : public Event::Impl::EventWaiter {
+    class EventMerger {
     public:
+#define LOCK_FREE_MERGED_EVENTS
+      class MergeWaiter : public Event::Impl::EventWaiter {
+      public:
+        MergeWaiter(EventMerger *_merger) : merger(_merger) {}
+
+        virtual bool event_triggered(void) 
+        {
+          bool nuke = merger->event_triggered();
+          if(nuke) delete merger;
+          return true; // always delete us
+        }
+
+        virtual void print_info(void) { merger->print_info(); }
+      
+      protected:
+        EventMerger *merger;
+      };
+
       EventMerger(Event _finish_event)
 	: count_needed(1), finish_event(_finish_event)
       {
+#ifdef LOCK_FREE_MERGED_EVENTS
+#else
 	gasnet_hsl_init(&mutex);
+#endif
       }
 
       void add_event(Event wait_for)
@@ -968,24 +999,28 @@ namespace LegionRuntime {
 	  //   instantly and call our count-decrementing function), and we
 	  //   need to make sure all increments happen before corresponding
 	  //   decrements
+	  __sync_fetch_and_add(&count_needed, 1);
+#ifdef LOCK_FREE_MERGED_EVENTS
+#else
 	  AutoHSLLock a(mutex);
 	  count_needed++;
+#endif
 	}
 	// step 2: enqueue ourselves on the input event
-	wait_for.impl()->add_waiter(wait_for, this);
+	wait_for.impl()->add_waiter(wait_for, new MergeWaiter(this));
       }
 
       // arms the merged event once you're done adding input events - just
       //  decrements the count for the implicit 'init done' event
       void arm(void)
       {
-	event_triggered();
+	bool nuke = event_triggered();
+        assert(!nuke);
       }
 
-      virtual void event_triggered(void)
+      virtual bool event_triggered(void)
       {
 	bool last_trigger = false;
-#define LOCK_FREE_MERGED_EVENTS
 #ifdef LOCK_FREE_MERGED_EVENTS
 	unsigned count_left = __sync_fetch_and_add(&count_needed, -1);
 	log_event(LEVEL_INFO, "recevied trigger merged event %x/%d (%d)",
@@ -1015,6 +1050,9 @@ namespace LegionRuntime {
 	    i->trigger(finish_event.gen, gasnet_mynode());
 	  }
 	}
+
+        // caller can delete us if this was the last trigger
+        return last_trigger;
       }
 
       virtual void print_info(void)
@@ -1025,7 +1063,10 @@ namespace LegionRuntime {
     protected:
       unsigned count_needed;
       Event finish_event;
+#ifdef LOCK_FREE_MERGED_EVENTS
+#else
       gasnet_hsl_t mutex;
+#endif
     };
 
     // creates an event that won't trigger until all input events have
@@ -1131,10 +1172,10 @@ namespace LegionRuntime {
       return u;
     }
 
-    void UserEvent::trigger(void) const
+    void UserEvent::trigger(Event wait_on) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      impl()->trigger(gen, gasnet_mynode());
+      impl()->trigger(gen, gasnet_mynode(), wait_on);
       //Runtime::get_runtime()->get_event_impl(*this)->trigger();
     }
 
@@ -1151,8 +1192,8 @@ namespace LegionRuntime {
 	}
       }
       if(impl) {
-	assert(!impl->in_use);
-	impl->in_use = true;
+	assert(impl->generation == impl->free_generation);
+	impl->free_generation++; // normal events are one-shot
 	Event ev = impl->me;
 	ev.gen = impl->generation + 1;
 	//printf("REUSE EVENT %x/%d\n", ev.id, ev.gen);
@@ -1211,7 +1252,7 @@ namespace LegionRuntime {
       events.resize(index + 1);
       Event ev = ID(ID::ID_EVENT, gasnet_mynode(), index).convert<Event>();
       events[index].init(ev, gasnet_mynode());
-      events[index].in_use = true;
+      events[index].free_generation++; // this event will be available after this generation
       Runtime::runtime->nodes[gasnet_mynode()].num_events = index + 1;
       ev.gen = 1; // waiting for first generation of this new event
       //printf("NEW EVENT %x/%d\n", ev.id, ev.gen);
@@ -1227,7 +1268,7 @@ namespace LegionRuntime {
       return ev;
     }
 
-    void Event::Impl::add_waiter(Event event, EventWaiter *waiter)
+    void Event::Impl::add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed /*= false*/)
     {
 #ifdef EVENT_TRACING
       {
@@ -1250,7 +1291,20 @@ namespace LegionRuntime {
 		    event.id, event.gen, owner, generation, gen_subscribed);
 	  // we haven't triggered the needed generation yet - add to list of
 	  //  waiters, and subscribe if we're not the owner
-	  local_waiters[event.gen].push_back(waiter);
+	  size_t idx = event.gen - generation - 1;
+          //printf("add %x/%d <- %p (%d)\n", event.id, generation, waiter, idx);
+          assert(idx < NUM_LOCAL_WAIT_LISTS);
+          *(local_wait_tailps[idx]) = waiter;
+          assert(waiter->next_waiter == 0);
+          local_wait_tailps[idx] = &(waiter->next_waiter);
+#if 0
+          for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
+            printf(" [%d] (%d) =", i, generation+i+1);
+            for(EventWaiter *w = local_wait_heads[i]; w; w = w->next_waiter)
+              printf(" %p", w);
+            printf(" (%p)\n", local_wait_tailps[i]);
+          }
+#endif
 	  //printf("LOCAL WAITERS CHECK: %zd\n", local_waiters.size());
 
 	  if((owner != gasnet_mynode()) && (event.gen > gen_subscribed)) {
@@ -1265,11 +1319,14 @@ namespace LegionRuntime {
 	}
       }
 
-      if(subscribe_owner != -1)
+      if((subscribe_owner != -1) && !pre_subscribed)
 	EventSubscribeMessage::request(owner, args);
 
-      if(trigger_now)
-	waiter->event_triggered();
+      if(trigger_now) {
+	bool nuke = waiter->event_triggered();
+        if(nuke)
+          delete waiter;
+      }
     }
 
     bool Event::Impl::has_triggered(Event::gen_t needed_gen)
@@ -1290,7 +1347,12 @@ namespace LegionRuntime {
       PthreadCondWaiter(pthread_cond_t *_condp) : condp(_condp) {}
       ~PthreadCondWaiter(void) {}
 
-      virtual void event_triggered(void) { pthread_cond_signal(condp); }
+      virtual bool event_triggered(void)
+      {
+        pthread_cond_signal(condp);
+        // we're allocated on caller's stack, so deleting would be bad
+        return false;
+      }
       virtual void print_info(void) { printf("external waiter"); }
 
     protected:
@@ -1306,8 +1368,11 @@ namespace LegionRuntime {
 	AutoHSLLock a(mutex);
 
 	if(gen_needed > generation) {
-	  local_waiters[gen_needed].push_back(&w);
-    
+          size_t idx = gen_needed - generation - 1;
+          assert(idx < NUM_LOCAL_WAIT_LISTS);
+          *(local_wait_tailps[idx]) = &w;
+          local_wait_tailps[idx] = &(w.next_waiter);
+
 	  if((owner != gasnet_mynode()) && (gen_needed > gen_subscribed)) {
 	    printf("AAAH!  Can't subscribe to another node's event in external_wait()!\n");
 	    exit(1);
@@ -1319,8 +1384,43 @@ namespace LegionRuntime {
       }
     }
 
-    void Event::Impl::trigger(Event::gen_t gen_triggered, int trigger_node)
+    class DeferredEventTrigger : public Event::Impl::EventWaiter {
+    public:
+      DeferredEventTrigger(Event _after_event)
+	: after_event(_after_event)
+      {}
+
+      virtual bool event_triggered(void)
+      {
+	log_event.info("deferred trigger occuring: %x/%d", after_event.id, after_event.gen);
+	after_event.impl()->trigger(after_event.gen, gasnet_mynode(), Event::NO_EVENT);
+        return true;
+      }
+
+      virtual void print_info(void)
+      {
+	printf("deferred trigger: after=%x/%d\n",
+	       after_event.id, after_event.gen);
+      }
+
+    protected:
+      Event after_event;
+    };
+
+    void Event::Impl::trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on)
     {
+      if(!wait_on.has_triggered()) {
+	// deferred trigger
+	// TODO: forward the deferred trigger to the owning node if it's remote
+	Event after_event;
+	after_event.id = me.id;
+	after_event.gen = gen_triggered;
+	log_event.info("deferring event trigger: in=%x/%d out=%x/%d\n",
+		       wait_on.id, wait_on.gen, me.id, gen_triggered);
+	wait_on.impl()->add_waiter(wait_on, new DeferredEventTrigger(after_event));
+	return;
+      }
+
       log_event(LEVEL_SPEW, "event triggered: event=%x/%d by node %d", 
 		me.id, gen_triggered, trigger_node);
 #ifdef EVENT_TRACING
@@ -1332,11 +1432,13 @@ namespace LegionRuntime {
       }
 #endif
       //printf("[%d] TRIGGER %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
-      std::deque<EventWaiter *> to_wake;
+      EventWaiter *wake_head = 0;
+      EventWaiter **wake_tailp = &wake_head;
+      bool release_event = false;
       {
 	//TimeStamp ts("foo", true);
 	//printf("[%d] TRIGGER MUTEX IN %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
-	AutoHSLLock a(mutex);
+	AutoHSLLock a(mutex); //, "event trigger");
 	//printf("[%d] TRIGGER MUTEX HOLD %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
 
 	//printf("[%d] TRIGGER GEN: %x/%d->%d\n", gasnet_mynode(), me.id, generation, gen_triggered);
@@ -1345,16 +1447,43 @@ namespace LegionRuntime {
 	//  an older generation, just ignore it
 	if(gen_triggered <= generation) return;
 	//assert(gen_triggered > generation);
+	size_t gen_delta = gen_triggered - generation;
 	generation = gen_triggered;
+	// if the generation is caught up to the "free generation", we can release the event
+	if(generation == free_generation)
+	  release_event = true;
 
+        // build list of folks to trigger (after we release the lock) and
+        //   and shift other generations down
 	//printf("[%d] LOCAL WAITERS: %zd\n", gasnet_mynode(), local_waiters.size());
-	std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = local_waiters.begin();
-	while((it != local_waiters.end()) && (it->first <= gen_triggered)) {
-	  //printf("[%d] LOCAL WAIT: %d (%zd)\n", gasnet_mynode(), it->first, it->second.size());
-	  to_wake.insert(to_wake.end(), it->second.begin(), it->second.end());
-	  local_waiters.erase(it);
-	  it = local_waiters.begin();
-	}
+	assert(gen_delta <= NUM_LOCAL_WAIT_LISTS);
+        for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
+          if(i < gen_delta) {
+            if(local_wait_heads[i]) {
+              *wake_tailp = local_wait_heads[i];
+              wake_tailp = local_wait_tailps[i];
+            }
+          }
+          if((i + gen_delta) < NUM_LOCAL_WAIT_LISTS) {
+            local_wait_heads[i] = local_wait_heads[i + gen_delta];
+            local_wait_tailps[i] = (local_wait_heads[i] ?
+                                      local_wait_tailps[i + gen_delta] :
+                                      (local_wait_heads + i));
+          } else {
+            // fresh list
+            local_wait_heads[i] = 0;
+            local_wait_tailps[i] = local_wait_heads + i;
+          }
+        }
+#if 0
+        printf("trigger %x/%d\n", me.id, generation);
+        for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
+          printf(" [%d] (%d) =", i, generation+i+1);
+          for(EventWaiter *w = local_wait_heads[i]; w; w = w->next_waiter)
+            printf(" %p", w);
+          printf(" (%p)\n", local_wait_tailps[i]);
+        }
+ #endif
 
 	// notify remote waiters and/or event's actual owner
 	if(owner == gasnet_mynode()) {
@@ -1380,36 +1509,238 @@ namespace LegionRuntime {
 	    EventTriggerMessage::request(owner, args);
 	  }
 	}
-
-	in_use = false;
       }
 
-      {
+      if(release_event) {
 	//TimeStamp ts("foo2", true);
 	// if this is one of our events, put ourselves on the free
 	//  list (we don't need our lock for this)
 	if(owner == gasnet_mynode()) {
 	  AutoHSLLock al(&freelist_mutex);
+	  base_arrival_count = current_arrival_count = 0;
 	  next_free = first_free;
 	  first_free = this;
 	}
       }
 
-      {
+      if(wake_head) {
 	//TimeStamp ts("foo3", true);
 	// now that we've let go of the lock, notify all the waiters who wanted
 	//  this event generation (or an older one)
-	for(std::deque<EventWaiter *>::iterator it = to_wake.begin();
-	    it != to_wake.end();
-	    it++)
-	  (*it)->event_triggered();
+	while(wake_head) {
+          EventWaiter *next = wake_head->next_waiter;
+          wake_head->next_waiter = 0;
+          //printf("WAKE: %x/%d -> %p\n", me.id, generation, wake_head);
+          bool nuke = wake_head->event_triggered();
+          if(nuke)
+            delete wake_head;
+          wake_head = next;
+        }
+      }
+    }
+
+    static Barrier::timestamp_t barrier_adjustment_timestamp;
+
+    static const int BARRIER_TIMESTAMP_NODEID_SHIFT = 48;
+
+    struct BarrierAdjustMessage {
+      struct RequestArgs {
+	Event event;
+	Barrier::timestamp_t timestamp;
+	int delta;
+      };
+
+      static void handle_request(RequestArgs args)
+      {
+	args.event.impl()->adjust_arrival(args.event.gen, args.delta, args.timestamp);
       }
 
+      typedef ActiveMessageShortNoReply<BARRIER_ADJUST_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Event event, int delta, Barrier::timestamp_t timestamp)
       {
-	//TimeStamp ts("foo4", true);
-	{
-	  //TimeStamp ts("foo4b", true);
+	RequestArgs args;
+	
+	args.event = event;
+	args.timestamp = timestamp;
+	args.delta = delta;
+
+	Message::request(target, args);
+      }
+    };
+
+    static Logger::Category log_barrier("barrier");
+
+    class DeferredBarrierArrival : public Event::Impl::EventWaiter {
+    public:
+      DeferredBarrierArrival(Barrier _barrier, int _delta)
+	: barrier(_barrier), delta(_delta)
+      {}
+
+      virtual bool event_triggered(void)
+      {
+	log_barrier.info("deferred barrier arrival: %x/%d (%llx), delta=%d\n",
+			 barrier.id, barrier.gen, barrier.timestamp, delta);
+	barrier.impl()->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT);
+        return true;
+      }
+
+      virtual void print_info(void)
+      {
+	printf("deferred arrival: barrier=%x/%d (%llx), delta=%d\n",
+	       barrier.id, barrier.gen, barrier.timestamp, delta);
+      }
+
+    protected:
+      Barrier barrier;
+      int delta;
+    };
+
+    class Event::Impl::PendingUpdates {
+     public:
+      struct PerNodeUpdates {
+        Barrier::timestamp_t last_ts;
+        std::map<Barrier::timestamp_t, int> pending;
+      };
+
+      PendingUpdates(void) : unguarded_delta(0) {}
+      ~PendingUpdates(void)
+      {
+        for(std::map<int, PerNodeUpdates *>::iterator it = pernode.begin();
+            it != pernode.end();
+            it++)
+          delete (it->second);
+      }
+
+      int handle_adjustment(Barrier::timestamp_t ts, int delta)
+      {
+        int delta_out = 0;
+        int node = ts >> BARRIER_TIMESTAMP_NODEID_SHIFT;
+        PerNodeUpdates *pn;
+        std::map<int, PerNodeUpdates *>::iterator it = pernode.find(node);
+        if(it != pernode.end()) {
+          pn = it->second;
+        } else {
+          pn = new PerNodeUpdates;
+          pernode[node] = pn;
+        }
+        if(delta > 0) {
+          // TODO: really need two timestamps to properly order increments
+          delta_out += delta;
+          pn->last_ts = ts;
+          std::map<Barrier::timestamp_t, int>::iterator it2 = pn->pending.begin();
+          while((it2 != pn->pending.end()) && (it2->first <= pn->last_ts)) {
+            log_barrier.info("applying pending delta: %llx/%d", it2->first, it2->second);
+            delta_out += it2->second;
+            pn->pending.erase(it2);
+            it2 = pn->pending.begin();
+          }
+        } else {
+          // if the timestamp is late enough, we can apply this directly
+          if(ts <= pn->last_ts) {
+            log_barrier.info("adjustment can be applied immediately: %llx/%d (%llx)",
+                             ts, delta, pn->last_ts);
+            delta_out += delta;
+          } else {
+            log_barrier.info("adjustment must be deferred: %llx/%d (%llx)",
+                             ts, delta, pn->last_ts);
+            pn->pending[ts] += delta;
+          }
+        }
+        return delta_out;
+      }
+
+      int unguarded_delta;
+
+      std::map<int, PerNodeUpdates *> pernode;
+    };
+
+    // used to adjust a barrier's arrival count either up or down
+    // if delta > 0, timestamp is current time (on requesting node)
+    // if delta < 0, timestamp says which positive adjustment this arrival must wait for
+    void Event::Impl::adjust_arrival(Event::gen_t barrier_gen, int delta, 
+				     Barrier::timestamp_t timestamp, Event wait_on)
+    {
+      if(!wait_on.has_triggered()) {
+	// deferred arrival
+	// TODO: forward the deferred arrival to the owning node if it's remote
+	Barrier b;
+	b.id = me.id;
+	b.gen = barrier_gen;
+	b.timestamp = timestamp;
+	log_barrier.info("deferring barrier arrival: delta=%d in=%x/%d out=%x/%d (%llx)\n",
+			 delta, wait_on.id, wait_on.gen, me.id, barrier_gen, timestamp);
+	wait_on.impl()->add_waiter(wait_on, new DeferredBarrierArrival(b, delta));
+	return;
+      }
+
+      log_barrier.info("barrier adjustment: event=%x/%d delta=%d ts=%llx", 
+		       me.id, barrier_gen, delta, timestamp);
+
+      if(owner != gasnet_mynode()) {
+	// all adjustments handled by owner node
+        Event e;
+        e.id = me.id;
+        e.gen = barrier_gen;
+	BarrierAdjustMessage::send_request(owner, e, delta, timestamp);
+	return;
+      }
+
+      // can't actually trigger while holding the lock, so remember which generation(s),
+      //  if any, to trigger and do it at the end
+      gen_t trigger_gen = 0;
+      {
+	AutoHSLLock a(mutex);
+
+	// sanity checks - is this a valid barrier?
+	assert(generation < free_generation);
+	assert(base_arrival_count > 0);
+
+	// just handle updates to current generation first
+	if(barrier_gen == (generation + 1)) {
+          int act_delta = 0;
+          if(timestamp == 0) {
+            act_delta = delta;
+          } else {
+            // some ordering is required - check pending updates
+            PendingUpdates *p;
+            std::map<Event::gen_t, PendingUpdates *>::iterator it = pending_updates.find(barrier_gen);
+            if(it != pending_updates.end()) {
+              p = it->second;
+            } else {
+	      p = new PendingUpdates;
+              pending_updates[barrier_gen] = p;
+            }
+            act_delta = p->handle_adjustment(timestamp, delta);
+            log_barrier.info("barrier timestamp adjustment: %x/%d, %llx/%d -> %d",
+                             me.id, barrier_gen, timestamp, delta, act_delta);
+          }
+
+	  if(act_delta > 0) {
+	    current_arrival_count += act_delta;
+	  } else {
+	    assert(-act_delta <= current_arrival_count);
+	    current_arrival_count += act_delta; // delta is negative
+	    if(current_arrival_count == 0) {
+	      // mark that we want to trigger this barrier generation
+	      trigger_gen = barrier_gen;
+
+	      // and reset the arrival count for the next generation
+	      current_arrival_count = base_arrival_count;
+	    }
+	  }
+	} else {
+	  // defer updates for future generations until then becomes now
+	  assert(0);
 	}
+      }
+
+      if(trigger_gen != 0) {
+	log_barrier.info("barrier trigger: event=%x/%d", 
+			 me.id, trigger_gen);
+	trigger(trigger_gen, gasnet_mynode());
       }
     }
 
@@ -1418,9 +1749,28 @@ namespace LegionRuntime {
 
     /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals)
     {
-      // TODO: Implement this
-      assert(false);
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+      // start by getting a free event
+      Event e = Event::Impl::create_event();
+
+      // now turn it into a barrier
+      Event::Impl *impl = e.impl();
+
+      // set the arrival count
+      impl->base_arrival_count = expected_arrivals;
+      impl->current_arrival_count = expected_arrivals;
+
+      // and let the barrier rearm as many times as necessary without being released
+      impl->free_generation = (unsigned)-1;
+
+      log_barrier.info("barrier created: %x/%d base_count=%d", e.id, e.gen, impl->base_arrival_count);
+
       Barrier result;
+      result.id = e.id;
+      result.gen = e.gen;
+      result.timestamp = 0;
+
       return result;
     }
 
@@ -1432,22 +1782,38 @@ namespace LegionRuntime {
 
     Barrier Barrier::advance_barrier(void) const
     {
-      // TODO: Implement this
-      assert(false);
-      return *this;
+      Barrier nextgen;
+      nextgen.id = id;
+      nextgen.gen = gen + 1;
+      nextgen.timestamp = 0;
+
+      return nextgen;
     }
 
     Barrier Barrier::alter_arrival_count(int delta) const
     {
-      // TODO: Implement this
-      assert(false);
-      return *this;
+      timestamp_t timestamp = __sync_fetch_and_add(&barrier_adjustment_timestamp, 1);
+      impl()->adjust_arrival(gen, delta, timestamp);
+
+      Barrier with_ts;
+      with_ts.id = id;
+      with_ts.gen = gen;
+      with_ts.timestamp = timestamp;
+
+      return with_ts;
     }
 
-    void Barrier::arrive(unsigned count /*= 1*/) const
+    Event Barrier::get_previous_phase(void) const
     {
-      // TODO: Implement this
-      assert(false);
+      Event result = *this;
+      result.gen--;
+      return result;
+    }
+
+    void Barrier::arrive(unsigned count /*= 1*/, Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // arrival uses the timestamp stored in this barrier object
+      impl()->adjust_arrival(gen, -count, timestamp, wait_on);
     }
 
     ///////////////////////////////////////////////////
@@ -1911,9 +2277,10 @@ namespace LegionRuntime {
 			  Event _after_lock)
 	: lock(_lock), mode(_mode), exclusive(_exclusive), after_lock(_after_lock) {}
 
-      virtual void event_triggered(void)
+      virtual bool event_triggered(void)
       {
 	lock.impl()->lock(mode, exclusive, after_lock);
+        return true;
       }
 
       virtual void print_info(void)
@@ -1953,9 +2320,10 @@ namespace LegionRuntime {
       DeferredUnlockRequest(Lock _lock)
 	: lock(_lock) {}
 
-      virtual void event_triggered(void)
+      virtual bool event_triggered(void)
       {
 	lock.impl()->unlock();
+        return true;
       }
 
       virtual void print_info(void)
@@ -2081,9 +2449,10 @@ namespace LegionRuntime {
     public:
       DeferredLockDestruction(Lock _lock) : lock(_lock) {}
 
-      virtual void event_triggered(void)
+      virtual bool event_triggered(void)
       {
 	lock.impl()->release_lock();
+        return true;
       }
 
       virtual void print_info(void)
@@ -2297,6 +2666,15 @@ namespace LegionRuntime {
       {
 	delete[] base;
       }
+
+#ifdef USE_GPU
+      // For pinning CPU memories for use with asynchronous
+      // GPU copies
+      void pin_memory(void)
+      {
+        CHECK_CUDART( cudaHostRegister(base, size, cudaHostRegisterPortable) );
+      }
+#endif
 
       virtual RegionInstance create_instance(IndexSpace r,
 					     const int *linearization_bits,
@@ -3018,9 +3396,9 @@ namespace LegionRuntime {
 	Task(LocalProcessor *_proc,
 	     Processor::TaskFuncID _func_id,
 	     const void *_args, size_t _arglen,
-	     Event _finish_event)
+	     Event _finish_event, int _priority)
 	  : proc(_proc), func_id(_func_id), arglen(_arglen),
-	    finish_event(_finish_event)
+	    finish_event(_finish_event), priority(_priority)
 	{
 	  if(arglen) {
 	    args = malloc(arglen);
@@ -3057,7 +3435,89 @@ namespace LegionRuntime {
 	void *args;
 	size_t arglen;
 	Event finish_event;
+        int priority;
       };
+
+#define SHARED_TASK_QUEUE
+#ifdef SHARED_TASK_QUEUE
+      class SharedTaskQueue {
+      public:
+        SharedTaskQueue(SharedTaskQueue *_parent)
+         : parent(_parent)
+        {
+          gasnet_hsl_init(&mutex);
+        }
+
+        void add_processor(LocalProcessor *p)
+        {
+          {
+            AutoHSLLock a(mutex);
+            procs.insert(p);
+          }
+          if(parent)
+            parent->add_processor(p);
+        }
+
+        void remove_processor(LocalProcessor *p)
+        {
+          {
+            AutoHSLLock a(mutex);
+            procs.erase(p);
+          }
+          if(parent)
+            parent->remove_processor(p);
+        }
+
+        // quick lock-free check to see if anything might be available
+        bool probably_empty(void) const
+        {
+          return(tasks.empty() && (!parent || parent->probably_empty()));
+        }
+
+        // attempt to actually pop the next item, returns NULL on failure
+        Task *pop(void)
+        {
+          if(!tasks.empty()) {  // don't even try if we're empty
+            AutoHSLLock a(mutex);
+            if(!tasks.empty()) { // double-check to avoid losing a race
+              Task *t = tasks.front();
+              tasks.pop_front();
+              return t;
+            }
+          }
+          // we have nothing?  maybe a parent queue does?
+          if(parent) return parent->pop();
+          // nope, nothing
+          return 0;
+        }
+
+        // add a task to the shared queue
+        void add(Task *to_add)
+        {
+          // TODO: go lock-free?
+          bool was_empty = false;
+          {
+            AutoHSLLock a(mutex);
+            was_empty = tasks.empty();
+            tasks.pri_insert(to_add);
+          }
+
+          // if we were empty, and now we're not, notify all processors
+          if(was_empty) {
+            for(std::set<LocalProcessor *>::const_iterator it = procs.begin();
+                it != procs.end();
+                it++)
+              (*it)->shared_tasks_available();
+          }
+        }
+
+      protected:
+        SharedTaskQueue *parent;
+        pri_list<Task *> tasks;
+        gasnet_hsl_t mutex;
+        std::set<LocalProcessor *> procs;
+      };
+#endif
 
       // simple thread object just has a task field that you can set and 
       //  wake up to run
@@ -3078,7 +3538,7 @@ namespace LegionRuntime {
 	      event.impl()->add_waiter(event, this);
 	  }
 
-	  virtual void event_triggered(void)
+	  virtual bool event_triggered(void)
 	  {
 	    log_task.info("thread %p notified for event %x/%d",
 			  thread, event.id, event.gen);
@@ -3103,6 +3563,9 @@ namespace LegionRuntime {
 		thread->proc->start_some_threads();
 	      }
 	    }
+
+            // don't have caller delete us
+            return false;
 	  }
 
 	  virtual void print_info(void)
@@ -3177,22 +3640,45 @@ namespace LegionRuntime {
 
 	      // plan B - if there's a ready task, we can run it while
 	      //   we're waiting (unless 'block' is set)
-	      if(!block && (proc->ready_tasks.size() > 0)) {
-		Task *newtask = proc->ready_tasks.front();
-		proc->ready_tasks.pop_front();
+	      if(!block) {
+                if(proc->ready_tasks.size() > 0) {
+		  Task *newtask = proc->ready_tasks.front();
+		  proc->ready_tasks.pop_front();
 		
-		log_task.info("thread %p (proc %x) running task %p instead of sleeping",
-			      this, proc->me.id, newtask);
+		  log_task.info("thread %p (proc %x) running task %p instead of sleeping",
+			        this, proc->me.id, newtask);
 
-		al.release();
-		newtask->run();
-		al.reacquire();
+		  al.release();
+		  newtask->run();
+		  al.reacquire();
 
-		log_task.info("thread %p (proc %x) done with inner task %p, back to waiting on %x/%d",
-			      this, proc->me.id, newtask, wait_for.id, wait_for.gen);
+		  log_task.info("thread %p (proc %x) done with inner task %p, back to waiting on %x/%d",
+			        this, proc->me.id, newtask, wait_for.id, wait_for.gen);
 
-		delete newtask;
-		continue;
+		  delete newtask;
+		  continue;
+	        }
+
+#ifdef SHARED_TASK_QUEUE
+	        // plan B(2) - try the shared queue
+	        if(proc->shared_queue) {
+	          Task *stask = proc->shared_queue->pop();
+                  if(stask) {
+		    log_task.info("thread %p (proc %x) running shared task %p instead of sleeping",
+			          this, proc->me.id, stask);
+
+		    al.release();
+		    stask->run();
+		    al.reacquire();
+
+		    log_task.info("thread %p (proc %x) done with inner shared task %p, back to waiting on %x/%d",
+			          this, proc->me.id, stask, wait_for.id, wait_for.gen);
+
+		    delete stask;
+		    continue;
+                  }
+                }
+#endif
 	      }
 
 	      // plan C - run the idle task if it's enabled and nobody else
@@ -3247,13 +3733,13 @@ namespace LegionRuntime {
 
 	virtual void thread_main(void)
 	{
-          if (proc->core_id >= 0) {
-            cpu_set_t cset;
-            CPU_ZERO(&cset);
-            CPU_SET(proc->core_id, &cset);
-            pthread_t current_thread = pthread_self();
-            CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
-          }
+          // if (proc->core_id >= 0) {
+          //   cpu_set_t cset;
+          //   CPU_ZERO(&cset);
+          //   CPU_SET(proc->core_id, &cset);
+          //   pthread_t current_thread = pthread_self();
+          //   CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
+          // }
 	  // first thing - take the lock and set our status
 	  state = STATE_IDLE;
 
@@ -3273,6 +3759,8 @@ namespace LegionRuntime {
 
 	    bool first = proc->all_threads.size() == 0;
 	    proc->all_threads.insert(this);
+
+	    // we count as an active thread until we can get to the idle loop
 	    proc->active_thread_count++;
 
 	    if(first) {
@@ -3280,11 +3768,13 @@ namespace LegionRuntime {
 	      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 	      if(it != task_id_table.end()) {
 		log_task(LEVEL_INFO, "calling processor init task: proc=%x", proc->me.id);
-		proc->active_thread_count++;
+                // consider ourselves to be running for the duration of the init task
+                state = STATE_RUN;
 		gasnet_hsl_unlock(&proc->mutex);
 		(it->second)(0, 0, proc->me);
 		gasnet_hsl_lock(&proc->mutex);
-		proc->active_thread_count--;
+                // now back to "idle"
+                state = STATE_IDLE;
 		log_task(LEVEL_INFO, "finished processor init task: proc=%x", proc->me.id);
 	      } else {
 		log_task(LEVEL_INFO, "no processor init task: proc=%x", proc->me.id);
@@ -3327,27 +3817,37 @@ namespace LegionRuntime {
 	  while(!proc->shutdown_requested) {
 	    // first priority - try to run a task if one is available and
 	    //   we're not at the active thread count limit
-	    if((proc->active_thread_count < proc->max_active_threads) &&
-	       (proc->ready_tasks.size() > 0)) {
-	      Task *newtask = proc->ready_tasks.front();
-	      proc->ready_tasks.pop_front();
+	    if(proc->active_thread_count < proc->max_active_threads) {
+              Task *newtask = 0;
+              if(proc->ready_tasks.size() > 0) {
+                newtask = proc->ready_tasks.front();
+                proc->ready_tasks.pop_front();
+              }
+#ifdef SHARED_TASK_QUEUE
+              if(!newtask && proc->shared_queue) {
+                // try to grab a task from the shared queue
+                newtask = proc->shared_queue->pop();
+              }
+#endif
 
-	      log_task.info("thread running ready task %p for proc %x",
-			    newtask, proc->me.id);
-	      proc->active_thread_count++;
-	      state = STATE_RUN;
+              if(newtask) {
+	        log_task.info("thread running ready task %p for proc %x",
+			      newtask, proc->me.id);
+	        proc->active_thread_count++;
+	        state = STATE_RUN;
 
-	      // drop processor lock while we run the task
-	      al.release();
-	      newtask->run();
-	      al.reacquire();
+	        // drop processor lock while we run the task
+	        al.release();
+	        newtask->run();
+	        al.reacquire();
 
-	      state = STATE_IDLE;
-	      proc->active_thread_count--;
-	      log_task.info("thread finished running task %p for proc %x",
-			    newtask, proc->me.id);
-	      delete newtask;
-	      continue;
+	        state = STATE_IDLE;
+	        proc->active_thread_count--;
+	        log_task.info("thread finished running task %p for proc %x",
+			      newtask, proc->me.id);
+	        delete newtask;
+	        continue;
+              }
 	    }
 
 	    // next idea - try to run the idle task
@@ -3432,14 +3932,23 @@ namespace LegionRuntime {
 	  // we do _NOT_ own the task - do not free it
 	}
 
-	virtual void event_triggered(void)
+	virtual bool event_triggered(void)
 	{
 	  log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=%x/%d",
 		   task->func_id, 
 		   task->finish_event.id, task->finish_event.gen);
 
 	  // add task to processor's ready queue
+#ifdef SHARED_TASK_QUEUE
+          if(task->func_id && task->proc->shared_queue) {
+            // always insert into shared queue for now
+            task->proc->shared_queue->add(task);
+            return true;
+          }
+#endif
 	  task->proc->add_ready_task(task);
+
+          return true;
 	}
 
 	virtual void print_info(void)
@@ -3453,8 +3962,14 @@ namespace LegionRuntime {
       };
 
       LocalProcessor(Processor _me, int _core_id, 
+#ifdef SHARED_TASK_QUEUE
+                     SharedTaskQueue *_shared_queue,
+#endif
 		     int _total_threads = 1, int _max_active_threads = 1)
 	: Processor::Impl(_me, Processor::LOC_PROC), core_id(_core_id),
+#ifdef SHARED_TASK_QUEUE
+          shared_queue(_shared_queue),
+#endif
 	  total_threads(_total_threads),
 	  active_thread_count(0), max_active_threads(_max_active_threads),
 	  init_done(false), shutdown_requested(false), shutdown_event(Event::NO_EVENT), in_idle_task(false),
@@ -3465,23 +3980,32 @@ namespace LegionRuntime {
 	// if a processor-idle task is in the table, make a Task object for it
 	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
 	idle_task = ((it != task_id_table.end()) ?
-  		       new Task(this, Processor::TASK_ID_PROCESSOR_IDLE, 0, 0, Event::NO_EVENT) :
+  		       new Task(this, Processor::TASK_ID_PROCESSOR_IDLE, 0, 0, Event::NO_EVENT, 0) :
 		       0);
+
+#ifdef SHARED_TASK_QUEUE
+        if(shared_queue)
+          shared_queue->add_processor(this);
+#endif
       }
 
       ~LocalProcessor(void)
       {
+#ifdef SHARED_TASK_QUEUE
+        if(shared_queue)
+          shared_queue->remove_processor(this);
+#endif
 	delete idle_task;
       }
 
-      void start_worker_threads(void)
+      void start_worker_threads(size_t stack_size)
       {
 	// create worker threads - they will enqueue themselves when
 	//   they're ready
 	for(int i = 0; i < total_threads; i++) {
 	  Thread *t = new Thread(this);
 	  log_task(LEVEL_DEBUG, "creating worker thread : proc=%x thread=%p", me.id, t);
-	  t->start_thread();
+	  t->start_thread(stack_size, core_id, "local worker");
 	}
       }
 
@@ -3506,9 +4030,30 @@ namespace LegionRuntime {
 	  return;
 	}
 
-	// push the task onto the ready task list and then see if we can
-	//  start a thread to run it
-	ready_tasks.push_back(task);
+        // Common case: if the guy on the back has our priority or higher then just
+        // put us on the back too.
+        if (ready_tasks.empty() || (ready_tasks.back()->priority >= task->priority))
+          ready_tasks.push_back(task);
+        else
+        {
+          // Uncommon case: go through the list until we find someone
+          // who has a priority lower than ours.  We know they
+          // exist since we saw them on the back.
+          bool inserted = false;
+          for (std::list<Task*>::iterator it = ready_tasks.begin();
+                it != ready_tasks.end(); it++)
+          {
+            if ((*it)->priority < task->priority)
+            {
+              ready_tasks.insert(it, task);
+              inserted = true;
+              break;
+            }
+          }
+          // Technically we shouldn't need this, but just to be safe
+          if (!inserted)
+            ready_tasks.push_back(task);
+        }
 
 	log_task.info("pushing ready task %p onto list for proc %x (active=%d, idle=%zd, preempt=%zd)",
 		      task, me.id, active_thread_count,
@@ -3537,6 +4082,33 @@ namespace LegionRuntime {
 	}
       }
 
+      void shared_tasks_available(void)
+      {
+        AutoHSLLock a(mutex);
+
+	if(active_thread_count < max_active_threads) {
+	  if(avail_threads.size() > 0) {
+	    // take a thread and start him - up to him to run this task or not
+	    Thread *t = avail_threads.front();
+	    avail_threads.pop_front();
+	    assert(t->state == Thread::STATE_IDLE);
+	    log_task.info("waking up thread %p to handle new shared task", t);
+	    gasnett_cond_signal(&t->condvar);
+	  } else
+	    if(preemptable_threads.size() > 0) {
+	      Thread *t = preemptable_threads.front();
+	      preemptable_threads.pop_front();
+	      assert(t->state == Thread::STATE_PREEMPTABLE);
+	      t->state = Thread::STATE_RUN;
+	      active_thread_count++;
+	      log_task.info("preempting thread %p to handle new shared task", t);
+	      gasnett_cond_signal(&t->condvar);
+	    } else {
+	      log_task.info("no threads avialable to run new shared task");
+	    }
+	}
+      }
+
       // see if there are resumable threads and/or new tasks to run, respecting
       //  the available thread and runnable thread limits
       // ASSUMES LOCK IS HELD BY CALLER
@@ -3558,17 +4130,25 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event)
+			      Event start_event, Event finish_event,
+                              int priority)
       {
 	// create task object to hold args, etc.
-	Task *task = new Task(this, func_id, args, arglen, finish_event);
+	Task *task = new Task(this, func_id, args, arglen, finish_event, priority);
 
 	// early out - if the event has obviously triggered (or is NO_EVENT)
 	//  don't build up continuation
 	if(start_event.has_triggered()) {
-	  log_task(LEVEL_DEBUG, "new ready task: func=%d start=%x/%d finish=%x/%d",
+	  log_task(LEVEL_INFO, "new ready task: func=%d start=%x/%d finish=%x/%d",
 		   func_id, start_event.id, start_event.gen,
 		   finish_event.id, finish_event.gen);
+#ifdef SHARED_TASK_QUEUE
+          if(func_id && shared_queue) {
+            // always insert into shared queue for now
+            shared_queue->add(task);
+            return;
+          }
+#endif
 	  add_ready_task(task);
 	} else {
 	  log_task(LEVEL_DEBUG, "deferring spawn: func=%d event=%x/%d",
@@ -3636,6 +4216,9 @@ namespace LegionRuntime {
 
     protected:
       int core_id;
+#ifdef SHARED_TASK_QUEUE
+      SharedTaskQueue *shared_queue;
+#endif
       int total_threads, active_thread_count, max_active_threads;
       std::list<Task *> ready_tasks;
       std::list<Thread *> avail_threads;
@@ -3655,9 +4238,9 @@ namespace LegionRuntime {
       UtilityTask(UtilityProcessor *_proc,
 		  Processor::TaskFuncID _func_id,
 		  const void *_args, size_t _arglen,
-		  Event _finish_event)
+		  Event _finish_event, int _priority)
 	: proc(_proc), func_id(_func_id), arglen(_arglen),
-	  finish_event(_finish_event)
+	  finish_event(_finish_event), priority(_priority)
       {
 	if(arglen) {
 	  args = malloc(arglen);
@@ -3672,9 +4255,12 @@ namespace LegionRuntime {
 	if(args) free(args);
       }
 
-      virtual void event_triggered(void)
+      virtual bool event_triggered(void)
       {
 	proc->enqueue_runnable_task(this);
+
+        // no deletion here
+        return false;
       }
 
       virtual void print_info(void)
@@ -3709,12 +4295,16 @@ namespace LegionRuntime {
       void *args;
       size_t arglen;
       Event finish_event;
+      int priority;
     };
 
-    void PreemptableThread::start_thread(void)
+    void PreemptableThread::start_thread(size_t stack_size, int core_id, const char *debug_name)
     {
       pthread_attr_t attr;
       CHECK_PTHREAD( pthread_attr_init(&attr) );
+      CHECK_PTHREAD( pthread_attr_setstacksize(&attr,stack_size) );
+      if(proc_assignment)
+	proc_assignment->bind_thread(core_id, &attr, debug_name);
       CHECK_PTHREAD( pthread_create(&thread, &attr, &thread_entry, (void *)this) );
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
     }
@@ -3761,7 +4351,7 @@ namespace LegionRuntime {
       void sleep_on_event(Event wait_for, bool block = false)
       {
 	while(!wait_for.has_triggered()) {
-	  log_util.info("utility thread polling on event %x/%d",
+	  log_util.spew("utility thread polling on event %x/%d",
 			wait_for.id, wait_for.gen);
 	  //usleep(1000);
 	}
@@ -3775,13 +4365,13 @@ namespace LegionRuntime {
     protected:
       void thread_main(void)
       {
-        if (proc->core_id >= 0) {
-          cpu_set_t cset;
-          CPU_ZERO(&cset);
-          CPU_SET(proc->core_id, &cset);
-          pthread_t current_thread = pthread_self();
-          CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
-        }
+        // if (proc->core_id >= 0) {
+        //   cpu_set_t cset;
+        //   CPU_ZERO(&cset);
+        //   CPU_SET(proc->core_id, &cset);
+        //   pthread_t current_thread = pthread_self();
+        //   CHECK_PTHREAD( pthread_setaffinity_np(current_thread, sizeof(cset), &cset) );
+        // }
 	// need to call init for utility processor too
 	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 	if(it != task_id_table.end()) {
@@ -3801,12 +4391,12 @@ namespace LegionRuntime {
 	  // try to run tasks from the runnable queue
 	  while(proc->tasks.size() > 0) {
 	    UtilityTask *task = proc->tasks.front();
-	    proc->tasks.pop();
+	    proc->tasks.pop_front();
 	    gasnet_hsl_unlock(&proc->mutex);
-	    log_util.info("running task %p in utility thread", task);
+	    log_util.debug("running task %p in utility thread", task);
 	    task->run();
 	    delete task;
-	    log_util.info("done with task %p in utility thread", task);
+	    log_util.debug("done with task %p in utility thread", task);
 	    gasnet_hsl_lock(&proc->mutex);
 	  }
 
@@ -3832,9 +4422,9 @@ namespace LegionRuntime {
 		gasnet_hsl_unlock(&proc->mutex);
 
 		// run the idle task on behalf of the idle proc
-		log_util.info("running idle task for %x", idle_proc->me.id);
+		log_util.debug("running idle task for %x", idle_proc->me.id);
 		proc->idle_task->run(idle_proc->me);
-		log_util.info("done with idle task for %x", idle_proc->me.id);
+		log_util.debug("done with idle task for %x", idle_proc->me.id);
 
 		gasnet_hsl_lock(&proc->mutex);
 		proc->procs_in_idle_task.erase(idle_proc);
@@ -3879,7 +4469,7 @@ namespace LegionRuntime {
                                        int _core_id /*=-1*/,
 				       int _num_worker_threads /*= 1*/)
       : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
-	core_id(_core_id), num_worker_threads(_num_worker_threads)
+	core_id(_core_id), num_worker_threads(_num_worker_threads), shutdown_requested(false)
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
@@ -3888,7 +4478,7 @@ namespace LegionRuntime {
       idle_task = ((it != task_id_table.end()) ?
 		     new UtilityTask(this, 
 				     Processor::TASK_ID_PROCESSOR_IDLE, 
-				     0, 0, Event::NO_EVENT) :
+				     0, 0, Event::NO_EVENT, 0) :
 		     0);
     }
 
@@ -3898,12 +4488,12 @@ namespace LegionRuntime {
 	delete idle_task;
     }
 
-    void UtilityProcessor::start_worker_threads(void)
+    void UtilityProcessor::start_worker_threads(size_t stack_size)
     {
       for(int i = 0; i < num_worker_threads; i++) {
 	UtilityThread *t = new UtilityThread(this);
 	threads.insert(t);
-	t->start_thread();
+	t->start_thread(stack_size, -1, "utility worker");
       }
     }
 
@@ -3920,10 +4510,11 @@ namespace LegionRuntime {
     /*virtual*/ void UtilityProcessor::spawn_task(Processor::TaskFuncID func_id,
 						  const void *args, size_t arglen,
 						  //std::set<RegionInstance> instances_needed,
-						  Event start_event, Event finish_event)
+						  Event start_event, Event finish_event,
+                                                  int priority)
     {
       UtilityTask *task = new UtilityTask(this, func_id, args, arglen,
-					  finish_event);
+					  finish_event, priority);
       if(start_event.has_triggered()) {
 	enqueue_runnable_task(task);
       } else {
@@ -3934,8 +4525,30 @@ namespace LegionRuntime {
     void UtilityProcessor::enqueue_runnable_task(UtilityTask *task)
     {
       AutoHSLLock al(mutex);
-
-      tasks.push(task);
+      // Common case: if the guy on the back has our priority or higher
+      // then just put us on the back too
+      if (tasks.empty() || (tasks.back()->priority >= task->priority))
+        tasks.push_back(task);
+      else
+      {
+        // Uncommon case: go through the list until we find someone
+        // who has priority lower than ours.  We know they exist
+        // since we saw them on the back
+        bool inserted = false;
+        for (std::list<UtilityTask*>::iterator it = tasks.begin();
+              it != tasks.end(); it++)
+        {
+          if ((*it)->priority < task->priority)
+          {
+            tasks.insert(it, task);
+            inserted = true;
+            break;
+          }
+        }
+        // Technically we shouldn't need this, but just to be safe
+        if (!inserted)
+          tasks.push_back(task);
+      }
       gasnett_cond_signal(&condvar);
     }
 
@@ -3974,6 +4587,7 @@ namespace LegionRuntime {
       Processor::TaskFuncID func_id;
       Event start_event;
       Event finish_event;
+      int priority;
     };
 
     void Event::wait(bool block) const
@@ -4045,7 +4659,7 @@ namespace LegionRuntime {
       log_task(LEVEL_DEBUG, "remote spawn request: proc_id=%x task_id=%d event=%x/%d",
 	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
       p->spawn_task(args.func_id, data, datalen,
-		    args.start_event, args.finish_event);
+		    args.start_event, args.finish_event, args.priority);
     }
 
     typedef ActiveMessageMediumNoReply<SPAWN_TASK_MSGID,
@@ -4066,7 +4680,8 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
-			      Event start_event, Event finish_event)
+			      Event start_event, Event finish_event,
+                              int priority)
       {
 	log_task(LEVEL_DEBUG, "spawning remote task: proc=%x task=%d start=%x/%d finish=%x/%d",
 		 me.id, func_id, 
@@ -4077,6 +4692,7 @@ namespace LegionRuntime {
 	msgargs.func_id = func_id;
 	msgargs.start_event = start_event;
 	msgargs.finish_event = finish_event;
+        msgargs.priority = priority;
 	SpawnTaskMessage::request(ID(me).node(), msgargs, args, arglen,
 				  PAYLOAD_COPY);
       }
@@ -4084,13 +4700,13 @@ namespace LegionRuntime {
 
     Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
 			   //std::set<RegionInstance> instances_needed,
-			   Event wait_on) const
+			   Event wait_on, int priority) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = impl();
       Event finish_event = Event::Impl::create_event();
       p->spawn_task(func_id, args, arglen, //instances_needed, 
-		    wait_on, finish_event);
+		    wait_on, finish_event, priority);
       return finish_event;
     }
 
@@ -5790,9 +6406,11 @@ namespace LegionRuntime {
 	gasnett_cond_init(&condvar);
       }
 
-      void start(void) {
+      void start(int core_id, const char *debug_name) {
 	pthread_attr_t attr;
 	CHECK_PTHREAD( pthread_attr_init(&attr) );
+	if(proc_assignment)
+	  proc_assignment->bind_thread(core_id, &attr, debug_name);
 	CHECK_PTHREAD( pthread_create(&thread, &attr, &thread_main, (void *)this) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
       }
@@ -5836,12 +6454,12 @@ namespace LegionRuntime {
 
       virtual void run(void)
       {
-	if(core_id >= 0) {
-	  cpu_set_t cset;
-	  CPU_ZERO(&cset);
-	  CPU_SET(core_id, &cset);
-	  CHECK_PTHREAD( pthread_setaffinity_np(thread, sizeof(cset), &cset) );
-	}
+	// if(core_id >= 0) {
+	//   cpu_set_t cset;
+	//   CPU_ZERO(&cset);
+	//   CPU_SET(core_id, &cset);
+	//   CHECK_PTHREAD( pthread_setaffinity_np(thread, sizeof(cset), &cset) );
+	// }
 
 	printf("thread %ld running on core %d\n", thread, core_id);
 
@@ -6064,6 +6682,7 @@ namespace LegionRuntime {
 
     static std::vector<LocalProcessor *> local_cpus;
     static std::vector<UtilityProcessor *> local_util_procs;
+    static size_t stack_size_in_mb;
 #ifdef USE_GPU
     static std::vector<GPUProcessor *> local_gpus;
 #endif
@@ -6092,6 +6711,184 @@ namespace LegionRuntime {
     }
 
     static std::map<Processor, std::set<Processor> *> proc_groups;
+
+    ProcessorAssignment::ProcessorAssignment(int _num_local_procs)
+      : num_local_procs(_num_local_procs)
+    {
+      valid = false;
+      
+      cpu_set_t cset;
+      int ret = sched_getaffinity(0, sizeof(cset), &cset);
+      if(ret < 0) {
+	printf("failed to get affinity info - binding disabled\n");
+	return;
+      }
+
+      SystemProcMap proc_map;
+      {
+	DIR *nd = opendir("/sys/devices/system/node");
+	if(!nd) {
+	  printf("can't open /sys/devices/system/node - binding disabled\n");
+	  return;
+	}
+	for(struct dirent *ne = readdir(nd); ne; ne = readdir(nd)) {
+	  if(strncmp(ne->d_name, "node", 4)) continue;  // not a node directory
+	  int node_id = atoi(ne->d_name + 4);
+	  
+	  char per_node_path[1024];
+	  sprintf(per_node_path, "/sys/devices/system/node/%s", ne->d_name);
+	  DIR *cd = opendir(per_node_path);
+	  if(!cd) {
+	    printf("can't open %s - skipping\n", per_node_path);
+	    continue;
+	  }
+
+	  for(struct dirent *ce = readdir(cd); ce; ce = readdir(cd)) {
+	    if(strncmp(ce->d_name, "cpu", 3)) continue; // definitely not a cpu
+	    char *pos;
+	    int cpu_id = strtol(ce->d_name + 3, &pos, 10);
+	    if(pos && *pos) continue;  // doesn't match cpu[0-9]+
+	    
+	    // is this a cpu we're allowed to use?
+	    if(!CPU_ISSET(cpu_id, &cset)) {
+	      printf("cpu %d not available - skipping\n", cpu_id);
+	      continue;
+	    }
+
+	    // figure out which physical core it is
+	    char core_id_path[1024];
+	    sprintf(core_id_path, "/sys/devices/system/node/%s/%s/topology/core_id", ne->d_name, ce->d_name);
+	    FILE *f = fopen(core_id_path, "r");
+	    if(!f) {
+	      printf("can't read %s - skipping\n", core_id_path);
+	      continue;
+	    }
+	    int core_id;
+	    int count = fscanf(f, "%d", &core_id);
+	    fclose(f);
+	    if(count != 1) {
+	      printf("can't find core id in %s - skipping\n", core_id_path);
+	      continue;
+	    }
+	    
+	    //printf("found: %d %d %d\n", node_id, cpu_id, core_id);
+	    proc_map[node_id][core_id].push_back(cpu_id);
+	  }
+	  closedir(cd);
+	}
+	closedir(nd);
+      }
+      
+      printf("Available cores:\n");
+      for(SystemProcMap::const_iterator it1 = proc_map.begin(); it1 != proc_map.end(); it1++) {
+	printf("  Node %d:", it1->first);
+	for(NodeProcMap::const_iterator it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
+	  if(it2->second.size() == 1) {
+	    printf(" %d", it2->second[0]);
+	  } else {
+	    printf(" {");
+	    for(size_t i = 0; i < it2->second.size(); i++)
+	      printf("%s%d", (i ? " " : ""), it2->second[i]);
+	    printf("}");
+	  }
+	}
+	printf("\n");
+      }
+
+      // count how many actual cores we have
+      size_t core_count = 0;
+      for(SystemProcMap::const_iterator it1 = proc_map.begin(); it1 != proc_map.end(); it1++)
+	core_count += it1->second.size();
+      
+      if(core_count <= num_local_procs) {
+	printf("not enough cores (%zd) to support %d local processors - skipping binding\n", core_count, num_local_procs);
+	return;
+      }
+      
+      // pick cores for each local proc - try to round-robin across nodes
+      SystemProcMap::iterator curnode = proc_map.end();
+      memcpy(&leftover_procs, &cset, sizeof(cset));  // subtract from cset to get leftovers
+      for(int i = 0; i < num_local_procs; i++) {
+	// pick the next node with any cores left
+	do {
+	  if(curnode != proc_map.end())
+	    curnode++;
+	  if(curnode == proc_map.end())
+	    curnode = proc_map.begin();
+	} while(curnode->second.size() == 0);
+	
+	NodeProcMap::iterator curcore = curnode->second.begin();
+	assert(curcore != curnode->second.end());
+	assert(curcore->second.size() > 0);
+	
+	// take the first cpu id for this core and add it to the local proc assignments
+	local_proc_assignments.push_back(curcore->second[0]);
+	
+	// and remove ALL cpu ids for this core from the leftover set
+	for(std::vector<int>::const_iterator it = curcore->second.begin(); it != curcore->second.end(); it++)
+	  CPU_CLR(*it, &leftover_procs);
+	
+	// and now remove this core from the node's list of available cores
+	curnode->second.erase(curcore);
+      }
+
+      // we now have a valid set of bindings
+      valid = true;
+
+      // set the process' default affinity to just the leftover nodes
+      bool override_default_affinity = false;
+      if(override_default_affinity) {
+	int ret = sched_setaffinity(0, sizeof(leftover_procs), &leftover_procs);
+	if(ret < 0) {
+	  printf("failed to set default affinity info!\n");
+	}
+      }
+	
+      {
+	printf("Local Proc Assignments:");
+	for(std::vector<int>::const_iterator it = local_proc_assignments.begin(); it != local_proc_assignments.end(); it++)
+	  printf(" %d", *it);
+	printf("\n");
+	
+	printf("Leftover Processors   :");
+	for(int i = 0; i < CPU_SETSIZE; i++)
+	  if(CPU_ISSET(i, &leftover_procs))
+	    printf(" %d", i);
+	printf("\n");
+      }
+    }
+
+    // binds a thread to the right set of cores based (-1 = not a local proc)
+    void ProcessorAssignment::bind_thread(int core_id, pthread_attr_t *attr, const char *debug_name /*= 0*/)
+    {
+      if(!valid) {
+	printf("no processor assignment for %s %d (%p)\n", debug_name ? debug_name : "unknown", core_id, attr);
+	return;
+      }
+
+      if((core_id >= 0) && (core_id < num_local_procs)) {
+	int cpu_id = local_proc_assignments[core_id];
+
+	printf("processor assignment for %s %d (%p) = %d\n", debug_name ? debug_name : "unknown", core_id, attr, cpu_id);
+
+	cpu_set_t cset;
+	CPU_ZERO(&cset);
+	CPU_SET(cpu_id, &cset);
+	if(attr)
+	  CHECK_PTHREAD( pthread_attr_setaffinity_np(attr, sizeof(cset), &cset) );
+	else
+	  CHECK_PTHREAD( pthread_setaffinity_np(pthread_self(), sizeof(cset), &cset) );
+      } else {
+	printf("processor assignment for %s %d (%p) = leftovers\n", debug_name ? debug_name : "unknown", core_id, attr);
+
+	if(attr)
+	  CHECK_PTHREAD( pthread_attr_setaffinity_np(attr, sizeof(leftover_procs), &leftover_procs) );
+	else
+	  CHECK_PTHREAD( pthread_setaffinity_np(pthread_self(), sizeof(leftover_procs), &leftover_procs) );
+      }
+    }
+
+    ProcessorAssignment *proc_assignment = 0;
 
     Machine::Machine(int *argc, char ***argv,
 		     const Processor::TaskIDTable &task_table,
@@ -6150,16 +6947,14 @@ namespace LegionRuntime {
       Arrays::Mapping<2,1>::register_mapping<Arrays::FortranArrayLinearization<2> >();
       Arrays::Mapping<3,1>::register_mapping<Arrays::FortranArrayLinearization<3> >();
 
-      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
-      CHECK_GASNET( gasnet_init(argc, argv) );
-
-      gasnet_set_waitmode(GASNET_WAIT_BLOCK);
-
       // low-level runtime parameters
       size_t gasnet_mem_size_in_mb = 256;
       size_t cpu_mem_size_in_mb = 512;
       size_t zc_mem_size_in_mb = 64;
       size_t fb_mem_size_in_mb = 256;
+      // Static variable for stack size since we need to 
+      // remember it when we launch threads in run 
+      stack_size_in_mb = 2;
       unsigned num_local_cpus = 1;
       unsigned num_local_gpus = 0;
       unsigned num_util_procs = 0;
@@ -6175,6 +6970,9 @@ namespace LegionRuntime {
       size_t   lock_trace_block_size = 1 << 20;
       double   lock_trace_exp_arrv_rate = 1e2;
 #endif
+      // should local proc threads get dedicated cores?
+      bool bind_localproc_threads = true;
+      bool pin_sysmem_for_gpu = true;
 
       for(int i = 1; i < *argc; i++) {
 #define INT_ARG(argname, varname) do { \
@@ -6193,6 +6991,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
+        INT_ARG("-ll:stack", stack_size_in_mb);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:gpu", num_local_gpus);
 	INT_ARG("-ll:util", num_util_procs);
@@ -6200,6 +6999,8 @@ namespace LegionRuntime {
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
+	INT_ARG("-ll:bind", bind_localproc_threads);
+        INT_ARG("-ll:pin", pin_sysmem_for_gpu);
 
 	if(!strcmp((*argv)[i], "-ll:eventtrace")) {
 #ifdef EVENT_TRACING
@@ -6220,6 +7021,22 @@ namespace LegionRuntime {
           continue;
         }
       }
+
+      if(bind_localproc_threads) {
+	// this has to preceed all spawning of threads, including the ones done by things like gasnet_init()
+	proc_assignment = new ProcessorAssignment(num_local_cpus);
+
+	// now move ourselves off the reserved cores
+	proc_assignment->bind_thread(-1, 0, "machine thread");
+      }
+
+      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+      CHECK_GASNET( gasnet_init(argc, argv) );
+
+      gasnet_set_waitmode(GASNET_WAIT_BLOCK);
+
+      // initialize barrier timestamp
+      barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
       Logger::init(*argc, (const char **)*argv);
 
@@ -6245,6 +7062,7 @@ namespace LegionRuntime {
       hcount += DestroyLockMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount]);
       hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount]);
+      hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount]);
       //hcount += TestMessage::add_handler_entries(&handlers[hcount]);
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount]);
 
@@ -6309,7 +7127,16 @@ namespace LegionRuntime {
 	adata[apos++] = up->util.id;
       }
 
+#ifdef USE_GPU
+      // Keep track of the local system memories so we can pin them
+      // after we've initialized the GPU
+      std::vector<LocalCPUMemory*> local_mems;
+#endif
       // create local processors
+#ifdef SHARED_TASK_QUEUE
+      // until we handle numa better, we might as well share tasks between all CPUs
+      LocalProcessor::SharedTaskQueue *shared_task_queue = new LocalProcessor::SharedTaskQueue(0);
+#endif
       for(unsigned i = 0; i < num_local_cpus; i++) {
 	Processor p = ID(ID::ID_PROCESSOR, 
 			 gasnet_mynode(), 
@@ -6317,6 +7144,9 @@ namespace LegionRuntime {
 
 	LocalProcessor *lp = new LocalProcessor(p, 
 						i,
+#ifdef SHARED_TASK_QUEUE
+                                                shared_task_queue,
+#endif
 						cpu_worker_threads, 
 						1); // HLRT not thread-safe yet
 	if(num_util_procs > 0) {
@@ -6359,6 +7189,9 @@ namespace LegionRuntime {
 				       n->memories.size(), 0).convert<Memory>(),
 				    cpu_mem_size_in_mb << 20);
 	n->memories.push_back(cpumem);
+#ifdef USE_GPU
+        local_mems.push_back(cpumem);
+#endif
 	adata[apos++] = NODE_ANNOUNCE_MEM;
 	adata[apos++] = cpumem->me.id;
         adata[apos++] = Memory::SYSTEM_MEM;
@@ -6428,24 +7261,25 @@ namespace LegionRuntime {
 					      Processor::NO_PROC,
 #endif
 					      zc_mem_size_in_mb << 20,
-					      fb_mem_size_in_mb << 20);
+					      fb_mem_size_in_mb << 20,
+                                              stack_size_in_mb << 20);
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
           {
             UtilityProcessor *up = local_util_procs[i % num_util_procs];
-            up->add_real_proc(gp);
+            gp->set_utility_processor(up);
             std::map<Processor, std::set<Processor>*>::iterator finder = proc_groups.find(up->me);
             if (finder != proc_groups.end())
             {
               finder->second->insert(p);
-              proc_groups[p] = it->second;
+              proc_groups[p] = finder->second;
             }
             else
             {
               std::set<Processor> *pgptr = new std::set<Processor>();
               pgptr->insert(p);
               proc_groups[p] = pgptr;
-              prog_groups[up->me] = pgptr;
+              proc_groups[up->me] = pgptr;
             }
           }
           else
@@ -6511,8 +7345,11 @@ namespace LegionRuntime {
 	    adata[apos++] = 3;
 	  }
 	}
+        // Now pin any CPU memories
+        if(pin_sysmem_for_gpu)
+          for (unsigned idx = 0; idx < local_mems.size(); idx++)
+            local_mems[idx]->pin_memory();
       }
-					      
 #endif
 
       adata[apos++] = NODE_ANNOUNCE_DONE;
@@ -6691,18 +7528,18 @@ namespace LegionRuntime {
       for(std::vector<UtilityProcessor *>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
 	  it++)
-	(*it)->start_worker_threads();
+	(*it)->start_worker_threads(stack_size_in_mb << 20);
 
       for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
-	(*it)->start_worker_threads();
+	(*it)->start_worker_threads(stack_size_in_mb << 20);
 
 #ifdef USE_GPU
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
 	  it != local_gpus.end();
 	  it++)
-	(*it)->start_worker_thread();
+	(*it)->start_worker_thread(); // stack size passed in GPUProcessor constructor
 #endif
 
       const std::vector<Processor::Impl *>& local_procs = Runtime::runtime->nodes[gasnet_mynode()].processors;
@@ -6720,7 +7557,7 @@ namespace LegionRuntime {
 	    it != local_procs.end();
 	    it++) {
 	  (*it)->spawn_task(task_id, args, arglen, 
-			    Event::NO_EVENT, Event::NO_EVENT);
+			    Event::NO_EVENT, Event::NO_EVENT, 0/*priority*/);
 	  if(style != ONE_TASK_PER_PROC) break;
 	}
       }
@@ -6765,7 +7602,7 @@ namespace LegionRuntime {
       {
         Event e = Event::Impl::create_event();
 	(*it)->spawn_task(0 /* shutdown task id */, 0, 0,
-			  Event::NO_EVENT, e);
+			  Event::NO_EVENT, e, 0/*priority*/);
       }
     }
 

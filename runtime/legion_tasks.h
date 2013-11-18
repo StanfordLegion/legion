@@ -126,7 +126,7 @@ namespace LegionRuntime {
       virtual void remove_created_field(FieldSpace handle, FieldID fid) = 0;
     public:
       void return_privilege_state(TaskOp *target);
-      void pack_privilege_state(Serializer &rez);
+      void pack_privilege_state(Serializer &rez, AddressSpaceID target);
       void unpack_privilege_state(Deserializer &derez);
       void perform_privilege_checks(void);
     public:
@@ -154,6 +154,7 @@ namespace LegionRuntime {
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
+      std::map<unsigned/*idx*/,InnerTaskView*> early_mapped_inner_views;
     protected:
       std::deque<RegionTreeContext> enclosing_physical_contexts;
     protected:
@@ -379,8 +380,12 @@ namespace LegionRuntime {
       // Number of virtual mapped regions
       unsigned num_virtual_mappings;
       Processor executing_processor;
-      // Hold the result of the mapping
+      // Hold the result of the mapping 
       std::deque<InstanceRef> physical_instances;
+      // If we're an inner task instead of a normal task then
+      // we also have lists of users which we will use to 
+      // seed our top-level instance view.
+      std::deque<InnerTaskView*> inner_task_views;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
       std::deque<InstanceRef> local_instances;
@@ -583,6 +588,8 @@ namespace LegionRuntime {
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
       std::deque<RegionTreeContext> remote_contexts;
+    protected:
+      bool sent_remotely;
     protected:
       friend class Runtime;
       // Special field for the top level task

@@ -17,6 +17,16 @@
 #define LOWLEVEL_GPU_H
 
 #include "lowlevel_impl.h"
+#include <cuda_runtime.h>
+
+#define CHECK_CUDART(cmd) do { \
+  cudaError_t ret = (cmd); \
+  if(ret != cudaSuccess) { \
+    fprintf(stderr, "CUDART: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString(ret)); \
+    assert(0); \
+    exit(1); \
+  } \
+} while(0)
 
 GASNETT_THREADKEY_DECLARE(gpu_thread);
 
@@ -25,7 +35,7 @@ namespace LegionRuntime {
     class GPUProcessor : public Processor::Impl {
     public:
       GPUProcessor(Processor _me, int _gpu_index, Processor _util,
-		   size_t _zcmem_size, size_t _fbmem_size);
+		   size_t _zcmem_size, size_t _fbmem_size, size_t _stack_size);
 
       ~GPUProcessor(void);
 
@@ -37,7 +47,8 @@ namespace LegionRuntime {
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstanceUntyped> instances_needed,
-			      Event start_event, Event finish_event);
+			      Event start_event, Event finish_event,
+                              int priority);
 
       virtual void enable_idle_task(void);
 
@@ -53,14 +64,14 @@ namespace LegionRuntime {
 			  size_t bytes,
 			  Event start_event, Event finish_event);
 
-      void copy_to_fb_generic(off_t dst_offset, 
-			      Memory::Impl *src_mem, off_t src_offset,
-			      size_t bytes,
-			      Event start_event, Event finish_event);
+      //void copy_to_fb_generic(off_t dst_offset, 
+      //			      Memory::Impl *src_mem, off_t src_offset,
+      //			      size_t bytes,
+      //			      Event start_event, Event finish_event);
 
-      void copy_from_fb_generic(Memory::Impl *dst_mem, off_t dst_offset, 
-				off_t src_offset, size_t bytes,
-				Event start_event, Event finish_event);
+      //void copy_from_fb_generic(Memory::Impl *dst_mem, off_t dst_offset, 
+      //				off_t src_offset, size_t bytes,
+      //				Event start_event, Event finish_event);
 
       void copy_to_fb(off_t dst_offset, const void *src,
 		      const ElementMask *mask, size_t elmt_size,
@@ -74,16 +85,16 @@ namespace LegionRuntime {
 			  const ElementMask *mask, size_t elmt_size,
 			  Event start_event, Event finish_event);
 
-      void copy_to_fb_generic(off_t dst_offset, 
-			      Memory::Impl *src_mem, off_t src_offset,
-			      const ElementMask *mask,
-			      size_t elmt_size,
-			      Event start_event, Event finish_event);
+      //void copy_to_fb_generic(off_t dst_offset, 
+      //			      Memory::Impl *src_mem, off_t src_offset,
+      //			      const ElementMask *mask,
+      //			      size_t elmt_size,
+      //			      Event start_event, Event finish_event);
 
-      void copy_from_fb_generic(Memory::Impl *dst_mem, off_t dst_offset, 
-				off_t src_offset,
-				const ElementMask *mask, size_t elmt_size,
-				Event start_event, Event finish_event);
+      //void copy_from_fb_generic(Memory::Impl *dst_mem, off_t dst_offset, 
+      //				off_t src_offset,
+      //				const ElementMask *mask, size_t elmt_size,
+      //				Event start_event, Event finish_event);
 
     public:
       // Helper method for getting a thread's processor value
