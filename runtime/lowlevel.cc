@@ -821,10 +821,6 @@ namespace LegionRuntime {
       gasnet_hsl_init(mutex);
       remote_waiters = 0;
       base_arrival_count = current_arrival_count = 0;
-      for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
-        local_wait_heads[i] = 0;
-        local_wait_tailps[i] = local_wait_heads + i;
-      }
     }
 
     struct EventSubscribeArgs {
@@ -916,8 +912,6 @@ namespace LegionRuntime {
 
 	  if(e->generation >= e->free_generation) continue;
 
-          assert(0);
-#ifdef FIX_THIS_LATER
 	  printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
 		 e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
 		 e->local_waiters.size());
@@ -931,7 +925,6 @@ namespace LegionRuntime {
 	      (*it2)->print_info();
 	    }
 	  }
-#endif
 	}
       }
       printf("DONE\n");
@@ -961,33 +954,12 @@ namespace LegionRuntime {
       return e->has_triggered(gen);
     }
 
-    class EventMerger {
+    class EventMerger : public Event::Impl::EventWaiter {
     public:
-#define LOCK_FREE_MERGED_EVENTS
-      class MergeWaiter : public Event::Impl::EventWaiter {
-      public:
-        MergeWaiter(EventMerger *_merger) : merger(_merger) {}
-
-        virtual bool event_triggered(void) 
-        {
-          bool nuke = merger->event_triggered();
-          if(nuke) delete merger;
-          return true; // always delete us
-        }
-
-        virtual void print_info(void) { merger->print_info(); }
-      
-      protected:
-        EventMerger *merger;
-      };
-
       EventMerger(Event _finish_event)
 	: count_needed(1), finish_event(_finish_event)
       {
-#ifdef LOCK_FREE_MERGED_EVENTS
-#else
 	gasnet_hsl_init(&mutex);
-#endif
       }
 
       void add_event(Event wait_for)
@@ -999,15 +971,11 @@ namespace LegionRuntime {
 	  //   instantly and call our count-decrementing function), and we
 	  //   need to make sure all increments happen before corresponding
 	  //   decrements
-	  __sync_fetch_and_add(&count_needed, 1);
-#ifdef LOCK_FREE_MERGED_EVENTS
-#else
 	  AutoHSLLock a(mutex);
 	  count_needed++;
-#endif
 	}
 	// step 2: enqueue ourselves on the input event
-	wait_for.impl()->add_waiter(wait_for, new MergeWaiter(this));
+	wait_for.impl()->add_waiter(wait_for, this);
       }
 
       // arms the merged event once you're done adding input events - just
@@ -1021,6 +989,7 @@ namespace LegionRuntime {
       virtual bool event_triggered(void)
       {
 	bool last_trigger = false;
+#define LOCK_FREE_MERGED_EVENTS
 #ifdef LOCK_FREE_MERGED_EVENTS
 	unsigned count_left = __sync_fetch_and_add(&count_needed, -1);
 	log_event(LEVEL_INFO, "recevied trigger merged event %x/%d (%d)",
@@ -1063,10 +1032,7 @@ namespace LegionRuntime {
     protected:
       unsigned count_needed;
       Event finish_event;
-#ifdef LOCK_FREE_MERGED_EVENTS
-#else
       gasnet_hsl_t mutex;
-#endif
     };
 
     // creates an event that won't trigger until all input events have
@@ -1291,20 +1257,7 @@ namespace LegionRuntime {
 		    event.id, event.gen, owner, generation, gen_subscribed);
 	  // we haven't triggered the needed generation yet - add to list of
 	  //  waiters, and subscribe if we're not the owner
-	  size_t idx = event.gen - generation - 1;
-          //printf("add %x/%d <- %p (%d)\n", event.id, generation, waiter, idx);
-          assert(idx < NUM_LOCAL_WAIT_LISTS);
-          *(local_wait_tailps[idx]) = waiter;
-          assert(waiter->next_waiter == 0);
-          local_wait_tailps[idx] = &(waiter->next_waiter);
-#if 0
-          for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
-            printf(" [%d] (%d) =", i, generation+i+1);
-            for(EventWaiter *w = local_wait_heads[i]; w; w = w->next_waiter)
-              printf(" %p", w);
-            printf(" (%p)\n", local_wait_tailps[i]);
-          }
-#endif
+	  local_waiters[event.gen].push_back(waiter);
 	  //printf("LOCAL WAITERS CHECK: %zd\n", local_waiters.size());
 
 	  if((owner != gasnet_mynode()) && (event.gen > gen_subscribed)) {
@@ -1368,11 +1321,8 @@ namespace LegionRuntime {
 	AutoHSLLock a(mutex);
 
 	if(gen_needed > generation) {
-          size_t idx = gen_needed - generation - 1;
-          assert(idx < NUM_LOCAL_WAIT_LISTS);
-          *(local_wait_tailps[idx]) = &w;
-          local_wait_tailps[idx] = &(w.next_waiter);
-
+	  local_waiters[gen_needed].push_back(&w);
+    
 	  if((owner != gasnet_mynode()) && (gen_needed > gen_subscribed)) {
 	    printf("AAAH!  Can't subscribe to another node's event in external_wait()!\n");
 	    exit(1);
@@ -1432,13 +1382,12 @@ namespace LegionRuntime {
       }
 #endif
       //printf("[%d] TRIGGER %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
-      EventWaiter *wake_head = 0;
-      EventWaiter **wake_tailp = &wake_head;
+      std::deque<EventWaiter *> to_wake;
       bool release_event = false;
       {
 	//TimeStamp ts("foo", true);
 	//printf("[%d] TRIGGER MUTEX IN %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
-	AutoHSLLock a(mutex); //, "event trigger");
+	AutoHSLLock a(mutex);
 	//printf("[%d] TRIGGER MUTEX HOLD %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
 
 	//printf("[%d] TRIGGER GEN: %x/%d->%d\n", gasnet_mynode(), me.id, generation, gen_triggered);
@@ -1447,43 +1396,19 @@ namespace LegionRuntime {
 	//  an older generation, just ignore it
 	if(gen_triggered <= generation) return;
 	//assert(gen_triggered > generation);
-	size_t gen_delta = gen_triggered - generation;
 	generation = gen_triggered;
 	// if the generation is caught up to the "free generation", we can release the event
 	if(generation == free_generation)
 	  release_event = true;
 
-        // build list of folks to trigger (after we release the lock) and
-        //   and shift other generations down
 	//printf("[%d] LOCAL WAITERS: %zd\n", gasnet_mynode(), local_waiters.size());
-	assert(gen_delta <= NUM_LOCAL_WAIT_LISTS);
-        for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
-          if(i < gen_delta) {
-            if(local_wait_heads[i]) {
-              *wake_tailp = local_wait_heads[i];
-              wake_tailp = local_wait_tailps[i];
-            }
-          }
-          if((i + gen_delta) < NUM_LOCAL_WAIT_LISTS) {
-            local_wait_heads[i] = local_wait_heads[i + gen_delta];
-            local_wait_tailps[i] = (local_wait_heads[i] ?
-                                      local_wait_tailps[i + gen_delta] :
-                                      (local_wait_heads + i));
-          } else {
-            // fresh list
-            local_wait_heads[i] = 0;
-            local_wait_tailps[i] = local_wait_heads + i;
-          }
-        }
-#if 0
-        printf("trigger %x/%d\n", me.id, generation);
-        for(size_t i = 0; i < NUM_LOCAL_WAIT_LISTS; i++) {
-          printf(" [%d] (%d) =", i, generation+i+1);
-          for(EventWaiter *w = local_wait_heads[i]; w; w = w->next_waiter)
-            printf(" %p", w);
-          printf(" (%p)\n", local_wait_tailps[i]);
-        }
- #endif
+	std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = local_waiters.begin();
+	while((it != local_waiters.end()) && (it->first <= gen_triggered)) {
+	  //printf("[%d] LOCAL WAIT: %d (%zd)\n", gasnet_mynode(), it->first, it->second.size());
+	  to_wake.insert(to_wake.end(), it->second.begin(), it->second.end());
+	  local_waiters.erase(it);
+	  it = local_waiters.begin();
+	}
 
 	// notify remote waiters and/or event's actual owner
 	if(owner == gasnet_mynode()) {
@@ -1523,19 +1448,26 @@ namespace LegionRuntime {
 	}
       }
 
-      if(wake_head) {
+      {
 	//TimeStamp ts("foo3", true);
 	// now that we've let go of the lock, notify all the waiters who wanted
 	//  this event generation (or an older one)
-	while(wake_head) {
-          EventWaiter *next = wake_head->next_waiter;
-          wake_head->next_waiter = 0;
-          //printf("WAKE: %x/%d -> %p\n", me.id, generation, wake_head);
-          bool nuke = wake_head->event_triggered();
-          if(nuke)
-            delete wake_head;
-          wake_head = next;
+	for(std::deque<EventWaiter *>::iterator it = to_wake.begin();
+	    it != to_wake.end();
+	    it++) {
+	  bool nuke = (*it)->event_triggered();
+          if(nuke) {
+            //printf("deleting: "); (*it)->print_info(); fflush(stdout);
+            delete (*it);
+          }
         }
+      }
+
+      {
+	//TimeStamp ts("foo4", true);
+	{
+	  //TimeStamp ts("foo4b", true);
+	}
       }
     }
 

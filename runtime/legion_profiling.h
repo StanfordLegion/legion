@@ -128,8 +128,10 @@ namespace LegionRuntime {
                           { closes.push_back(inst); }
       private:
 	// no copy constructor or assignment
-	ProcessorProfiler(const ProcessorProfiler& copy_from) {}
-	ProcessorProfiler& operator=(const ProcessorProfiler& copy_from) {}
+	ProcessorProfiler(const ProcessorProfiler& copy_from) 
+        { assert(false); }
+	ProcessorProfiler& operator=(const ProcessorProfiler& copy_from) 
+        { assert(false); return *this; }
       public:
         Processor proc;
         bool utility;

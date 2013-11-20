@@ -1118,6 +1118,33 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class LegionStack
+     * A special runtime class for keeping track of both physical
+     * and logical states.  The stack objects are never allowed
+     * to shrink.  They are always maintained in a consistent state
+     * so they can be accessed even when being appended to.  We assume
+     * that there is only one appender at a time.  Access time is O(1).
+     */
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    class LegionStack {
+    public:
+      LegionStack(void);
+      LegionStack(const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs);
+      ~LegionStack(void);
+    public:
+      LegionStack<T,MAX_SIZE,INC_SIZE>& operator=(
+                          const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs);
+      T& operator[](unsigned int idx);
+    public:
+      void append(unsigned int append_count);
+      size_t size(void) const;
+    private:
+      T* ptr_buffer[(MAX_SIZE+INC_SIZE-1)/INC_SIZE];
+      size_t buffer_size;
+      size_t remaining;
+    };
+
+    /**
      * \class RegionTreeNode
      * A generic region tree node from which all
      * other kinds of region tree nodes inherit.  Notice
@@ -1289,8 +1316,8 @@ namespace LegionRuntime {
       std::set<AddressSpaceID> destruction_set;
     protected:
       Lock node_lock;
-      std::deque<LogicalState> logical_states;
-      std::deque<PhysicalState> physical_states;
+      LegionStack<LogicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> logical_states;
+      LegionStack<PhysicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> physical_states;
 #ifdef DEBUG_HIGH_LEVEL
       // Uses these for debugging to avoid races accessing
       // the logical and physical deques to check for size
@@ -2406,7 +2433,7 @@ namespace LegionRuntime {
       const unsigned index;
     protected:
       MappingRef result;
-    };
+    }; 
 
   };
 };

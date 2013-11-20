@@ -1036,6 +1036,8 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void deferred_collect_task(
                           const void *args, size_t arglen, Processor p);
+      static void legion_logging_task(
+                          const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call

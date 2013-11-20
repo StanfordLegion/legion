@@ -2365,8 +2365,10 @@ namespace LegionRuntime {
           // Issue a deferred trigger on our completion event
           // and mark that we are no longer responsible for
           // triggering our completion event.
+#ifndef LEGION_LOGGING
           completion_event.trigger(copy_complete_event);
           need_completion_trigger = false;
+#endif
           Processor util = local_proc.get_utility_processor();
           CopyOp *proxy_this = this;
           util.spawn(COPY_COMPLETE_ID, &proxy_this, 
@@ -3272,8 +3274,10 @@ namespace LegionRuntime {
         // Issue a deferred trigger of our completion event and mark
         // that we are no longer responsible for triggering it
         // when we are complete.
+#ifndef LEGION_LOGGING
         completion_event.trigger(close_event);
         need_completion_trigger = false;
+#endif
         CloseOp *proxy_this = this;
         Processor util = parent_ctx->get_executing_processor().
                                      get_utility_processor();

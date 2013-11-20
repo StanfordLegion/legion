@@ -97,25 +97,19 @@ namespace LegionRuntime {
 
     class AutoHSLLock {
     public:
-      AutoHSLLock(gasnet_hsl_t &mutex, const char *_profile = 0)
-       : mutexp(&mutex), held(true), profile(_profile)
+      AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
       { 
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	if(profile) t1 = TimeStamp::get_current_time_in_nanos();
 	gasnet_hsl_lock(mutexp); 
-	if(profile) t2 = TimeStamp::get_current_time_in_nanos();
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
-      AutoHSLLock(gasnet_hsl_t *_mutexp, const char *_profile = 0)
-       : mutexp(_mutexp), held(true), profile(_profile)
+      AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
       { 
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
-	if(profile) t1 = TimeStamp::get_current_time_in_nanos();
 	gasnet_hsl_lock(mutexp); 
-	if(profile) t2 = TimeStamp::get_current_time_in_nanos();
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
@@ -123,10 +117,6 @@ namespace LegionRuntime {
       {
 	if(held)
 	  gasnet_hsl_unlock(mutexp);
-	if(profile) {
-          t3 = TimeStamp::get_current_time_in_nanos();
-          printf("mutex profile: %s = %10lld %10lld\n", profile, t2-t1, t3-t2);
-        }
 	log_mutex(LEVEL_SPEW, "MUTEX LOCK OUT %p", mutexp);
 	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
       }
@@ -145,8 +135,6 @@ namespace LegionRuntime {
     protected:
       gasnet_hsl_t *mutexp;
       bool held;
-      const char *profile;
-      unsigned long long t1, t2, t3;
     };
 
     // for each of the ID-based runtime objects, we're going to have an
@@ -807,10 +795,8 @@ namespace LegionRuntime {
 
       class EventWaiter {
       public:
-        EventWaiter(void) : next_waiter(0)  {}
 	virtual bool event_triggered(void) = 0;
 	virtual void print_info(void) = 0;
-        EventWaiter *next_waiter;
       };
 
       void add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed = false);
@@ -826,9 +812,7 @@ namespace LegionRuntime {
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
       uint64_t remote_waiters; // bitmask of which remote nodes are waiting on the event
-      static const size_t NUM_LOCAL_WAIT_LISTS = 8;
-      EventWaiter *local_wait_heads[NUM_LOCAL_WAIT_LISTS];
-      EventWaiter **local_wait_tailps[NUM_LOCAL_WAIT_LISTS];
+      std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
 
       // for barriers
       unsigned base_arrival_count, current_arrival_count;

@@ -6847,6 +6847,17 @@ namespace LegionRuntime {
       // RegionTreeForest's resize method!
       unsigned current_contexts = total_contexts;
       __sync_fetch_and_add(&total_contexts,current_contexts);
+      if (total_contexts >= MAX_CONTEXTS)
+      {
+        log_run(LEVEL_ERROR,"ERROR: Maximum number of allowed contexts %d "
+                            "exceeded.  Please change 'MAX_CONTEXTS' at top "
+                            "of legion_types.h and recompile.",
+                            MAX_CONTEXTS);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_EXCEEDED_MAX_CONTEXTS);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(!available_contexts.empty());
 #endif
@@ -8325,6 +8336,7 @@ namespace LegionRuntime {
       table[CLOSE_COMPLETE_ID]    = Runtime::close_complete_task;
       table[RECLAIM_LOCAL_FID]    = Runtime::reclaim_local_field_task;
       table[DEFERRED_COLLECT_ID]  = Runtime::deferred_collect_task;
+      table[LEGION_LOGGING_ID]    = Runtime::legion_logging_task;
     }
 
     //--------------------------------------------------------------------------
@@ -8663,6 +8675,14 @@ namespace LegionRuntime {
     {
       Deserializer derez(args, arglen);
       PhysicalView::handle_deferred_collect(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::legion_logging_task(
+                                  const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+
     }
 
   }; // namespace HighLevel

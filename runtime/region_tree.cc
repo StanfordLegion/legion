@@ -4417,6 +4417,9 @@ namespace LegionRuntime {
               finder->second = full_instance;
           }
         }
+        // Also set the maximum blocking factor for this region
+        Domain node_domain = node->get_domain();
+        info->req.max_blocking_factor = node_domain.get_volume();
       }
       // Release the state
       node->release_physical_state(state);
@@ -6223,8 +6226,6 @@ namespace LegionRuntime {
     {
       node_lock.destroy_lock();
       node_lock = Lock::NO_LOCK;
-      logical_states.clear();
-      physical_states.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -6244,16 +6245,16 @@ namespace LegionRuntime {
       assert(num_contexts >= logical_states.size());
       assert(num_contexts >= physical_states.size());
 #endif
-      for (unsigned idx = logical_states.size(); idx < num_contexts; idx++)
-        logical_states.push_back(LogicalState());
-      for (unsigned idx = physical_states.size(); idx < num_contexts; idx++)
-      {
+      logical_states.append(num_contexts);
+      physical_states.append(num_contexts);
 #ifdef DEBUG_HIGH_LEVEL
-        physical_states.push_back(PhysicalState(idx, this));
+      for (unsigned idx = physical_state_size; idx < num_contexts; idx++)
+        physical_states[idx] = PhysicalState(idx, this);
 #else
-        physical_states.push_back(PhysicalState(idx));
+      for (unsigned idx = physical_states.size()-num_contexts; 
+            idx < physical_states.size(); idx++)
+        physical_states[idx] = PhysicalState(idx);
 #endif
-      }
 #ifdef DEBUG_HIGH_LEVEL
       logical_state_size = logical_states.size();
       physical_state_size = physical_states.size();
@@ -7572,6 +7573,34 @@ namespace LegionRuntime {
                                                to_create,
                                                create_one,
                                                blocking_factor);
+      // Filter out any re-use memories which are not in the list of
+      // valid memories
+      if (!to_reuse.empty())
+      {
+        std::vector<Memory> to_delete;
+        for (std::set<Memory>::const_iterator it = to_reuse.begin();
+              it != to_reuse.end(); it++)
+        {
+          if (valid_memories.find(*it) == valid_memories.end())
+          {
+            log_region(LEVEL_WARNING,"WARNING: memory %x was specified "
+                                     "to be reused in rank_copy_targets "
+                                     "when closing mappable operation ID %lld."
+                                     "Memory %x will be ignored.", it->id,
+                               closer.info->mappable->get_unique_mappable_id(),
+                               it->id);
+            to_delete.push_back(*it);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<Memory>::const_iterator it = to_delete.begin();
+                it != to_delete.end(); it++)
+          {
+            to_reuse.erase(*it);
+          }
+        }
+      }
       // See if the mapper gave us reasonable output
       if (!composite && !complete && to_reuse.empty() && to_create.empty())
       {
@@ -13956,6 +13985,99 @@ namespace LegionRuntime {
         child_views.insert(child);
         child->unpack_inner_view(derez, context, handle, source);
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Legion Stack 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    LegionStack<T,MAX_SIZE,INC_SIZE>::LegionStack(void)
+    //--------------------------------------------------------------------------
+    {
+      // Allocate the first entry
+      ptr_buffer[0] = new T[INC_SIZE];
+      buffer_size = 1;
+      remaining = INC_SIZE;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    LegionStack<T,MAX_SIZE,INC_SIZE>::LegionStack(
+                                    const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Copy constructor should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    LegionStack<T,MAX_SIZE,INC_SIZE>::~LegionStack(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < buffer_size; idx++)
+      {
+        delete [] ptr_buffer[idx];
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    LegionStack<T,MAX_SIZE,INC_SIZE>& LegionStack<T,MAX_SIZE,INC_SIZE>::
+                          operator=(const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    T& LegionStack<T,MAX_SIZE,INC_SIZE>::operator[](unsigned int idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < MAX_SIZE);
+#endif
+      return ptr_buffer[idx/INC_SIZE][idx%INC_SIZE];
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    void LegionStack<T,MAX_SIZE,INC_SIZE>::append(unsigned int append_count)
+    //--------------------------------------------------------------------------
+    {
+      // Quick out if we have entires
+      if (remaining >= append_count)
+      {
+        remaining -= append_count;
+        return;
+      }
+      // If we make it here, we can subtract remaining from append count
+      // to get the number we actually need to add
+      append_count -= remaining;
+      const int new_arrays = (append_count+INC_SIZE-1)/INC_SIZE;
+#ifdef DEBUG_HIGH_LEVEL
+      // If we fail this assertion, then we've run out of contexts
+      assert((buffer_size+new_arrays) <= ((MAX_SIZE+INC_SIZE-1)/INC_SIZE));
+#endif
+      // Allocate new arrays
+      for (unsigned idx = 0; idx < new_arrays; idx++)
+        ptr_buffer[buffer_size+idx] = new T[INC_SIZE];
+      remaining = append_count % INC_SIZE;
+      buffer_size += new_arrays;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, int MAX_SIZE, int INC_SIZE>
+    size_t LegionStack<T,MAX_SIZE,INC_SIZE>::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ((buffer_size*INC_SIZE) +
+                ((remaining == 0) ? 0 : (INC_SIZE-remaining)));
     }
 
   }; // namespace HighLevel

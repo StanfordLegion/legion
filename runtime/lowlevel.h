@@ -792,6 +792,33 @@ namespace LegionRuntime {
 
       int get_dim(void) const { return dim; }
 
+      int get_volume(void) const
+      {
+        switch (dim)
+        {
+          case 0:
+            return get_index_space().get_valid_mask().get_num_elmts();
+          case 1:
+            {
+              Arrays::Rect<1> r1 = get_rect<1>();
+              return r1.volume();
+            }
+          case 2:
+            {
+              Arrays::Rect<2> r2 = get_rect<2>();
+              return r2.volume();
+            }
+          case 3:
+            {
+              Arrays::Rect<3> r3 = get_rect<3>();
+              return r3.volume();
+            }
+          default:
+            assert(false);
+        }
+        return 0;
+      }
+
       template <int DIM>
       Arrays::Rect<DIM> get_rect(void) const { assert(dim == DIM); return Arrays::Rect<DIM>(rect_data); }
 

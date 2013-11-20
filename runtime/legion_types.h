@@ -59,7 +59,10 @@
 // Default number of mapper slots
 #define DEFAULT_MAPPER_SLOTS    8
 // Default number of contexts made for each runtime instance
+// Ideally this is a power of 2 (better for performance)
 #define DEFAULT_CONTEXTS        64 
+// Maximum number of allowed contexts ever in Legion runtime
+#define MAX_CONTEXTS           1024
 // Maximum number of sub-tasks per task at a time
 #define DEFAULT_MAX_TASK_WINDOW         4096 
 // How many tasks to group together for runtime operations
@@ -184,6 +187,7 @@ namespace LegionRuntime {
       ERROR_INVALID_PARTITION_COLOR = 93,
       ERROR_INNER_MISMATCH = 94,
       ERROR_INNER_LEAF_MISMATCH = 95,
+      ERROR_EXCEEDED_MAX_CONTEXTS = 96,
     };
 
     // enum and namepsaces don't really get along well
@@ -254,7 +258,8 @@ namespace LegionRuntime {
       CLOSE_COMPLETE_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
       RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
       DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
+      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
+      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
     };
 
     // Forward declarations for user level objects

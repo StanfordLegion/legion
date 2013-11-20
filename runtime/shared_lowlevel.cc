@@ -2453,6 +2453,11 @@ namespace LegionRuntime {
               PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
 	    }
 #ifdef LEGION_LOGGING
+            else
+            {
+              assert(done_event != NULL);
+              done_clone = done_event;
+            }
             LegionRuntime::HighLevel::LegionLogging::log_timing_event(
                                           Machine::get_executing_processor(),
                                           done_event->get_event(), COPY_INIT);
@@ -4957,6 +4962,10 @@ namespace LegionRuntime {
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
 
+#ifdef DEBUG_LOW_LEVEL
+      assert(impl->get_block_size() == 1);
+#endif
+
       if(base != 0) return false;
       base = ((char *)(impl->get_base_ptr())) + field_offset;
 
@@ -4969,8 +4978,25 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_soa_parameters(void *& base, size_t& stride) const
     {
-      // TODO: implement this
-      return false;
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+#ifdef DEBUG_LOW_LEVEL
+      assert(impl->get_block_size() == impl->get_num_elmts() || impl->get_field_sizes().size());
+#endif
+
+      size_t field_start, field_size, within_field;
+      find_field(impl->get_field_sizes(), field_offset, 1,
+                 field_start, field_size, within_field);
+
+      if (base != 0) return false;
+      base = (((char *)(impl->get_base_ptr())) +
+              (field_start * impl->get_block_size()) +
+              (field_offset - field_start));
+
+      if ((stride != 0) && (stride != field_size)) return false;
+      stride = field_size;
+
+      return true;
     }
 
     bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *& base, size_t& stride,
