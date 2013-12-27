@@ -84,6 +84,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Acquire* TaskOp::as_mappable_acquire(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Release* TaskOp::as_mappable_release(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID TaskOp::get_unique_mappable_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -112,7 +126,7 @@ namespace LegionRuntime {
       indexes.clear();
       regions.clear();
       futures.clear();
-      reservation_requests.clear();
+      grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
       if (args != NULL)
@@ -165,9 +179,9 @@ namespace LegionRuntime {
         rez.serialize(futures[idx].impl->did);
         rez.serialize(add_remote_reference);
       }
-      rez.serialize(reservation_requests.size());
-      for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
-        pack_reservation_request(reservation_requests[idx], rez);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
       rez.serialize(wait_barriers.size());
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
         pack_phase_barrier(wait_barriers[idx], rez);
@@ -249,11 +263,11 @@ namespace LegionRuntime {
         if (add_remote_reference)
           futures[idx].impl->add_held_remote_reference();
       }
-      size_t num_reservations;
-      derez.deserialize(num_reservations);
-      reservation_requests.resize(num_reservations);
-      for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
-        unpack_reservation_request(reservation_requests[idx], derez);
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
       size_t num_wait_barriers;
       derez.deserialize(num_wait_barriers);
       wait_barriers.resize(num_wait_barriers);
@@ -1246,7 +1260,7 @@ namespace LegionRuntime {
       this->indexes = rhs->indexes;
       this->regions = rhs->regions;
       this->futures = rhs->futures;
-      this->reservation_requests = rhs->reservation_requests;
+      this->grants = rhs->grants;
       this->wait_barriers = rhs->wait_barriers;
       this->arrive_barriers = rhs->arrive_barriers;
       this->arglen = rhs->arglen;
@@ -1276,6 +1290,15 @@ namespace LegionRuntime {
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
       this->early_mapped_inner_views = rhs->early_mapped_inner_views;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::update_grants(const std::vector<Grant> &requested_grants)
+    //--------------------------------------------------------------------------
+    {
+      grants = requested_grants;
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(get_task_completion());
     }
 
     //--------------------------------------------------------------------------
@@ -1631,6 +1654,7 @@ namespace LegionRuntime {
       }
       rez.serialize(req.max_blocking_factor);
       rez.serialize(req.must_early_map);
+      rez.serialize(req.restricted);
       rez.serialize(req.selected_memory);
     }
 
@@ -1678,30 +1702,25 @@ namespace LegionRuntime {
       }
       derez.deserialize(req.max_blocking_factor);
       derez.deserialize(req.must_early_map);
+      derez.deserialize(req.restricted);
       derez.deserialize(req.selected_memory);
       req.flags |= VERIFIED_FLAG;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_reservation_request(
-                            const ReservationRequest &request, Serializer &rez)
+    /*static*/ void TaskOp::pack_grant(const Grant &grant, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      RezCheck z(rez);
-      rez.serialize(request.reservation);
-      rez.serialize(request.mode);
-      rez.serialize(request.exclusive);
+      grant.impl->pack_grant(rez);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_reservation_request(
-                              ReservationRequest &request, Deserializer &derez)
+    /*static*/ void TaskOp::unpack_grant(Grant &grant, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      derez.deserialize(request.reservation);
-      derez.deserialize(request.mode);
-      derez.deserialize(request.exclusive);
+      // Create a new grant impl object to perform the unpack
+      grant = Grant(new Grant::Impl());
+      grant.impl->unpack_grant(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1804,6 +1823,8 @@ namespace LegionRuntime {
       profile_task = false;
       current_fence = NULL;
       fence_gen = 0;
+      simultaneous_checked = false;
+      has_simultaneous = false;
       context = RegionTreeContext();
       executed = false;
       valid_wait_event = false;
@@ -1844,7 +1865,7 @@ namespace LegionRuntime {
       // asked us to destroy
       while (!context_locks.empty())
       {
-        context_locks.back().destroy_lock();
+        context_locks.back().destroy_reservation();
         context_locks.pop_back();
       }
       while (!context_barriers.empty())
@@ -1910,12 +1931,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::destroy_user_lock(Lock l)
+    void SingleTask::destroy_user_lock(Reservation r)
     //--------------------------------------------------------------------------
     {
       // Can only be called from user land so no
       // need to hold the lock
-      context_locks.push_back(l);
+      context_locks.push_back(r);
     }
 
     //--------------------------------------------------------------------------
@@ -2787,6 +2808,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool SingleTask::has_region_dependence(unsigned our_idx, AcquireOp *acquire)
+    //--------------------------------------------------------------------------
+    {
+      // Need to hold our local when reading regions
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      const RegionRequirement &our_req = regions[our_idx];
+#ifdef DEBUG_HIGH_LEVEL
+      // This better be true for a single task
+      assert(our_req.handle_type == SINGULAR);
+#endif
+      RegionTreeID our_tid = our_req.region.get_tree_id();
+      IndexSpace our_space = our_req.region.get_index_space();
+      RegionUsage our_usage(our_req);
+      const RegionRequirement &req = acquire->get_requirement();
+      return check_region_dependence(our_tid,our_space,our_req,our_usage,req);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::has_region_dependence(unsigned our_idx, ReleaseOp *release)
+    //--------------------------------------------------------------------------
+    {
+      // Need to hold our local when reading regions
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      const RegionRequirement &our_req = regions[our_idx];
+#ifdef DEBUG_HIGH_LEVEL
+      // This better be true for a single task
+      assert(our_req.handle_type == SINGULAR);
+#endif
+      RegionTreeID our_tid = our_req.region.get_tree_id();
+      IndexSpace our_space = our_req.region.get_index_space();
+      RegionUsage our_usage(our_req);
+      const RegionRequirement &req = release->get_requirement();
+      return check_region_dependence(our_tid,our_space,our_req,our_usage,req);
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::check_region_dependence(RegionTreeID our_tid,
                                              IndexSpace our_space,
                                              const RegionRequirement &our_req,
@@ -2972,7 +3029,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LegionErrorType SingleTask::check_privilege(const RegionRequirement &req,
-                                                FieldID &bad_field) const
+                                                FieldID &bad_field,
+                                                bool skip_privilege) const
     //--------------------------------------------------------------------------
     {
       if (req.flags & VERIFIED_FLAG)
@@ -3036,7 +3094,8 @@ namespace LegionRuntime {
             }
           }
           // Only need to do this check if there were overlapping fields
-          if (has_fields && (req.privilege & (~(it->privilege))))
+          if (!skip_privilege && has_fields && 
+              (req.privilege & (~(it->privilege))))
           {
             // Handle the special case where the parent has WRITE_DISCARD
             // privilege and the sub-task wants any other kind of privilege.  
@@ -3087,6 +3146,119 @@ namespace LegionRuntime {
         return ERROR_BAD_REGION_TYPE;
       }
       return ERROR_BAD_PARENT_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::has_simultaneous_coherence(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we already did the check, then return the value
+      if (simultaneous_checked)
+        return has_simultaneous;
+      // Otherwise do the check and cache the value
+      // Need the lock when reading the regions
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // If we have simultaneous coherence and there is an
+        // actual physical region then there is something
+        // that needs checking for child ops.
+        if ((regions[idx].prop == SIMULTANEOUS) &&
+            (physical_regions[idx].is_mapped()))
+        {
+          has_simultaneous = true;
+          break;
+        }
+      }
+      simultaneous_checked = true;
+      return has_simultaneous;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_simultaneous_restricted(
+                                    RegionRequirement &child_requirement) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(has_simultaneous);
+#endif
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].prop != SIMULTANEOUS)
+          continue;
+        // Also check to see if we have a physical region
+        // If not then we don't need to bother with coherence
+        if (!physical_regions[idx].is_mapped())
+          continue;
+        // Check to see if the child parent region matches this region
+        if (child_requirement.parent == regions[idx].region)
+        {
+          // If it does, see if there are any fields which overlap
+          std::vector<FieldID> intersection(
+                              regions[idx].privilege_fields.size());
+          std::vector<FieldID>::iterator intersect_it = 
+            std::set_intersection(
+                              regions[idx].privilege_fields.begin(),
+                              regions[idx].privilege_fields.end(),
+                              child_requirement.privilege_fields.begin(),
+                              child_requirement.privilege_fields.end(),
+                              intersection.begin());
+          intersection.resize(intersect_it - intersection.begin());
+          // If we had overlapping fields then mark that the
+          // requirement is now restricted.  We might find later
+          // during dependence analysis that user-level software
+          // coherence changes this, but for now it is true.
+          if (!intersection.empty())
+          {
+            child_requirement.restricted = true;
+            // At this point we're done
+            return;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_simultaneous_restricted(
+                      std::vector<RegionRequirement> &child_requirements) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(has_simultaneous);
+#endif
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].prop != SIMULTANEOUS)
+          continue;
+        if (!physical_regions[idx].is_mapped())
+          continue;
+        std::vector<FieldID> intersection(regions[idx].privilege_fields.size());
+        for (unsigned child_idx = 0; 
+              child_idx < child_requirements.size(); child_idx++)
+        {
+          // If the child has already been marked restricted
+          // then we don't need to do the test again
+          if (child_requirements[child_idx].restricted)
+            continue;
+          if (child_requirements[child_idx].parent == regions[idx].region)
+          {
+            std::vector<FieldID>::iterator intersect_it = 
+              std::set_intersection(
+                    regions[idx].privilege_fields.begin(),
+                    regions[idx].privilege_fields.end(),
+                    child_requirements[child_idx].privilege_fields.begin(),
+                    child_requirements[child_idx].privilege_fields.end(),
+                    intersection.begin());
+            intersection.resize(intersect_it - intersection.begin());
+            if (!intersection.empty())
+              child_requirements[child_idx].restricted = true;
+            // Reset the intersection vector
+            intersection.resize(regions[idx].privilege_fields.size());
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3508,9 +3680,7 @@ namespace LegionRuntime {
       // the locks into the required locks.  We also track which
       // locks are reservation locks and which are future
       // locks since they have to be taken differently.
-      std::set<Lock> required_locks;
-      std::map<Lock,bool/*exlusive*/> atomic_locks;
-      std::map<Lock,unsigned> reservation_locks;
+      std::map<Reservation,bool/*exlusive*/> atomic_locks;
       // If we're debugging do one last check to make sure
       // that all the memories are visible on this processor
 #ifdef DEBUG_HIGH_LEVEL
@@ -3528,10 +3698,11 @@ namespace LegionRuntime {
           // See if we need a lock for this region
           if (physical_instances[idx].has_required_lock())
           {
-            Lock req_lock = physical_instances[idx].get_required_lock();
+            Reservation req_lock = physical_instances[idx].get_required_lock();
             // Check to see if it is needed exclusively or not
             bool exclusive = !IS_READ_ONLY(regions[idx]);
-            std::map<Lock,bool>::iterator finder = atomic_locks.find(req_lock);
+            std::map<Reservation,bool>::iterator finder = 
+              atomic_locks.find(req_lock);
             if (finder == atomic_locks.end())
               atomic_locks[req_lock] = exclusive;
             else
@@ -3557,14 +3728,10 @@ namespace LegionRuntime {
         Future::Impl *impl = futures[idx].impl; 
         wait_on_events.insert(impl->get_ready_event());
       }
-      for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
+      for (unsigned idx = 0; idx < grants.size(); idx++)
       {
-        Lock req_lock = reservation_requests[idx].reservation.reservation_lock;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(required_locks.find(req_lock) == required_locks.end());
-#endif
-        required_locks.insert(req_lock);
-        reservation_locks[req_lock] = idx;
+        Grant::Impl *impl = grants[idx].impl;
+        wait_on_events.insert(impl->acquire_grant());
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
@@ -3590,87 +3757,34 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
 #endif
       // Take all the locks in order in the proper way
-      if (!required_locks.empty())
+      if (!atomic_locks.empty())
       {
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          std::map<Lock,bool>::const_iterator atomic_finder = 
-            atomic_locks.find(*it);
-          if (atomic_finder != atomic_locks.end())
+          Event next = Event::NO_EVENT;
+          if (it->second)
+            next = it->first.acquire(0, true/*exclusive*/,
+                                         start_condition);
+          else
+            next = it->first.acquire(1, false/*exclusive*/,
+                                         start_condition);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+          if (!next.exists())
           {
-            if (atomic_finder->second)
-            {
-              Event next = atomic_finder->first.lock(0, true/*exclusive*/, 
-                                                          start_condition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-              if (!next.exists())
-              {
-                UserEvent new_next = UserEvent::create_user_event();
-                new_next.trigger();
-                next = new_next;
-              }
-#endif
-#ifdef LEGION_LOGGING
-              LegionLogging::log_event_dependence(
-                  Machine::get_executing_processor(), start_condition, next);
-#endif
-#ifdef LEGION_SPY
-              LegionSpy::log_event_dependence(start_condition, next);
-#endif
-              start_condition = next;
-            }
-            else
-            {
-              Event next = atomic_finder->first.lock(1, false/*exclusive*/,
-                                                          start_condition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-              if (!next.exists())
-              {
-                UserEvent new_next = UserEvent::create_user_event();
-                new_next.trigger();
-                next = new_next;
-              }
-#endif
-#ifdef LEGION_LOGGING
-              LegionLogging::log_event_dependence(
-                  Machine::get_executing_processor(), start_condition, next);
-#endif
-#ifdef LEGION_SPY
-              LegionSpy::log_event_dependence(start_condition, next);
-#endif
-              start_condition = next;
-            }
-            continue;
+            UserEvent new_next = UserEvent::create_user_event();
+            new_next.trigger();
+            next = new_next;
           }
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            const ReservationRequest &req = 
-              reservation_requests[res_finder->second]; 
-            Event next = res_finder->first.lock(req.mode, req.exclusive,
-                                                     start_condition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-              if (!next.exists())
-              {
-                UserEvent new_next = UserEvent::create_user_event();
-                new_next.trigger();
-                next = new_next;
-              }
 #endif
 #ifdef LEGION_LOGGING
-            LegionLogging::log_event_dependence(
-                Machine::get_executing_processor(), start_condition, next);
+          LegionLogging::log_event_dependence(
+              Machine::get_executing_processor(), start_condition, next);
 #endif
 #ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(start_condition, next);
+          LegionSpy::log_event_dependence(start_condition, next);
 #endif
-            start_condition = next;
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
+          start_condition = next;
         }
       }
 
@@ -3697,6 +3811,10 @@ namespace LegionRuntime {
             // Don't switch coherence modes since we virtually
             // mapped it which means we will map in the parent's
             // context
+#ifdef LEGION_LOGGING
+            unmap_events[idx] = UserEvent::create_user_event();
+            unmap_events[idx].trigger();
+#endif
           }
           else
           { 
@@ -3865,31 +3983,14 @@ namespace LegionRuntime {
       Event task_launch_event = executing_processor.spawn(low_id, &proxy_this,
                             sizeof(proxy_this), start_condition, task_priority);
       // STEP 4: After we've launched the task, then we have to release any 
-      // locks that we took for while the task was running.  Note that most 
-      // of these get release after the whole task finishes, while some 
-      // get released assoon as the operation of running the task completes.
-      if (!required_locks.empty())
+      // locks that we took for while the task was running.  
+      if (!atomic_locks.empty())
       {
         Event term_event = get_task_completion();
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          std::map<Lock,bool>::const_iterator atomic_finder = 
-            atomic_locks.find(*it);
-          if (atomic_finder != atomic_locks.end())
-          {
-            atomic_finder->first.unlock(term_event);
-            continue;
-          }
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            res_finder->first.unlock(term_event);
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
+          it->first.release(term_event);
         }
       }
     }
@@ -3930,6 +4031,11 @@ namespace LegionRuntime {
         }
       }
 #endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      get_unique_task_id(),
+                                      BEGIN_EXECUTION);
+#endif
       // Tell the runtime that this task is now running
       // and is no longer pending
       runtime->start_execution(executing_processor);
@@ -3938,11 +4044,6 @@ namespace LegionRuntime {
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 
                               Runtime::init_time);
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(executing_processor,
-                                      get_unique_task_id(),
-                                      BEGIN_EXECUTION);
-#endif
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_EXECUTION);
 #endif
@@ -3997,7 +4098,7 @@ namespace LegionRuntime {
       local_instances.clear();
 
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(executing_processor,
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_EXECUTION);
 #endif
@@ -4029,6 +4130,12 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       UniqueID local_id = get_unique_task_id();
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
+#endif
+#ifdef LEGION_LOGGING
+      UniqueID local_id = get_unique_task_id();
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      local_id,
+                                      BEGIN_POST_EXEC);
 #endif
       // Mark that we are done executing this operation
       complete_execution();
@@ -4067,6 +4174,11 @@ namespace LegionRuntime {
       } 
 #ifdef LEGION_PROF
       LegionProf::register_event(local_id, PROF_END_POST);
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      local_id,
+                                      END_POST_EXEC);
 #endif
     }
 
@@ -4578,8 +4690,11 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
-      reservation_requests = launcher.reservation_requests;
+      grants = launcher.grants;
+      update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
       arglen = launcher.argument.get_size();
@@ -4606,7 +4721,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_task_id(),
-                                         unique_op_id, task_id);
+                                         unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -4647,6 +4762,8 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       arglen = arg.get_size();
       if (arglen > 0)
       {
@@ -4670,7 +4787,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_task_id(),
-                                         unique_op_id, task_id);
+                                         unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -5165,21 +5282,15 @@ namespace LegionRuntime {
     {
       // See if there is anything that we need to wait on before running
       std::set<Event> wait_on_events;
-      std::set<Lock> required_locks;
-      std::map<Lock,unsigned> reservation_locks;
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         Future::Impl *impl = futures[idx].impl; 
         wait_on_events.insert(impl->ready_event);
       }
-      for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
+      for (unsigned idx = 0; idx < grants.size(); idx++)
       {
-        Lock req_lock = reservation_requests[idx].reservation.reservation_lock;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(required_locks.find(req_lock) == required_locks.end());
-#endif
-        required_locks.insert(req_lock);
-        reservation_locks[req_lock] = idx;
+        Grant::Impl *impl = grants[idx].impl;
+        wait_on_events.insert(impl->acquire_grant());
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
@@ -5188,26 +5299,6 @@ namespace LegionRuntime {
       }
       // Merge together all the events for the start condition 
       Event start_condition = Event::merge_events(wait_on_events); 
-      // Take all the locks in order in the proper way
-      if (!required_locks.empty())
-      {
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
-        {
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            const ReservationRequest &req = 
-              reservation_requests[res_finder->second]; 
-            start_condition = res_finder->first.lock(req.mode, req.exclusive,
-                                                     start_condition);
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
-        }
-      }
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -5227,24 +5318,6 @@ namespace LegionRuntime {
       future_store = NULL;
       future_size = 0;
       result.impl->complete_future();
-
-      // Release any locks that we held
-      if (!required_locks.empty())
-      {
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
-        {
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            res_finder->first.unlock();
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
-        }
-      }
 
       // Trigger our completion event
       completion_event.trigger();
@@ -6432,8 +6505,10 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
-      reservation_requests = launcher.reservation_requests;
+      update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
       arglen = launcher.global_arg.get_size();
@@ -6461,7 +6536,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id);
+                                          unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -6497,8 +6572,10 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
-      reservation_requests = launcher.reservation_requests;
+      update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
       update_arrival_barriers(launcher.arrive_barriers);
       arglen = launcher.global_arg.get_size();
@@ -6538,7 +6615,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id);
+                                          unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -6580,6 +6657,8 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -6605,7 +6684,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id);
+                                          unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -6649,6 +6728,8 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(regions);
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -6686,7 +6767,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id);
+                                          unique_op_id, task_id, tag);
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_task(task_id, get_unique_task_id(), index_point);
@@ -7012,21 +7093,15 @@ namespace LegionRuntime {
       }
       // See if there is anything to wait for
       std::set<Event> wait_on_events;
-      std::set<Lock> required_locks;
-      std::map<Lock,unsigned> reservation_locks;
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         Future::Impl *impl = futures[idx].impl; 
         wait_on_events.insert(impl->ready_event);
       }
-      for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
+      for (unsigned idx = 0; idx < grants.size(); idx++)
       {
-        Lock req_lock = reservation_requests[idx].reservation.reservation_lock;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(required_locks.find(req_lock) == required_locks.end());
-#endif
-        required_locks.insert(req_lock);
-        reservation_locks[req_lock] = idx;
+        Grant::Impl *impl = grants[idx].impl;
+        wait_on_events.insert(impl->acquire_grant());
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
@@ -7035,26 +7110,6 @@ namespace LegionRuntime {
       }
       // Merge together all the events for the start condition 
       Event start_condition = Event::merge_events(wait_on_events); 
-      // Take all the locks in order in the proper way
-      if (!required_locks.empty())
-      {
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
-        {
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            const ReservationRequest &req = 
-              reservation_requests[res_finder->second]; 
-            start_condition = res_finder->first.lock(req.mode, req.exclusive,
-                                                     start_condition);
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
-        }
-      }
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -7097,24 +7152,6 @@ namespace LegionRuntime {
         reduction_future.impl->complete_future();
       }
 
-      // Release any locks that we held
-      if (!required_locks.empty())
-      {
-        for (std::set<Lock>::const_iterator it = required_locks.begin();
-              it != required_locks.end(); it++)
-        {
-          std::map<Lock,unsigned>::const_iterator res_finder =
-            reservation_locks.find(*it);
-          if (res_finder != reservation_locks.end())
-          {
-            res_finder->first.unlock();
-            continue;
-          }
-          // If we ever get here it is really bad
-          assert(false);
-        }
-      }
-      
       // Trigger all our events event
       completion_event.trigger();
     }
@@ -7747,9 +7784,9 @@ namespace LegionRuntime {
         // Once we're done packing the task we can deactivate it
         points[idx]->deactivate();
       }
-      // Always return false for slice tasks since they should
+      // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
-      return false;
+      return true;
     }
     
     //--------------------------------------------------------------------------

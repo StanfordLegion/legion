@@ -518,16 +518,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // We should only get this for tasks in the default mapper
-      const Task *task = dynamic_cast<const Task*>(mappable);
-      assert(task != NULL);
-      log_mapper(LEVEL_SPEW,"Notify mapping for task %s (ID %lld) in "
-                            "default mapper for processor %x",
-                            task->variants->name,
-                            task->get_unique_task_id(), local_proc.id);
-      for (unsigned idx = 0; idx < task->regions.size(); idx++)
+      if (mappable->get_mappable_kind() == Mappable::TASK_MAPPABLE)
       {
-        memoizer.notify_mapping(task->target_proc, task, idx, 
-                                task->regions[idx].selected_memory);
+        const Task *task = mappable->as_mappable_task();
+        assert(task != NULL);
+        log_mapper(LEVEL_SPEW,"Notify mapping for task %s (ID %lld) in "
+                              "default mapper for processor %x",
+                              task->variants->name,
+                              task->get_unique_task_id(), local_proc.id);
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          memoizer.notify_mapping(task->target_proc, task, idx, 
+                                  task->regions[idx].selected_memory);
+        }
       }
     }
 
@@ -789,7 +792,7 @@ namespace LegionRuntime {
           Arrays::Point<1> lo(idx*elmts_per_chunk);  
           Arrays::Point<1> hi((((idx+1)*elmts_per_chunk > num_elmts) ? 
                                 num_elmts : (idx+1)*elmts_per_chunk)-1);
-          Arrays::Rect<1> chunk(lo,hi);
+          Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
           slices.push_back(DomainSplit(
                 Domain::from_rect<1>(chunk), targets[proc_idx], false, false));

@@ -185,11 +185,11 @@ namespace LegionRuntime {
     // the object goes out of scope
     class AutoLock { 
     public:
-      AutoLock(Lock l, unsigned mode = 0, bool exclusive = true, 
+      AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
                Event wait_on = Event::NO_EVENT)
-        : is_low(true), low_lock(l)
+        : is_low(true), low_lock(r)
       {
-        Event lock_event = l.lock(mode,exclusive,wait_on);
+        Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
         {
 #ifdef LEGION_PROF
@@ -217,7 +217,7 @@ namespace LegionRuntime {
       {
         if (is_low)
         {
-          low_lock.unlock();
+          low_lock.release();
         }
         else
         {
@@ -233,7 +233,7 @@ namespace LegionRuntime {
       }
     private:
       const bool is_low;
-      Lock low_lock;
+      Reservation low_lock;
       ImmovableLock immov_lock;
     };
 

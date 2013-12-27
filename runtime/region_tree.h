@@ -119,7 +119,7 @@ namespace LegionRuntime {
       // Logical analysis methods
       void perform_dependence_analysis(RegionTreeContext ctx, 
                                        Operation *op, unsigned idx,
-                                       const RegionRequirement &req,
+                                       RegionRequirement &req,
                                        RegionTreePath &path);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle);
@@ -140,6 +140,12 @@ namespace LegionRuntime {
                                       LogicalRegion handle);
       void invalidate_logical_context(RegionTreeContext ctx,
                                       LogicalRegion handle);
+      void acquire_user_coherence(RegionTreeContext ctx,
+                                  LogicalRegion handle,
+                                  const std::set<FieldID> &fields);
+      void release_user_coherence(RegionTreeContext ctx,
+                                  LogicalRegion handle,
+                                  const std::set<FieldID> &fields);
     public:
       // Physical analysis methods
       bool premap_physical_region(RegionTreeContext ctx,
@@ -326,9 +332,9 @@ namespace LegionRuntime {
     public:
       Runtime *const runtime;
     protected:
-      Lock forest_lock;
-      Lock lookup_lock;
-      Lock distributed_lock;
+      Reservation forest_lock;
+      Reservation lookup_lock;
+      Reservation distributed_lock;
     private:
       // The lookup lock must be held when accessing these
       // data structures
@@ -365,7 +371,7 @@ namespace LegionRuntime {
         std::vector<IndexSpace> left, right;
       };
     private:
-      Lock dynamic_lock;
+      Reservation dynamic_lock;
       std::deque<DynamicSpaceTest> dynamic_space_tests;
       std::deque<DynamicPartTest>  dynamic_part_tests;
     public:
@@ -394,7 +400,7 @@ namespace LegionRuntime {
       std::set<AddressSpaceID> creation_set;
       std::set<AddressSpaceID> destruction_set;
     protected:
-      Lock node_lock;
+      Reservation node_lock;
     };
 
     /**
@@ -578,7 +584,7 @@ namespace LegionRuntime {
       std::set<AddressSpaceID> creation_set;
       std::set<AddressSpaceID> destruction_set;
     private:
-      Lock node_lock;
+      Reservation node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<RegionNode*> logical_nodes;
       std::map<FieldID,FieldInfo> fields;
@@ -737,6 +743,9 @@ namespace LegionRuntime {
       FieldTree<LogicalUser> *prev_epoch_users;
 #endif
       std::list<CloseInfo> close_operations;
+      // Fields on which the user has 
+      // asked for explicit coherence
+      FieldMask user_level_coherence;
     };
 
     /**
@@ -1204,6 +1213,11 @@ namespace LegionRuntime {
       void invalidate_logical_state(ContextID ctx);
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
+      void record_user_coherence(ContextID ctx, FieldMask &coherence_mask);
+      void acquire_user_coherence(ContextID ctx, 
+                                  const FieldMask &coherence_mask);
+      void release_user_coherence(ContextID ctx, 
+                                  const FieldMask &coherence_mask);
     public:
       // Physical traversal operations
       // Entry
@@ -1315,7 +1329,7 @@ namespace LegionRuntime {
       std::set<AddressSpaceID> creation_set;
       std::set<AddressSpaceID> destruction_set;
     protected:
-      Lock node_lock;
+      Reservation node_lock;
       LegionStack<LogicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> logical_states;
       LegionStack<PhysicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> physical_states;
 #ifdef DEBUG_HIGH_LEVEL
@@ -1645,6 +1659,28 @@ namespace LegionRuntime {
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
+    };
+
+    /**
+     * \class RestrictedTraverser
+     * A class for checking for user-level software coherence
+     * on restricted logical regions.
+     */
+    class RestrictedTraverser : public PathTraverser {
+    public:
+      RestrictedTraverser(ContextID ctx, RegionTreePath &path);
+      RestrictedTraverser(const RestrictedTraverser &rhs);
+      virtual ~RestrictedTraverser(void);
+    public:
+      RestrictedTraverser& operator=(const RestrictedTraverser &rhs);
+    public:
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      const FieldMask& get_coherence_mask(void) const;
+    protected:
+      const ContextID ctx;
+      FieldMask coherence_mask;
     };
 
     /**
@@ -2082,7 +2118,7 @@ namespace LegionRuntime {
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
     protected:
-      Lock view_lock;
+      Reservation view_lock;
     };
 
     /**
@@ -2191,7 +2227,7 @@ namespace LegionRuntime {
       // of a physical instance within a context.  The top
       // most view is responsible for deleting the lock
       // when it is reclaimed.
-      Lock inst_lock;
+      Reservation inst_lock;
       // Keep track of the child views
       std::map<Color,InstanceView*> children;
       // These are the sets of users in the current and next epochs
@@ -2349,12 +2385,12 @@ namespace LegionRuntime {
     class InstanceRef {
     public:
       InstanceRef(void);
-      InstanceRef(Event ready, Lock lock, const ViewHandle &handle);
+      InstanceRef(Event ready, Reservation lock, const ViewHandle &handle);
     public:
       inline bool has_ref(void) const { return handle.has_view(); }
       inline Event get_ready_event(void) const { return ready_event; }
       inline bool has_required_lock(void) const { return needed_lock.exists(); }
-      Lock get_required_lock(void) const { return needed_lock; }
+      Reservation get_required_lock(void) const { return needed_lock; }
       const ViewHandle& get_handle(void) const { return handle; }
       Memory get_memory(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
@@ -2366,7 +2402,7 @@ namespace LegionRuntime {
                                           RegionTreeForest *context);
     private:
       Event ready_event;
-      Lock needed_lock;
+      Reservation needed_lock;
       ViewHandle handle;
     };
 

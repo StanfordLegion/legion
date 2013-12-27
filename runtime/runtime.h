@@ -186,7 +186,7 @@ namespace LegionRuntime {
       std::map<DomainPoint,Future,DomainPoint::STLComparator> futures;
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
-      Lock lock;
+      Reservation lock;
     };
 
     /**
@@ -245,6 +245,54 @@ namespace LegionRuntime {
       // upon unmap
       bool trigger_on_unmap;
       UserEvent termination_event;
+    };
+
+    /**
+     * \class Grant::Impl
+     * This is the base implementation of a grant object.
+     * The grant implementation remembers the locks that
+     * must be acquired and gives out an precondition event
+     * for acquiring the locks whenever a user attempts
+     * to register as using the grant.  Registering requires
+     * providing a completion event for the operation which
+     * the grant object then knows to use when releasing the
+     * locks.  Grants continues accepting registrations
+     * until the runtime marks that it is no longer active.
+     */
+    class Grant::Impl : public Collectable {
+    public:
+      struct ReservationRequest {
+      public:
+        ReservationRequest(void)
+          : reservation(Reservation::NO_RESERVATION),
+            mode(0), exclusive(true) { }
+        ReservationRequest(Reservation r, unsigned m, bool e)
+          : reservation(r), mode(m), exclusive(e) { }
+      public:
+        Reservation reservation;
+        unsigned mode;
+        bool exclusive;
+      };
+    public:
+      Impl(void);
+      Impl(const std::vector<ReservationRequest> &requests);
+      Impl(const Grant::Impl &rhs);
+      ~Impl(void);
+    public:
+      Impl& operator=(const Grant::Impl &rhs);
+    public:
+      void register_operation(Event completion_event);
+      Event acquire_grant(void);
+      void release_grant(void);
+    public:
+      void pack_grant(Serializer &rez);
+      void unpack_grant(Deserializer &derez);
+    private:
+      std::vector<ReservationRequest> requests;
+      bool acquired;
+      Event grant_event;
+      std::set<Event> completion_events;
+      Reservation grant_lock;
     };
 
     /**
@@ -353,12 +401,12 @@ namespace LegionRuntime {
     protected:
       // Note locks are declaraed in the order in which they
       // must be taken 
-      Lock idle_lock;
-      // Lock for protecting the dependence queue
-      Lock dependence_lock;
-      // Lock for protecting the ready queues and
+      Reservation idle_lock;
+      // Reservation for protecting the dependence queue
+      Reservation dependence_lock;
+      // Reservation for protecting the ready queues and
       // the other ready queue
-      Lock queue_lock;
+      Reservation queue_lock;
       // A list of operations needing dependence analysis.  We keep
       // a seperate list for each depth.  This allows us to pull
       // from deeper lists first which is a performance optimization
@@ -373,15 +421,15 @@ namespace LegionRuntime {
       // Mapper objects
       std::vector<Mapper*> mapper_objects;
       // Mapper locks
-      std::vector<Lock> mapper_locks;
+      std::vector<Reservation> mapper_locks;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
       // Failed thiefs to notify when tasks become available
       std::multimap<MapperID,Processor> failed_thiefs;
-      // Locks for stealing and thieving
-      Lock stealing_lock;
-      Lock thieving_lock;
+      // Reservations for stealing and thieving
+      Reservation stealing_lock;
+      Reservation thieving_lock;
     };
 
     /**
@@ -531,7 +579,7 @@ namespace LegionRuntime {
       Runtime *const runtime;
       // State for sending messages
       Processor target;
-      Lock send_lock;
+      Reservation send_lock;
       char *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
@@ -730,13 +778,18 @@ namespace LegionRuntime {
       Predicate predicate_or(Context ctx, const Predicate &p1, 
                                           const Predicate &p2);  
     public:
-      Reservation create_reservation(Context ctx);
-      void destroy_reservation(Context ctx, Reservation r);
+      Lock create_lock(Context ctx);
+      void destroy_lock(Context ctx, Lock l);
+      Grant acquire_grant(Context ctx, 
+                          const std::vector<LockRequest> &requests);
+      void release_grant(Context ctx, Grant grant);
       PhaseBarrier create_phase_barrier(Context ctx, unsigned participants);
       void destroy_phase_barrier(Context ctx, PhaseBarrier pb);
       PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
-      void issue_legion_mapping_fence(Context ctx);
-      void issue_legion_execution_fence(Context ctx);
+      void issue_acquire(Context ctx, const AcquireLauncher &launcher);
+      void issue_release(Context ctx, const ReleaseLauncher &launcher);
+      void issue_mapping_fence(Context ctx);
+      void issue_execution_fence(Context ctx);
     public:
       Mapper* get_mapper(Context ctx, MapperID id);
       Processor get_executing_processor(Context ctx);
@@ -975,6 +1028,8 @@ namespace LegionRuntime {
       NotPredOp*      get_available_not_pred_op(void);
       AndPredOp*      get_available_and_pred_op(void);
       OrPredOp*       get_available_or_pred_op(void);
+      AcquireOp*      get_available_acquire_op(void);
+      ReleaseOp*      get_available_release_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -991,6 +1046,8 @@ namespace LegionRuntime {
       void free_not_predicate_op(NotPredOp *op);
       void free_and_predicate_op(AndPredOp *op);
       void free_or_predicate_op(OrPredOp *op);
+      void free_acquire_op(AcquireOp *op);
+      void free_release_op(ReleaseOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
@@ -1026,11 +1083,7 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void post_end_task(
                           const void *args, size_t arglen, Processor p);
-      static void copy_complete_task(
-                          const void *args, size_t arglen, Processor p);
-      static void fence_complete_task(
-                          const void *args, size_t arglen, Processor p);
-      static void close_complete_task(
+      static void deferred_complete_task(
                           const void *args, size_t arglen, Processor p);
       static void reclaim_local_field_task(
                           const void *args, size_t arglen, Processor p);
@@ -1072,44 +1125,46 @@ namespace LegionRuntime {
       unsigned unique_operation_id;
       unsigned unique_field_id;
     protected:
-      Lock available_lock;
+      Reservation available_lock;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:
-      Lock distributed_id_lock;
+      Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
       std::deque<DistributedID> available_distributed_ids;
     protected:
       // Garbage collection data structures
-      Lock distributed_collectable_lock;
+      Reservation distributed_collectable_lock;
       std::map<DistributedID,DistributedCollectable*> dist_collectables;
-      Lock hierarchical_collectable_lock;
+      Reservation hierarchical_collectable_lock;
       std::map<DistributedID,HierarchicalCollectable*> hier_collectables;
     protected:
       // Keep track of futures
-      Lock future_lock;
+      Reservation future_lock;
       std::map<DistributedID,Future::Impl*> local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
-      Lock remote_lock;
+      Reservation remote_lock;
       std::map<UniqueID,RemoteTask*> remote_contexts;
     protected:
-      Lock individual_task_lock;
-      Lock point_task_lock;
-      Lock index_task_lock;
-      Lock slice_task_lock;
-      Lock remote_task_lock;
-      Lock inline_task_lock;
-      Lock map_op_lock;
-      Lock copy_op_lock;
-      Lock fence_op_lock;
-      Lock deletion_op_lock;
-      Lock close_op_lock;
-      Lock future_pred_op_lock;
-      Lock not_pred_op_lock;
-      Lock and_pred_op_lock;
-      Lock or_pred_op_lock;
+      Reservation individual_task_lock;
+      Reservation point_task_lock;
+      Reservation index_task_lock;
+      Reservation slice_task_lock;
+      Reservation remote_task_lock;
+      Reservation inline_task_lock;
+      Reservation map_op_lock;
+      Reservation copy_op_lock;
+      Reservation fence_op_lock;
+      Reservation deletion_op_lock;
+      Reservation close_op_lock;
+      Reservation future_pred_op_lock;
+      Reservation not_pred_op_lock;
+      Reservation and_pred_op_lock;
+      Reservation or_pred_op_lock;
+      Reservation acquire_op_lock;
+      Reservation release_op_lock;
     protected:
       std::deque<IndividualTask*> available_individual_tasks;
       std::deque<PointTask*>      available_point_tasks;
@@ -1126,6 +1181,8 @@ namespace LegionRuntime {
       std::deque<NotPredOp*>      available_not_pred_ops;
       std::deque<AndPredOp*>      available_and_pred_ops;
       std::deque<OrPredOp*>       available_or_pred_ops;
+      std::deque<AcquireOp*>      available_acquire_ops;
+      std::deque<ReleaseOp*>      available_release_ops;
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -1154,7 +1211,8 @@ namespace LegionRuntime {
                       TaskID uid, Processor::Kind proc_kind, 
                       bool single_task, bool index_space_task,
                       VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options);
+                      const TaskConfigOptions &options,
+                      const char *name);
       static TaskVariantCollection* get_variant_collection(
                       Processor::TaskFuncID tid);
       static PartitionProjectionFnptr 

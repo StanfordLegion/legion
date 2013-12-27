@@ -96,6 +96,10 @@ namespace LegionRuntime {
       // The function to trigger once speculation is
       // ready to be resolved
       virtual void trigger_resolution(void);
+      // Helper function for deferring complete operations
+      // (only used in a limited set of operations and not
+      // part of the default pipeline)
+      virtual void deferred_complete(void);
       // The function to call once the operation is ready to complete
       virtual void trigger_complete(void);
       // The function to call when commit the operation is
@@ -183,7 +187,7 @@ namespace LegionRuntime {
     public:
       Runtime *const runtime;
     protected:
-      Lock op_lock;
+      Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
       // Operations on which this operation depends
@@ -300,6 +304,7 @@ namespace LegionRuntime {
       // depending on the value of the predicate operation.
       virtual void trigger_mapping(void);
       virtual void trigger_resolution(void);
+      virtual void deferred_complete(void);
     public:
       // Call this method for inheriting classes 
       // to indicate when they should map
@@ -352,6 +357,8 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const;
       virtual Copy* as_mappable_copy(void) const;
       virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
     protected:
       void check_privilege(void);
@@ -389,14 +396,15 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual void continue_mapping(void);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
       virtual Copy* as_mappable_copy(void) const;
       virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
-    public:
-      void complete_copy(void);
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
@@ -433,8 +441,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-    public:
-      void complete_execution_fence(void);
+      virtual void deferred_complete(void);
     protected:
       bool mapping_fence;
     };
@@ -511,7 +518,6 @@ namespace LegionRuntime {
     public:
       void initialize(SingleTask *ctx, unsigned index, 
                       const InstanceRef &reference);
-      void complete_close(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -519,12 +525,103 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
     protected:
       RegionRequirement requirement;
       InstanceRef reference;
       RegionTreePath privilege_path;
 #ifdef DEBUG_HIGH_LEVEL
       unsigned parent_index;
+#endif
+    };
+
+    /**
+     * \class AcquireOp
+     * Acquire operations are used for performing
+     * user-level software coherence when tasks own
+     * regions with simultaneous coherence.
+     */
+    class AcquireOp : public Acquire, public SpeculativeOp {
+    public:
+      AcquireOp(Runtime *rt);
+      AcquireOp(const AcquireOp &rhs);
+      virtual ~AcquireOp(void);
+    public:
+      AcquireOp& operator=(const AcquireOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const AcquireLauncher &launcher,
+                      bool check_privileges);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void); 
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void continue_mapping(void); 
+      virtual void deferred_complete(void);
+    public:
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
+    public:
+      const RegionRequirement& get_requirement(void) const;
+    protected:
+      void check_acquire_privilege(void);
+    protected:
+      RegionRequirement requirement;
+      RegionTreePath    privilege_path;
+#ifdef DEBUG_HIGH_LEVEL
+      RegionTreePath    mapping_path;
+#endif
+    };
+
+    /**
+     * \class ReleaseOp
+     * Release operations are used for performing
+     * user-level software coherence when tasks own
+     * regions with simultaneous coherence.
+     */
+    class ReleaseOp : public Release, public SpeculativeOp {
+    public:
+      ReleaseOp(Runtime *rt);
+      ReleaseOp(const ReleaseOp &rhs);
+      virtual ~ReleaseOp(void);
+    public:
+      ReleaseOp& operator=(const ReleaseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const ReleaseLauncher &launcher,
+                      bool check_privileges);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void continue_mapping(void); 
+      virtual void deferred_complete(void);
+    public:
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
+    public:
+      const RegionRequirement& get_requirement(void) const;
+    protected:
+      void check_release_privilege(void);
+    protected:
+      RegionRequirement requirement;
+      RegionTreePath    privilege_path;
+#ifdef DEBUG_HIGH_LEVEL
+      RegionTreePath    mapping_path;
 #endif
     };
 

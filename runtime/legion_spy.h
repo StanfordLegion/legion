@@ -330,7 +330,7 @@ namespace LegionRuntime {
       FILE *tree_state_log;
       char block_buffer[128];
       unsigned depth;
-      Lock logger_lock;
+      Reservation logger_lock;
     };
   };
 };

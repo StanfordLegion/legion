@@ -43,7 +43,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
-      : runtime(rt), op_lock(Lock::create_lock()), 
+      : runtime(rt), op_lock(Reservation::create_reservation()), 
         gen(0), unique_op_id(0), 
         outstanding_mapping_deps(0),
         outstanding_commit_deps(0),
@@ -58,8 +58,8 @@ namespace LegionRuntime {
     Operation::~Operation(void)
     //--------------------------------------------------------------------------
     {
-      op_lock.destroy_lock();
-      op_lock = Lock::NO_LOCK;
+      op_lock.destroy_reservation();
+      op_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -227,6 +227,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called if overridden
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1122,6 +1130,13 @@ namespace LegionRuntime {
         resolve_speculation();
     }
 
+    //--------------------------------------------------------------------------
+    void SpeculativeOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // Map Operation 
     /////////////////////////////////////////////////////////////
@@ -1167,6 +1182,8 @@ namespace LegionRuntime {
       parent_task = ctx;
       requirement.copy_without_mapping_info(launcher.requirement);
       requirement.initialize_mapping_fields();
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(requirement);
       map_id = launcher.map_id;
       tag = launcher.tag;
       parent_task = ctx;
@@ -1225,6 +1242,8 @@ namespace LegionRuntime {
       requirement = req;
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(requirement);
       map_id = id;
       tag = t;
       parent_task = ctx;
@@ -1572,6 +1591,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Acquire* MapOp::as_mappable_acquire(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Release* MapOp::as_mappable_release(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID MapOp::get_unique_mappable_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -1756,13 +1789,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void CopyOp::initialize(SingleTask *ctx,
-                              const CopyLauncher &launcher, 
-                              bool check_privileges)
+                            const CopyLauncher &launcher, bool check_privileges)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, dst_requirements.size(), 
+      initialize_speculation(ctx, true/*track*/, 
+                             launcher.src_requirements.size() + 
+                               launcher.dst_requirements.size(), 
                              launcher.predicate);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
@@ -1780,7 +1814,15 @@ namespace LegionRuntime {
         dst_requirements[idx].initialize_mapping_fields();
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
-      reservation_requests = launcher.reservation_requests;
+      if (parent_ctx->has_simultaneous_coherence())
+      {
+        parent_ctx->check_simultaneous_restricted(src_requirements);
+        parent_ctx->check_simultaneous_restricted(dst_requirements);
+      }
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
       wait_barriers = launcher.wait_barriers;
       for (std::vector<PhaseBarrier>::const_iterator it = 
             launcher.arrive_barriers.begin(); it != 
@@ -2001,18 +2043,18 @@ namespace LegionRuntime {
     void CopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      activate_speculative();
     }
 
     //--------------------------------------------------------------------------
     void CopyOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_speculative();
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
-      reservation_requests.clear();
+      grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
       src_privilege_paths.clear();
@@ -2188,19 +2230,25 @@ namespace LegionRuntime {
       // made all the destination regions.
       if (map_success)
       {
-        // First get the set of barriers we need to wait on before
-        // we can start running this copy.
+        // First get the set of barriers and grants we need to wait 
+        // on before we can start running this copy.
         Event sync_precondition = Event::NO_EVENT;
-        if (!wait_barriers.empty())
+        if (!wait_barriers.empty() || !grants.empty())
         {
-          std::set<Event> barrier_preconditions;
+          std::set<Event> preconditions;
           for (std::vector<PhaseBarrier>::const_iterator it = 
                 wait_barriers.begin(); it != wait_barriers.end(); it++)
           {
             Event e = it->phase_barrier.get_previous_phase(); 
-            barrier_preconditions.insert(e);
+            preconditions.insert(e);
           }
-          sync_precondition = Event::merge_events(barrier_preconditions);
+          for (std::vector<Grant>::const_iterator it = grants.begin();
+                it != grants.end(); it++)
+          {
+            Event e = it->impl->acquire_grant();
+            preconditions.insert(e);
+          }
+          sync_precondition = Event::merge_events(preconditions);
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
           if (!sync_precondition.exists())
           {
@@ -2211,44 +2259,13 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
           LegionLogging::log_event_dependences(
-              Machine::get_executing_processor(), barrier_preconditions,
+              Machine::get_executing_processor(), preconditions,
                                               sync_precondition);
 #endif
 #ifdef LEGION_SPY
-          LegionSpy::log_event_dependences(barrier_preconditions,
+          LegionSpy::log_event_dependences(preconditions,
                                            sync_precondition);
 #endif
-        }
-        // Now chain any lock acquisitions we need to do onto the
-        // barrier precondition.  Put these in a map so we can
-        // sort them by their lock IDs to avoid deadlock.
-        std::map<Lock,unsigned> required_locks;
-        if (!reservation_requests.empty())
-        {
-          for (unsigned idx = 0; idx < reservation_requests.size(); idx++)
-          {
-            Lock req_lock = 
-              reservation_requests[idx].reservation.reservation_lock;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(required_locks.find(req_lock) == required_locks.end());
-#endif
-            required_locks[req_lock] = idx;
-          }
-          for (std::map<Lock,unsigned>::const_iterator it = 
-                required_locks.begin(); it != required_locks.end(); it++)
-          {
-            const ReservationRequest &req = reservation_requests[it->second]; 
-            Event next = it->first.lock(req.mode, req.exclusive,
-                                          sync_precondition);
-#ifdef LEGION_LOGGING
-            LegionLogging::log_event_dependence(
-                Machine::get_executing_processor(), sync_precondition, next);
-#endif
-#ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(sync_precondition, next);
-#endif
-            sync_precondition = next;
-          }
         }
         std::set<Event> copy_complete_events;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -2343,40 +2360,33 @@ namespace LegionRuntime {
           }
         }
 
-        // Handle any unlock operations
-        if (!required_locks.empty())
-        {
-          for (std::map<Lock,unsigned>::const_iterator it = 
-                required_locks.begin(); it != required_locks.end(); it++)
-          {
-            it->first.unlock(copy_complete_event);
-          }
-        }
-
         // Mark that we completed mapping
         complete_mapping();
         // Notify the mapper if it wanted to be notified
         if (notify)
           runtime->invoke_mapper_notify_result(local_proc, this);
 
+#ifdef LEGION_LOGGING
+        LegionLogging::log_event_dependence(Machine::get_executing_processor(),
+                                            copy_complete_event,
+                                            completion_event);
+#endif
         // Handle the case for marking when the copy completes
         if (!copy_complete_event.has_triggered())
         {
           // Issue a deferred trigger on our completion event
           // and mark that we are no longer responsible for
           // triggering our completion event.
-#ifndef LEGION_LOGGING
           completion_event.trigger(copy_complete_event);
           need_completion_trigger = false;
-#endif
           Processor util = local_proc.get_utility_processor();
-          CopyOp *proxy_this = this;
-          util.spawn(COPY_COMPLETE_ID, &proxy_this, 
+          Operation *proxy_this = this;
+          util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
                       sizeof(proxy_this), copy_complete_event,
                       parent_ctx->task_priority);
         }
         else
-          complete_copy();
+          deferred_complete();
       }
       else
       {
@@ -2391,7 +2401,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::complete_copy(void)
+    void CopyOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
       // Mark that we're done executing
@@ -2422,6 +2432,20 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     Inline* CopyOp::as_mappable_inline(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+    
+    //--------------------------------------------------------------------------
+    Acquire* CopyOp::as_mappable_acquire(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Release* CopyOp::as_mappable_release(void) const
     //--------------------------------------------------------------------------
     {
       return NULL;
@@ -2724,19 +2748,19 @@ namespace LegionRuntime {
         {
           Processor util = parent_ctx->get_executing_processor().
                                        get_utility_processor();
-          FenceOp *proxy_this = this;
-          util.spawn(FENCE_COMPLETE_ID, &proxy_this,
+          Operation *proxy_this = this;
+          util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
                      sizeof(proxy_this), wait_on, parent_ctx->task_priority);
         }
         else
-          complete_execution_fence();
+          deferred_complete();
       }
       // If we successfully performed the operation return true
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::complete_execution_fence(void)
+    void FenceOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
       // Mark that we are done mapping and executing
@@ -3143,16 +3167,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::complete_close(void)
+    void CloseOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF
       UniqueID local_id = unique_op_id;
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
 #endif
+#ifdef LEGION_LOGGING
+      UniqueID local_id = unique_op_id;
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      local_id,
+                                      BEGIN_POST_EXEC);
+#endif
       complete_execution();
 #ifdef LEGION_PROF
       LegionProf::register_event(local_id, PROF_END_POST);
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      local_id,
+                                      BEGIN_POST_EXEC);
 #endif
     }
 
@@ -3268,29 +3303,884 @@ namespace LegionRuntime {
 
 #endif
       complete_mapping();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependence(Machine::get_executing_processor(),
+                                          close_event,
+                                          completion_event);
+#endif
       // See if we need to defer completion of the close operation
       if (!close_event.has_triggered())
       {
         // Issue a deferred trigger of our completion event and mark
         // that we are no longer responsible for triggering it
         // when we are complete.
-#ifndef LEGION_LOGGING
         completion_event.trigger(close_event);
         need_completion_trigger = false;
-#endif
         CloseOp *proxy_this = this;
         Processor util = parent_ctx->get_executing_processor().
                                      get_utility_processor();
-        util.spawn(CLOSE_COMPLETE_ID, &proxy_this, 
+        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
                    sizeof(proxy_this), close_event, parent_ctx->task_priority);
       }
       else
-      {
-        // We're already complete
-        complete_execution();
-      }
+        deferred_complete();
       // This should always succeed
       return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Acquire Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AcquireOp::AcquireOp(Runtime *rt)
+      : Acquire(), SpeculativeOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AcquireOp::AcquireOp(const AcquireOp &rhs)
+      : Acquire(), SpeculativeOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AcquireOp::~AcquireOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AcquireOp& AcquireOp::operator=(const AcquireOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::initialize(Context ctx, 
+                               const AcquireLauncher &launcher,
+                               bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      parent_task = ctx;
+      initialize_speculation(ctx, true/*track*/, 1/*num region requirements*/,
+                             launcher.predicate);
+      // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
+      // can be re-ordered around this operation for mapping or
+      // normal dependences.  We won't actually read or write anything.
+      requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
+                                      EXCLUSIVE, launcher.parent_region);
+      requirement.privilege_fields = launcher.fields;
+      logical_region = launcher.logical_region;
+      parent_region = launcher.parent_region;
+      fields = launcher.fields;
+      // Mark the requirement restricted
+      region = launcher.physical_region;
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
+      wait_barriers = launcher.wait_barriers;
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        // TODO: Put this back in once Sean fixes barriers
+#if 0
+        arrive_barriers.push_back(
+            PhaseBarrier(it->phase_barrier.alter_arrival_count(1),
+                         it->participants));
+#else
+        arrive_barriers.push_back(*it);
+#endif
+      }
+      map_id = launcher.map_id;
+      tag = launcher.tag;
+      if (check_privileges)
+        check_acquire_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+#ifdef DEBUG_HIGH_LEVEL
+      initialize_mapping_path(mapping_path, requirement, requirement.region);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_speculative();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_speculative();  
+      // Remove our reference to the physical region
+      region = PhysicalRegion();
+      privilege_path = RegionTreePath();
+#ifdef DEBUG_HIGH_LEVEL
+      mapping_path = RegionTreePath();
+#endif
+      grants.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
+      // Return this operation to the runtime
+      runtime->free_acquire_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* AcquireOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Acquire";
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      // First register any mapping dependences that we have
+      runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
+                                                   this, 0/*idx*/, requirement,
+                                                   privilege_path);
+      // Now tell the forest that we have user-level coherence
+      runtime->forest->acquire_user_coherence(parent_ctx->get_context(),
+                                              requirement.region,
+                                              requirement.privilege_fields);
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::continue_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Put this on the queue of stuff to do
+      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
+                                  this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool AcquireOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark our region requirement as being restricted now
+      requirement.restricted = true;
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(requirement.parent);
+      Processor local_proc = parent_ctx->get_executing_processor();
+      // If we haven't already premapped the path, then do so now
+      if (!requirement.premapped)
+      {
+        // Use our parent_ctx as the mappable since technically
+        // we aren't a mappable.  Technically this shouldn't do anything
+        // because we've marked ourselves as being restricted.
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement, 
+                  this, parent_ctx, local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                  , 0/*idx*/, get_logging_name(), unique_op_id
+#endif
+                  );
+      }
+      // If we couldn't premap, then we need to try again later
+      if (!requirement.premapped)
+        return false;
+      // We use 'remapping' as the mechanism for figuring out who
+      // we need to wait on.  We already know the physical region 
+      // that we want to map.
+      MappingRef map_ref = runtime->forest->remap_physical_region(physical_ctx,
+                                                                  requirement,
+                                                                  0/*idx*/,
+                                                  region.impl->get_reference()
+#ifdef DEBUG_HIGH_LEVEL
+                                                          , get_logging_name()
+                                                          , unique_op_id
+#endif
+                                                                  );
+#ifdef DEBUG_HIGH_LEVEL
+      assert(map_ref.has_ref());
+#endif
+      InstanceRef result = runtime->forest->register_physical_region(
+                                                          physical_ctx,
+                                                          map_ref,
+                                                          requirement,
+                                                          0/*idx*/,
+                                                          this,
+                                                          local_proc,
+                                                          completion_event
+#ifdef DEBUG_HIGH_LEVEL
+                                                          , get_logging_name()
+                                                          , unique_op_id
+                                                          , mapping_path
+#endif
+                                                          );
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result.has_ref());
+#endif
+      // Get all the events that need to happen before we can consider
+      // ourselves acquired: reference ready and all synchronization
+      std::set<Event> acquire_preconditions;
+      acquire_preconditions.insert(result.get_ready_event());
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          Event e = it->phase_barrier.get_previous_phase();
+          acquire_preconditions.insert(e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          Event e = it->impl->acquire_grant();
+          acquire_preconditions.insert(e);
+        }
+      }
+      Event acquire_complete = Event::merge_events(acquire_preconditions);
+        
+      // Chain any arrival barriers
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          it->phase_barrier.arrive(1/*count*/, acquire_complete);
+        }
+      }
+      
+      // Mark that we completed mapping
+      complete_mapping();
+
+      // See if we already triggered
+      if (!acquire_complete.has_triggered())
+      {
+        completion_event.trigger(acquire_complete);
+        need_completion_trigger = false;
+        Processor util = local_proc.get_utility_processor();
+        Operation *proxy_this = this;
+        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
+                    sizeof(proxy_this), acquire_complete,
+                    parent_ctx->task_priority);
+      }
+      else
+        deferred_complete();
+      // we succeeded in mapping
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that we're done executing
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable::MappableKind AcquireOp::get_mappable_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ACQUIRE_MAPPABLE;
+    }
+
+    //--------------------------------------------------------------------------
+    Task* AcquireOp::as_mappable_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Copy* AcquireOp::as_mappable_copy(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Inline* AcquireOp::as_mappable_inline(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Acquire* AcquireOp::as_mappable_acquire(void) const
+    //--------------------------------------------------------------------------
+    {
+      AcquireOp *proxy_this = const_cast<AcquireOp*>(this);
+      return proxy_this;
+    }
+
+    //--------------------------------------------------------------------------
+    Release* AcquireOp::as_mappable_release(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID AcquireOp::get_unique_mappable_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& AcquireOp::get_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::check_acquire_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check to make sure the physical region was mapped for
+      // the same logical region.
+      {
+        const RegionRequirement &req = region.impl->get_requirement();
+        if (req.region != requirement.region)
+        {
+          log_region(LEVEL_ERROR,"Mismatch between logical region (%x,%d,%d) "
+                                 "and logical region (%x,%d,%d) used for "
+                                 "mapping physical region for acquire "
+                                 "operation (ID %lld)",
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id,
+                                 req.region.index_space.id,
+                                 req.region.field_space.id,
+                                 req.region.tree_id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_ACQUIRE_MISMATCH);
+        }
+      }
+      FieldID bad_field;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, check the privileges, but only check the
+      // data and not the actual privilege values since we're
+      // using psuedo-read-write-exclusive
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, true/*skip*/);
+      switch (et)
+      {
+        case NO_ERROR:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            log_region(LEVEL_ERROR,"Requirest for invalid region handle "
+                                   "(%x,%d,%d) of requirement for acquire "
+                                   "operation (ID %lld)",
+                                   requirement.region.index_space.id, 
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id, 
+                                   unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_REGION_HANDLE);
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = (requirement.handle_type == SINGULAR) || 
+                            (requirement.handle_type == REG_PROJECTION)
+                             ? requirement.region.field_space : 
+                               requirement.partition.field_space;
+            log_region(LEVEL_ERROR,"Field %d is not a valid field of field "
+                                   "space %d of requirement for acquire "
+                                   "operation (ID %lld)",
+                                   bad_field, sp.id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of acquire "
+                                   "operation (ID %lld) does not have a region "
+                                   "requirement for region (%x,%x,%x) as a "
+                                   "parent",
+                                   parent_ctx->variants->name, 
+                                   parent_ctx->get_unique_task_id(),
+                                   unique_op_id, 
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_PARENT_REGION);
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
+                                   "parent region (%x,%x,%x) of requirement "
+                                   "for acquire operation (ID %lld)",
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id,
+                                   requirement.parent.index_space.id,
+                                   requirement.parent.field_space.id,
+                                   requirement.parent.tree_id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_PATH);
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            log_region(LEVEL_ERROR,"Region requirement of acquire operation "
+                                   "(ID %lld) cannot find privileges for field "
+                                   "%d in parent task",
+                                   unique_op_id, bad_field);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_TYPE);
+          }
+        // these should never happen with an acquire operation 
+        case ERROR_INVALID_INSTANCE_FIELD:
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+        case ERROR_BAD_REGION_PRIVILEGES:
+        case ERROR_NON_DISJOINT_PARTITION: 
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Release Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReleaseOp::ReleaseOp(Runtime *rt)
+      : Release(), SpeculativeOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReleaseOp::ReleaseOp(const ReleaseOp &rhs)
+      : Release(), SpeculativeOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReleaseOp::~ReleaseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReleaseOp& ReleaseOp::operator=(const ReleaseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::initialize(Context ctx, 
+                               const ReleaseLauncher &launcher, 
+                               bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      parent_task = ctx;
+      initialize_speculation(ctx, true/*track*/, 1/*num region requirements*/,
+                             launcher.predicate);
+      // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
+      // can be re-ordered around this operation for mapping or
+      // normal dependences.  We won't actually read or write anything.
+      requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
+                                      EXCLUSIVE, launcher.parent_region);
+      requirement.privilege_fields = launcher.fields;
+      logical_region = launcher.logical_region;
+      parent_region = launcher.parent_region;
+      fields = launcher.fields;
+      region = launcher.physical_region;
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
+      wait_barriers = launcher.wait_barriers;
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        // TODO: Put this back in once Sean fixes barriers
+#if 0
+        arrive_barriers.push_back(
+            PhaseBarrier(it->phase_barrier.alter_arrival_count(1),
+                         it->participants));
+#else
+        arrive_barriers.push_back(*it);
+#endif
+      }
+      map_id = launcher.map_id;
+      tag = launcher.tag;
+      if (check_privileges)
+        check_release_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+#ifdef DEBUG_HIGH_LEVEL
+      initialize_mapping_path(mapping_path, requirement, requirement.region);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_speculative(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_speculative();
+      // Remove our reference to the physical region
+      region = PhysicalRegion();
+      privilege_path = RegionTreePath();
+#ifdef DEBUG_HIGH_LEVEL
+      mapping_path = RegionTreePath();
+#endif
+      grants.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
+      // Return this operation to the runtime
+      runtime->free_release_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* ReleaseOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Release";
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      // First register any mapping dependences that we have
+      runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
+                                                   this, 0/*idx*/, requirement,
+                                                   privilege_path);
+      // Now tell the forest that we are relinquishing user-level coherence
+      runtime->forest->release_user_coherence(parent_ctx->get_context(),
+                                              requirement.region,
+                                              requirement.privilege_fields);
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::continue_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // Put this on the queue of stuff to do
+      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
+                                  this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReleaseOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(requirement.parent);
+      Processor local_proc = parent_ctx->get_executing_processor();
+      // If we haven't already premapped the path, then do so now
+      if (!requirement.premapped)
+      {
+        // Use our parent_ctx as the mappable since technically
+        // we aren't a mappable.  Technically this shouldn't do anything
+        // because we've marked ourselves as being restricted.
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement, 
+                  this, parent_ctx, local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                  , 0/*idx*/, get_logging_name(), unique_op_id
+#endif
+                  );
+      }
+      // If we couldn't premap, then we need to try again later
+      if (!requirement.premapped)
+        return false;
+      // Now all we need to do is close the physical context to
+      // the logical region that we are releasing.  Since we
+      // are read-write-exclusive, it will invalidate all other
+      // physical instances in the region tree.
+      Event release_event = 
+        runtime->forest->close_physical_context(physical_ctx,
+                                                requirement,
+                                                this, parent_ctx,
+                                                local_proc,
+                                                region.impl->get_reference()
+#ifdef DEBUG_HIGH_LEVEL
+                                                , 0/*idx*/
+                                                , get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
+      std::set<Event> release_preconditions;
+      release_preconditions.insert(release_event);
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          Event e = it->phase_barrier.get_previous_phase();
+          release_preconditions.insert(e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          Event e = it->impl->acquire_grant();
+          release_preconditions.insert(e);
+        }
+      }
+      Event release_complete = Event::merge_events(release_preconditions);
+      
+      // Chain any arrival barriers
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          it->phase_barrier.arrive(1/*count*/, release_complete);
+        }
+      }
+      
+      // Mark that we completed mapping
+      complete_mapping();
+
+      // See if we already triggered
+      if (!release_complete.has_triggered())
+      {
+        completion_event.trigger(release_complete);
+        need_completion_trigger = false;
+        Processor util = local_proc.get_utility_processor();
+        Operation *proxy_this = this;
+        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
+                   sizeof(proxy_this), release_complete,
+                   parent_ctx->task_priority);
+      }
+      else
+        deferred_complete();
+      // We succeeded in mapping
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that we're done executing
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable::MappableKind ReleaseOp::get_mappable_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return RELEASE_MAPPABLE;
+    }
+
+    //--------------------------------------------------------------------------
+    Task* ReleaseOp::as_mappable_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Copy* ReleaseOp::as_mappable_copy(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Inline* ReleaseOp::as_mappable_inline(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Acquire* ReleaseOp::as_mappable_acquire(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    Release* ReleaseOp::as_mappable_release(void) const
+    //--------------------------------------------------------------------------
+    {
+      ReleaseOp *proxy_this = const_cast<ReleaseOp*>(this);
+      return proxy_this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID ReleaseOp::get_unique_mappable_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& ReleaseOp::get_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::check_release_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      // Check to make sure the physical region was mapped for
+      // the same logical region.
+      {
+        const RegionRequirement &req = region.impl->get_requirement();
+        if (req.region != requirement.region)
+        {
+          log_region(LEVEL_ERROR,"Mismatch between logical region (%x,%d,%d) "
+                                 "and logical region (%x,%d,%d) used for "
+                                 "mapping physical region for release "
+                                 "operation (ID %lld)",
+                                 requirement.region.index_space.id,
+                                 requirement.region.field_space.id,
+                                 requirement.region.tree_id,
+                                 req.region.index_space.id,
+                                 req.region.field_space.id,
+                                 req.region.tree_id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RELEASE_MISMATCH);
+        }
+      }
+      FieldID bad_field;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, check the privileges, but only check the
+      // data and not the actual privilege values since we're
+      // using psuedo-read-write-exclusive
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, true/*skip*/);
+      switch (et)
+      {
+        case NO_ERROR:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            log_region(LEVEL_ERROR,"Requirest for invalid region handle "
+                                   "(%x,%d,%d) of requirement for release "
+                                   "operation (ID %lld)",
+                                   requirement.region.index_space.id, 
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id, 
+                                   unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_REGION_HANDLE);
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = (requirement.handle_type == SINGULAR) || 
+                            (requirement.handle_type == REG_PROJECTION)
+                             ? requirement.region.field_space : 
+                               requirement.partition.field_space;
+            log_region(LEVEL_ERROR,"Field %d is not a valid field of field "
+                                   "space %d of requirement for release "
+                                   "operation (ID %lld)",
+                                   bad_field, sp.id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of release "
+                                   "operation (ID %lld) does not have a region "
+                                   "requirement for region (%x,%x,%x) as a "
+                                   "parent",
+                                   parent_ctx->variants->name, 
+                                   parent_ctx->get_unique_task_id(),
+                                   unique_op_id, 
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_PARENT_REGION);
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
+                                   "parent region (%x,%x,%x) of requirement "
+                                   "for release operation (ID %lld)",
+                                   requirement.region.index_space.id,
+                                   requirement.region.field_space.id, 
+                                   requirement.region.tree_id,
+                                   requirement.parent.index_space.id,
+                                   requirement.parent.field_space.id,
+                                   requirement.parent.tree_id, unique_op_id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_PATH);
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            log_region(LEVEL_ERROR,"Region requirement of release operation "
+                                   "(ID %lld) cannot find privileges for field "
+                                   "%d in parent task",
+                                   unique_op_id, bad_field);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_BAD_REGION_TYPE);
+          }
+        // these should never happen with an release operation 
+        case ERROR_INVALID_INSTANCE_FIELD:
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+        case ERROR_BAD_REGION_PRIVILEGES:
+        case ERROR_NON_DISJOINT_PARTITION: 
+        default:
+          assert(false); // Should never happen
+      }
     }
 
     /////////////////////////////////////////////////////////////

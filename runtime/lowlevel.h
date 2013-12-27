@@ -36,7 +36,7 @@ namespace LegionRuntime {
     // forward class declarations because these things all refer to each other
     class Event;
     class UserEvent;
-    class Lock;
+    class Reservation;
     class Memory;
     class Processor;
 
@@ -117,31 +117,31 @@ namespace LegionRuntime {
       void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT) const;
     };
 
-    class Lock {
+    class Reservation {
     public:
       typedef unsigned id_t;
       id_t id;
-      bool operator<(const Lock& rhs) const { return id < rhs.id; }
-      bool operator==(const Lock& rhs) const { return id == rhs.id; }
-      bool operator!=(const Lock& rhs) const { return id != rhs.id; }
+      bool operator<(const Reservation& rhs) const { return id < rhs.id; }
+      bool operator==(const Reservation& rhs) const { return id == rhs.id; }
+      bool operator!=(const Reservation& rhs) const { return id != rhs.id; }
 
       class Impl;
       Impl *impl(void) const;
 
-      static const Lock NO_LOCK;
+      static const Reservation NO_RESERVATION;
 
       bool exists(void) const { return id != 0; }
 
-      // requests ownership (either exclusive or shared) of the lock with a 
-      //   specified mode - returns an event that will trigger when the lock
+      // requests ownership (either exclusive or shared) of the reservation with a 
+      //   specified mode - returns an event that will trigger when the reservation 
       //   is granted
-      Event lock(unsigned mode = 0, bool exclusive = true, Event wait_on = Event::NO_EVENT) const;
-      // releases a held lock - release can be deferred until an event triggers
-      void unlock(Event wait_on = Event::NO_EVENT) const;
+      Event acquire(unsigned mode = 0, bool exclusive = true, Event wait_on = Event::NO_EVENT) const;
+      // releases a held reservation - release can be deferred until an event triggers
+      void release(Event wait_on = Event::NO_EVENT) const;
 
-      // Create a new lock, destroy an existing lock
-      static Lock create_lock(size_t _data_size = 0);
-      void destroy_lock();
+      // Create a new reservation, destroy an existing reservation 
+      static Reservation create_reservation(size_t _data_size = 0);
+      void destroy_reservation();
 
       size_t data_size(void) const;
       void *data_ptr(void) const;

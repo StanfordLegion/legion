@@ -37,11 +37,11 @@ using namespace LegionRuntime::Accessor;
 #include <pthread.h>
 #include <errno.h>
 
-#define BASE_EVENTS	1024	
-#define BASE_LOCKS	64	
-#define BASE_METAS	64
-#define BASE_ALLOCATORS	64
-#define BASE_INSTANCES	64
+#define BASE_EVENTS	  1024	
+#define BASE_RESERVATIONS 64	
+#define BASE_METAS	  64
+#define BASE_ALLOCATORS	  64
+#define BASE_INSTANCES	  64
 
 // The number of threads for this version
 #define NUM_PROCS	4
@@ -124,7 +124,7 @@ namespace LegionRuntime {
     
     // Implementation for each of the runtime objects
     class EventImpl;
-    class LockImpl;
+    class ReservationImpl;
     class MemoryImpl;
     class ProcessorImpl;
 
@@ -135,14 +135,14 @@ namespace LegionRuntime {
       static Runtime* get_runtime(void) { return runtime; } 
 
       EventImpl*           get_event_impl(Event e);
-      LockImpl*            get_lock_impl(Lock l);
+      ReservationImpl*     get_reservation_impl(Reservation r);
       MemoryImpl*          get_memory_impl(Memory m);
       ProcessorImpl*       get_processor_impl(Processor p);
       IndexSpace::Impl*  get_metadata_impl(IndexSpace is);
       RegionInstance::Impl*  get_instance_impl(RegionInstance i);
 
       EventImpl*           get_free_event(void);
-      LockImpl*            get_free_lock(size_t data_size = 0);
+      ReservationImpl*     get_free_reservation(size_t data_size = 0);
       IndexSpace::Impl*  get_free_metadata(size_t num_elmts);
       IndexSpace::Impl*  get_free_metadata(IndexSpace::Impl *par, const ElementMask &mask);
       RegionInstance::Impl*  get_free_instance(IndexSpace is, Memory m, 
@@ -164,8 +164,8 @@ namespace LegionRuntime {
       ReductionOpTable redop_table;
       std::vector<EventImpl*> events;
       std::list<EventImpl*> free_events; // Keep a free list of events since this seems to dominate perf
-      std::vector<LockImpl*> locks;
-      std::list<LockImpl*> free_locks;
+      std::vector<ReservationImpl*> reservations;
+      std::list<ReservationImpl*> free_reservations;
       std::vector<MemoryImpl*> memories;
       std::vector<ProcessorImpl*> processors;
       std::vector<IndexSpace::Impl*> metadatas;
@@ -175,8 +175,8 @@ namespace LegionRuntime {
       Machine *machine;
       pthread_rwlock_t event_lock;
       pthread_mutex_t  free_event_lock;
-      pthread_rwlock_t lock_lock;
-      pthread_mutex_t  free_lock_lock;
+      pthread_rwlock_t reservation_lock;
+      pthread_mutex_t  free_reservation_lock;
       pthread_rwlock_t metadata_lock;
       pthread_mutex_t  free_metas_lock;
       pthread_rwlock_t allocator_lock;
@@ -350,7 +350,7 @@ namespace LegionRuntime {
     
 
     // Any object which can be triggered should be able to triggered
-    // This will include Events and Locks
+    // This will include Events and Reservations 
     class Triggerable {
     public:
         typedef unsigned TriggerHandle;
@@ -991,16 +991,16 @@ namespace LegionRuntime {
     }
 
     ////////////////////////////////////////////////////////
-    // Lock 
+    // Reservation 
     ////////////////////////////////////////////////////////
 
-    /*static*/ const Lock Lock::NO_LOCK = Lock();
+    /*static*/ const Reservation Reservation::NO_RESERVATION = Reservation();
 
-    Logger::Category log_lock("lock");
+    Logger::Category log_reservation("reservation");
 
-    class LockImpl : public Triggerable {
+    class ReservationImpl : public Triggerable {
     public:
-	LockImpl(int idx, bool activate = false, size_t dsize = 0) : index(idx) {
+	ReservationImpl(int idx, bool activate = false, size_t dsize = 0) : index(idx) {
 		active = activate;
 		taken = false;
 		mode = 0;
@@ -1034,7 +1034,7 @@ namespace LegionRuntime {
                     data = NULL;
                 }
 	}	
-        ~LockImpl(void)
+        ~ReservationImpl(void)
         {
                 PTHREAD_SAFE_CALL(pthread_mutex_destroy(mutex));
                 free(mutex);
@@ -1049,26 +1049,26 @@ namespace LegionRuntime {
                 }
         }
 
-	Event lock(unsigned mode, bool exclusive, Event wait_on);
-	void unlock(Event wait_on);
+	Event acquire(unsigned mode, bool exclusive, Event wait_on);
+	void release(Event wait_on);
 	void trigger(unsigned count = 1, TriggerHandle handle = 0);
 
 	bool activate(size_t data_size);
 	void deactivate(void);
-	Lock get_lock(void) const;
+	Reservation get_reservation(void) const;
         size_t get_data_size(void) const;
         void* get_data_ptr(void) const;
     private:
 	Event register_request(unsigned m, bool exc, TriggerHandle handle = 0);
-	void perform_unlock(std::set<EventImpl*> &to_trigger);
+	void perform_release(std::set<EventImpl*> &to_trigger);
     private:
-	class LockRecord {
+	class ReservationRecord {
 	public:
 		unsigned mode;
 		bool exclusive;
 		Event event;
 		bool handled;
-                bool ready; // If this lock waits on a event, see if it's ready
+                bool ready; // If this reservation waits on a event, see if it's ready
                 TriggerHandle id; // If it's not ready this is the trigger handle
 	};
     private:
@@ -1079,65 +1079,66 @@ namespace LegionRuntime {
 	bool waiters;
 	unsigned mode;
 	unsigned holders;
-        TriggerHandle next_handle; // all numbers >0 are lock requests, 0 is unlock trigger handle
-	std::list<LockRecord> requests;
+        TriggerHandle next_handle; // all numbers >0 are reservation requests, 0 is release trigger handle
+	std::list<ReservationRecord> requests;
 	pthread_mutex_t *mutex;
         void *data;
         size_t data_size;
     };
 
-    Event Lock::lock(unsigned mode, bool exclusive, Event wait_on) const
+    Event Reservation::acquire(unsigned mode, bool exclusive, Event wait_on) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-	LockImpl *l = Runtime::get_runtime()->get_lock_impl(*this);
-	return l->lock(mode,exclusive, wait_on);
+	ReservationImpl *l = Runtime::get_runtime()->get_reservation_impl(*this);
+	return l->acquire(mode,exclusive, wait_on);
     }
 
-    void Lock::unlock(Event wait_on) const
+    void Reservation::release(Event wait_on) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-	LockImpl *l = Runtime::get_runtime()->get_lock_impl(*this);
-	l->unlock(wait_on);
+	ReservationImpl *l = Runtime::get_runtime()->get_reservation_impl(*this);
+	l->release(wait_on);
     }
 
-    Lock Lock::create_lock(size_t data_size)
+    Reservation Reservation::create_reservation(size_t data_size)
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-	return Runtime::get_runtime()->get_free_lock(data_size)->get_lock();
+	return Runtime::get_runtime()->get_free_reservation(data_size)->get_reservation();
     }
 
-    void Lock::destroy_lock(void)
+    void Reservation::destroy_reservation(void)
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-	LockImpl *l = Runtime::get_runtime()->get_lock_impl(*this);
+	ReservationImpl *l = Runtime::get_runtime()->get_reservation_impl(*this);
 	l->deactivate();
     }
 
-    size_t Lock::data_size(void) const
+    size_t Reservation::data_size(void) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-        LockImpl *l = Runtime::get_runtime()->get_lock_impl(*this);
+        ReservationImpl *l = Runtime::get_runtime()->get_reservation_impl(*this);
         return l->get_data_size();
     }
 
-    void* Lock::data_ptr(void) const
+    void* Reservation::data_ptr(void) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-        LockImpl *l = Runtime::get_runtime()->get_lock_impl(*this);
+        ReservationImpl *l = Runtime::get_runtime()->get_reservation_impl(*this);
         return l->get_data_ptr();
     }
 
-    Event LockImpl::lock(unsigned m, bool exc, Event wait_on)
+    Event ReservationImpl::acquire(unsigned m, bool exc, Event wait_on)
     {
 	Event result = Event::NO_EVENT;
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-        log_lock(LEVEL_DEBUG,"lock request: lock=%x mode=%d excl=%d event=%x/%d count=%d",
+        log_reservation(LEVEL_DEBUG,"reservation request: reservation=%x mode=%d "
+                                    "excl=%d event=%x/%d count=%d",
                  index, m, exc, wait_on.id, wait_on.gen, holders); 
         // check to see if we have to wait on event first
         bool must_wait = false;
         if (wait_on.exists())
         {
-          // Try registering the lock
+          // Try registering the reservation
           EventImpl *impl = Runtime::get_runtime()->get_event_impl(wait_on);
           if (impl->register_dependent(this, wait_on.gen, next_handle))
           {
@@ -1166,7 +1167,7 @@ namespace LegionRuntime {
                           {
                                   // Not exclusive and modes are equal
                                   // and there are no waiters
-                                  // Can still acquire the lock
+                                  // Can still acquire the reservation 
                                   holders++;
                           }
                           else
@@ -1177,13 +1178,13 @@ namespace LegionRuntime {
           }
           else
           {
-                  // Nobody has the lock, grab it
+                  // Nobody has the reservation, grab it
                   taken = true;
                   exclusive = exc;
                   mode = m;
                   holders = 1;
 #ifdef DEBUG_PRINT
-                  DPRINT3("Granting lock %d in mode %d with exclusive %d\n",index,mode,exclusive);
+                  DPRINT3("Granting reservation %d in mode %d with exclusive %d\n",index,mode,exclusive);
 #endif
           }
         }
@@ -1191,11 +1192,11 @@ namespace LegionRuntime {
 	return result;
     }
 
-    // Always called while holding the lock
-    Event LockImpl::register_request(unsigned m, bool exc, TriggerHandle handle)
+    // Always called while holding the mutex 
+    Event ReservationImpl::register_request(unsigned m, bool exc, TriggerHandle handle)
     {
 	EventImpl *e = Runtime::get_runtime()->get_free_event();
-	LockRecord req;
+	ReservationRecord req;
 	req.mode = m;
 	req.exclusive = exc;
 	req.event = e->get_event();
@@ -1213,31 +1214,31 @@ namespace LegionRuntime {
 	return req.event;
     }
 
-    void LockImpl::unlock(Event wait_on)
+    void ReservationImpl::release(Event wait_on)
     {
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-        log_lock(LEVEL_DEBUG,"unlock request: lock=%x mode=%d excl=%d event=%x/%d count=%d",
+        log_reservation(LEVEL_DEBUG,"release request: reservation=%x mode=%d excl=%d event=%x/%d count=%d",
                  index, mode, exclusive, wait_on.id, wait_on.gen, holders);
         std::set<EventImpl*> to_trigger;
 	if (wait_on.exists())
 	{
-		// Register this lock to be unlocked when the even triggers	
+		// Register this reservation to be released when the even triggers	
 		EventImpl *e = Runtime::get_runtime()->get_event_impl(wait_on);
-                // Use default handle 0 to indicate unlock event
+                // Use default handle 0 to indicate release event
 		if (!(e->register_dependent(this,wait_on.gen)))
 		{
 			// The event didn't register which means it already triggered
-			// so go ahead and perform the unlock operation
-			perform_unlock(to_trigger);
+			// so go ahead and perform the release operation
+			perform_release(to_trigger);
 		}	
 	}
 	else
 	{
-		// No need to wait to perform the unlock
-		perform_unlock(to_trigger);		
+		// No need to wait to perform the release 
+		perform_release(to_trigger);		
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-        // Don't perform any triggers while holding the lock's lock
+        // Don't perform any triggers while holding the reservation's mutex 
         for (std::set<EventImpl*>::const_iterator it = to_trigger.begin();
               it != to_trigger.end(); it++)
         {
@@ -1245,21 +1246,21 @@ namespace LegionRuntime {
         }
     }
 
-    void LockImpl::trigger(unsigned count, TriggerHandle handle)
+    void ReservationImpl::trigger(unsigned count, TriggerHandle handle)
     {
         std::set<EventImpl*> to_trigger;
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-        // If the trigger handle is 0 then unlock the lock, 
-        // otherwise find the lock request to wake up
+        // If the trigger handle is 0 then release the reservation, 
+        // otherwise find the reservation request to wake up
         if (handle == 0)
         {
-          perform_unlock(to_trigger);
+          perform_release(to_trigger);
         }
         else
         {
           bool found = false;
           // Go through the list and mark the matching request as being ready
-          for (std::list<LockRecord>::iterator it = requests.begin();
+          for (std::list<ReservationRecord>::iterator it = requests.begin();
                 it != requests.end(); it++)
           {
             if (it->id == handle)
@@ -1269,14 +1270,14 @@ namespace LegionRuntime {
               assert(!it->ready);
 #endif
               it->ready = true;
-              // Try acquiring this lock just in case it is available,
+              // Try acquiring this reservation just in case it is available,
               // otherwise we can just leave this request on the queue
               if (taken)
               {
                 if (!exclusive && !it->exclusive && (mode == it->mode) && !waiters)
                 {
                   holders++;
-                  // Trigger the event saying we have the lock
+                  // Trigger the event saying we have the reservation 
                   to_trigger.insert(Runtime::get_runtime()->get_event_impl(it->event));
                   // Remove the request
                   requests.erase(it);
@@ -1293,12 +1294,12 @@ namespace LegionRuntime {
                 exclusive = it->exclusive;
                 mode = it->mode; 
                 holders = 1;
-                // Trigger the event saying we have the lock
+                // Trigger the event saying we have the reservation 
                 to_trigger.insert(Runtime::get_runtime()->get_event_impl(it->event));
                 // Remove this request
                 requests.erase(it);
 #ifdef DEBUG_PRINT
-                  DPRINT3("Granting lock %d in mode %d with exclusive %d\n",index,mode,exclusive);
+                  DPRINT3("Granting reservation %d in mode %d with exclusive %d\n",index,mode,exclusive);
 #endif
               }
               break;
@@ -1309,7 +1310,7 @@ namespace LegionRuntime {
 #endif
         }
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-        // Don't perform any triggers while holding the lock's lock
+        // Don't perform any triggers while holding the reservation's mutex 
         for (std::set<EventImpl*>::const_iterator it = to_trigger.begin();
               it != to_trigger.end(); it++)
         {
@@ -1317,15 +1318,15 @@ namespace LegionRuntime {
         }
     }
 
-    // Always called while holding the lock's mutex
-    void LockImpl::perform_unlock(std::set<EventImpl*> &to_trigger)
+    // Always called while holding the reservations's mutex
+    void ReservationImpl::perform_release(std::set<EventImpl*> &to_trigger)
     {
 	holders--;	
 	// If the holders are zero, get the next request out of the queue and trigger it
 	if (holders==0)
 	{
 #ifdef DEBUG_PRINT
-		DPRINT1("Unlocking lock %d\n",index);
+		DPRINT1("Releasing reservation %d\n",index);
 #endif
 		// Check to see if there are any waiters
 		if (requests.empty())
@@ -1336,7 +1337,7 @@ namespace LegionRuntime {
 		}
                 // Clean out all the handled requests
                 {
-                  std::list<LockRecord>::iterator it = requests.begin();
+                  std::list<ReservationRecord>::iterator it = requests.begin();
                   while (it != requests.end())
                   {
                     if (it->handled)
@@ -1345,9 +1346,9 @@ namespace LegionRuntime {
                       it++;
                   }
                 }
-		LockRecord req;
+		ReservationRecord req;
                 bool found = false;
-                for (std::list<LockRecord>::iterator it = requests.begin();
+                for (std::list<ReservationRecord>::iterator it = requests.begin();
                       it != requests.end(); it++)
                 {
                   if (it->ready)
@@ -1370,7 +1371,7 @@ namespace LegionRuntime {
 		mode = req.mode;
 		holders = 1;
 #ifdef DEBUG_PRINT
-		DPRINT3("Issuing lock %d in mode %d with exclusivity %d\n",index,mode,exclusive);
+		DPRINT3("Issuing reservation %d in mode %d with exclusivity %d\n",index,mode,exclusive);
 #endif
 		// Trigger the event
                 to_trigger.insert(Runtime::get_runtime()->get_event_impl(req.event));
@@ -1379,7 +1380,7 @@ namespace LegionRuntime {
 		if (!exclusive)
 		{
 			waiters = false;
-			for (std::list<LockRecord>::iterator it = requests.begin();
+			for (std::list<ReservationRecord>::iterator it = requests.begin();
 				it != requests.end(); it++)
 			{
                           if (it->ready)
@@ -1405,7 +1406,7 @@ namespace LegionRuntime {
 	}
     }
 
-    bool LockImpl::activate(size_t dsize)
+    bool ReservationImpl::activate(size_t dsize)
     {
 	bool result = false;
         PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1432,7 +1433,7 @@ namespace LegionRuntime {
 	return result;
     }
 
-    void LockImpl::deactivate(void)
+    void ReservationImpl::deactivate(void)
     {
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
 	active = false;	
@@ -1448,21 +1449,21 @@ namespace LegionRuntime {
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
-    Lock LockImpl::get_lock(void) const
+    Reservation ReservationImpl::get_reservation(void) const
     {
 #ifdef DEBUG_LOWL_LEVEL
         assert(index != 0);
 #endif
-	Lock l = { static_cast<id_t>(index) };
-	return l;
+	Reservation r = { static_cast<id_t>(index) };
+	return r;
     }
 
-    size_t LockImpl::get_data_size(void) const
+    size_t ReservationImpl::get_data_size(void) const
     {
         return data_size;
     }
 
-    void* LockImpl::get_data_ptr(void) const
+    void* ReservationImpl::get_data_ptr(void) const
     {
         return data;
     }
@@ -2331,7 +2332,7 @@ namespace LegionRuntime {
 		if (activate)
 		{
 			num_elmts = num;
-			lock = Runtime::get_runtime()->get_free_lock();
+			reservation = Runtime::get_runtime()->get_free_reservation();
                         mask = ElementMask(num_elmts);
                         parent = NULL;
 		}
@@ -2346,7 +2347,7 @@ namespace LegionRuntime {
 		{
 			num_elmts = m.get_num_elmts();
 	                // Since we have a parent, use the parent's master allocator	
-			lock = Runtime::get_runtime()->get_free_lock();
+			reservation = Runtime::get_runtime()->get_free_reservation();
                         mask = m;
                         parent = par;
 		}
@@ -2374,7 +2375,7 @@ namespace LegionRuntime {
 
 	void destroy_instance(RegionInstance i);
 
-	Lock get_lock(void);
+	Reservation get_reservation(void);
 
         const ElementMask& get_element_mask(void);
 
@@ -2497,7 +2498,7 @@ namespace LegionRuntime {
     private:
 	//std::set<RegionAllocatorUntyped> allocators;
 	std::set<RegionInstance> instances;
-	LockImpl *lock;
+	ReservationImpl *reservation;
 	pthread_mutex_t *mutex;
 	bool active;
 	int index;
@@ -2532,7 +2533,6 @@ namespace LegionRuntime {
       bool activate(IndexSpace::Impl *owner);
       void deactivate();
       //IndexSpaceAllocator get_allocator(void) const;
-      //Lock get_lock(void);
 
     private:
       IndexSpace::Impl *is_impl;
@@ -2603,7 +2603,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOW_LEVEL
 			assert(base_ptr != NULL);
 #endif
-			lock = Runtime::get_runtime()->get_free_lock();
+			reservation = Runtime::get_runtime()->get_free_reservation();
 		}
 	}
 
@@ -2625,7 +2625,7 @@ namespace LegionRuntime {
         Event copy_to(RegionInstance target, IndexSpace src_region, Event wait_on);
 	RegionInstance get_instance(void) const;
 	void trigger(unsigned count, TriggerHandle handle);
-	Lock get_lock(void);
+        Reservation get_reservation(void);
         void perform_copy_operation(RegionInstance::Impl *target, const ElementMask &src_mask, const ElementMask &dst_mask);
         void apply_list(RegionInstance::Impl *target);
         void append_list(RegionInstance::Impl *target);
@@ -2672,7 +2672,7 @@ namespace LegionRuntime {
 	bool active;
 	const int index;
 	// Fields for the copy operation
-	LockImpl *lock;
+	ReservationImpl *reservation;
         TriggerHandle next_handle;
         std::list<CopyOperation2> pending_copies;
     };
@@ -2757,7 +2757,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOW_LEVEL
 		assert(base_ptr != NULL);
 #endif
-		lock = Runtime::get_runtime()->get_free_lock();
+		reservation = Runtime::get_runtime()->get_free_reservation();
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
 	return result;
@@ -2779,8 +2779,8 @@ namespace LegionRuntime {
         reduction = false;
         parent_impl = NULL;
         list = false;
-	lock->deactivate();
-	lock = NULL;
+	reservation->deactivate();
+	reservation = NULL;
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
@@ -3056,9 +3056,9 @@ namespace LegionRuntime {
 	return inst;
     }
 
-    Lock RegionInstance::Impl::get_lock(void)
+    Reservation RegionInstance::Impl::get_reservation(void)
     {
-	return lock->get_lock();
+	return reservation->get_reservation();
     }
 
     void RegionInstance::Impl::verify_access(unsigned ptr)
@@ -3460,7 +3460,7 @@ namespace LegionRuntime {
 		active = true;
 		result = true;
 		num_elmts = num;
-		lock = Runtime::get_runtime()->get_free_lock();
+		reservation = Runtime::get_runtime()->get_free_reservation();
                 mask = ElementMask(num_elmts);
                 parent = NULL;
 	}
@@ -3477,7 +3477,7 @@ namespace LegionRuntime {
         active = true;
         result = true;
         num_elmts = m.get_num_elmts();
-        lock = Runtime::get_runtime()->get_free_lock();
+        reservation = Runtime::get_runtime()->get_free_reservation();
         mask = m;
         parent = par;
       }
@@ -3500,8 +3500,8 @@ namespace LegionRuntime {
 	}	
 #endif
 	instances.clear();
-	lock->deactivate();
-	lock = NULL;
+	reservation->deactivate();
+	reservation = NULL;
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
@@ -3684,9 +3684,9 @@ namespace LegionRuntime {
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
-    Lock IndexSpace::Impl::get_lock(void)
+    Reservation IndexSpace::Impl::get_reservation(void)
     {
-	return lock->get_lock();
+	return reservation->get_reservation();
     }
 
     static size_t find_field(const std::vector<size_t>& field_sizes,
@@ -4387,8 +4387,8 @@ namespace LegionRuntime {
 #ifdef ORDERED_LOGGING 
       Logger::finalize();
 #endif
-      // Once we're done with this, then we can exit
-      pthread_exit(NULL);
+      // Once we're done with this, then we can exit with a successful error code
+      exit(0);
     }
 
     void Machine::shutdown(bool local_request /*= true*/)
@@ -4513,11 +4513,11 @@ namespace LegionRuntime {
               free_events.push_back(event);
         }
 
-	for (unsigned i=0; i<BASE_LOCKS; i++)
+	for (unsigned i=0; i<BASE_RESERVATIONS; i++)
         {
-		locks.push_back(new LockImpl(i));
+		reservations.push_back(new ReservationImpl(i));
                 if (i != 0)
-                  free_locks.push_back(locks.back());
+                  free_reservations.push_back(reservations.back());
         }
 
 	for (unsigned i=0; i<BASE_METAS; i++)
@@ -4546,8 +4546,8 @@ namespace LegionRuntime {
 
 	PTHREAD_SAFE_CALL(pthread_rwlock_init(&event_lock,NULL));
         PTHREAD_SAFE_CALL(pthread_mutex_init(&free_event_lock,NULL));
-	PTHREAD_SAFE_CALL(pthread_rwlock_init(&lock_lock,NULL));
-        PTHREAD_SAFE_CALL(pthread_mutex_init(&free_lock_lock,NULL));
+	PTHREAD_SAFE_CALL(pthread_rwlock_init(&reservation_lock,NULL));
+        PTHREAD_SAFE_CALL(pthread_mutex_init(&free_reservation_lock,NULL));
 	PTHREAD_SAFE_CALL(pthread_rwlock_init(&metadata_lock,NULL));
         PTHREAD_SAFE_CALL(pthread_mutex_init(&free_metas_lock,NULL));
 	PTHREAD_SAFE_CALL(pthread_rwlock_init(&allocator_lock,NULL));
@@ -4577,15 +4577,15 @@ namespace LegionRuntime {
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_event_lock));
     }
 
-    LockImpl* Runtime::get_lock_impl(Lock l)
+    ReservationImpl* Runtime::get_reservation_impl(Reservation r)
     {
-        PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&lock_lock));
+        PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&reservation_lock));
 #ifdef DEBUG_LOW_LEVEL
-	assert(l.id != 0);
-	assert(l.id < locks.size());
+	assert(r.id != 0);
+	assert(r.id < reservations.size());
 #endif
-        LockImpl *result = locks[l.id];
-        PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&lock_lock));
+        ReservationImpl *result = reservations[r.id];
+        PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&reservation_lock));
 	return result;
     }
 
@@ -4669,14 +4669,14 @@ namespace LegionRuntime {
         return result;
     }
 
-    LockImpl* Runtime::get_free_lock(size_t data_size/*= 0*/)
+    ReservationImpl* Runtime::get_free_reservation(size_t data_size/*= 0*/)
     {
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(&free_lock_lock));
-        if (!free_locks.empty())
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&free_reservation_lock));
+        if (!free_reservations.empty())
         {
-          LockImpl *result = free_locks.front();
-          free_locks.pop_front();
-          PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_lock_lock));
+          ReservationImpl *result = free_reservations.front();
+          free_reservations.pop_front();
+          PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_reservation_lock));
           bool activated = result->activate(data_size);
 #ifdef DEBUG_LOW_LEVEL
           assert(activated);
@@ -4684,18 +4684,18 @@ namespace LegionRuntime {
           return result;
         }
         // We weren't able to get a new event, get the writer lock
-	PTHREAD_SAFE_CALL(pthread_rwlock_wrlock(&lock_lock));
-	unsigned index = locks.size();
-	locks.push_back(new LockImpl(index,true,data_size));
-	LockImpl *result = locks[index];
-        // Create a whole bunch of other locks too while we're here
-        for (unsigned idx=1; idx < BASE_LOCKS; idx++)
+	PTHREAD_SAFE_CALL(pthread_rwlock_wrlock(&reservation_lock));
+	unsigned index = reservations.size();
+	reservations.push_back(new ReservationImpl(index,true,data_size));
+	ReservationImpl *result = reservations[index];
+        // Create a whole bunch of other reservations too while we're here
+        for (unsigned idx=1; idx < BASE_RESERVATIONS; idx++)
         {
-          locks.push_back(new LockImpl(index+idx,false));
-          free_locks.push_back(locks.back());
+          reservations.push_back(new ReservationImpl(index+idx,false));
+          free_reservations.push_back(reservations.back());
         }
-	PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&lock_lock));	
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_lock_lock));
+	PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&reservation_lock));	
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_reservation_lock));
 	return result;
     }
 

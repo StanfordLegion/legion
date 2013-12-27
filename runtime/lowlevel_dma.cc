@@ -29,6 +29,12 @@
 
 using namespace LegionRuntime::Accessor;
 
+#ifdef LEGION_LOGGING
+#include "legion_logging.h"
+
+using namespace LegionRuntime::HighLevel::LegionLogging;
+#endif
+
 namespace LegionRuntime {
   namespace LowLevel {
 
@@ -84,7 +90,7 @@ namespace LegionRuntime {
       Event before_copy;
       Event after_copy;
       State state;
-      Lock current_lock;
+      Reservation current_lock;
       int priority;
     };
 
@@ -101,7 +107,8 @@ namespace LegionRuntime {
       : domain(_domain), oas_by_inst(_oas_by_inst),
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy), after_copy(_after_copy),
-	state(STATE_INIT), current_lock(Lock::NO_LOCK), priority(_priority)
+	state(STATE_INIT), 
+        current_lock(Reservation::NO_RESERVATION), priority(_priority)
     {
       log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
 		   this,
@@ -126,8 +133,8 @@ namespace LegionRuntime {
       log_dma.info("request %p triggered in state %d (lock = %x)", this, state, current_lock.id);
 
       if(current_lock.exists()) {
-	current_lock.unlock();
-	current_lock = Lock::NO_LOCK;
+	current_lock.release();
+	current_lock = Reservation::NO_RESERVATION;
       }
 
       // this'll enqueue the DMA if it can, or wait on another event if it 
@@ -158,10 +165,10 @@ namespace LegionRuntime {
 	    log_dma.info("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
-	    Event e = is_impl->lock.lock(1, false);
+	    Event e = is_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
 	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
-	      is_impl->lock.unlock();
+	      is_impl->lock.release();
 	    } else {
 	      current_lock = is_impl->lock.me;
 	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, current_lock.id);
@@ -180,10 +187,10 @@ namespace LegionRuntime {
 	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->first.first.id);
 	    if(just_check) return false;
 
-	    Event e = src_impl->lock.lock(1, false);
+	    Event e = src_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
 	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
-	      src_impl->lock.unlock();
+	      src_impl->lock.release();
 	    } else {
 	      current_lock = src_impl->lock.me;
 	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, current_lock.id);
@@ -200,10 +207,10 @@ namespace LegionRuntime {
 	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, it->first.second.id);
 	    if(just_check) return false;
 
-	    Event e = dst_impl->lock.lock(1, false);
+	    Event e = dst_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
 	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
-	      dst_impl->lock.unlock();
+	      dst_impl->lock.release();
 	    } else {
 	      current_lock = dst_impl->lock.me;
 	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, current_lock.id);
@@ -272,6 +279,10 @@ namespace LegionRuntime {
 	gasnett_cond_signal(&queue_condvar);
 	gasnet_hsl_unlock(&queue_mutex);
 	log_dma.info("request %p enqueued", this);
+
+#ifdef LEGION_LOGGING
+	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
+#endif
       }
 
       if(state == STATE_QUEUED)
@@ -1332,9 +1343,38 @@ namespace LegionRuntime {
       }
     }
 
+#ifdef LEGION_LOGGING
+    class CopyCompletionLogger : public Event::Impl::EventWaiter {
+    public:
+      CopyCompletionLogger(Event _event) : event(_event) {}
+
+      virtual bool event_triggered(void)
+      {
+	log_timing_event(Processor::NO_PROC, event, COPY_END);
+	return true;
+      }
+
+      virtual void print_info(void)
+      {
+	printf("copy completion logger - %x/%d\n", event.id, event.gen);
+      }
+
+    protected:
+      Event event;
+    };
+#endif
+
     void DmaRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
+
+      // the copy might not actually finish in this thread, so set up an event waiter
+      //  to log the completion
+      after_copy.impl()->add_waiter(after_copy, new CopyCompletionLogger(after_copy));
+#endif
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
@@ -1746,6 +1786,10 @@ namespace LegionRuntime {
       } else {
 	if(!after_copy.exists())
 	  r->after_copy = after_copy = Event::Impl::create_event();
+
+#ifdef LEGION_LOGGING
+	log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
+#endif
 
 	// calling this with 'just_check'==false means it'll automatically
 	//  enqueue the dma if ready

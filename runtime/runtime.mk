@@ -164,9 +164,9 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g -march=native #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb -march=native #-ggdb -Wall
 else
-CC_FLAGS	+= -O2 -march=native
+CC_FLAGS	+= -O2 -ggdb -march=native
 endif
 
 

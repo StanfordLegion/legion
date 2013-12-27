@@ -26,7 +26,7 @@ namespace LegionRuntime {
     TreeStateLogger::TreeStateLogger(AddressSpaceID sid, bool verb,
         bool log_only, bool phy_only)
       : verbose(verb), logical_only(log_only), physical_only(phy_only),
-        depth(0), logger_lock(Lock::create_lock())
+        depth(0), logger_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       char file_name[100];
@@ -45,8 +45,8 @@ namespace LegionRuntime {
       assert(tree_state_log != NULL);
       fclose(tree_state_log);
       tree_state_log = NULL;
-      logger_lock.destroy_lock();
-      logger_lock = Lock::NO_LOCK;
+      logger_lock.destroy_reservation();
+      logger_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -78,7 +78,7 @@ namespace LegionRuntime {
     void TreeStateLogger::start_block(const char *fmt, ...)
     //--------------------------------------------------------------------------
     {
-      Event lock_event = logger_lock.lock(0, true/*exclusive*/);
+      Event lock_event = logger_lock.acquire(0, true/*exclusive*/);
       lock_event.wait(true/*block*/);
       va_list args;
       va_start(args, fmt);
@@ -106,7 +106,7 @@ namespace LegionRuntime {
       log(temp_buffer);
       log("//////////////////////////////////////////////////////////////////");
       log("");
-      logger_lock.unlock();
+      logger_lock.release();
     }
 
     //--------------------------------------------------------------------------

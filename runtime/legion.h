@@ -457,47 +457,98 @@ namespace LegionRuntime {
     //==========================================================================
 
     /**
-     * \class Reservation
-     * A reservation is an atomicity mechanism for use with regions acquired
+     * \class Lock 
+     * NOTE THIS IS NOT A NORMAL LOCK!
+     * A lock is an atomicity mechanism for use with regions acquired
      * with simultaneous coherence in a deferred execution model.  
-     * Reservations are light-weight handles that are created in a parent 
+     * Locks are light-weight handles that are created in a parent 
      * task and can be passed to child tasks to guaranteeing atomic access 
-     * to a region in simultaneous mode.  Reservations can be used to request 
+     * to a region in simultaneous mode.  Lock can be used to request 
      * access in either exclusive (mode 0) or non-exclusive mode (any number 
      * other than zero).  Non-exclusive modes are mutually-exclusive from each 
-     * other. While reservations can be passed down the task tree, they should
+     * other. While locks can be passed down the task tree, they should
      * never escape the context in which they are created as they will be 
      * garbage collected when the task in which they were created is complete.
      *
-     * There are two ways to use reservations.  The first is to use the blocking
-     * acquire and release methods on the reservation directly.  Acquire
-     * guarantees that the application will hold the reservation when it 
+     * There are two ways to use locks.  The first is to use the blocking
+     * acquire and release methods on the lock directly.  Acquire
+     * guarantees that the application will hold the lock when it 
      * returns, but may result in stalls while some other task is holding the 
-     * reservation.  The recommended way of using reservations is to pass
-     * them as pre-requisites in launcher objects to ensure that the 
-     * reservation is held during the course of the operation and will 
-     * avoid stalls.
+     * lock.  The recommended way of using locks is to request
+     * grants of a lock through the runtime interface and then pass
+     * grants to launcher objects.  This ensures that the lock will be
+     * held during the course of the operation while still avoiding
+     * any stalls in the task's execution.
      * @see TaskLauncher
      * @see IndexLauncher
      * @see CopyLauncher
      * @see InlineLauncher
      * @see HighLevelRuntime
      */
-    class Reservation {
+    class Lock {
     public:
-      Reservation(void);
+      Lock(void);
     protected:
-      // Only the runtime is allowed to make non-empty reservations
+      // Only the runtime is allowed to make non-empty locks 
       FRIEND_ALL_RUNTIME_CLASSES
-      Reservation(Lock l);
+      Lock(Reservation r);
     public:
-      bool operator<(const Reservation &rhs) const;
-      bool operator==(const Reservation &rhs) const;
+      bool operator<(const Lock &rhs) const;
+      bool operator==(const Lock &rhs) const;
     public:
       void acquire(unsigned mode = 0, bool exclusive = true);
       void release(void);
     private:
-      Lock reservation_lock;
+      Reservation reservation_lock;
+    };
+
+    /**
+     * \struct LockRequest
+     * This is a helper class for requesting grants.  It
+     * specifies the locks that are needed, what mode they
+     * should be acquired in, and whether or not they 
+     * should be acquired in exclusive mode or not.
+     */
+    struct LockRequest {
+    public:
+      LockRequest(Lock l, unsigned mode = 0, bool exclusive = true);
+    public:
+      Lock lock;
+      unsigned mode;
+      bool exclusive;
+    };
+
+    /**
+     * \class Grant
+     * Grants are ways of naming deferred acquisitions and releases
+     * of locks.  This allows the application to defer a lock 
+     * acquire but still be able to use it to specify which tasks
+     * must run while holding the this particular grant of the lock.
+     * Grants are created through the runtime call 'acquire_grant'.
+     * Once a grant has been used for all necessary tasks, the
+     * application can defer a grant release using the runtime
+     * call 'release_grant'.
+     * @see HighLevelRuntime
+     */
+    class Grant {
+    public:
+      Grant(void);
+      Grant(const Grant &g);
+      ~Grant(void);
+    public:
+      class Impl;
+    protected:
+      // Only the runtime is allowed to make non-empty grants
+      FRIEND_ALL_RUNTIME_CLASSES
+      Grant(Impl *impl);
+    public:
+      bool operator==(const Grant &g) const
+        { return impl == g.impl; }
+      bool operator<(const Grant &g) const
+        { return impl < g.impl; }
+      Grant& operator=(const Grant &g);
+    protected:
+      Impl *impl;
     };
 
     /**
@@ -690,6 +741,7 @@ namespace LegionRuntime {
       // are only valid if the premapped flag is true.
       bool premapped;
       bool must_early_map;
+      bool restricted;
       size_t max_blocking_factor;
       std::map<Memory,bool> current_instances;
     public:
@@ -762,31 +814,6 @@ namespace LegionRuntime {
       bool operator==(const FieldSpaceRequirement &req) const;
     };
 
-    /**
-     * \struct ReservationRequest
-     * A reservation request records a request to have 
-     * a reservation taken during an operation specified
-     * by a launcher object.  It records the reservation
-     * being requested as well as the mode and whether
-     * the mode should be taken exclusively or not.  If
-     * the zero mode is requested it then the reservation
-     * must be taken exclusively.
-     */
-    struct ReservationRequest {
-    public:
-      ReservationRequest(void);
-      ReservationRequest(Reservation res,
-                         unsigned mode = 0,
-                         bool exclusive = true);
-    public:
-      bool operator<(const ReservationRequest &rhs) const;
-      bool operator==(const ReservationRequest &rhs) const;
-    public:
-      Reservation reservation;
-      unsigned mode;
-      bool exclusive;
-    };
-
     //==========================================================================
     //                    Operation Launcher Classes
     //==========================================================================
@@ -809,9 +836,10 @@ namespace LegionRuntime {
     public:
       inline void add_index_requirement(const IndexSpaceRequirement &req);
       inline void add_region_requirement(const RegionRequirement &req);
+      inline void add_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       inline void add_future(Future f);
-      inline void add_reservation_request(const ReservationRequest &req);
+      inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
     public:
@@ -819,7 +847,7 @@ namespace LegionRuntime {
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
-      std::vector<ReservationRequest>    reservation_requests;
+      std::vector<Grant>                 grants;
       std::vector<PhaseBarrier>          wait_barriers;
       std::vector<PhaseBarrier>          arrive_barriers;
       TaskArgument                       argument;
@@ -850,9 +878,10 @@ namespace LegionRuntime {
     public:
       inline void add_index_requirement(const IndexSpaceRequirement &req);
       inline void add_region_requirement(const RegionRequirement &req);
+      inline void add_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       inline void add_future(Future f);
-      inline void add_reservation_request(const ReservationRequest &req);
+      inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
     public:
@@ -861,7 +890,7 @@ namespace LegionRuntime {
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
-      std::vector<ReservationRequest>    reservation_requests;
+      std::vector<Grant>                 grants;
       std::vector<PhaseBarrier>          wait_barriers;
       std::vector<PhaseBarrier>          arrive_barriers;
       TaskArgument                       global_arg;
@@ -886,6 +915,8 @@ namespace LegionRuntime {
       InlineLauncher(const RegionRequirement &req,
                      MapperID id = 0,
                      MappingTagID tag = 0);
+    public:
+      inline void add_field(FieldID fid, bool inst = true);
     public:
       RegionRequirement               requirement;
       MapperID                        map_id;
@@ -919,14 +950,16 @@ namespace LegionRuntime {
     public:
       inline void add_copy_requirements(const RegionRequirement &src,
 					const RegionRequirement &dst);
+      inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
+      inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
-      inline void add_reservation_request(const ReservationRequest &req);
+      inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
-      std::vector<ReservationRequest> reservation_requests;
+      std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
       Predicate                       predicate;
@@ -1142,6 +1175,10 @@ namespace LegionRuntime {
         { return (impl < reg.impl); }
     public:
       /**
+       * Check to see if this represents a mapped physical region. 
+       */
+      inline bool is_mapped(void) const;
+      /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
        * instance has a valid copy of the data.
@@ -1203,6 +1240,81 @@ namespace LegionRuntime {
     };
 
     //==========================================================================
+    //                      Software Coherence Classes
+    //==========================================================================
+
+    /**
+     * \struct AcquireLauncher
+     * An AcquireLauncher is a class that is used for supporting user-level
+     * software coherence when working with logical regions held in 
+     * simultaneous coherence mode.  By default simultaneous mode requires
+     * all users to use the same physical instance.  By acquiring coherence
+     * on the physical region, a parent task can launch sub-tasks which
+     * are not required to use the same physical instance.  Synchronization
+     * primitives are allowed to specify what must occur before the
+     * acquire operation is performed.
+     */
+    struct AcquireLauncher {
+    public:
+      AcquireLauncher(LogicalRegion logical_region, 
+                      LogicalRegion parent_region,
+                      PhysicalRegion physical_region,
+                      Predicate pred = Predicate::TRUE_PRED,
+                      MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline void add_field(FieldID f);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier pb);
+      inline void add_arrival_barrier(PhaseBarrier pb);
+    public:
+      LogicalRegion                   logical_region;
+      LogicalRegion                   parent_region;
+      std::set<FieldID>               fields;
+    public:
+      PhysicalRegion                  physical_region;
+    public:
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+    };
+
+    /**
+     * \struct ReleaseLauncher
+     * A ReleaseLauncher supports the complementary operation to acquire
+     * for performing user-level software coherence when dealing with
+     * regions in simultaneous coherence mode.  
+     */
+    struct ReleaseLauncher {
+    public:
+      ReleaseLauncher(LogicalRegion logical_region, 
+                      LogicalRegion parent_region,
+                      PhysicalRegion physical_region,
+                      Predicate pred = Predicate::TRUE_PRED,
+                      MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline void add_field(FieldID f);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier pb);
+      inline void add_arrival_barrier(PhaseBarrier pb);
+    public:
+      LogicalRegion                   logical_region;
+      LogicalRegion                   parent_region;
+      std::set<FieldID>               fields;
+    public:
+      PhysicalRegion                  physical_region;
+    public:
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+    };
+
+    //==========================================================================
     //                            Mapping Classes
     //==========================================================================
     
@@ -1221,6 +1333,8 @@ namespace LegionRuntime {
         TASK_MAPPABLE,
         COPY_MAPPABLE,
         INLINE_MAPPABLE,
+        ACQUIRE_MAPPABLE,
+        RELEASE_MAPPABLE,
       };
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -1233,6 +1347,8 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const = 0;
       virtual Copy* as_mappable_copy(void) const = 0;
       virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
     };
 
@@ -1257,7 +1373,7 @@ namespace LegionRuntime {
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
       std::vector<Future>                 futures;
-      std::vector<ReservationRequest>     reservation_requests;
+      std::vector<Grant>                  grants;
       std::vector<PhaseBarrier>           wait_barriers;
       std::vector<PhaseBarrier>           arrive_barriers;
       void                               *args;                         
@@ -1306,6 +1422,8 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const = 0;
       virtual Copy* as_mappable_copy(void) const = 0;
       virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
     };
 
@@ -1324,7 +1442,7 @@ namespace LegionRuntime {
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
       std::vector<RegionRequirement>    dst_requirements;
-      std::vector<ReservationRequest>   reservation_requests;
+      std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
     public:
@@ -1337,6 +1455,8 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const = 0;
       virtual Copy* as_mappable_copy(void) const = 0;
       virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
     };
 
@@ -1364,6 +1484,80 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const = 0;
       virtual Copy* as_mappable_copy(void) const = 0;
       virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
+      virtual UniqueID get_unique_mappable_id(void) const = 0;
+    };
+
+    /**
+     * \class Acquire
+     * Acquire objects present an interface to the 
+     * arguments from a user-level software coherence 
+     * acquire call.  Acquire objects are passed to 
+     * mapper calls that need to decide how to best 
+     * map an acquire.
+     */
+    class Acquire : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Acquire(void);
+    public:
+      // Acquire Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the acquire operation
+      Task                              *parent_task;
+    public:
+      inline UniqueID get_unique_acquire_id(void) const;
+    public:
+      virtual MappableKind get_mappable_kind(void) const = 0;
+      virtual Task* as_mappable_task(void) const = 0;
+      virtual Copy* as_mappable_copy(void) const = 0;
+      virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
+      virtual UniqueID get_unique_mappable_id(void) const = 0;
+    };
+
+    /**
+     * \class Release
+     * Release objects present an interface to the
+     * arguments from a user-level software coherence
+     * release call.  Release objects are passed to 
+     * mapper calls that need to decide how best
+     * to map a release.
+     */
+    class Release : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Release(void);
+    public:
+      // Release Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the release operation
+      Task                              *parent_task;
+    public:
+      inline UniqueID get_unique_release_id(void) const;
+    public:
+      virtual MappableKind get_mappable_kind(void) const = 0;
+      virtual Task* as_mappable_task(void) const = 0;
+      virtual Copy* as_mappable_copy(void) const = 0;
+      virtual Inline* as_mappable_inline(void) const = 0;
+      virtual Acquire* as_mappable_acquire(void) const = 0;
+      virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
     };
 
@@ -2058,20 +2252,17 @@ namespace LegionRuntime {
      * the Sequoia definition of an inner task.
      * Idempotent tasks must have no side-effects outside
      * of the kind that Legion can analyze (i.e. writing
-     * regions).  The name given to a task will be used
-     * by the runtime in all error and debugging messages.
+     * regions).
      */
     struct TaskConfigOptions {
     public:
       TaskConfigOptions(bool leaf = false,
                         bool inner = false,
-                        bool idempotent = false,
-                        const char *name = NULL);
+                        bool idempotent = false);
     public:
       bool leaf;
       bool inner;
       bool idempotent;
-      const char *name;
     };
 
     /**
@@ -2722,27 +2913,56 @@ namespace LegionRuntime {
                                           const Predicate &p2);
     public:
       //------------------------------------------------------------------------
-      // Synchronization and Fence Operations
+      // Lock Operations
       //------------------------------------------------------------------------
       /**
-       * Create a new reservation.
+       * Create a new lock.
        * @param ctx enclosing task context
-       * @return a new reservation handle
+       * @return a new lock handle
        */
-      Reservation create_reservation(Context ctx);
+      Lock create_lock(Context ctx);
 
       /**
-       * Destroy a reservation.  This operation will
-       * defer the reservation destruction until the
+       * Destroy a lock.  This operation will
+       * defer the lock destruction until the
        * completion of the task in which the destruction
        * is performed so the user does not need to worry
        * about races with child operations which may
-       * be using the reservation.
+       * be using the lock.
        * @param ctx enclosing task context
-       * @param r reservation to be destroyed
+       * @param r lock to be destroyed
        */
-      void destroy_reservation(Context ctx, Reservation r);
-      
+      void destroy_lock(Context ctx, Lock l);
+
+      /**
+       * Acquire one or more locks in the given mode.  Returns
+       * a grant object which can be passed to many kinds
+       * of launchers for indicating that the operations
+       * must be performed while the grant his held.
+       * Note that the locks will be acquired in the order specified
+       * by the in the vector which may be necessary for
+       * applications to avoid deadlock.
+       * @param ctx the enclosing task context
+       * @param requests vector of locks to acquire
+       * @return a grant object
+       */
+      Grant acquire_grant(Context ctx, 
+                          const std::vector<LockRequest> &requests);
+
+      /**
+       * Release the grant object indicating that no more
+       * operations will be launched that require the 
+       * grant object.  Once this is done and all the tasks
+       * using the grant complete the runtime can release
+       * the lock.
+       * @param ctx the enclosing task context
+       * @param grant the grant object to release
+       */
+      void release_grant(Context ctx, Grant grant);
+    public:
+      //------------------------------------------------------------------------
+      // Phase Barrier operations
+      //------------------------------------------------------------------------
       /**
        * Create a new phase barrier with a given number of 
        * participants.  Note that this number of participants
@@ -2782,7 +3002,29 @@ namespace LegionRuntime {
        * @return an updated phase barrier used for the next phase
        */
       PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
+    public:
+      //------------------------------------------------------------------------
+      // User-Managed Software Coherence 
+      //------------------------------------------------------------------------
+      /**
+       * Issue an acquire operation on the specified physical region
+       * provided by the acquire launcher.  This call should be matched
+       * by a release call later in the same context on the same 
+       * physical region.
+       */
+      void issue_acquire(Context ctx, const AcquireLauncher &launcher);
 
+      /**
+       * Issue a release operation on the specified physical region
+       * provided by the release launcher.  This call should be preceded
+       * by an acquire call earlier in teh same context on the same
+       * physical region.
+       */
+      void issue_release(Context ctx, const ReleaseLauncher &launcher);
+    public:
+      //------------------------------------------------------------------------
+      // Fence Operations 
+      //------------------------------------------------------------------------
       /**
        * Issue a Legion mapping fence in the current context.  A 
        * Legion mapping fence guarantees that all of the tasks issued
@@ -2791,7 +3033,7 @@ namespace LegionRuntime {
        * useful as a performance optimization to minimize the
        * number of mapping independence tests required.
        */
-      void issue_legion_mapping_fence(Context ctx);
+      void issue_mapping_fence(Context ctx);
 
       /**
        * Issue a Legion execution fence in the current context.  A 
@@ -2802,7 +3044,7 @@ namespace LegionRuntime {
        * such as modifications to the region tree made prior
        * to the fence visible to tasks issued after the fence.
        */
-      void issue_legion_execution_fence(Context ctx);
+      void issue_execution_fence(Context ctx); 
     public:
       //------------------------------------------------------------------------
       // Miscellaneous Operations
@@ -2881,7 +3123,7 @@ namespace LegionRuntime {
     public:
       /**
        * After configuring the runtime object this method should be called
-       * to the start the runtime running.  The runtime will then launch
+       * to start the runtime running.  The runtime will then launch
        * the specified top-level task on one of the processors in the
        * machine.  Note if background is set to false, control will
        * never return from this call.  An integer is returned since
@@ -3070,6 +3312,7 @@ namespace LegionRuntime {
        * @param index whether the task can be run as an index space task
        * @param vid the variant ID to assign to the task
        * @param options the task configuration options
+       * @param task_name string name for the task
        * @return the ID where the task was assigned
        */
       template<typename T,
@@ -3078,7 +3321,8 @@ namespace LegionRuntime {
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index, 
                                          VariantID vid = AUTO_GENERATE_ID,
-                              TaskConfigOptions options = TaskConfigOptions());
+                              TaskConfigOptions options = TaskConfigOptions(),
+                                         const char *task_name = NULL);
       /**
        * Register a task with a void return type for the given
        * kind of processor.
@@ -3088,6 +3332,7 @@ namespace LegionRuntime {
        * @param index whether the task can be run as an index space task
        * @param vid the variant ID to assign to the task
        * @param options the task configuration options
+       * @param task_name string name for the task
        * @return the ID where the task was assigned
        */
       template<
@@ -3096,7 +3341,8 @@ namespace LegionRuntime {
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          VariantID vid = AUTO_GENERATE_ID,
-                             TaskConfigOptions options = TaskConfigOptions());
+                             TaskConfigOptions options = TaskConfigOptions(),
+                                         const char *task_name = NULL);
       /**
        * @deprecated
        * Register a single task with a template return type for the given
@@ -3238,7 +3484,8 @@ namespace LegionRuntime {
                       TaskID uid, Processor::Kind proc_kind, 
                       bool single_task, bool index_space_task,
                       VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options);
+                      const TaskConfigOptions &options,
+                      const char *task_name);
       static LowLevel::ReductionOpTable& get_reduction_table(void);
     private:
       Runtime *runtime;
@@ -3748,6 +3995,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskLauncher::add_field(unsigned idx, FieldID fid, bool inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < region_requirements.size());
+#endif
+      region_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
     inline void TaskLauncher::add_future(Future f)
     //--------------------------------------------------------------------------
     {
@@ -3755,11 +4012,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_reservation_request(
-                                                  const ReservationRequest &req)
+    inline void TaskLauncher::add_grant(Grant g)
     //--------------------------------------------------------------------------
     {
-      reservation_requests.push_back(req);
+      grants.push_back(g);
     }
 
     //--------------------------------------------------------------------------
@@ -3793,6 +4049,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline void IndexLauncher::add_field(unsigned idx, FieldID fid, bool inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < region_requirements.size());
+#endif
+      region_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
     inline void IndexLauncher::add_future(Future f)
     //--------------------------------------------------------------------------
     {
@@ -3800,11 +4066,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_reservation_request(
-                                                  const ReservationRequest &req)
+    inline void IndexLauncher::add_grant(Grant g)
     //--------------------------------------------------------------------------
     {
-      reservation_requests.push_back(req);
+      grants.push_back(g);
     }
 
     //--------------------------------------------------------------------------
@@ -3822,6 +4087,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_field(FieldID fid, bool inst)
+    //--------------------------------------------------------------------------
+    {
+      requirement.add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
     inline void CopyLauncher::add_copy_requirements(
                      const RegionRequirement &src, const RegionRequirement &dst)
     //--------------------------------------------------------------------------
@@ -3831,11 +4103,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_reservation_request(
-                                                  const ReservationRequest &req)
+    inline void CopyLauncher::add_src_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
-      reservation_requests.push_back(req);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < src_requirements.size());
+#endif
+      src_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_dst_field(unsigned idx,FieldID fid,bool inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < dst_requirements.size());
+#endif
+      dst_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
     }
 
     //--------------------------------------------------------------------------
@@ -3847,6 +4138,62 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline void CopyLauncher::add_arrival_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_field(FieldID f)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(f);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_wait_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_arrival_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_field(FieldID f)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(f);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_wait_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(bar);
@@ -3928,6 +4275,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline bool PhysicalRegion::is_mapped(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl != NULL);
+    }
+
+    //--------------------------------------------------------------------------
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
     {
@@ -3970,6 +4324,20 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline UniqueID Inline::get_unique_inline_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Acquire::get_unique_acquire_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Release::get_unique_release_id(void) const
     //--------------------------------------------------------------------------
     {
       return get_unique_mappable_id();
@@ -4197,6 +4565,9 @@ namespace LegionRuntime {
                                                 size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
+      // Assert that we are returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
       // Get the high level runtime
@@ -4249,6 +4620,9 @@ namespace LegionRuntime {
                                                     size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
+      // Assert that we aren't returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
       // Get the high level runtime
@@ -4308,6 +4682,9 @@ namespace LegionRuntime {
                                                      size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
+      // Assert that we aren't returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<RT,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<RT,FutureMap>::value));
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(RT) <= MAX_RETURN_SIZE);
       // Get the high level runtime
@@ -4371,6 +4748,12 @@ namespace LegionRuntime {
           void *&return_addr, size_t &return_size)
     //--------------------------------------------------------------------------
     {
+      // Assert that we aren't returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
+      // Assert that the return type size is within the required size
+      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+
       T return_value = (*TASK_PTR)(task, regions, ctx, runtime);
 
       // Send the return value back, no need to pack it
@@ -4405,6 +4788,12 @@ namespace LegionRuntime {
           void *&return_addr, size_t &return_size)
     //--------------------------------------------------------------------------
     {
+      // Assert that we aren't returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
+      // Assert that the return type size is within the required size
+      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+
       T return_value = (*TASK_PTR)(task->args, task->arglen,
                                    task->regions, regions, ctx, runtime);
 
@@ -4441,6 +4830,12 @@ namespace LegionRuntime {
           void *&return_addr, size_t &return_size)
     //--------------------------------------------------------------------------
     {
+      // Assert that we aren't returning Futures or FutureMaps
+      LEGION_STATIC_ASSERT((LegionTypeInequality<RT,Future>::value));
+      LEGION_STATIC_ASSERT((LegionTypeInequality<RT,FutureMap>::value));
+      // Assert that the return type size is within the required size
+      LEGION_STATIC_ASSERT(sizeof(RT) <= MAX_RETURN_SIZE);
+
       RT return_value = (*TASK_PTR)(task->args, task->arglen,
                                     task->local_args, task->local_arglen,
                                     task->index_point, task->regions,
@@ -4479,20 +4874,21 @@ namespace LegionRuntime {
                                                     Processor::Kind proc_kind,
                                                     bool single, bool index,
                                                     VariantID vid,
-                                                    TaskConfigOptions options)
+                                                    TaskConfigOptions options,
+                                                    const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (options.name == NULL)
+      if (task_name == NULL)
       {
         // Has no name, so just call it by its number
         char *buffer = (char*)malloc(32*sizeof(char));
         sprintf(buffer,"%d",id);
-        options.name = buffer;
+        task_name = buffer;
       }
       return HighLevelRuntime::update_collection_table(
         LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>, 
         LegionTaskWrapper::inline_task_wrapper<T,TASK_PTR>, id, proc_kind, 
-                                      single, index, vid, sizeof(T), options);
+                            single, index, vid, sizeof(T), options, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -4503,22 +4899,23 @@ namespace LegionRuntime {
                                                     Processor::Kind proc_kind,
                                                     bool single, bool index,
                                                     VariantID vid,
-                                                    TaskConfigOptions options)
+                                                    TaskConfigOptions options,
+                                                    const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (options.name == NULL)
+      if (task_name == NULL)
       {
         // Has no name, so just call it by its number
         char *buffer = (char*)malloc(32*sizeof(char));
         sprintf(buffer,"%d",id);
-        options.name = buffer;
+        task_name = buffer;
       }
       else
-        options.name = strdup(options.name);
+        task_name = strdup(task_name);
       return HighLevelRuntime::update_collection_table(
         LegionTaskWrapper::legion_task_wrapper<TASK_PTR>, 
         LegionTaskWrapper::inline_task_wrapper<TASK_PTR>, id, proc_kind, 
-                                      single, index, vid, 0/*size*/, options);
+                            single, index, vid, 0/*size*/, options, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -4547,7 +4944,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_task_wrapper<T,TASK_PTR>,  
               LegionTaskWrapper::high_level_inline_task_wrapper<T,TASK_PTR>,
               id, proc_kind, true/*single*/, false/*index space*/, vid,
-              sizeof(T), TaskConfigOptions(leaf, inner, idempotent, name));
+              sizeof(T), TaskConfigOptions(leaf, inner, idempotent), name);
     }
 
     //--------------------------------------------------------------------------
@@ -4578,7 +4975,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_task_wrapper<TASK_PTR>,
               LegionTaskWrapper::high_level_inline_task_wrapper<TASK_PTR>,
               id, proc_kind, true/*single*/, false/*index space*/, vid,
-              0/*size*/, TaskConfigOptions(leaf, inner, idempotent, name));
+              0/*size*/, TaskConfigOptions(leaf, inner, idempotent), name);
     }
 
     //--------------------------------------------------------------------------
@@ -4609,7 +5006,7 @@ namespace LegionRuntime {
           LegionTaskWrapper::high_level_index_task_wrapper<RT,TASK_PTR>,  
           LegionTaskWrapper::high_level_inline_index_task_wrapper<RT,TASK_PTR>,
           id, proc_kind, false/*single*/, true/*index space*/, vid,
-          sizeof(RT), TaskConfigOptions(leaf, inner, idempotent, name));
+          sizeof(RT), TaskConfigOptions(leaf, inner, idempotent), name);
     }
 
     //--------------------------------------------------------------------------
@@ -4641,7 +5038,7 @@ namespace LegionRuntime {
               LegionTaskWrapper::high_level_index_task_wrapper<TASK_PTR>, 
               LegionTaskWrapper::high_level_inline_index_task_wrapper<TASK_PTR>,
               id, proc_kind, false/*single*/, true/*index space*/, vid,
-              0/*size*/, TaskConfigOptions(leaf, inner, idempotent, name));
+              0/*size*/, TaskConfigOptions(leaf, inner, idempotent), name);
     }
 
 

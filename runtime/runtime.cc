@@ -796,7 +796,7 @@ namespace LegionRuntime {
       : Collectable(), context(ctx), task(t), task_gen(t->get_generation()),
         future_size(fut_size), predicated(t->is_predicated()), valid(true),
         runtime(rt), ready_event(t->get_completion_event()),
-        lock(Lock::create_lock()) 
+        lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
     }
@@ -806,7 +806,7 @@ namespace LegionRuntime {
       : Collectable(), context(ctx), task(NULL), task_gen(0),
         future_size(0), predicated(false), valid(false),
         runtime(rt), ready_event(Event::NO_EVENT), 
-        lock(Lock::NO_LOCK)
+        lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
 
@@ -829,8 +829,8 @@ namespace LegionRuntime {
       futures.clear();
       if (lock.exists())
       {
-        lock.destroy_lock();
-        lock = Lock::NO_LOCK;
+        lock.destroy_reservation();
+        lock = Reservation::NO_RESERVATION;
       }
     }
 
@@ -849,7 +849,7 @@ namespace LegionRuntime {
     {
       if (valid)
       {
-        Event lock_event = lock.lock(0, true/*exclusive*/);
+        Event lock_event = lock.acquire(0, true/*exclusive*/);
         lock_event.wait(true/*block*/);
         // Check to see if we already have a future for the point
         std::map<DomainPoint,Future,DomainPoint::STLComparator>::const_iterator
@@ -857,14 +857,14 @@ namespace LegionRuntime {
         if (finder != futures.end())
         {
           Future result = finder->second;
-          lock.unlock();
+          lock.release();
           return result;
         }
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         Future result = runtime->help_create_future(task);
         futures[point] = result;
-        lock.unlock();
+        lock.release();
         return result;
       }
       else
@@ -1066,8 +1066,9 @@ namespace LegionRuntime {
         // once the reference event is ready
         if (reference.has_required_lock())
         {
-          Lock req_lock = reference.get_required_lock();
-          Event locked_event = req_lock.lock(0, true/*exclusive*/, ref_ready);
+          Reservation req_lock = reference.get_required_lock();
+          Event locked_event = 
+            req_lock.acquire(0, true/*exclusive*/, ref_ready);
           locked_event.wait();
         }
         else
@@ -1172,8 +1173,8 @@ namespace LegionRuntime {
       // Unlock our lock now that we're done
       if (reference.has_required_lock())
       {
-        Lock req_lock = reference.get_required_lock();
-        req_lock.unlock();
+        Reservation req_lock = reference.get_required_lock();
+        req_lock.release();
       }
       mapped = false;
       valid = false;
@@ -1230,6 +1231,113 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // Physical Region Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Grant::Impl::Impl(void)
+      : acquired(false), grant_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Impl::Impl(const std::vector<ReservationRequest> &reqs)
+      : requests(reqs), acquired(false), 
+        grant_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Impl::Impl(const Grant::Impl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Impl::~Impl(void)
+    //--------------------------------------------------------------------------
+    {
+      // clean up our reservation
+      grant_lock.destroy_reservation();
+      grant_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Impl& Grant::Impl::operator=(const Grant::Impl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void Grant::Impl::register_operation(Event completion_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock g_lock(grant_lock);
+      completion_events.insert(completion_event);
+    }
+
+    //--------------------------------------------------------------------------
+    Event Grant::Impl::acquire_grant(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock g_lock(grant_lock);
+      if (!acquired)
+      {
+        grant_event = Event::NO_EVENT;
+        for (std::vector<ReservationRequest>::const_iterator it = 
+              requests.begin(); it != requests.end(); it++)
+        {
+          grant_event = it->reservation.acquire(it->mode, 
+                                                it->exclusive, grant_event);
+        }
+        acquired = true;
+      }
+      return grant_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void Grant::Impl::release_grant(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock g_lock(grant_lock);
+      Event deferred_release = Event::merge_events(completion_events);
+      for (std::vector<ReservationRequest>::const_iterator it = 
+            requests.begin(); it != requests.end(); it++)
+      {
+        it->reservation.release(deferred_release);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Grant::Impl::pack_grant(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      Event pack_event = acquire_grant();
+      rez.serialize(pack_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void Grant::Impl::unpack_grant(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Event unpack_event;
+      derez.deserialize(unpack_event);
+      AutoLock g_lock(grant_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!acquired);
+#endif
+      grant_event = unpack_event;
+      acquired = true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Processor Manager 
     /////////////////////////////////////////////////////////////
 
@@ -1246,7 +1354,8 @@ namespace LegionRuntime {
         current_pending(0), current_executing(false), idle_task_enabled(true),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
-        mapper_locks(std::vector<Lock>(def_mappers,Lock::NO_LOCK))
+        mapper_locks(
+            std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION))
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < def_mappers; idx++)
@@ -1254,11 +1363,11 @@ namespace LegionRuntime {
         ready_queues[idx].clear();
         outstanding_steal_requests[idx] = std::set<Processor>();
       }
-      this->idle_lock = Lock::create_lock();
-      this->dependence_lock = Lock::create_lock();
-      this->queue_lock = Lock::create_lock();
-      this->stealing_lock = Lock::create_lock();
-      this->thieving_lock = Lock::create_lock();
+      this->idle_lock = Reservation::create_reservation();
+      this->dependence_lock = Reservation::create_reservation();
+      this->queue_lock = Reservation::create_reservation();
+      this->stealing_lock = Reservation::create_reservation();
+      this->thieving_lock = Reservation::create_reservation();
       this->gc_epoch_event = Event::NO_EVENT;
     }
 
@@ -1288,8 +1397,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(mapper_locks[idx].exists());
 #endif
-          mapper_locks[idx].destroy_lock();
-          mapper_locks[idx] = Lock::NO_LOCK;
+          mapper_locks[idx].destroy_reservation();
+          mapper_locks[idx] = Reservation::NO_RESERVATION;
         }
       }
       mapper_objects.clear();
@@ -1297,16 +1406,16 @@ namespace LegionRuntime {
       dependence_queues.clear();
       ready_queues.clear();
       local_ready_queue.clear();
-      idle_lock.destroy_lock();
-      idle_lock = Lock::NO_LOCK;
-      dependence_lock.destroy_lock();
-      dependence_lock = Lock::NO_LOCK;
-      queue_lock.destroy_lock();
-      queue_lock = Lock::NO_LOCK;
-      stealing_lock.destroy_lock();
-      stealing_lock = Lock::NO_LOCK;
-      thieving_lock.destroy_lock();
-      thieving_lock = Lock::NO_LOCK;
+      idle_lock.destroy_reservation();
+      idle_lock = Reservation::NO_RESERVATION;
+      dependence_lock.destroy_reservation();
+      dependence_lock = Reservation::NO_RESERVATION;
+      queue_lock.destroy_reservation();
+      queue_lock = Reservation::NO_RESERVATION;
+      stealing_lock.destroy_reservation();
+      stealing_lock = Reservation::NO_RESERVATION;
+      thieving_lock.destroy_reservation();
+      thieving_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1341,8 +1450,8 @@ namespace LegionRuntime {
         for (unsigned int i=old_size; i<(mid+1); i++)
         {
           mapper_objects[i] = NULL;
-          mapper_locks[i].destroy_lock();
-          mapper_locks[i] = Lock::NO_LOCK;
+          mapper_locks[i].destroy_reservation();
+          mapper_locks[i] = Reservation::NO_RESERVATION;
           ready_queues[i].clear();
           outstanding_steal_requests[i] = std::set<Processor>();
         }
@@ -1352,7 +1461,7 @@ namespace LegionRuntime {
       assert(mapper_objects[mid] == NULL);
       assert(!mapper_locks[mid].exists());
 #endif
-      mapper_locks[mid] = Lock::create_lock();
+      mapper_locks[mid] = Reservation::create_reservation();
       mapper_objects[mid] = m;
     }
 
@@ -2189,7 +2298,7 @@ namespace LegionRuntime {
         sending_buffer_size(max_message_size)
     //--------------------------------------------------------------------------
     {
-      send_lock = Lock::create_lock();
+      send_lock = Reservation::create_reservation();
       receiving_buffer_size = max_message_size;
       receiving_buffer = (char*)malloc(receiving_buffer_size);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2250,8 +2359,8 @@ namespace LegionRuntime {
     MessageManager::~MessageManager(void)
     //--------------------------------------------------------------------------
     {
-      send_lock.destroy_lock();
-      send_lock = Lock::NO_LOCK;
+      send_lock.destroy_reservation();
+      send_lock = Reservation::NO_RESERVATION;
       free(sending_buffer);
       free(receiving_buffer);
       receiving_buffer = NULL;
@@ -3041,27 +3150,30 @@ namespace LegionRuntime {
         unique_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
-        available_lock(Lock::create_lock()), total_contexts(0),
-        distributed_id_lock(Lock::create_lock()),
-        distributed_collectable_lock(Lock::create_lock()),
-        hierarchical_collectable_lock(Lock::create_lock()),
-        future_lock(Lock::create_lock()),
+        available_lock(Reservation::create_reservation()), total_contexts(0),
+        distributed_id_lock(Reservation::create_reservation()),
+        distributed_collectable_lock(Reservation::create_reservation()),
+        hierarchical_collectable_lock(Reservation::create_reservation()),
+        future_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
-        remote_lock(Lock::create_lock()),
-        individual_task_lock(Lock::create_lock()), 
-        point_task_lock(Lock::create_lock()),
-        index_task_lock(Lock::create_lock()), 
-        slice_task_lock(Lock::create_lock()),
-        remote_task_lock(Lock::create_lock()),
-        inline_task_lock(Lock::create_lock()),
-        map_op_lock(Lock::create_lock()), 
-        copy_op_lock(Lock::create_lock()), fence_op_lock(Lock::create_lock()),
-        deletion_op_lock(Lock::create_lock()), 
-        close_op_lock(Lock::create_lock()), 
-        future_pred_op_lock(Lock::create_lock()), 
-        not_pred_op_lock(Lock::create_lock()),
-        and_pred_op_lock(Lock::create_lock()),
-        or_pred_op_lock(Lock::create_lock())
+        remote_lock(Reservation::create_reservation()),
+        individual_task_lock(Reservation::create_reservation()), 
+        point_task_lock(Reservation::create_reservation()),
+        index_task_lock(Reservation::create_reservation()), 
+        slice_task_lock(Reservation::create_reservation()),
+        remote_task_lock(Reservation::create_reservation()),
+        inline_task_lock(Reservation::create_reservation()),
+        map_op_lock(Reservation::create_reservation()), 
+        copy_op_lock(Reservation::create_reservation()), 
+        fence_op_lock(Reservation::create_reservation()),
+        deletion_op_lock(Reservation::create_reservation()), 
+        close_op_lock(Reservation::create_reservation()), 
+        future_pred_op_lock(Reservation::create_reservation()), 
+        not_pred_op_lock(Reservation::create_reservation()),
+        and_pred_op_lock(Reservation::create_reservation()),
+        or_pred_op_lock(Reservation::create_reservation()),
+        acquire_op_lock(Reservation::create_reservation()),
+        release_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run(LEVEL_DEBUG,"Initializing high-level runtime in address space %x",
@@ -3230,18 +3342,18 @@ namespace LegionRuntime {
         delete it->second;
       }
       message_managers.clear();
-      available_lock.destroy_lock();
-      available_lock = Lock::NO_LOCK;
-      distributed_id_lock.destroy_lock();
-      distributed_id_lock = Lock::NO_LOCK;
-      distributed_collectable_lock.destroy_lock();
-      distributed_collectable_lock = Lock::NO_LOCK;
-      hierarchical_collectable_lock.destroy_lock();
-      hierarchical_collectable_lock = Lock::NO_LOCK;
-      future_lock.destroy_lock();
-      future_lock = Lock::NO_LOCK;
-      remote_lock.destroy_lock();
-      remote_lock = Lock::NO_LOCK;
+      available_lock.destroy_reservation();
+      available_lock = Reservation::NO_RESERVATION;
+      distributed_id_lock.destroy_reservation();
+      distributed_id_lock = Reservation::NO_RESERVATION;
+      distributed_collectable_lock.destroy_reservation();
+      distributed_collectable_lock = Reservation::NO_RESERVATION;
+      hierarchical_collectable_lock.destroy_reservation();
+      hierarchical_collectable_lock = Reservation::NO_RESERVATION;
+      future_lock.destroy_reservation();
+      future_lock = Reservation::NO_RESERVATION;
+      remote_lock.destroy_reservation();
+      remote_lock = Reservation::NO_RESERVATION;
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -3249,8 +3361,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_individual_tasks.clear();
-      individual_task_lock.destroy_lock();
-      individual_task_lock = Lock::NO_LOCK;
+      individual_task_lock.destroy_reservation();
+      individual_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<PointTask*>::const_iterator it = 
             available_point_tasks.begin(); it != 
             available_point_tasks.end(); it++)
@@ -3258,8 +3370,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_point_tasks.clear();
-      point_task_lock.destroy_lock();
-      point_task_lock = Lock::NO_LOCK;
+      point_task_lock.destroy_reservation();
+      point_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<IndexTask*>::const_iterator it = 
             available_index_tasks.begin(); it != 
             available_index_tasks.end(); it++)
@@ -3267,8 +3379,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_index_tasks.clear();
-      index_task_lock.destroy_lock();
-      index_task_lock = Lock::NO_LOCK;
+      index_task_lock.destroy_reservation();
+      index_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<SliceTask*>::const_iterator it = 
             available_slice_tasks.begin(); it != 
             available_slice_tasks.end(); it++)
@@ -3276,8 +3388,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_slice_tasks.clear();
-      slice_task_lock.destroy_lock();
-      slice_task_lock = Lock::NO_LOCK;
+      slice_task_lock.destroy_reservation();
+      slice_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<RemoteTask*>::const_iterator it = 
             available_remote_tasks.begin(); it != 
             available_remote_tasks.end(); it++)
@@ -3285,8 +3397,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_remote_tasks.clear();
-      remote_task_lock.destroy_lock();
-      remote_task_lock = Lock::NO_LOCK;
+      remote_task_lock.destroy_reservation();
+      remote_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<InlineTask*>::const_iterator it = 
             available_inline_tasks.begin(); it !=
             available_inline_tasks.end(); it++)
@@ -3294,8 +3406,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_inline_tasks.clear();
-      inline_task_lock.destroy_lock();
-      inline_task_lock = Lock::NO_LOCK;
+      inline_task_lock.destroy_reservation();
+      inline_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<MapOp*>::const_iterator it = 
             available_map_ops.begin(); it != 
             available_map_ops.end(); it++)
@@ -3303,8 +3415,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_map_ops.clear();
-      map_op_lock.destroy_lock();
-      map_op_lock = Lock::NO_LOCK;
+      map_op_lock.destroy_reservation();
+      map_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<CopyOp*>::const_iterator it = 
             available_copy_ops.begin(); it != 
             available_copy_ops.end(); it++)
@@ -3312,8 +3424,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_copy_ops.clear();
-      copy_op_lock.destroy_lock();
-      copy_op_lock = Lock::NO_LOCK;
+      copy_op_lock.destroy_reservation();
+      copy_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FenceOp*>::const_iterator it = 
             available_fence_ops.begin(); it != 
             available_fence_ops.end(); it++)
@@ -3321,8 +3433,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_fence_ops.clear();
-      fence_op_lock.destroy_lock();
-      fence_op_lock = Lock::NO_LOCK;
+      fence_op_lock.destroy_reservation();
+      fence_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DeletionOp*>::const_iterator it = 
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
@@ -3330,8 +3442,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_deletion_ops.clear();
-      deletion_op_lock.destroy_lock();
-      deletion_op_lock = Lock::NO_LOCK;
+      deletion_op_lock.destroy_reservation();
+      deletion_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<CloseOp*>::const_iterator it = 
             available_close_ops.begin(); it !=
             available_close_ops.end(); it++)
@@ -3339,8 +3451,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_close_ops.clear();
-      close_op_lock.destroy_lock();
-      close_op_lock = Lock::NO_LOCK;
+      close_op_lock.destroy_reservation();
+      close_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FuturePredOp*>::const_iterator it = 
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
@@ -3348,8 +3460,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_future_pred_ops.clear();
-      future_pred_op_lock.destroy_lock();
-      future_pred_op_lock = Lock::NO_LOCK;
+      future_pred_op_lock.destroy_reservation();
+      future_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<NotPredOp*>::const_iterator it = 
             available_not_pred_ops.begin(); it !=
             available_not_pred_ops.end(); it++)
@@ -3357,8 +3469,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_not_pred_ops.clear();
-      not_pred_op_lock.destroy_lock();
-      not_pred_op_lock = Lock::NO_LOCK;
+      not_pred_op_lock.destroy_reservation();
+      not_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<AndPredOp*>::const_iterator it = 
             available_and_pred_ops.begin(); it !=
             available_and_pred_ops.end(); it++)
@@ -3366,8 +3478,8 @@ namespace LegionRuntime {
         delete *it;
       }
       available_and_pred_ops.clear();
-      and_pred_op_lock.destroy_lock();
-      and_pred_op_lock = Lock::NO_LOCK;
+      and_pred_op_lock.destroy_reservation();
+      and_pred_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<OrPredOp*>::const_iterator it = 
             available_or_pred_ops.begin(); it !=
             available_or_pred_ops.end(); it++)
@@ -3375,8 +3487,27 @@ namespace LegionRuntime {
         delete *it;
       }
       available_or_pred_ops.clear();
-      or_pred_op_lock.destroy_lock();
-      or_pred_op_lock = Lock::NO_LOCK;
+      or_pred_op_lock.destroy_reservation();
+      or_pred_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<AcquireOp*>::const_iterator it = 
+            available_acquire_ops.begin(); it !=
+            available_acquire_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_acquire_ops.clear();
+      acquire_op_lock.destroy_reservation();
+      acquire_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReleaseOp*>::const_iterator it = 
+            available_release_ops.begin(); it !=
+            available_release_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_release_ops.clear();
+      release_op_lock.destroy_reservation();
+      release_op_lock = Reservation::NO_RESERVATION;
+
       delete forest;
 
 #ifdef DEBUG_HIGH_LEVEL
@@ -4947,7 +5078,7 @@ namespace LegionRuntime {
       Event term_event = copy_op->get_completion_event();
 #endif
       Processor proc = ctx->get_executing_processor();
-      // Check to see if we need to do any unamppings and remappings
+      // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
       for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
@@ -5168,38 +5299,84 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Reservation Runtime::create_reservation(Context ctx)
+    Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal reservation creation in leaf "
+        log_task(LEVEL_ERROR,"Illegal lock creation in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      Lock result = Lock::create_lock();
-      return Reservation(result);
+      return Lock(Reservation::create_reservation());
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::destroy_reservation(Context ctx, Reservation r)
+    void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal reservation destruction in leaf "
+        log_task(LEVEL_ERROR,"Illegal lock destruction in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      ctx->destroy_user_lock(r.reservation_lock);
+      ctx->destroy_user_lock(l.reservation_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    Grant Runtime::acquire_grant(Context ctx, 
+                                 const std::vector<LockRequest> &requests)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal grant acquire in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      // Kind of annoying, but we need to unpack and repack the
+      // Lock type here to build new requests because the C++
+      // type system is dumb with nested classes.
+      std::vector<Grant::Impl::ReservationRequest> 
+        unpack_requests(requests.size());
+      for (unsigned idx = 0; idx < requests.size(); idx++)
+      {
+        unpack_requests[idx] = 
+          Grant::Impl::ReservationRequest(requests[idx].lock.reservation_lock,
+                                          requests[idx].mode,
+                                          requests[idx].exclusive);
+      }
+      return Grant(new Grant::Impl(unpack_requests));
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_grant(Context ctx, Grant grant)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal grant release in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      grant.impl->release_grant();
     }
 
     //--------------------------------------------------------------------------
@@ -5262,7 +5439,193 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_legion_mapping_fence(Context ctx)
+    void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AcquireOp *acquire_op = get_available_acquire_op();
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Issuing an acquire operation in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal acquire operation performed in leaf task"
+                              "%s (ID %lld)",
+                              ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      acquire_op->initialize(ctx, launcher, check_privileges);
+#else
+      acquire_op->initialize(ctx, launcher, false/*check privileges*/);
+#endif
+#ifdef INORDER_EXECUTION
+      Event term_event = acquire_op->get_completion_event();
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this acquire operation.
+      std::vector<PhysicalRegion> unmapped_regions;
+      for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+      {
+        if (ctx->is_region_mapped(idx) &&
+            ctx->has_region_dependence(idx, acquire_op))
+        {
+          unmapped_regions.push_back(ctx->get_physical_region(idx));
+          unmapped_regions.back().impl->unmap_region();
+        }
+      }
+      // Issue the acquire operation
+      add_to_dependence_queue(ctx->get_executing_processor(), acquire_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_release(Context ctx, const ReleaseLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      ReleaseOp *release_op = get_available_release_op();
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Issuing a release operation in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal release operation performed in leaf task"
+                             "%s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      release_op->initialize(ctx, launcher, check_privileges);
+#else
+      release_op->initialize(ctx, launcher, false/*check privileges*/);
+#endif
+#ifdef INORDER_EXECUTION
+      Event term_event = release_op->get_completion_event();
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue the release operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+      {
+        if (ctx->is_region_mapped(idx) &&
+            ctx->has_region_dependence(idx, release_op))
+        {
+          unmapped_regions.push_back(ctx->get_physical_region(idx));
+          unmapped_regions.back().impl->unmap_region();
+        }
+      }
+      // Issue the release operation
+      add_to_dependence_queue(ctx->get_executing_processor(), release_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp *fence_op = get_available_fence_op();
@@ -5295,7 +5658,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_legion_execution_fence(Context ctx)
+    void Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp *fence_op = get_available_fence_op();
@@ -7387,11 +7750,55 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    AcquireOp* Runtime::get_available_acquire_op(void)
+    //--------------------------------------------------------------------------
+    {
+      AcquireOp *result = NULL;
+      {
+        AutoLock a_lock(acquire_op_lock);
+        if (!available_acquire_ops.empty())
+        {
+          result = available_acquire_ops.front();
+          available_acquire_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = new AcquireOp(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ReleaseOp* Runtime::get_available_release_op(void)
+    //--------------------------------------------------------------------------
+    {
+      ReleaseOp *result = NULL;
+      {
+        AutoLock r_lock(release_op_lock);
+        if (!available_release_ops.empty())
+        {
+          result = available_release_ops.front();
+          available_release_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = new ReleaseOp(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(individual_task_lock);
-      available_individual_tasks.push_back(task);
+      available_individual_tasks.push_front(task);
 #ifdef DEBUG_HIGH_LEVEL
       out_individual_tasks.erase(task);
 #endif
@@ -7402,7 +7809,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(point_task_lock);
-      available_point_tasks.push_back(task);
+      available_point_tasks.push_front(task);
 #ifdef DEBUG_HIGH_LEVEL
       out_point_tasks.erase(task);
 #endif
@@ -7413,7 +7820,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(index_task_lock);
-      available_index_tasks.push_back(task);
+      available_index_tasks.push_front(task);
 #ifdef DEBUG_HIGH_LEVEL
       out_index_tasks.erase(task);
 #endif
@@ -7424,7 +7831,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(slice_task_lock);
-      available_slice_tasks.push_back(task);
+      available_slice_tasks.push_front(task);
 #ifdef DEBUG_HIGH_LEVEL
       out_slice_tasks.erase(task);
 #endif
@@ -7446,7 +7853,7 @@ namespace LegionRuntime {
       }
       // Then we can put it back on the list of available remote tasks
       AutoLock r_lock(remote_task_lock);
-      available_remote_tasks.push_back(task);
+      available_remote_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -7454,7 +7861,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inline_task_lock);
-      available_inline_tasks.push_back(task);
+      available_inline_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -7462,7 +7869,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(map_op_lock);
-      available_map_ops.push_back(op);
+      available_map_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7470,7 +7877,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      available_copy_ops.push_back(op);
+      available_copy_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7478,7 +7885,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fence_op_lock);
-      available_fence_ops.push_back(op);
+      available_fence_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7486,7 +7893,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(deletion_op_lock);
-      available_deletion_ops.push_back(op);
+      available_deletion_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7494,7 +7901,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(close_op_lock);
-      available_close_ops.push_back(op);
+      available_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7502,7 +7909,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_pred_op_lock);
-      available_future_pred_ops.push_back(op);
+      available_future_pred_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7510,7 +7917,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(not_pred_op_lock);
-      available_not_pred_ops.push_back(op);
+      available_not_pred_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7518,7 +7925,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(and_pred_op_lock);
-      available_and_pred_ops.push_back(op);
+      available_and_pred_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -7526,7 +7933,23 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(or_pred_op_lock);
-      available_or_pred_ops.push_back(op);
+      available_or_pred_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_acquire_op(AcquireOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(acquire_op_lock);
+      available_acquire_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_release_op(ReleaseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(release_op_lock);
+      available_release_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -8048,7 +8471,8 @@ namespace LegionRuntime {
                           TaskID uid, Processor::Kind proc_kind, 
                           bool single_task, bool index_space_task,
                           VariantID vid, size_t return_size,
-                          const TaskConfigOptions &options)
+                          const TaskConfigOptions &options,
+                          const char *name)
     //--------------------------------------------------------------------------
     {
       std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = 
@@ -8087,14 +8511,14 @@ namespace LegionRuntime {
         {
           log_run(LEVEL_ERROR,"Task variant %s (ID %d) is not permitted to "
                               "be both inner and leaf tasks simultaneously.",
-                              options.name, uid);
+                              name, uid);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
           exit(ERROR_INNER_LEAF_MISMATCH);
         }
         TaskVariantCollection *collec = 
-          new TaskVariantCollection(uid, options.name, 
+          new TaskVariantCollection(uid, name, 
             options.leaf, 
 #ifdef LEGION_SPY
             false, // no inner optimizations for analysis
@@ -8156,12 +8580,12 @@ namespace LegionRuntime {
 #endif
           exit(ERROR_RETURN_SIZE_MISMATCH);
         }
-        if ((options.name != NULL) && 
-            (strcmp(table[uid]->name,options.name) != 0))
+        if ((name != NULL) && 
+            (strcmp(table[uid]->name,name) != 0))
         {
           log_run(LEVEL_WARNING,"WARNING: name mismatch between variants of "
                                 "task %d.  Differing names: %s %s",
-                                uid, table[uid]->name, options.name);
+                                uid, table[uid]->name, name);
         }
         if ((vid != AUTO_GENERATE_ID) && table[uid]->has_variant(vid))
         {
@@ -8331,9 +8755,7 @@ namespace LegionRuntime {
       table[SCHEDULER_ID]         = Runtime::schedule_runtime;
       table[MESSAGE_TASK_ID]      = Runtime::message_task;
       table[POST_END_TASK_ID]     = Runtime::post_end_task;
-      table[COPY_COMPLETE_ID]     = Runtime::copy_complete_task;
-      table[FENCE_COMPLETE_ID]    = Runtime::fence_complete_task;
-      table[CLOSE_COMPLETE_ID]    = Runtime::close_complete_task;
+      table[DEFERRED_COMPLETE_ID] = Runtime::deferred_complete_task;
       table[RECLAIM_LOCAL_FID]    = Runtime::reclaim_local_field_task;
       table[DEFERRED_COLLECT_ID]  = Runtime::deferred_collect_task;
       table[LEGION_LOGGING_ID]    = Runtime::legion_logging_task;
@@ -8628,30 +9050,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::copy_complete_task(
+    /*static*/ void Runtime::deferred_complete_task(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-      CopyOp *copy = *((CopyOp**)args);
-      copy->complete_copy();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::fence_complete_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      FenceOp *fence = *((FenceOp**)args);
-      fence->complete_execution_fence();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::close_complete_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      CloseOp *close = *((CloseOp**)args);
-      close->complete_close();
+      Operation *op = *((Operation**)args);
+      op->deferred_complete();
     }
 
     //--------------------------------------------------------------------------

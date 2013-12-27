@@ -34,7 +34,8 @@ namespace LegionRuntime {
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space)
       : runtime(rt), did(id), owner_space(own_space), local_space(loc_space),
-        owner(owner_space == local_space), gc_lock(Lock::create_lock()),
+        owner(owner_space == local_space), 
+        gc_lock(Reservation::create_reservation()),
         gc_references(0), resource_references(0), held_remote_references(0)
     //--------------------------------------------------------------------------
     {
@@ -53,8 +54,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->unregister_distributed_collectable(did);
-      gc_lock.destroy_lock();
-      gc_lock = Lock::NO_LOCK;
+      gc_lock.destroy_reservation();
+      gc_lock = Reservation::NO_RESERVATION;
       // Remove references on any remote nodes
       if (owner)
       {
@@ -342,7 +343,7 @@ namespace LegionRuntime {
                                                      DistributedID d,
                                                      AddressSpaceID own_addr, 
                                                      DistributedID own_did)
-      : runtime(rt), did(d), gc_lock(Lock::create_lock()), 
+      : runtime(rt), did(d), gc_lock(Reservation::create_reservation()), 
         gc_references(0), remote_references(0), resource_references(0),
         owner_addr(own_addr), owner_did(own_did), held_remote_references(0)
     //--------------------------------------------------------------------------
@@ -358,8 +359,8 @@ namespace LegionRuntime {
     HierarchicalCollectable::~HierarchicalCollectable(void)
     //--------------------------------------------------------------------------
     {
-      gc_lock.destroy_lock();
-      gc_lock = Lock::NO_LOCK;
+      gc_lock.destroy_reservation();
+      gc_lock = Reservation::NO_RESERVATION;
       // Remove our references from any remote collectables
       if (!subscribers.empty())
       {

@@ -41,8 +41,9 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
     namespace LegionLogging {
       Logger::Category log_logging("legion_logging");
-      ProcessorProfiler *legion_prof_table = 
-        new ProcessorProfiler[MAX_NUM_PROCS + 1];
+      std::list<ProcessorProfiler *> processor_profilers;
+      pthread_key_t pthread_profiler_key;
+      pthread_mutex_t profiler_mutex = PTHREAD_MUTEX_INITIALIZER;
       std::deque<LogMsgProcessor> msgs_processor;
       std::deque<LogMsgMemory> msgs_memory;
       std::deque<LogMsgProcMemAffinity> msgs_proc_mem_affinity;
@@ -50,6 +51,8 @@ namespace LegionRuntime {
       std::deque<LogMsgTaskCollection> msgs_task_collection;
       std::deque<LogMsgTaskVariant> msgs_task_variant;
       std::deque<LogMsgTopLevelTask> msgs_top_level_task;
+      unsigned long long init_time;
+      AddressSpaceID address_space;
     };
 #endif
 
@@ -109,7 +112,27 @@ namespace LegionRuntime {
     {
     }
 
+    /////////////////////////////////////////////////////////////
+    // Acquire 
+    /////////////////////////////////////////////////////////////
 
+    //--------------------------------------------------------------------------
+    Acquire::Acquire(void)
+      : Mappable(), parent_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Release 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Release::Release(void)
+      : Mappable(), parent_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     /////////////////////////////////////////////////////////////
     // FieldSpace 
@@ -455,45 +478,45 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
-    // Reservation 
+    // Lock 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Reservation::Reservation(void)
-      : reservation_lock(Lock::NO_LOCK)
+    Lock::Lock(void)
+      : reservation_lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    Reservation::Reservation(Lock l)
-      : reservation_lock(l)
+    Lock::Lock(Reservation r)
+      : reservation_lock(r)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    bool Reservation::operator<(const Reservation &rhs) const
+    bool Lock::operator<(const Lock &rhs) const
     //--------------------------------------------------------------------------
     {
       return (reservation_lock < rhs.reservation_lock);
     }
 
     //--------------------------------------------------------------------------
-    bool Reservation::operator==(const Reservation &rhs) const
+    bool Lock::operator==(const Lock &rhs) const
     //--------------------------------------------------------------------------
     {
       return (reservation_lock == rhs.reservation_lock);
     }
 
     //--------------------------------------------------------------------------
-    void Reservation::acquire(unsigned mode /*=0*/, bool exclusive /*=true*/)
+    void Lock::acquire(unsigned mode /*=0*/, bool exclusive /*=true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(reservation_lock.exists());
 #endif
-      Event lock_event = reservation_lock.lock(mode,exclusive);
+      Event lock_event = reservation_lock.acquire(mode,exclusive);
       if (!lock_event.has_triggered())
       {
         Processor proc = Machine::get_executing_processor();
@@ -505,13 +528,69 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Reservation::release(void)
+    void Lock::release(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(reservation_lock.exists());
 #endif
-      reservation_lock.unlock();
+      reservation_lock.release();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Grant 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Grant::Grant(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Grant(Grant::Impl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::Grant(const Grant &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    Grant::~Grant(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    Grant& Grant::operator=(const Grant &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1019,6 +1098,7 @@ namespace LegionRuntime {
     {
       premapped = false;
       must_early_map = false;
+      restricted = false;
       max_blocking_factor = 1;
       current_instances.clear();
       virtual_map = false;
@@ -1140,53 +1220,6 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
-    // Reservation Request
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReservationRequest::ReservationRequest(void)
-      : reservation(Reservation()), mode(0), exclusive(true)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReservationRequest::ReservationRequest(Reservation res, 
-                                           unsigned m /*=0*/, 
-                                           bool excl /*=true*/)
-      : reservation(res), mode(m), exclusive(excl)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReservationRequest::operator<(const ReservationRequest &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (mode < rhs.mode)
-        return true;
-      else if (mode > rhs.mode)
-        return false;
-      else
-      {
-        if (exclusive < rhs.exclusive)
-          return true;
-        else if (exclusive > rhs.exclusive)
-          return false;
-        else
-          return reservation < rhs.reservation;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReservationRequest::operator==(const ReservationRequest &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      return ((reservation == rhs.reservation) && (mode == rhs.mode) &&
-              (exclusive == rhs.exclusive));
-    }
-
-    /////////////////////////////////////////////////////////////
     // TaskLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -1262,6 +1295,36 @@ namespace LegionRuntime {
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : predicate(pred), map_id(mid), tag(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AcquireLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AcquireLauncher::AcquireLauncher(LogicalRegion reg, LogicalRegion par,
+                                     PhysicalRegion phy,
+                                     Predicate pred /*= Predicate::TRUE_PRED*/,
+                                     MapperID id /*=0*/, MappingTagID t /*=0*/)
+      : logical_region(reg), parent_region(par), physical_region(phy), 
+        predicate(pred), map_id(id), tag(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReleaseLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReleaseLauncher::ReleaseLauncher(LogicalRegion reg, LogicalRegion par,
+                                     PhysicalRegion phy,
+                                     Predicate pred /*= Predicate::TRUE_PRED*/,
+                                     MapperID id /*=0*/, MappingTagID t /*=0*/)
+      : logical_region(reg), parent_region(par), physical_region(phy), 
+        predicate(pred), map_id(id), tag(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -1598,8 +1661,8 @@ namespace LegionRuntime {
             it != variants.end(); it++)
       {
         if ((it->second.proc_kind == kind) && 
-            (it->second.single_task <= single) && 
-            (it->second.index_space <= index_space))
+            ((it->second.single_task <= single) || 
+            (it->second.index_space <= index_space)))
         {
           return true;
         }
@@ -1617,8 +1680,8 @@ namespace LegionRuntime {
             it != variants.end(); it++)
       {
         if ((it->second.proc_kind == kind) && 
-            (it->second.single_task <= single) && 
-            (it->second.index_space <= index_space))
+            ((it->second.single_task <= single) || 
+            (it->second.index_space <= index_space)))
         {
           return it->first;
         }
@@ -1704,9 +1767,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     TaskConfigOptions::TaskConfigOptions(bool l /*=false*/,
                                          bool in /*=false*/,
-                                         bool idem /*=false*/,
-                                         const char *n /*=NULL*/)
-      : leaf(l), inner(in), idempotent(idem), name(n)
+                                         bool idem /*=false*/)
+      : leaf(l), inner(in), idempotent(idem)
     //--------------------------------------------------------------------------
     {
     }
@@ -1784,6 +1846,7 @@ namespace LegionRuntime {
       {
         Color c = *((const Color*)source);
         source += sizeof(c);
+        coloring[c]; // Force coloring to exist even if empty.
         size_t num_points = *((const size_t*)source);
         source += sizeof(num_points);
         for (unsigned p = 0; p < num_points; p++)
@@ -2307,17 +2370,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Reservation HighLevelRuntime::create_reservation(Context ctx)
+    Lock HighLevelRuntime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_reservation(ctx);
+      return runtime->create_lock(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::destroy_reservation(Context ctx, Reservation r)
+    void HighLevelRuntime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
-      runtime->destroy_reservation(ctx, r);
+      runtime->destroy_lock(ctx, l);
+    }
+
+    //--------------------------------------------------------------------------
+    Grant HighLevelRuntime::acquire_grant(Context ctx,
+                                      const std::vector<LockRequest> &requests)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->acquire_grant(ctx, requests);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::release_grant(Context ctx, Grant grant)
+    //--------------------------------------------------------------------------
+    {
+      runtime->release_grant(ctx, grant);
     }
 
     //--------------------------------------------------------------------------
@@ -2344,17 +2422,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_legion_mapping_fence(Context ctx)
+    void HighLevelRuntime::issue_acquire(Context ctx,
+                                         const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_legion_mapping_fence(ctx);
+      runtime->issue_acquire(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_legion_execution_fence(Context ctx)
+    void HighLevelRuntime::issue_release(Context ctx,
+                                         const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return runtime->issue_legion_execution_fence(ctx);
+      runtime->issue_release(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::issue_mapping_fence(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->issue_mapping_fence(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::issue_execution_fence(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->issue_execution_fence(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -2537,13 +2631,14 @@ namespace LegionRuntime {
     /*static*/ TaskID HighLevelRuntime::update_collection_table(
         LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
         Processor::Kind proc_kind, bool single_task, bool index_space_task,
-        VariantID vid, size_t return_size, const TaskConfigOptions &options)
+        VariantID vid, size_t return_size, 
+        const TaskConfigOptions &options, const char *name)
     //--------------------------------------------------------------------------
     {
       return Runtime::update_collection_table(low_level_ptr,inline_ptr,
                                                     uid,proc_kind,single_task, 
                                                     index_space_task,vid,
-                                                    return_size,options);
+                                                    return_size,options,name);
     }
 
     //--------------------------------------------------------------------------

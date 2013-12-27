@@ -87,6 +87,21 @@ namespace LegionRuntime {
   template<> struct LegionStaticAssert<true> { };
 #define LEGION_STATIC_ASSERT(condition) \
   do { LegionStaticAssert<(condition)>(); } while (0)
+
+  /**
+   * \struct LegionTypeEquality
+   * Help with checking equality of types.
+   */
+  template<typename T, typename U>
+  struct LegionTypeInequality {
+  public:
+    static const bool value = true;
+  };
+  template<typename T>
+  struct LegionTypeInequality<T,T> {
+  public:
+    static const bool value = false;
+  };
   
   namespace HighLevel {
     
@@ -188,6 +203,8 @@ namespace LegionRuntime {
       ERROR_INNER_MISMATCH = 94,
       ERROR_INNER_LEAF_MISMATCH = 95,
       ERROR_EXCEEDED_MAX_CONTEXTS = 96,
+      ERROR_ACQUIRE_MISMATCH = 97,
+      ERROR_RELEASE_MISMATCH = 98,
     };
 
     // enum and namepsaces don't really get along well
@@ -253,13 +270,11 @@ namespace LegionRuntime {
       SCHEDULER_ID         = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
       MESSAGE_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
       POST_END_TASK_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      COPY_COMPLETE_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
-      FENCE_COMPLETE_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
-      CLOSE_COMPLETE_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
-      RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
-      DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
-      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
+      DEFERRED_COMPLETE_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
+      RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
+      DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
+      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
+      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
     };
 
     // Forward declarations for user level objects
@@ -271,16 +286,19 @@ namespace LegionRuntime {
     class FieldAllocator;
     class TaskArgument;
     class ArgumentMap;
-    class Reservation;
+    class Lock;
+    class LockRequest;
+    class Grant;
     class PhaseBarrier;
     struct RegionRequirement;
     struct IndexSpaceRequirement;
     struct FieldSpaceRequirement;
-    struct ReservationRequest;
     struct TaskLauncher;
     struct IndexLauncher;
     struct InlineLauncher;
     struct CopyLauncher;
+    struct AcquireLauncher;
+    struct ReleaseLauncher;
     class Future;
     class FutureMap;
     class Predicate;
@@ -290,6 +308,8 @@ namespace LegionRuntime {
     class Task;
     class Copy;
     class Inline;
+    class Acquire;
+    class Release;
     class TaskVariantCollection;
     class Mapper; 
     template<typename T> struct ColoredPoints; 
@@ -321,6 +341,8 @@ namespace LegionRuntime {
     class FenceOp;
     class DeletionOp;
     class CloseOp;
+    class AcquireOp;
+    class ReleaseOp;
     class FuturePredOp;
     class NotPredOp;
     class AndPredOp;
@@ -415,7 +437,7 @@ namespace LegionRuntime {
     typedef LowLevel::Processor Processor;
     typedef LowLevel::Event Event;
     typedef LowLevel::UserEvent UserEvent;
-    typedef LowLevel::Lock Lock;
+    typedef LowLevel::Reservation Reservation;
     typedef LowLevel::Barrier Barrier;
     typedef LowLevel::ReductionOpID ReductionOpID;
     typedef LowLevel::ReductionOpUntyped ReductionOp;
@@ -471,7 +493,6 @@ namespace LegionRuntime {
     friend class NotPredicate;                    \
     friend class AndPredicate;                    \
     friend class OrPredicate;                     \
-    friend class Resolver;                        \
     friend class ProcessorManager;                \
     friend class Operation;                       \
     friend class SpeculativeOp;                   \
@@ -482,6 +503,8 @@ namespace LegionRuntime {
     friend class FuturePredOp;                    \
     friend class DeletionOp;                      \
     friend class CloseOp;                         \
+    friend class AcquireOp;                       \
+    friend class ReleaseOp;                       \
     friend class NotPredOp;                       \
     friend class AndPredOp;                       \
     friend class OrPredOp;                        \

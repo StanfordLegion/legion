@@ -145,7 +145,7 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex;  // used to cover resizing activities on vectors below
       std::vector<Event::Impl> events;
       size_t num_events;
-      std::vector<Lock::Impl> locks;
+      std::vector<Reservation::Impl> locks;
       size_t num_locks;
       std::vector<Memory::Impl *> memories;
       std::vector<Processor::Impl *> processors;
@@ -277,7 +277,7 @@ namespace LegionRuntime {
       static Runtime *get_runtime(void) { return runtime; }
 
       Event::Impl *get_event_impl(ID id);
-      Lock::Impl *get_lock_impl(ID id);
+      Reservation::Impl *get_lock_impl(ID id);
       Memory::Impl *get_memory_impl(ID id);
       Processor::Impl *get_processor_impl(ID id);
       IndexSpace::Impl *get_index_space_impl(ID id);
@@ -305,11 +305,11 @@ namespace LegionRuntime {
 	
     };
 
-    class Lock::Impl {
+    class Reservation::Impl {
     public:
       Impl(void);
 
-      void init(Lock _me, unsigned _init_owner, size_t _data_size = 0);
+      void init(Reservation _me, unsigned _init_owner, size_t _data_size = 0);
 
       template <class T>
       void set_local_data(T *data)
@@ -319,7 +319,7 @@ namespace LegionRuntime {
       }
 
       //protected:
-      Lock me;
+      Reservation me;
       unsigned owner; // which node owns the lock
       unsigned count; // number of locks held by local threads
       unsigned mode;  // lock mode
@@ -340,19 +340,19 @@ namespace LegionRuntime {
       size_t local_data_size;
 
       static gasnet_hsl_t freelist_mutex;
-      static Lock::Impl *first_free;
-      Lock::Impl *next_free;
+      static Reservation::Impl *first_free;
+      Reservation::Impl *next_free;
 
-      Event lock(unsigned new_mode, bool exclusive,
+      Event acquire(unsigned new_mode, bool exclusive,
 		 Event after_lock = Event::NO_EVENT);
 
       bool select_local_waiters(std::deque<Event>& to_wake);
 
-      void unlock(void);
+      void release(void);
 
       bool is_locked(unsigned check_mode, bool excl_ok);
 
-      void release_lock(void);
+      void release_reservation(void);
     };
 
     template <class T>
@@ -370,8 +370,8 @@ namespace LegionRuntime {
 	  if(!data->valid) {
 	    // get a valid copy of the static data by taking and then releasing
 	    //  a shared lock
-	    thing_with_data->lock.lock(1, false).wait(true);// TODO: must this be blocking?
-	    thing_with_data->lock.unlock();
+	    thing_with_data->lock.acquire(1, false).wait(true);// TODO: must this be blocking?
+	    thing_with_data->lock.release();
 	    assert(data->valid);
 	  }
 	}
@@ -397,20 +397,20 @@ namespace LegionRuntime {
 	if(already_held) {
 	  assert(lock->is_locked(1, true));
 	} else {
-	  lock->lock(1, false).wait();
+	  lock->acquire(1, false).wait();
 	}
       }
 
       ~SharedAccess(void)
       {
-	lock->unlock();
+	lock->release();
       }
 
       const CoherentData *operator->(void) { return data; }
 
     protected:
       CoherentData *data;
-      Lock::Impl *lock;
+      Reservation::Impl *lock;
     };
 
     template <class T>
@@ -425,20 +425,20 @@ namespace LegionRuntime {
 	if(already_held) {
 	  assert(lock->is_locked(0, true));
 	} else {
-	  lock->lock(0, true).wait();
+	  lock->acquire(0, true).wait();
 	}
       }
 
       ~ExclusiveAccess(void)
       {
-	lock->unlock();
+	lock->release();
       }
 
       CoherentData *operator->(void) { return data; }
 
     protected:
       CoherentData *data;
-      Lock::Impl *lock;
+      Reservation::Impl *lock;
     };
 
     class ProcessorAssignment {
@@ -759,7 +759,7 @@ namespace LegionRuntime {
 	int linearization_bits[MAX_LINEARIZATION_LEN];
       } locked_data;
 
-      Lock::Impl lock;
+      Reservation::Impl lock;
     };
 
     class Event::Impl {
@@ -842,7 +842,7 @@ namespace LegionRuntime {
       Event request_valid_mask(void);
 
       IndexSpace me;
-      Lock::Impl lock;
+      Reservation::Impl lock;
 
       struct StaticData {
 	bool valid;

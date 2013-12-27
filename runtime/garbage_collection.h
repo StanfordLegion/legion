@@ -120,7 +120,7 @@ namespace LegionRuntime {
       const AddressSpaceID local_space;
       const bool owner;
     protected:
-      Lock gc_lock;
+      Reservation gc_lock;
       unsigned gc_references;
       unsigned resource_references;
       // Places where we know there are remote instances
@@ -193,7 +193,7 @@ namespace LegionRuntime {
       Runtime *const runtime;
       const DistributedID did;
     protected:
-      Lock gc_lock;
+      Reservation gc_lock;
       unsigned gc_references;
       unsigned remote_references;
       unsigned resource_references;

@@ -314,7 +314,7 @@ namespace LegionRuntime {
         if(it != timerp->end())
           it->second += accum;
         else
-          timerp->insert(std::make_pair<int,double>(kind,accum));
+          timerp->insert(std::make_pair(kind,accum));
       }
 
       count_left--;
@@ -461,7 +461,7 @@ namespace LegionRuntime {
 
     struct LockRequestArgs {
       gasnet_node_t node;
-      Lock lock;
+      Reservation lock;
       unsigned mode;
     };
 
@@ -473,7 +473,7 @@ namespace LegionRuntime {
 
     struct LockReleaseArgs {
       gasnet_node_t node;
-      Lock lock;
+      Reservation lock;
     };
     
     void handle_lock_release(LockReleaseArgs args);
@@ -483,7 +483,7 @@ namespace LegionRuntime {
 				      handle_lock_release> LockReleaseMessage;
 
     struct LockGrantArgs {
-      Lock lock;
+      Reservation lock;
       unsigned mode;
       uint64_t remote_waiter_mask;
     };
@@ -554,7 +554,7 @@ namespace LegionRuntime {
 	  locked_data.last_elmt = pdata->last_elmt;
 	}
       }
-      lock.init(ID(me).convert<Lock>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
       lock.set_local_data(&locked_data);
     }
@@ -571,7 +571,7 @@ namespace LegionRuntime {
       locked_data.last_elmt = 0;
       locked_data.valid_mask_owners = 0;
       locked_data.avail_mask_owner = -1;
-      lock.init(ID(me).convert<Lock>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
       lock.set_local_data(&locked_data);
       valid_mask = 0;
@@ -773,7 +773,7 @@ namespace LegionRuntime {
 
       locked_data.valid = true;
 
-      lock.init(ID(me).convert<Lock>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
       lock.set_local_data(&locked_data);
     }
@@ -789,7 +789,7 @@ namespace LegionRuntime {
       locked_data.size = 0;
       //locked_data.first_elmt = 0;
       //locked_data.last_elmt = 0;
-      lock.init(ID(me).convert<Lock>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
       lock.set_local_data(&locked_data);
     }
@@ -1749,32 +1749,32 @@ namespace LegionRuntime {
     }
 
     ///////////////////////////////////////////////////
-    // Locks
+    // Reservations 
 
-    /*static*/ const Lock Lock::NO_LOCK = { 0 };
+    /*static*/ const Reservation Reservation::NO_RESERVATION = { 0 };
 
-    Lock::Impl *Lock::impl(void) const
+    Reservation::Impl *Reservation::impl(void) const
     {
       return Runtime::runtime->get_lock_impl(*this);
     }
 
-    /*static*/ Lock::Impl *Lock::Impl::first_free = 0;
-    /*static*/ gasnet_hsl_t Lock::Impl::freelist_mutex = GASNET_HSL_INITIALIZER;
+    /*static*/ Reservation::Impl *Reservation::Impl::first_free = 0;
+    /*static*/ gasnet_hsl_t Reservation::Impl::freelist_mutex = GASNET_HSL_INITIALIZER;
 
-    Lock::Impl::Impl(void)
+    Reservation::Impl::Impl(void)
     {
-      init(Lock::NO_LOCK, -1);
+      init(Reservation::NO_RESERVATION, -1);
     }
 
-    Logger::Category log_lock("lock");
+    Logger::Category log_reservation("reservation");
 
-    void Lock::Impl::init(Lock _me, unsigned _init_owner,
+    void Reservation::Impl::init(Reservation _me, unsigned _init_owner,
 			  size_t _data_size /*= 0*/)
     {
       me = _me;
       owner = _init_owner;
       count = ZERO_COUNT;
-      log_lock.spew("count init [%p]=%d", &count, count);
+      log_reservation.spew("count init [%p]=%d", &count, count);
       mode = 0;
       in_use = false;
       mutex = new gasnet_hsl_t;
@@ -1791,12 +1791,12 @@ namespace LegionRuntime {
       }
     }
 
-    /*static*/ void /*Lock::Impl::*/handle_lock_request(LockRequestArgs args)
+    /*static*/ void /*Reservation::Impl::*/handle_lock_request(LockRequestArgs args)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      Lock::Impl *impl = args.lock.impl();
+      Reservation::Impl *impl = args.lock.impl();
 
-      log_lock(LEVEL_DEBUG, "lock request: lock=%x, node=%d, mode=%d",
+      log_reservation(LEVEL_DEBUG, "reservation request: reservation=%x, node=%d, mode=%d",
 	       args.lock.id, args.node, args.mode);
 
       // can't send messages while holding mutex, so remember args and who
@@ -1812,7 +1812,8 @@ namespace LegionRuntime {
 	//  to whoever we think the owner is
 	if(impl->owner != gasnet_mynode()) {
 	  // can reuse the args we were given
-	  log_lock(LEVEL_DEBUG, "forwarding lock request: lock=%x, from=%d, to=%d, mode=%d",
+	  log_reservation(LEVEL_DEBUG, 
+              "forwarding reservation request: reservation=%x, from=%d, to=%d, mode=%d",
 		   args.lock.id, args.node, impl->owner, args.mode);
 	  req_forward_target = impl->owner;
 	  break;
@@ -1825,11 +1826,12 @@ namespace LegionRuntime {
 
 	// case 2: we're the owner, and nobody is holding the lock, so grant
 	//  it to the (original) requestor
-	if((impl->count == Lock::Impl::ZERO_COUNT) && 
+	if((impl->count == Reservation::Impl::ZERO_COUNT) && 
 	   (impl->remote_sharer_mask == 0)) {
 	  assert(impl->remote_waiter_mask == 0);
 
-	  log_lock(LEVEL_DEBUG, "granting lock request: lock=%x, node=%d, mode=%d",
+	  log_reservation(LEVEL_DEBUG, 
+              "granting reservation request: reservation=%x, node=%d, mode=%d",
 		   args.lock.id, args.node, args.mode);
 	  g_args.lock = args.lock;
 	  g_args.mode = 0; // always give it exclusively for now
@@ -1843,7 +1845,8 @@ namespace LegionRuntime {
 	// case 3: we're the owner, but we can't grant the lock right now -
 	//  just set a bit saying that the node is waiting and get back to
 	//  work
-	log_lock(LEVEL_DEBUG, "deferring lock request: lock=%x, node=%d, mode=%d (count=%d cmode=%d)",
+	log_reservation(LEVEL_DEBUG, 
+            "deferring reservation request: reservation=%x, node=%d, mode=%d (count=%d cmode=%d)",
 		 args.lock.id, args.node, args.mode, impl->count, impl->mode);
 	impl->remote_waiter_mask |= (1ULL << args.node);
       } while(0);
@@ -1877,7 +1880,7 @@ namespace LegionRuntime {
       }
     }
 
-    /*static*/ void /*Lock::Impl::*/handle_lock_release(LockReleaseArgs args)
+    /*static*/ void /*Reservation::Impl::*/handle_lock_release(LockReleaseArgs args)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       assert(0);
@@ -1886,12 +1889,13 @@ namespace LegionRuntime {
     void handle_lock_grant(LockGrantArgs args, const void *data, size_t datalen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      log_lock(LEVEL_DEBUG, "lock request granted: lock=%x mode=%d mask=%lx",
+      log_reservation(LEVEL_DEBUG, 
+          "reservation request granted: reservation=%x mode=%d mask=%lx",
 	       args.lock.id, args.mode, args.remote_waiter_mask);
 
       std::deque<Event> to_wake;
 
-      Lock::Impl *impl = args.lock.impl();
+      Reservation::Impl *impl = args.lock.impl();
       {
 	AutoHSLLock a(impl->mutex);
 
@@ -1917,16 +1921,17 @@ namespace LegionRuntime {
       for(std::deque<Event>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	log_lock(LEVEL_DEBUG, "unlock trigger: lock=%x event=%x/%d",
+	log_reservation(LEVEL_DEBUG, "release trigger: reservation=%x event=%x/%d",
 		 args.lock.id, (*it).id, (*it).gen);
 	(*it).impl()->trigger((*it).gen, gasnet_mynode());
       }
     }
 
-    Event Lock::Impl::lock(unsigned new_mode, bool exclusive,
+    Event Reservation::Impl::acquire(unsigned new_mode, bool exclusive,
 			   Event after_lock /*= Event::NO_EVENT*/)
     {
-      log_lock(LEVEL_DEBUG, "local lock request: lock=%x mode=%d excl=%d event=%x/%d count=%d impl=%p",
+      log_reservation(LEVEL_DEBUG, 
+          "local reservation request: reservation=%x mode=%d excl=%d event=%x/%d count=%d impl=%p",
 	       me.id, new_mode, exclusive, after_lock.id, after_lock.gen, count, this);
 
       // collapse exclusivity into mode
@@ -1958,7 +1963,7 @@ namespace LegionRuntime {
 	  if((count == ZERO_COUNT) || ((mode == new_mode) && (mode != MODE_EXCL))) {
 	    mode = new_mode;
 	    count++;
-	    log_lock.spew("count ++(1) [%p]=%d", &count, count);
+	    log_reservation.spew("count ++(1) [%p]=%d", &count, count);
 	    got_lock = true;
 #ifdef LOCK_TRACING
             {
@@ -1978,7 +1983,7 @@ namespace LegionRuntime {
 	    assert(mode != MODE_EXCL);
 	    if(mode == new_mode) {
 	      count++;
-	      log_lock.spew("count ++(2) [%p]=%d", &count, count);
+	      log_reservation.spew("count ++(2) [%p]=%d", &count, count);
 	      got_lock = true;
 	    }
 	  }
@@ -1986,7 +1991,8 @@ namespace LegionRuntime {
 	  // if we didn't get the lock, we'll have to ask for it from the
 	  //  other node (even if we're currently sharing with the wrong mode)
 	  if(!got_lock && !requested) {
-	    log_lock(LEVEL_DEBUG, "requesting lock: lock=%x node=%d mode=%d",
+	    log_reservation(LEVEL_DEBUG, 
+                "requesting reservation: reservation=%x node=%d mode=%d",
 		     me.id, owner, new_mode);
 	    args.node = gasnet_mynode();
 	    args.lock = me;
@@ -2000,7 +2006,8 @@ namespace LegionRuntime {
 	  }
 	}
   
-	log_lock(LEVEL_DEBUG, "local lock result: lock=%x got=%d req=%d count=%d",
+	log_reservation(LEVEL_DEBUG, 
+            "local reservation result: reservation=%x got=%d req=%d count=%d",
 		 me.id, got_lock ? 1 : 0, requested ? 1 : 0, count);
 
 	// if we didn't get the lock, put our event on the queue of local
@@ -2035,13 +2042,13 @@ namespace LegionRuntime {
     // factored-out code to select one or more local waiters on a lock
     //  fills events to trigger into 'to_wake' and returns true if any were
     //  found - NOTE: ASSUMES LOCK IS ALREADY HELD!
-    bool Lock::Impl::select_local_waiters(std::deque<Event>& to_wake)
+    bool Reservation::Impl::select_local_waiters(std::deque<Event>& to_wake)
     {
       if(local_waiters.size() == 0)
 	return false;
 
       // favor the local waiters
-      log_lock(LEVEL_DEBUG, "lock going to local waiter: size=%zd first=%d(%zd)",
+      log_reservation(LEVEL_DEBUG, "reservation going to local waiter: size=%zd first=%d(%zd)",
 	       local_waiters.size(), 
 	       local_waiters.begin()->first,
 	       local_waiters.begin()->second.size());
@@ -2058,14 +2065,14 @@ namespace LegionRuntime {
 	  
 	mode = MODE_EXCL;
 	count = ZERO_COUNT + 1;
-	log_lock.spew("count <-1 [%p]=%d", &count, count);
+	log_reservation.spew("count <-1 [%p]=%d", &count, count);
       } else {
 	// pull a whole list of waiters that want to share with the same mode
 	std::map<unsigned, std::deque<Event> >::iterator it = local_waiters.begin();
 	
 	mode = it->first;
 	count = ZERO_COUNT + it->second.size();
-	log_lock.spew("count <-waiters [%p]=%d", &count, count);
+	log_reservation.spew("count <-waiters [%p]=%d", &count, count);
 	assert(count > ZERO_COUNT);
 	// grab the list of events wanting to share the lock
 	to_wake.swap(it->second);
@@ -2084,7 +2091,7 @@ namespace LegionRuntime {
       return true;
     }
 
-    void Lock::Impl::unlock(void)
+    void Reservation::Impl::release(void)
     {
       // make a list of events that we be woken - can't do it while holding the
       //  lock's mutex (because the event we trigger might try to take the lock)
@@ -2097,7 +2104,8 @@ namespace LegionRuntime {
       LockGrantArgs g_args;
 
       do {
-	log_lock(LEVEL_DEBUG, "unlock: lock=%x count=%d mode=%d share=%lx wait=%lx",
+	log_reservation(LEVEL_DEBUG, 
+            "release: reservation=%x count=%d mode=%d share=%lx wait=%lx",
 		 me.id, count, mode, remote_sharer_mask, remote_waiter_mask);
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
@@ -2106,8 +2114,9 @@ namespace LegionRuntime {
 	// if this isn't the last holder of the lock, just decrement count
 	//  and return
 	count--;
-	log_lock.spew("count -- [%p]=%d", &count, count);
-	log_lock(LEVEL_DEBUG, "post-unlock: lock=%x count=%d mode=%d share=%lx wait=%lx",
+	log_reservation.spew("count -- [%p]=%d", &count, count);
+	log_reservation(LEVEL_DEBUG, 
+            "post-release: reservation=%x count=%d mode=%d share=%lx wait=%lx",
 		 me.id, count, mode, remote_sharer_mask, remote_waiter_mask);
 	if(count > ZERO_COUNT) break;
 
@@ -2133,7 +2142,8 @@ namespace LegionRuntime {
 	  int new_owner = 0;
 	  while(((remote_waiter_mask >> new_owner) & 1) == 0) new_owner++;
 
-	  log_lock(LEVEL_DEBUG, "lock going to remote waiter: new=%d mask=%lx",
+	  log_reservation(LEVEL_DEBUG, 
+              "reservation going to remote waiter: new=%d mask=%lx",
 		   new_owner, remote_waiter_mask);
 
 	  g_args.lock = me;
@@ -2177,13 +2187,13 @@ namespace LegionRuntime {
       for(std::deque<Event>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	log_lock(LEVEL_DEBUG, "unlock trigger: lock=%x event=%x/%d",
+	log_reservation(LEVEL_DEBUG, "release trigger: reservation=%x event=%x/%d",
 		 me.id, (*it).id, (*it).gen);
 	(*it).impl()->trigger((*it).gen, gasnet_mynode());
       }
     }
 
-    bool Lock::Impl::is_locked(unsigned check_mode, bool excl_ok)
+    bool Reservation::Impl::is_locked(unsigned check_mode, bool excl_ok)
     {
       // checking the owner can be done atomically, so doesn't need mutex
       if(owner != gasnet_mynode()) return false;
@@ -2205,13 +2215,13 @@ namespace LegionRuntime {
 
     class DeferredLockRequest : public Event::Impl::EventWaiter {
     public:
-      DeferredLockRequest(Lock _lock, unsigned _mode, bool _exclusive,
+      DeferredLockRequest(Reservation _lock, unsigned _mode, bool _exclusive,
 			  Event _after_lock)
 	: lock(_lock), mode(_mode), exclusive(_exclusive), after_lock(_after_lock) {}
 
       virtual bool event_triggered(void)
       {
-	lock.impl()->lock(mode, exclusive, after_lock);
+	lock.impl()->acquire(mode, exclusive, after_lock);
         return true;
       }
 
@@ -2222,13 +2232,13 @@ namespace LegionRuntime {
       }
 
     protected:
-      Lock lock;
+      Reservation lock;
       unsigned mode;
       bool exclusive;
       Event after_lock;
     };
 
-    Event Lock::lock(unsigned mode /* = 0 */, bool exclusive /* = true */,
+    Event Reservation::acquire(unsigned mode /* = 0 */, bool exclusive /* = true */,
 		     Event wait_on /* = Event::NO_EVENT */) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -2236,7 +2246,7 @@ namespace LegionRuntime {
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
-	Event e = impl()->lock(mode, exclusive);
+	Event e = impl()->acquire(mode, exclusive);
 	//printf("(%x/%d)\n", e.id, e.gen);
 	return e;
       } else {
@@ -2249,12 +2259,12 @@ namespace LegionRuntime {
 
     class DeferredUnlockRequest : public Event::Impl::EventWaiter {
     public:
-      DeferredUnlockRequest(Lock _lock)
+      DeferredUnlockRequest(Reservation _lock)
 	: lock(_lock) {}
 
       virtual bool event_triggered(void)
       {
-	lock.impl()->unlock();
+	lock.impl()->release();
         return true;
       }
 
@@ -2264,30 +2274,30 @@ namespace LegionRuntime {
 	       lock.id);
       }
     protected:
-      Lock lock;
+      Reservation lock;
     };
 
     // releases a held lock - release can be deferred until an event triggers
-    void Lock::unlock(Event wait_on /* = Event::NO_EVENT */) const
+    void Reservation::release(Event wait_on /* = Event::NO_EVENT */) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
-	impl()->unlock();
+	impl()->release();
       } else {
 	wait_on.impl()->add_waiter(wait_on, new DeferredUnlockRequest(*this));
       }
     }
 
     // Create a new lock, destroy an existing lock
-    /*static*/ Lock Lock::create_lock(size_t _data_size /*= 0*/)
+    /*static*/ Reservation Reservation::create_reservation(size_t _data_size /*= 0*/)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       //DetailedTimer::ScopedPush sp(18);
 
       // see if the freelist has an event we can reuse
-      Lock::Impl *impl = 0;
+      Reservation::Impl *impl = 0;
       {
 	AutoHSLLock al(&Impl::freelist_mutex);
 	if(Impl::first_free) {
@@ -2309,7 +2319,7 @@ namespace LegionRuntime {
 	impl->in_use = true;
 	impl->count = Impl::ZERO_COUNT;  // unlock it
 
-	log_lock(LEVEL_INFO, "lock reused: lock=%x", impl->me.id);
+	log_reservation(LEVEL_INFO, "reservation reused: reservation=%x", impl->me.id);
 	return impl->me;
       }
 
@@ -2317,11 +2327,12 @@ namespace LegionRuntime {
       //  being resized?
       AutoHSLLock a(Runtime::runtime->nodes[gasnet_mynode()].mutex);
 
-      std::vector<Lock::Impl>& locks = Runtime::runtime->nodes[gasnet_mynode()].locks;
+      std::vector<Reservation::Impl>& locks = 
+        Runtime::runtime->nodes[gasnet_mynode()].locks;
 
 #ifdef REUSE_LOCKS
       // try to find an lock we can reuse
-      for(std::vector<Lock::Impl>::iterator it = locks.begin();
+      for(std::vector<Reservation::Impl>::iterator it = locks.begin();
 	  it != locks.end();
 	  it++) {
 	// check the owner and in_use without taking the lock - conservative check
@@ -2332,8 +2343,8 @@ namespace LegionRuntime {
 	if(!(*it).in_use && ((*it).owner == gasnet_mynode())) {
 	  // now we really have the lock
 	  (*it).in_use = true;
-	  Lock l = (*it).me;
-	  return l;
+	  Reservation r = (*it).me;
+	  return r;
 	}
       }
 #endif
@@ -2343,15 +2354,15 @@ namespace LegionRuntime {
       unsigned index = locks.size();
       assert(index < MAX_LOCAL_LOCKS);
       locks.resize(index + 1);
-      Lock l = ID(ID::ID_LOCK, gasnet_mynode(), index).convert<Lock>();
-      locks[index].init(l, gasnet_mynode());
+      Reservation r = ID(ID::ID_LOCK, gasnet_mynode(), index).convert<Reservation>();
+      locks[index].init(r, gasnet_mynode());
       locks[index].in_use = true;
       Runtime::runtime->nodes[gasnet_mynode()].num_locks = index + 1;
-      log_lock.info("created new lock: lock=%x", l.id);
-      return l;
+      log_reservation.info("created new reservation: reservation=%x", r.id);
+      return r;
     }
 
-    void Lock::Impl::release_lock(void)
+    void Reservation::Impl::release_reservation(void)
     {
       // take the lock's mutex to sanity check it and clear the in_use field
       {
@@ -2367,7 +2378,7 @@ namespace LegionRuntime {
 	
 	in_use = false;
       }
-      log_lock.info("releasing lock: lock=%x", me.id);
+      log_reservation.info("releasing reservation: reservation=%x", me.id);
 
       // now take the freelist mutex to put ourselves on the free list
       {
@@ -2379,11 +2390,11 @@ namespace LegionRuntime {
 
     class DeferredLockDestruction : public Event::Impl::EventWaiter {
     public:
-      DeferredLockDestruction(Lock _lock) : lock(_lock) {}
+      DeferredLockDestruction(Reservation _lock) : lock(_lock) {}
 
       virtual bool event_triggered(void)
       {
-	lock.impl()->release_lock();
+	lock.impl()->release_reservation();
         return true;
       }
 
@@ -2393,18 +2404,18 @@ namespace LegionRuntime {
       }
 
     protected:
-      Lock lock;
+      Reservation lock;
     };
 
-    void handle_destroy_lock(Lock lock)
+    void handle_destroy_lock(Reservation lock)
     {
-      lock.destroy_lock();
+      lock.destroy_reservation();
     }
 
-    typedef ActiveMessageShortNoReply<DESTROY_LOCK_MSGID, Lock,
+    typedef ActiveMessageShortNoReply<DESTROY_LOCK_MSGID, Reservation,
 				      handle_destroy_lock> DestroyLockMessage;
 
-    void Lock::destroy_lock()
+    void Reservation::destroy_reservation()
     {
       // a lock has to be destroyed on the node that created it
       if(ID(*this).node() != gasnet_mynode()) {
@@ -2413,9 +2424,9 @@ namespace LegionRuntime {
       }
 
       // to destroy a local lock, we first must lock it (exclusively)
-      Event e = lock(0, true);
+      Event e = acquire(0, true);
       if(e.has_triggered()) {
-	impl()->release_lock();
+	impl()->release_reservation();
       } else {
 	e.impl()->add_waiter(e, new DeferredLockDestruction(*this));
       }
@@ -4693,13 +4704,13 @@ namespace LegionRuntime {
       }
     }
 
-    Lock::Impl *Runtime::get_lock_impl(ID id)
+    Reservation::Impl *Runtime::get_lock_impl(ID id)
     {
       switch(id.type()) {
       case ID::ID_LOCK:
 	{
 	  Node *n = &runtime->nodes[id.node()];
-	  std::vector<Lock::Impl>& locks = nodes[id.node()].locks;
+	  std::vector<Reservation::Impl>& locks = nodes[id.node()].locks;
 
 	  unsigned index = id.index();
 	  if(index >= n->num_locks) {
@@ -4714,7 +4725,7 @@ namespace LegionRuntime {
 	    if(index >= oldsize) { // only it's still too small
 	      n->locks.resize(index + 1);
 	      for(unsigned i = oldsize; i <= index; i++)
-		n->locks[i].init(ID(ID::ID_LOCK, id.node(), i).convert<Lock>(),
+		n->locks[i].init(ID(ID::ID_LOCK, id.node(), i).convert<Reservation>(),
 				 id.node());
 	      n->num_locks = index + 1;
 	    }
@@ -7511,6 +7522,8 @@ namespace LegionRuntime {
       Logger::finalize();
 #endif
       log_machine.info("running proc count is now zero - terminating\n");
+      // Exit out of the process with a successful error code
+      exit(0);
     }
 
     void Machine::shutdown(bool local_request /*= true*/)

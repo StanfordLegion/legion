@@ -47,11 +47,11 @@ namespace LegionRuntime {
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
-      this->forest_lock = Lock::create_lock();
-      this->lookup_lock = Lock::create_lock();
-      this->distributed_lock = Lock::create_lock();
+      this->forest_lock = Reservation::create_reservation();
+      this->lookup_lock = Reservation::create_reservation();
+      this->distributed_lock = Reservation::create_reservation();
 #ifdef DYNAMIC_TESTS
-      this->dynamic_lock = Lock::create_lock();
+      this->dynamic_lock = Reservation::create_reservation();
 #endif
     }
 
@@ -68,15 +68,15 @@ namespace LegionRuntime {
     RegionTreeForest::~RegionTreeForest(void)
     //--------------------------------------------------------------------------
     {
-      forest_lock.destroy_lock();
-      forest_lock = Lock::NO_LOCK;
-      lookup_lock.destroy_lock();
-      lookup_lock = Lock::NO_LOCK;
-      distributed_lock.destroy_lock();
-      distributed_lock = Lock::NO_LOCK;
+      forest_lock.destroy_reservation();
+      forest_lock = Reservation::NO_RESERVATION;
+      lookup_lock.destroy_reservation();
+      lookup_lock = Reservation::NO_RESERVATION;
+      distributed_lock.destroy_reservation();
+      distributed_lock = Reservation::NO_RESERVATION;
 #ifdef DYNAMIC_TESTS
-      dynamic_lock.destroy_lock();
-      dynamic_lock = Lock::NO_LOCK;
+      dynamic_lock.destroy_reservation();
+      dynamic_lock = Reservation::NO_RESERVATION;
 #endif
     }
 
@@ -479,7 +479,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_dependence_analysis(RegionTreeContext ctx,
                                                   Operation *op, unsigned idx,
-                                                  const RegionRequirement &req,
+                                                  RegionRequirement &req,
                                                   RegionTreePath &path) 
     //--------------------------------------------------------------------------
     {
@@ -505,6 +505,22 @@ namespace LegionRuntime {
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
       parent_node->register_logical_node(ctx.get_id(), user, path);
+      // Now check to see if we have any simultaneous restrictions
+      // we need to check
+      if (req.restricted)
+      {
+        RestrictedTraverser traverser(ctx.get_id(), path);
+        traverser.traverse(parent_node);
+        // Check to see if there was user-level software
+        // coherence for all of our fields.
+        FieldMask restricted_mask = user_mask - traverser.get_coherence_mask();
+        // If none of our fields are still restricted
+        // then we can remove the restricted field on
+        // our region requirement.  Otherwise we keep
+        // the restriction.
+        if (!restricted_mask)
+          req.restricted = false; 
+      }
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -685,6 +701,28 @@ namespace LegionRuntime {
       RegionNode *top_node = get_node(handle);
       LogicalInvalidator invalidator(ctx.get_id());
       top_node->visit_node(&invalidator);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::acquire_user_coherence(RegionTreeContext ctx,
+                                                  LogicalRegion handle,
+                                                const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      FieldMask user_mask = node->column_source->get_field_mask(fields);
+      node->acquire_user_coherence(ctx.get_id(), user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::release_user_coherence(RegionTreeContext ctx,
+                                                  LogicalRegion handle,
+                                                const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      FieldMask user_mask = node->column_source->get_field_mask(fields);
+      node->release_user_coherence(ctx.get_id(), user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2384,7 +2422,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::DynamicPartTest::add_child_space(bool l, IndexSpace space) 
+    void RegionTreeForest::DynamicPartTest::add_child_space(bool l, 
+                                                            IndexSpace space) 
     //--------------------------------------------------------------------------
     {
       if (l)
@@ -2434,7 +2473,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(Color c, unsigned d, RegionTreeForest *ctx)
-      : depth(d), color(c), context(ctx), node_lock(Lock::create_lock())
+      : depth(d), color(c), context(ctx), 
+        node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2446,8 +2486,8 @@ namespace LegionRuntime {
     IndexTreeNode::~IndexTreeNode(void)
     //--------------------------------------------------------------------------
     {
-      node_lock.destroy_lock();
-      node_lock = Lock::NO_LOCK;
+      node_lock.destroy_reservation();
+      node_lock = Reservation::NO_RESERVATION;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3001,7 +3041,7 @@ namespace LegionRuntime {
       : handle(sp), context(ctx)
     //--------------------------------------------------------------------------
     {
-      this->node_lock = Lock::create_lock();
+      this->node_lock = Reservation::create_reservation();
       this->allocated_indexes = FieldMask();
     }
 
@@ -3018,8 +3058,8 @@ namespace LegionRuntime {
     FieldSpaceNode::~FieldSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-      node_lock.destroy_lock();
-      node_lock = Lock::NO_LOCK;
+      node_lock.destroy_reservation();
+      node_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -3887,7 +3927,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegistrar::LogicalRegistrar(const LogicalRegistrar&rhs)
+    LogicalRegistrar::LogicalRegistrar(const LogicalRegistrar &rhs)
       : ctx(0), field_mask(FieldMask()), op(NULL)
     //--------------------------------------------------------------------------
     {
@@ -4049,6 +4089,65 @@ namespace LegionRuntime {
     {
       node->invalidate_logical_state(ctx);
       return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RestrictedTraverser 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RestrictedTraverser::RestrictedTraverser(ContextID c, RegionTreePath &path)
+      : PathTraverser(path), ctx(c)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictedTraverser::RestrictedTraverser(const RestrictedTraverser &rhs)
+      : PathTraverser(rhs.path), ctx(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictedTraverser::~RestrictedTraverser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictedTraverser& RestrictedTraverser::operator=(
+                                                 const RestrictedTraverser &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RestrictedTraverser::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->record_user_coherence(ctx, coherence_mask);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RestrictedTraverser::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->record_user_coherence(ctx, coherence_mask);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& RestrictedTraverser::get_coherence_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return coherence_mask;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4560,9 +4659,7 @@ namespace LegionRuntime {
         for (std::vector<Memory>::const_iterator it = chosen_order.begin();
               it != chosen_order.end(); it++)
         {
-          if (visible_memories.find(*it) != visible_memories.end())
-            filtered_memories.push_back(*it);
-          else
+          if (visible_memories.find(*it) == visible_memories.end())
           {
             log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x "
                                      "which is not visible from processor "
@@ -4571,7 +4668,26 @@ namespace LegionRuntime {
                                      "chosen ordering!", it->id, 
                                      target_proc.id, index, 
                                      info->mappable->get_unique_mappable_id());
+            continue;
           }
+          // Also if we're restricted, remove any memories which
+          // do not already contain valid memories.
+          if (info->req.restricted && 
+              (info->req.current_instances.find(*it) == 
+                info->req.current_instances.end()))
+          {
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x "
+                                     "for restricted region requirement "
+                                     "when mapping region %d of mappable "
+                                     "(ID %lld) on processor %x!  Removing "
+                                     "memory from the chosen ordering!", 
+                                     it->id, index, 
+                                     info->mappable->get_unique_mappable_id(),
+                                     target_proc.id);
+            continue;
+          }
+          // Otherwise we can add it to the list of filtered memories
+          filtered_memories.push_back(*it);
         }
         chosen_order = filtered_memories;
       }
@@ -4717,6 +4833,9 @@ namespace LegionRuntime {
             }
           }
         }
+        // If we're restricted we can't make instances, so just keep going
+        if (info->req.restricted)
+          continue;
         // If it didn't find a valid instance, try to make one
         chosen_inst = node->create_instance(*mit, new_fields, blocking_factor); 
         if (chosen_inst != NULL)
@@ -5089,6 +5208,7 @@ namespace LegionRuntime {
       prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
 #endif
       close_operations.clear();
+      user_level_coherence = FieldMask();
     }
 
     //--------------------------------------------------------------------------
@@ -6217,15 +6337,15 @@ namespace LegionRuntime {
 #endif
     //--------------------------------------------------------------------------
     {
-      this->node_lock = Lock::create_lock(); 
+      this->node_lock = Reservation::create_reservation(); 
     }
 
     //--------------------------------------------------------------------------
     RegionTreeNode::~RegionTreeNode(void)
     //--------------------------------------------------------------------------
     {
-      node_lock.destroy_lock();
-      node_lock = Lock::NO_LOCK;
+      node_lock.destroy_reservation();
+      node_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -7439,6 +7559,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::record_user_coherence(ContextID ctx, 
+                                               FieldMask &coherence_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx < logical_state_size);
+#endif
+      LogicalState &state = logical_states[ctx];
+      coherence_mask |= state.user_level_coherence;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::acquire_user_coherence(ContextID ctx, 
+                                                const FieldMask &coherence_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx < logical_state_size);
+#endif
+      LogicalState &state = logical_states[ctx];
+      state.user_level_coherence |= coherence_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::release_user_coherence(ContextID ctx,
+                                                const FieldMask &coherence_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx < logical_state_size);
+#endif
+      LogicalState &state = logical_states[ctx];
+      state.user_level_coherence -= coherence_mask;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::close_physical_node(PhysicalCloser &closer,
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
@@ -7600,6 +7756,16 @@ namespace LegionRuntime {
             to_reuse.erase(*it);
           }
         }
+      }
+      // If we're restricted, then we can't make any new instances
+      if (closer.info->req.restricted && !to_create.empty())
+      {
+        log_region(LEVEL_WARNING,"WARNING: Mapper requested creation of new "
+                                 "regions in rank_copy_targets whe closing "
+                                 "mappable operation ID %lld when requirement "
+                                 "was restricted.  Request will be ignored.",
+                             closer.info->mappable->get_unique_mappable_id());
+        to_create.clear();
       }
       // See if the mapper gave us reasonable output
       if (!composite && !complete && to_reuse.empty() && to_create.empty())
@@ -9373,7 +9539,8 @@ namespace LegionRuntime {
         view->add_user(user, local_proc);
       }
       release_physical_state(state);
-      return InstanceRef(Event::NO_EVENT, Lock::NO_LOCK, new_view);
+      return InstanceRef(Event::NO_EVENT, 
+                         Reservation::NO_RESERVATION, new_view);
     }
 
     //--------------------------------------------------------------------------
@@ -9397,7 +9564,8 @@ namespace LegionRuntime {
         view->initialize_view(inner_view, local_proc);
       }
       release_physical_state(state);
-      return InstanceRef(Event::NO_EVENT, Lock::NO_LOCK, new_view);
+      return InstanceRef(Event::NO_EVENT, 
+                         Reservation::NO_RESERVATION, new_view);
     }
 
     //--------------------------------------------------------------------------
@@ -11136,7 +11304,8 @@ namespace LegionRuntime {
                                AddressSpaceID own_addr, DistributedID own_did,
                                RegionTreeNode *node)
       : HierarchicalCollectable(ctx->runtime, did, own_addr, own_did), 
-        context(ctx), logical_node(node), view_lock(Lock::create_lock()) 
+        context(ctx), logical_node(node), 
+        view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
       context->register_physical_view(this);
@@ -11146,8 +11315,8 @@ namespace LegionRuntime {
     PhysicalView::~PhysicalView(void)
     //--------------------------------------------------------------------------
     {
-      view_lock.destroy_lock();
-      view_lock = Lock::NO_LOCK;
+      view_lock.destroy_reservation();
+      view_lock = Reservation::NO_RESERVATION;
       context->unregister_physical_view(this->did);
     }
 
@@ -11191,6 +11360,11 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(0, PROF_BEGIN_GC);
 #endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      0 /* no unique id */,
+                                      BEGIN_GC);
+#endif
       DerezCheck z(derez);
       PhysicalView *view;
       derez.deserialize(view);
@@ -11205,6 +11379,11 @@ namespace LegionRuntime {
         delete view;
 #ifdef LEGION_PROF
       LegionProf::register_event(0, PROF_END_GC);
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      0 /* no unique id */,
+                                      END_GC);
 #endif
     }
 
@@ -11289,7 +11468,7 @@ namespace LegionRuntime {
     {
       // If we're the top of the tree and the owner make the instance lock
       if ((parent == NULL) && (owner_did == did))
-        inst_lock = Lock::create_lock();
+        inst_lock = Reservation::create_reservation();
       else if (parent != NULL)
         inst_lock = parent->inst_lock;
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -11320,8 +11499,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL && (owner_did == did))
-        inst_lock.destroy_lock();
-      inst_lock = Lock::NO_LOCK;
+        inst_lock.destroy_reservation();
+      inst_lock = Reservation::NO_RESERVATION;
       // Remove our references to the manager
       if (manager->remove_resource_reference())
         delete manager;
@@ -11613,7 +11792,8 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
 #endif
-      Lock needed_lock = IS_ATOMIC(user.usage) ? inst_lock : Lock::NO_LOCK;
+      Reservation needed_lock = 
+        IS_ATOMIC(user.usage) ? inst_lock : Reservation::NO_RESERVATION;
       return InstanceRef(ready_event, needed_lock, ViewHandle(this));
     }
 
@@ -11664,7 +11844,8 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
 #endif
-      Lock needed_lock = IS_ATOMIC(user.usage) ? inst_lock : Lock::NO_LOCK;
+      Reservation needed_lock = 
+        IS_ATOMIC(user.usage) ? inst_lock : Reservation::NO_RESERVATION;
       // For inner views we also have to go down all the children
       // and find their views also. Take a snapshot of the children
       // and then traverse them.
@@ -13212,7 +13393,8 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
-      return InstanceRef(result, Lock::NO_LOCK, ViewHandle(this));
+      return InstanceRef(result, 
+                         Reservation::NO_RESERVATION, ViewHandle(this));
     }
 
     //--------------------------------------------------------------------------
@@ -13258,7 +13440,8 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
-      return InstanceRef(result, Lock::NO_LOCK, ViewHandle(this));
+      return InstanceRef(result, 
+                         Reservation::NO_RESERVATION, ViewHandle(this));
     }
 
     //--------------------------------------------------------------------------
@@ -13747,13 +13930,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(void)
       : ready_event(Event::NO_EVENT), 
-        needed_lock(Lock::NO_LOCK), handle(ViewHandle())
+        needed_lock(Reservation::NO_RESERVATION), handle(ViewHandle())
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(Event ready, Lock lock, const ViewHandle &h)
+    InstanceRef::InstanceRef(Event ready, Reservation lock, const ViewHandle &h)
       : ready_event(ready), needed_lock(lock), handle(h)  
     //--------------------------------------------------------------------------
     {
@@ -13839,7 +14022,7 @@ namespace LegionRuntime {
       {
         Event ready;
         derez.deserialize(ready);
-        Lock lock;
+        Reservation lock;
         derez.deserialize(lock);
         DistributedID did;
         derez.deserialize(did);

@@ -47,6 +47,8 @@ namespace LegionRuntime {
       virtual Task* as_mappable_task(void) const;
       virtual Copy* as_mappable_copy(void) const;
       virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
     public:
       inline bool is_leaf(void) const { return variants->leaf; }
@@ -133,6 +135,7 @@ namespace LegionRuntime {
       InstanceRef find_premapped_region(unsigned idx);
       RegionTreeContext get_enclosing_physical_context(unsigned idx);
       void clone_task_op_from(TaskOp *rhs, Processor p, bool stealable);
+      void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
       bool early_map_regions(void);
@@ -184,8 +187,8 @@ namespace LegionRuntime {
           const IndexSpaceRequirement &req, Serializer &rez);
       static void pack_region_requirement(
           const RegionRequirement &req, Serializer &rez);
-      static void pack_reservation_request(
-          const ReservationRequest &request, Serializer &rez);
+      static void pack_grant(
+          const Grant &grant, Serializer &rez);
       static void pack_phase_barrier(
           const PhaseBarrier &barrier, Serializer &rez);
     public:
@@ -193,8 +196,8 @@ namespace LegionRuntime {
           IndexSpaceRequirement &req, Deserializer &derez);
       static void unpack_region_requirement(
           RegionRequirement &req, Deserializer &derez);
-      static void unpack_reservation_request(
-          ReservationRequest &reqest, Deserializer &derez);
+      static void unpack_grant(
+          Grant &grant, Deserializer &derez);
       static void unpack_phase_barrier(
           PhaseBarrier &barrier, Deserializer &derez);
     public:
@@ -249,7 +252,7 @@ namespace LegionRuntime {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const; 
     public:
-      void destroy_user_lock(Lock l);
+      void destroy_user_lock(Reservation r);
       void destroy_user_barrier(Barrier b);
     public:
       PhysicalRegion get_physical_region(unsigned idx);
@@ -300,6 +303,8 @@ namespace LegionRuntime {
     public:
       bool has_region_dependence(unsigned idx, TaskOp *task);
       bool has_region_dependence(unsigned idx, CopyOp *copy);
+      bool has_region_dependence(unsigned idx, AcquireOp *acquire);
+      bool has_region_dependence(unsigned idx, ReleaseOp *release);
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
                                   const RegionRequirement &our_req,
                                   const RegionUsage &our_usage,
@@ -309,7 +314,13 @@ namespace LegionRuntime {
       unsigned find_parent_index_region(unsigned idx, TaskOp *task);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
       LegionErrorType check_privilege(const RegionRequirement &req, 
-                                      FieldID &bad_field) const; 
+                                      FieldID &bad_field, 
+                                      bool skip_privileges = false) const; 
+      bool has_simultaneous_coherence(void);
+      void check_simultaneous_restricted(
+          RegionRequirement &child_requirement) const;
+      void check_simultaneous_restricted(
+          std::vector<RegionRequirement> &child_requirements) const;
       bool has_created_region(LogicalRegion handle) const;
       bool has_created_field(FieldSpace handle, FieldID fid) const;
     protected:
@@ -409,8 +420,11 @@ namespace LegionRuntime {
       FenceOp *current_fence;
       GenerationID fence_gen;
     protected:
+      // For handling simultaneous coherence cases
+      bool simultaneous_checked, has_simultaneous;
+    protected:
       // Resources that can build up over a task's lifetime
-      std::deque<Lock> context_locks;
+      std::deque<Reservation> context_locks;
       std::deque<Barrier> context_barriers; 
       std::deque<LocalFieldInfo> local_fields; 
       std::deque<InlineTask*> inline_tasks;
