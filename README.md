@@ -1,6 +1,8 @@
 Legion
 ======
 
+The primary homepage for Legion is now located at [legion.stanford.edu](http://legion.stanford.edu).
+
 Publicly visible repository for the Legion parallel programming project at Stanford University.
 
 Overview
