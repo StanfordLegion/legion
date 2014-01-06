@@ -8162,6 +8162,7 @@ namespace LegionRuntime {
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
+    /*static*/ unsigned Runtime::shutdown_counter = 0;
 #ifdef INORDER_EXECUTION
     /*static*/ bool Runtime::program_order_execution = true;
 #endif
@@ -8995,6 +8996,10 @@ namespace LegionRuntime {
           }
         }
       }
+      // Yes there is a race condition here on writes, but
+      // everyone is going to be writing the same value
+      // so it doesn't matter.
+      Runtime::shutdown_counter = needed_count;
       // Have a spinning barrier here to wait for all processors
       // to finish initializing before continuing
       while (__sync_fetch_and_add(&Runtime::startup_arrivals, 0) 
@@ -9015,13 +9020,15 @@ namespace LegionRuntime {
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-#ifndef SHARED_LOWLEVEL
-      if (separate_runtime_instances || ((p.id & 0xffff) == 0))
+      if (separate_runtime_instances)
         delete get_runtime(p);
-#else
-      if (separate_runtime_instances || (p.id == 1))
-        delete get_runtime(p);
-#endif
+      else
+      {
+        unsigned result = __sync_sub_and_fetch(&Runtime::shutdown_counter, 1);
+        // Only delete the runtime if we're the last one to use it
+        if (result == 0)
+          delete get_runtime(p);
+      }
     }
 
     //--------------------------------------------------------------------------

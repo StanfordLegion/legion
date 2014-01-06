@@ -23,7 +23,7 @@ using namespace LegionRuntime::HighLevel;
 /*
  * This example shows how to create index
  * spaces, field spaces, and logical regions.
- * It also shows how to dynamically allocated
+ * It also shows how to dynamically allocate
  * and free elements in index spaces and fields
  * in field spaces.
  */
@@ -132,7 +132,7 @@ void top_level_task(const Task *task,
 
   // Logical regions are created by passing an index space and a field
   // space to the 'create_logical_region' runtime method.  Note that
-  // we both structured and unstructured index spaces can be used.
+  // both structured and unstructured index spaces can be used.
   // Note that we use the same field space for both logical regions
   // which means they both will have the same set of fields.  Any
   // modifications to the field space will effect both logical regions.

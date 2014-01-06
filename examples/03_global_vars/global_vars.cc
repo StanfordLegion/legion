@@ -56,6 +56,21 @@ void top_level_task(const Task *task,
   printf("The value of global_constant %d will always be the same\n", global_constant);
 
   printf("The function pointer to foo %p may be different on different processors\n", foo);
+
+  // In general, Legion tasks should not allocate
+  // memory directly but should instead create
+  // logical regions and use them for storing data.
+  // The one exception to this is that tasks can
+  // use standard C and C++ memory allocation routines
+  // as long as the lifetime of the allocation does
+  // not exceed the lifetime of the task. Furthermore
+  // any pointers referencing the allocation should
+  // not be passed to sub-tasks or escape the task's
+  // context. Violating either of these conditions
+  // will result in a Legion application with 
+  // undefined behavior.
+  void *some_memory = malloc(16*sizeof(int));
+  free(some_memory);
 }
 
 int main(int argc, char **argv)

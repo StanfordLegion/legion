@@ -27,7 +27,7 @@ using namespace LegionRuntime::Arrays;
 
 /*
  * In this example, we perform the same
- * saxpy computation as example 07.  While
+ * daxpy computation as example 07.  While
  * the source code for the actual computation
  * between the two examples is identical, we 
  * show to create a custom mapper that changes 
@@ -37,7 +37,7 @@ using namespace LegionRuntime::Arrays;
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,
-  SAXPY_TASK_ID,
+  DAXPY_TASK_ID,
   CHECK_TASK_ID,
 };
 
@@ -76,8 +76,8 @@ enum FieldIDs {
  * notify the mapper that it tried to perform
  * an illegal mapping and allow it to retry.
  *
- * To introduce how to write a custom mapper,
- * we'll implement an adverserial mapper 
+ * To introduce how to write a custom mapper
+ * we'll implement an adversarial mapper 
  * that makes random mapping decisions
  * designed to stress the Legion runtime. 
  * We'll report the chosen mapping decisions
@@ -101,9 +101,9 @@ enum FieldIDs {
 // In this example, we'll override four
 // of the mapping calls to illustrate
 // how they work.
-class AdverserialMapper : public DefaultMapper {
+class AdversarialMapper : public DefaultMapper {
 public:
-  AdverserialMapper(Machine *machine, 
+  AdversarialMapper(Machine *machine, 
       HighLevelRuntime *rt, Processor local);
 public:
   virtual void select_task_options(Task *task);
@@ -146,7 +146,7 @@ public:
 //
 // Here we override the DefaultMapper ID so that
 // all tasks that normally would have used the
-// DefaultMapper will now use our AdverserialMapper.
+// DefaultMapper will now use our AdversarialMapper.
 // We create one new mapper for each processor
 // and register it with the runtime.
 void mapper_registration(Machine *machine, HighLevelRuntime *rt,
@@ -156,14 +156,14 @@ void mapper_registration(Machine *machine, HighLevelRuntime *rt,
         it != local_procs.end(); it++)
   {
     rt->replace_default_mapper(
-        new AdverserialMapper(machine, rt, *it), *it);
+        new AdversarialMapper(machine, rt, *it), *it);
   }
 }
 
 // Here is the constructor for our adversial mapper.
 // We'll use the constructor to illustrate how mappers can
 // get access to information regarding the current machine.
-AdverserialMapper::AdverserialMapper(Machine *m, 
+AdversarialMapper::AdversarialMapper(Machine *m, 
                                      HighLevelRuntime *rt, Processor p)
   : DefaultMapper(m, rt, p) // pass arguments through to DefaultMapper
 {
@@ -349,7 +349,7 @@ AdverserialMapper::AdverserialMapper(Machine *m,
 //  spawn_task - whether the task is eligible for 
 //    stealing (based on Cilk-style semantics)
 //  map_locally - whether the task should be mapped
-//    by the processor on which it was spawned or
+//    by the processor on which it was launched or
 //    whether it should be mapped by the processor
 //    where it will run.
 //  profile_task - should the runtime collect profiling
@@ -365,11 +365,11 @@ AdverserialMapper::AdverserialMapper(Machine *m,
 //  decisions.  Note that there are similar objects
 //  for inline mappings as well as other operations.
 //
-//  For our adverserial mapper, we perform the default
+//  For our adversarial mapper, we perform the default
 //  choices for all options except the last one.  Here
 //  we choose a random processor in our system to 
 //  send the task to.
-void AdverserialMapper::select_task_options(Task *task)
+void AdversarialMapper::select_task_options(Task *task)
 {
   task->inline_task = false;
   task->spawn_task = false;
@@ -402,7 +402,7 @@ void AdverserialMapper::select_task_options(Task *task)
 // a single point in them. This creates a tree of slices of
 // depth log(N) in the number of points in the domain with
 // each slice being sent to a random processor.
-void AdverserialMapper::slice_domain(const Task *task, const Domain &domain,
+void AdversarialMapper::slice_domain(const Task *task, const Domain &domain,
                                      std::vector<DomainSplit> &slices)
 {
   const std::set<Processor> &all_procs = machine->get_all_processors();
@@ -427,7 +427,7 @@ void AdverserialMapper::slice_domain(const Task *task, const Domain &domain,
 }
 
 // The next mapping call that we override is the map_task
-// mapper method. Once a task has been selected to map on
+// mapper method. Once a task has been assigned to map on
 // a specific processor (the target_proc) then this method
 // is invoked by the runtime to select the memories in 
 // which to create physical instances for each logical region.
@@ -446,7 +446,7 @@ void AdverserialMapper::slice_domain(const Task *task, const Domain &domain,
 // the task failed to map using the 'notify_mapping_failed'
 // mapper call. If the mapper does nothing, then the task
 // is placed back on the list of tasks eligible to be mapped.
-// Ther are other fields that the mapper can set in the
+// There are other fields that the mapper can set in the
 // process of the map_task call that we do not cover here.
 //
 // In this example, the mapper finds the set of all visible
@@ -454,7 +454,7 @@ void AdverserialMapper::slice_domain(const Task *task, const Domain &domain,
 // in a random order as the target set of memories, thereby
 // challenging the Legion runtime to maintain correctness
 // of data moved through random sets of memories.
-bool AdverserialMapper::map_task(Task *task)
+bool AdversarialMapper::map_task(Task *task)
 { 
   const std::set<Memory> &vis_mems = 
       machine->get_visible_memories(task->target_proc);  
@@ -490,7 +490,7 @@ bool AdverserialMapper::map_task(Task *task)
 // this example to record the memories in which physical instances
 // were mapped for each logical region of each task so we can
 // see that the assignment truly is random.
-void AdverserialMapper::notify_mapping_result(const Mappable *mappable)
+void AdversarialMapper::notify_mapping_result(const Mappable *mappable)
 {
   if (mappable->get_mappable_kind() == Mappable::TASK_MAPPABLE)
   {
@@ -507,7 +507,7 @@ void AdverserialMapper::notify_mapping_result(const Mappable *mappable)
 }
 
 /*
- * Everything below here is the standard saxpy example
+ * Everything below here is the standard daxpy example
  * except for the registration of the callback function
  * for creating custom mappers which is explicitly commented.
  */
@@ -527,7 +527,7 @@ void top_level_task(const Task *task,
         num_subregions = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running saxpy for %d elements...\n", num_elements);
+  printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
   Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
@@ -603,18 +603,18 @@ void top_level_task(const Task *task,
   runtime->execute_index_space(ctx, init_launcher);
 
   const double alpha = drand48();
-  IndexLauncher saxpy_launcher(SAXPY_TASK_ID, launch_domain,
+  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, launch_domain,
                 TaskArgument(&alpha, sizeof(alpha)), arg_map);
-  saxpy_launcher.add_region_requirement(
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/,
                         READ_ONLY, EXCLUSIVE, input_lr));
-  saxpy_launcher.add_field(0, FID_X);
-  saxpy_launcher.add_field(0, FID_Y);
-  saxpy_launcher.add_region_requirement(
+  daxpy_launcher.add_field(0, FID_X);
+  daxpy_launcher.add_field(0, FID_Y);
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(output_lp, 0/*projection ID*/,
                         WRITE_DISCARD, EXCLUSIVE, output_lr));
-  saxpy_launcher.add_field(1, FID_Z);
-  runtime->execute_index_space(ctx, saxpy_launcher);
+  daxpy_launcher.add_field(1, FID_Z);
+  runtime->execute_index_space(ctx, daxpy_launcher);
                     
   TaskLauncher check_launcher(CHECK_TASK_ID, TaskArgument(&alpha, sizeof(alpha)));
   check_launcher.add_region_requirement(
@@ -657,7 +657,7 @@ void init_field_task(const Task *task,
   }
 }
 
-void saxpy_task(const Task *task,
+void daxpy_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
                 Context ctx, HighLevelRuntime *runtime)
 {
@@ -673,7 +673,7 @@ void saxpy_task(const Task *task,
     regions[0].get_field_accessor(FID_Y).typeify<double>();
   RegionAccessor<AccessorType::Generic, double> acc_z = 
     regions[1].get_field_accessor(FID_Z).typeify<double>();
-  printf("Running saxpy computation with alpha %.8g for point %d...\n", 
+  printf("Running daxpy computation with alpha %.8g for point %d...\n", 
           alpha, point);
 
   Domain dom = runtime->get_index_space_domain(ctx, 
@@ -730,7 +730,7 @@ int main(int argc, char **argv)
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
-  HighLevelRuntime::register_legion_task<saxpy_task>(SAXPY_TASK_ID,
+  HighLevelRuntime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
   HighLevelRuntime::register_legion_task<check_task>(CHECK_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);

@@ -22,10 +22,10 @@ using namespace LegionRuntime::HighLevel;
 
 /*
  * In this section we use a sequential
- * implementation of saxpy to show how
+ * implementation of daxpy to show how
  * to create physical instances of logical
  * reigons.  In later sections we will
- * show how to extend this saxpy example
+ * show how to extend this daxpy example
  * so that it will run with sub-tasks
  * and also run in parallel.
  */
@@ -58,12 +58,12 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running saxpy for %d elements...\n", num_elements);
+  printf("Running daxpy for %d elements...\n", num_elements);
 
   // We'll create two logical regions with a common index space
   // for storing our inputs and outputs.  The input region will
   // have two fields for storing the 'x' and 'y' fields of the
-  // saxpy computation, and the output region will have a single
+  // daxpy computation, and the output region will have a single
   // field 'z' for storing the result.
   Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
   IndexSpace is = runtime->create_index_space(ctx, 
@@ -91,7 +91,7 @@ void top_level_task(const Task *task,
   // instances in the next example.)  Inline mappings map a physical instance
   // of logical region inside of this task's context.  This will give the
   // task an up-to-date copy of the data stored in these logical regions.
-  // In this particular saxpy example, the data has yet to be initialized so
+  // In this particular daxpy example, the data has yet to be initialized so
   // really this just creates un-initialized physical regions for the 
   // application to use.
   //
@@ -107,13 +107,13 @@ void top_level_task(const Task *task,
   // which the enclosing task has privileges which in this case is the 
   // same input_lr logical region.  We'll discuss restrictions on privileges
   // more in the next example.
-  InlineLauncher input_launcher(RegionRequirement(input_lr, READ_WRITE,
-                                                  EXCLUSIVE, input_lr));
+  RegionRequirement req(input_lr, READ_WRITE, EXCLUSIVE, input_lr);
   // We also need to specify which fields we plan to access in our
   // RegionRequirement.  To do this we invoke the 'add_field' method
   // on the RegionRequirement.
-  input_launcher.requirement.add_field(FID_X);
-  input_launcher.requirement.add_field(FID_Y);
+  req.add_field(FID_X);
+  req.add_field(FID_Y);
+  InlineLauncher input_launcher(req);
 
   // Once we have set up our launcher, we as the runtime to map a physical
   // region instance of our requested logical region with the given 
@@ -124,14 +124,14 @@ void top_level_task(const Task *task,
   // application to issue many of these operations in flight and to
   // perform other useful work while waiting for the region to be ready.
   //
-  // One common complaint about Legion applications is that there exists
+  // One common criticism about Legion applications is that there exists
   // a dichotomy between logical and physical regions.  Programmers
   // are explicitly required to keep track of both kinds of regions and
   // know when and how to use them.  If you feel this way as well, we
   // encourage you to try out our Legion compiler in which this
   // dichotomy does not exist.  There are simply regions and the compiler
   // automatically manages the logical and physical nature of them
-  // in a way that is annalogous to how compilers manage the mapping 
+  // in a way that is analogous to how compilers manage the mapping 
   // between variables and architectural registers.  This runtime API
   // is designed to be expressive for all Legion programs and is not
   // necessarily designed for programmer productivity.
@@ -206,8 +206,8 @@ void top_level_task(const Task *task,
     output_region.get_field_accessor(FID_Z).typeify<double>();
 
   const double alpha = drand48();
-  printf("Running saxpy computation with alpha %.8g...", alpha);
-  // Iterate over our points and perform the saxpy computation.  Note
+  printf("Running daxpy computation with alpha %.8g...", alpha);
+  // Iterate over our points and perform the daxpy computation.  Note
   // we can use the same iterator because both the input and output
   // regions were created using the same index space.
   for (GenericPointInRectIterator<1> pir(elem_rect); pir; pir++)

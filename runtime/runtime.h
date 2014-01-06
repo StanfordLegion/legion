@@ -1246,6 +1246,7 @@ namespace LegionRuntime {
       static bool separate_runtime_instances;
       static bool stealing_disabled;
       static bool resilient_mode;
+      static unsigned shutdown_counter;
 #ifdef DEBUG_HIGH_LEVEL
       static bool logging_region_tree_state;
       static bool verbose_logging;

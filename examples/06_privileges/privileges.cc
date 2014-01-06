@@ -24,7 +24,7 @@ using namespace LegionRuntime::Accessor;
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,
-  SAXPY_TASK_ID,
+  DAXPY_TASK_ID,
   CHECK_TASK_ID,
 };
 
@@ -48,7 +48,7 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running saxpy for %d elements...\n", num_elements);
+  printf("Running daxpy for %d elements...\n", num_elements);
 
   // Create our logical regions using the same schema that
   // we used in the previous example.
@@ -72,7 +72,7 @@ void top_level_task(const Task *task,
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
 
   // Instead of using an inline mapping to initialize the fields for
-  // saxpy, in this case we will launch two separate tasks for initializing
+  // daxpy, in this case we will launch two separate tasks for initializing
   // each of the fields in parallel.  To launch the sub-tasks for performing
   // the initialization we again use the launcher objects that were
   // introduced earlier.  The only difference now is that instead of passing
@@ -96,7 +96,7 @@ void top_level_task(const Task *task,
   TaskLauncher init_launcher(INIT_FIELD_TASK_ID, TaskArgument(NULL, 0));
   init_launcher.add_region_requirement(
       RegionRequirement(input_lr, WRITE_DISCARD, EXCLUSIVE, input_lr));
-  init_launcher.region_requirements[0].add_field(FID_X);
+  init_launcher.add_field(0/*idx*/, FID_X);
   // Note that when we launch this task we don't record the future.
   // This is because we're going to let Legion be responsible for 
   // computing the data dependences between how different tasks access
@@ -121,11 +121,11 @@ void top_level_task(const Task *task,
   // of being used in many places.
   init_launcher.region_requirements[0].privilege_fields.clear();
   init_launcher.region_requirements[0].instance_fields.clear();
-  init_launcher.region_requirements[0].add_field(FID_Y);
+  init_launcher.add_field(0/*idx*/, FID_Y);
 
   runtime->execute_task(ctx, init_launcher);
 
-  // Now we launch the task to perform the saxpy computation.  We pass
+  // Now we launch the task to perform the daxpy computation.  We pass
   // in the alpha value as an argument.  All the rest of the arguments
   // are RegionRequirements specifying that we are reading the two
   // fields on the input_lr region and writing results to the output_lr
@@ -133,32 +133,32 @@ void top_level_task(const Task *task,
   // from the two init_field_tasks and will ensure that the program
   // order execution is obeyed.
   const double alpha = drand48();
-  TaskLauncher saxpy_launcher(SAXPY_TASK_ID, TaskArgument(&alpha, sizeof(alpha)));
-  saxpy_launcher.add_region_requirement(
+  TaskLauncher daxpy_launcher(DAXPY_TASK_ID, TaskArgument(&alpha, sizeof(alpha)));
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
-  saxpy_launcher.region_requirements[0].add_field(FID_X);
-  saxpy_launcher.region_requirements[0].add_field(FID_Y);
-  saxpy_launcher.add_region_requirement(
+  daxpy_launcher.add_field(0/*idx*/, FID_X);
+  daxpy_launcher.add_field(0/*idx*/, FID_Y);
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(output_lr, WRITE_DISCARD, EXCLUSIVE, output_lr));
-  saxpy_launcher.region_requirements[1].add_field(FID_Z);
+  daxpy_launcher.add_field(1/*idx*/, FID_Z);
 
-  runtime->execute_task(ctx, saxpy_launcher);
+  runtime->execute_task(ctx, daxpy_launcher);
 
   // Finally we launch a task to perform the check on the output.  Note
   // that Legion will compute a data dependence on the first RegionRequirement
-  // with the two init_field_tasks, but not on saxpy task since they 
+  // with the two init_field_tasks, but not on daxpy task since they 
   // both request read-only privileges on the 'X' and 'Y' fields.  However,
   // Legion will compute a data dependence on the second region requirement
-  // as the saxpy task was writing the 'Z' field on output_lr and this task
+  // as the daxpy task was writing the 'Z' field on output_lr and this task
   // is reading the 'Z' field of the output_lr region.
   TaskLauncher check_launcher(CHECK_TASK_ID, TaskArgument(&alpha, sizeof(alpha)));
   check_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
-  check_launcher.region_requirements[0].add_field(FID_X);
-  check_launcher.region_requirements[0].add_field(FID_Y);
+  check_launcher.add_field(0/*idx*/, FID_X);
+  check_launcher.add_field(0/*idx*/, FID_Y);
   check_launcher.add_region_requirement(
       RegionRequirement(output_lr, READ_ONLY, EXCLUSIVE, output_lr));
-  check_launcher.region_requirements[1].add_field(FID_Z);
+  check_launcher.add_field(1/*idx*/, FID_Z);
 
   runtime->execute_task(ctx, check_launcher);
 
@@ -219,7 +219,7 @@ void init_field_task(const Task *task,
   }
 }
 
-void saxpy_task(const Task *task,
+void daxpy_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
                 Context ctx, HighLevelRuntime *runtime)
 {
@@ -234,7 +234,7 @@ void saxpy_task(const Task *task,
     regions[0].get_field_accessor(FID_Y).typeify<double>();
   RegionAccessor<AccessorType::Generic, double> acc_z = 
     regions[1].get_field_accessor(FID_Z).typeify<double>();
-  printf("Running saxpy computation with alpha %.8g...\n", alpha);
+  printf("Running daxpy computation with alpha %.8g...\n", alpha);
   Domain dom = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());
   Rect<1> rect = dom.get_rect<1>();
@@ -289,7 +289,7 @@ int main(int argc, char **argv)
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
-  HighLevelRuntime::register_legion_task<saxpy_task>(SAXPY_TASK_ID,
+  HighLevelRuntime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   HighLevelRuntime::register_legion_task<check_task>(CHECK_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);

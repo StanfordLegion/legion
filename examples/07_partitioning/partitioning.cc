@@ -31,7 +31,7 @@ using namespace LegionRuntime::Arrays;
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,
-  SAXPY_TASK_ID,
+  DAXPY_TASK_ID,
   CHECK_TASK_ID,
 };
 
@@ -60,7 +60,7 @@ void top_level_task(const Task *task,
         num_subregions = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running saxpy for %d elements...\n", num_elements);
+  printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 
   // Create our logical regions using the same schemas as earlier examples
@@ -210,7 +210,7 @@ void top_level_task(const Task *task,
   Domain launch_domain = color_domain; 
   ArgumentMap arg_map;
 
-  // As in previous examples, We now want to launch tasks for initializing 
+  // As in previous examples, we now want to launch tasks for initializing 
   // both the fields.  However, to increase the amount of parallelism
   // exposed to the runtime we will launch separate sub-tasks for each of
   // the logical subregions created by our partitioning.  To express this
@@ -262,22 +262,22 @@ void top_level_task(const Task *task,
   runtime->execute_index_space(ctx, init_launcher);
 
   const double alpha = drand48();
-  // We launch the subtasks for performing the saxpy computation
+  // We launch the subtasks for performing the daxpy computation
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
   // partition as the upper bound for the privileges for the task.
-  IndexLauncher saxpy_launcher(SAXPY_TASK_ID, launch_domain,
+  IndexLauncher daxpy_launcher(DAXPY_TASK_ID, launch_domain,
                 TaskArgument(&alpha, sizeof(alpha)), arg_map);
-  saxpy_launcher.add_region_requirement(
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(input_lp, 0/*projection ID*/,
                         READ_ONLY, EXCLUSIVE, input_lr));
-  saxpy_launcher.region_requirements[0].add_field(FID_X);
-  saxpy_launcher.region_requirements[0].add_field(FID_Y);
-  saxpy_launcher.add_region_requirement(
+  daxpy_launcher.region_requirements[0].add_field(FID_X);
+  daxpy_launcher.region_requirements[0].add_field(FID_Y);
+  daxpy_launcher.add_region_requirement(
       RegionRequirement(output_lp, 0/*projection ID*/,
                         WRITE_DISCARD, EXCLUSIVE, output_lr));
-  saxpy_launcher.region_requirements[1].add_field(FID_Z);
-  runtime->execute_index_space(ctx, saxpy_launcher);
+  daxpy_launcher.region_requirements[1].add_field(FID_Z);
+  runtime->execute_index_space(ctx, daxpy_launcher);
                     
   // While we could also issue parallel subtasks for the checking
   // task, we only issue a single task launch to illustrate an
@@ -331,7 +331,7 @@ void init_field_task(const Task *task,
   }
 }
 
-void saxpy_task(const Task *task,
+void daxpy_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
                 Context ctx, HighLevelRuntime *runtime)
 {
@@ -347,7 +347,7 @@ void saxpy_task(const Task *task,
     regions[0].get_field_accessor(FID_Y).typeify<double>();
   RegionAccessor<AccessorType::Generic, double> acc_z = 
     regions[1].get_field_accessor(FID_Z).typeify<double>();
-  printf("Running saxpy computation with alpha %.8g for point %d...\n", 
+  printf("Running daxpy computation with alpha %.8g for point %d...\n", 
           alpha, point);
 
   Domain dom = runtime->get_index_space_domain(ctx, 
@@ -406,7 +406,7 @@ int main(int argc, char **argv)
   // run both as single tasks and as index space tasks
   HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
-  HighLevelRuntime::register_legion_task<saxpy_task>(SAXPY_TASK_ID,
+  HighLevelRuntime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
   HighLevelRuntime::register_legion_task<check_task>(CHECK_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);

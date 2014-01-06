@@ -108,7 +108,7 @@ void top_level_task(const Task *task,
       // First we'll compute the points assigned to the color
       // for the disjoint partition.  This computation is
       // identical to the one performed in earlier examples
-      // for the saxpy computation.  We again handle the
+      // for the daxpy computation.  We again handle the
       // default case the edge case when we reach the upper
       // bound of the index space.
       if ((index+elmts_per_subregion) > num_elements)
