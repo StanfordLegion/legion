@@ -303,8 +303,9 @@ namespace LegionRuntime {
 
     class TreeStateLogger {
     public:
-      explicit TreeStateLogger(AddressSpaceID sid, bool verbose,
-                               bool logical_only, bool physical_only);
+      TreeStateLogger(void);
+      TreeStateLogger(AddressSpaceID sid, bool verbose,
+                      bool logical_only, bool physical_only);
       ~TreeStateLogger(void);
     public:
       void log(const char *fmt, ...);

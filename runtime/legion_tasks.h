@@ -51,7 +51,6 @@ namespace LegionRuntime {
       virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
     public:
-      inline bool is_leaf(void) const { return variants->leaf; }
       inline bool is_remote(void) const { return !runtime->is_local(orig_proc);}
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
@@ -157,7 +156,6 @@ namespace LegionRuntime {
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
-      std::map<unsigned/*idx*/,InnerTaskView*> early_mapped_inner_views;
     protected:
       std::deque<RegionTreeContext> enclosing_physical_contexts;
     protected:
@@ -246,6 +244,11 @@ namespace LegionRuntime {
         { return executing_processor; }
       inline void set_executing_processor(Processor p)
         { executing_processor = p; }
+    public:
+      // These two functions are only safe to call after
+      // the task has had its variant selected
+      bool is_leaf(void) const;
+      bool is_inner(void) const;
     public:
       void assign_context(RegionTreeContext ctx);
       RegionTreeContext release_context(void);
@@ -357,6 +360,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(void) = 0;
       virtual bool is_stealable(void) const = 0;
+      virtual bool can_early_complete(UserEvent &chain_event) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -393,10 +397,6 @@ namespace LegionRuntime {
       Processor executing_processor;
       // Hold the result of the mapping 
       std::deque<InstanceRef> physical_instances;
-      // If we're an inner task instead of a normal task then
-      // we also have lists of users which we will use to 
-      // seed our top-level instance view.
-      std::deque<InnerTaskView*> inner_task_views;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
       std::deque<InstanceRef> local_instances;
@@ -555,6 +555,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(void);
       virtual bool is_stealable(void) const;
+      virtual bool can_early_complete(UserEvent &chain_event);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -635,6 +636,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(void);
       virtual bool is_stealable(void) const;
+      virtual bool can_early_complete(UserEvent &chain_event);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -695,6 +697,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(void);
       virtual bool is_stealable(void) const;
+      virtual bool can_early_complete(UserEvent &chain_event);
       virtual RegionTreeContext find_enclosing_physical_context(
                                                 LogicalRegion parent) = 0;
       virtual RemoteTask* find_outermost_physical_context(void) = 0;

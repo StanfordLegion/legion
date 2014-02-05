@@ -167,6 +167,11 @@ namespace LegionRuntime {
                                 bool &registered_dependence,
                                 unsigned &op_mapping_deps,
                                 unsigned &op_speculation_deps);
+      // Check to see if the operation is still valid
+      // for the given GenerationID.  This method is not precise
+      // and may return false when the operation has committed.
+      // However, the converse will never be occur.
+      bool is_operation_committed(GenerationID gen);
       // Add and remove mapping references to tell an operation
       // how many places additional dependences can come from.
       // Once the mapping reference count goes to zero, no

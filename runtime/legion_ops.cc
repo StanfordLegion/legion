@@ -103,7 +103,7 @@ namespace LegionRuntime {
       outgoing.clear();
       unverified_regions.clear();
       verify_regions.clear();
-      if (!completion_event.has_triggered())
+      if (need_completion_trigger && !completion_event.has_triggered())
         completion_event.trigger();
     }
 
@@ -653,6 +653,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Operation::is_operation_committed(GenerationID our_gen)
+    //--------------------------------------------------------------------------
+    {
+      // If we're on an old generation then it's definitely committed
+      if (our_gen < gen)
+        return true;
+      // Otherwise check the committed flag
+      return committed;
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::add_mapping_reference(GenerationID our_gen)
     //--------------------------------------------------------------------------
     {
@@ -1189,7 +1200,8 @@ namespace LegionRuntime {
       parent_task = ctx;
       termination_event = UserEvent::create_user_event();
       region = PhysicalRegion(new PhysicalRegion::Impl(requirement,
-              completion_event, true/*mapped*/, ctx, map_id, tag, runtime));
+                              completion_event, true/*mapped*/, ctx, 
+                              map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -1249,7 +1261,8 @@ namespace LegionRuntime {
       parent_task = ctx;
       termination_event = UserEvent::create_user_event();
       region = PhysicalRegion(new PhysicalRegion::Impl(requirement,
-                completion_event, true/*mapped*/, ctx, map_id, tag,runtime));
+                              completion_event, true/*mapped*/, ctx, 
+                              map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -1866,16 +1879,19 @@ namespace LegionRuntime {
         }
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          if (src_requirements[idx].privilege_fields.size() != 1)
+          if (src_requirements[idx].privilege_fields.size() != 
+              src_requirements[idx].instance_fields.size())
           {
             log_run(LEVEL_ERROR,"Copy source requirement %d for copy operation "
                                 "(ID %lld) in parent task %s (ID %lld) has %ld "
-                                "privilege fields.  Copy requirements must "
-                                "have exactly one privilege field.",
+                                "privilege fields and %ld instance fields.  "
+                                "Copy requirements must have exactly the same "
+                                "number of privilege and instance fields.",
                                 idx, get_unique_copy_id(), 
                                 parent_ctx->variants->name,
                                 parent_ctx->get_unique_task_id(),
-                                src_requirements[idx].privilege_fields.size());
+                                src_requirements[idx].privilege_fields.size(),
+                                src_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -1898,16 +1914,20 @@ namespace LegionRuntime {
         }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
-          if (dst_requirements[idx].privilege_fields.size() != 1)
+          if (dst_requirements[idx].privilege_fields.size() != 
+              dst_requirements[idx].instance_fields.size())
           {
             log_run(LEVEL_ERROR,"Copy destination requirement %d for copy "
                                 "operation (ID %lld) in parent task %s "
-                                "(ID %lld) has %ld privilege fields.  Copy "
-                                "requirements must have exactly one privilege "
-                                "field.", idx, get_unique_copy_id(), 
+                                "(ID %lld) has %ld privilege fields and %ld "
+                                "instance fields.  Copy requirements must "
+                                "have exactly the same number of  privilege "
+                                "and instance fields.", idx, 
+                                get_unique_copy_id(), 
                                 parent_ctx->variants->name,
                                 parent_ctx->get_unique_task_id(),
-                                dst_requirements[idx].privilege_fields.size());
+                                dst_requirements[idx].privilege_fields.size(),
+                                dst_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2379,11 +2399,10 @@ namespace LegionRuntime {
           // triggering our completion event.
           completion_event.trigger(copy_complete_event);
           need_completion_trigger = false;
-          Processor util = local_proc.get_utility_processor();
+          Processor util = runtime->get_cleanup_proc(local_proc);
           Operation *proxy_this = this;
           util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
-                      sizeof(proxy_this), copy_complete_event,
-                      parent_ctx->task_priority);
+                      sizeof(proxy_this), copy_complete_event);
         }
         else
           deferred_complete();
@@ -2746,11 +2765,11 @@ namespace LegionRuntime {
         Event wait_on = Event::merge_events(trigger_events);
         if (!wait_on.has_triggered())
         {
-          Processor util = parent_ctx->get_executing_processor().
-                                       get_utility_processor();
+          Processor util = runtime->get_cleanup_proc(
+                            parent_ctx->get_executing_processor());
           Operation *proxy_this = this;
           util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                     sizeof(proxy_this), wait_on, parent_ctx->task_priority);
+                     sizeof(proxy_this), wait_on);
         }
         else
           deferred_complete();
@@ -3170,12 +3189,13 @@ namespace LegionRuntime {
     void CloseOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
+#if defined(LEGION_PROF) || defined(LEGION_LOGGING)
       UniqueID local_id = unique_op_id;
+#endif
+#ifdef LEGION_PROF
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
 #endif
 #ifdef LEGION_LOGGING
-      UniqueID local_id = unique_op_id;
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       local_id,
                                       BEGIN_POST_EXEC);
@@ -3317,10 +3337,10 @@ namespace LegionRuntime {
         completion_event.trigger(close_event);
         need_completion_trigger = false;
         CloseOp *proxy_this = this;
-        Processor util = parent_ctx->get_executing_processor().
-                                     get_utility_processor();
+        Processor util = runtime->get_cleanup_proc(
+                          parent_ctx->get_executing_processor());
         util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
-                   sizeof(proxy_this), close_event, parent_ctx->task_priority);
+                   sizeof(proxy_this), close_event);
       }
       else
         deferred_complete();
@@ -3569,11 +3589,10 @@ namespace LegionRuntime {
       {
         completion_event.trigger(acquire_complete);
         need_completion_trigger = false;
-        Processor util = local_proc.get_utility_processor();
+        Processor util = runtime->get_cleanup_proc(local_proc);
         Operation *proxy_this = this;
         util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                    sizeof(proxy_this), acquire_complete,
-                    parent_ctx->task_priority);
+                    sizeof(proxy_this), acquire_complete);
       }
       else
         deferred_complete();
@@ -3986,11 +4005,10 @@ namespace LegionRuntime {
       {
         completion_event.trigger(release_complete);
         need_completion_trigger = false;
-        Processor util = local_proc.get_utility_processor();
+        Processor util = runtime->get_cleanup_proc(local_proc);
         Operation *proxy_this = this;
         util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                   sizeof(proxy_this), release_complete,
-                   parent_ctx->task_priority);
+                   sizeof(proxy_this), release_complete);
       }
       else
         deferred_complete();

@@ -123,7 +123,7 @@ namespace LegionRuntime {
                             "for proecessor %x", local_proc.id);
       task->inline_task = false;
       task->spawn_task = stealing_enabled;
-      task->map_locally = task->variants->leaf; 
+      task->map_locally = false; 
       task->profile_task = !profiler.profiling_complete(task);
       task->task_priority = 0; // No prioritization
       // For selecting a target processor see if we have finished profiling

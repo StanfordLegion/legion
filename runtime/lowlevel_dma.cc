@@ -147,7 +147,8 @@ namespace LegionRuntime {
 
     void DmaRequest::print_info(void)
     {
-      printf("dma request %p", this);
+      printf("dma request %p: after %x/%d\n", 
+          this, after_copy.id, after_copy.gen);
     }
 
     bool DmaRequest::check_readiness(bool just_check)

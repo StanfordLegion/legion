@@ -42,9 +42,18 @@
 #endif
 
 #define AUTO_GENERATE_ID   UINT_MAX
+
+#ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
+#endif
+
+#ifndef MAX_FIELDS
 #define MAX_FIELDS         2048 // must be divisible by 2^FIELD_SHIFT
+#endif
+
+#ifndef FIELD_LOG2
 #define FIELD_LOG2         11 // log2(MAX_FIELDS)
+#endif
 // The folowing macros are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
 #define FIELD_TYPE          uint64_t 
@@ -55,28 +64,56 @@
 // Some default values 
 
 // The maximum number of processors on a node
-#define MAX_NUM_PROCS           1024
+#ifndef MAX_NUM_PROCS
+#define MAX_NUM_PROCS                   1024
+#endif
 // Default number of mapper slots
-#define DEFAULT_MAPPER_SLOTS    8
+#ifndef DEFAULT_MAPPER_SLOTS
+#define DEFAULT_MAPPER_SLOTS            8
+#endif
 // Default number of contexts made for each runtime instance
 // Ideally this is a power of 2 (better for performance)
-#define DEFAULT_CONTEXTS        64 
+#ifndef DEFAULT_CONTEXTS
+#define DEFAULT_CONTEXTS                64 
+#endif
 // Maximum number of allowed contexts ever in Legion runtime
-#define MAX_CONTEXTS           1024
+#ifndef MAX_CONTEXTS
+#define MAX_CONTEXTS                    1024
+#endif
 // Maximum number of sub-tasks per task at a time
-#define DEFAULT_MAX_TASK_WINDOW         4096 
+#ifndef DEFAULT_MAX_TASK_WINDOW
+#define DEFAULT_MAX_TASK_WINDOW         1024 
+#endif
 // How many tasks to group together for runtime operations
-#define DEFAULT_MIN_TASKS_TO_SCHEDULE 1
+#ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
+#define DEFAULT_MIN_TASKS_TO_SCHEDULE   1
+#endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline
-#define DEFAULT_SUPERSCALAR_WIDTH 4
-// The maximum size of active messages sent by the runtime
+#ifndef DEFAULT_SUPERSCALAR_WIDTH
+#define DEFAULT_SUPERSCALAR_WIDTH       4
+#endif
+// The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
 // latency and bandwidth numbers on both Cray and Infiniband
 // interconnect networks.
-#define DEFAULT_MAX_MESSAGE_SIZE 4096 
+#ifndef DEFAULT_MAX_MESSAGE_SIZE
+#define DEFAULT_MAX_MESSAGE_SIZE        16384 
+#endif
 // Maximum number of tasks in logical region node before consolidation
-#define DEFAULT_MAX_FILTER_SIZE         (16*DEFAULT_MIN_TASKS_TO_SCHEDULE) 
+#ifndef DEFAULT_MAX_FILTER_SIZE
+#define DEFAULT_MAX_FILTER_SIZE         0
+#endif
+// Timeout before checking for whether a logical user
+// should be pruned from the logical region tree data strucutre
+// Making the value less than or equal to zero will
+// result in checks always being performed
+#ifndef DEFAULT_LOGICAL_USER_TIMEOUT
+#define DEFAULT_LOGICAL_USER_TIMEOUT    32
+#endif
+
+namespace BindingLib { class Utility; } // BindingLib namespace
+
 
 namespace LegionRuntime {
   /**
@@ -200,11 +237,11 @@ namespace LegionRuntime {
       ERROR_COPY_SPACE_MISMATCH = 91,
       ERROR_INVALID_COPY_PRIVILEGE = 92,
       ERROR_INVALID_PARTITION_COLOR = 93,
-      ERROR_INNER_MISMATCH = 94,
-      ERROR_INNER_LEAF_MISMATCH = 95,
-      ERROR_EXCEEDED_MAX_CONTEXTS = 96,
-      ERROR_ACQUIRE_MISMATCH = 97,
-      ERROR_RELEASE_MISMATCH = 98,
+      ERROR_EXCEEDED_MAX_CONTEXTS = 94,
+      ERROR_ACQUIRE_MISMATCH = 95,
+      ERROR_RELEASE_MISMATCH = 96,
+      ERROR_INNER_LEAF_MISMATCH = 97,
+      ERROR_INVALID_FIELD_PRIVILEGES = 98,
     };
 
     // enum and namepsaces don't really get along well
@@ -530,7 +567,8 @@ namespace LegionRuntime {
     friend class ReductionManager;                \
     friend class ListReductionManager;            \
     friend class FoldReductionManager;            \
-    friend class TreeStateLogger;
+    friend class TreeStateLogger;                 \
+    friend class BindingLib::Utility;
 
     // Timing events
     enum {

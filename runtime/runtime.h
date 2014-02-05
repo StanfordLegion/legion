@@ -127,6 +127,8 @@ namespace LegionRuntime {
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
       virtual void notify_new_remote(AddressSpaceID);
     protected:
       void mark_sampled(void);
@@ -206,7 +208,7 @@ namespace LegionRuntime {
     public:
       Impl(const RegionRequirement &req, Event ready_event,
            bool mapped, SingleTask *ctx, MapperID mid,
-           MappingTagID tag, Runtime *rt);
+           MappingTagID tag, bool leaf, Runtime *rt);
       Impl(const PhysicalRegion::Impl &rhs);
       ~Impl(void);
     public:
@@ -233,6 +235,7 @@ namespace LegionRuntime {
       SingleTask *const context;
       const MapperID map_id;
       const MappingTagID tag;
+      const bool leaf_region;
     private:
       // Event for when the instance ref is ready
       Event ready_event;
@@ -430,6 +433,57 @@ namespace LegionRuntime {
       // Reservations for stealing and thieving
       Reservation stealing_lock;
       Reservation thieving_lock;
+    };
+
+    /**
+     * \class MemoryManager
+     * The goal of the memory manager is to keep track of all of
+     * the physical instances that the runtime knows about in various
+     * memories throughout the system.  This will then allow for
+     * feedback when mapping to know when memories are nearing
+     * their capacity.
+     */
+    class MemoryManager {
+    public:
+      MemoryManager(Memory mem, Runtime *rt);
+      MemoryManager(const MemoryManager &rhs);
+      ~MemoryManager(void);
+    public:
+      MemoryManager& operator=(const MemoryManager &rhs);
+    public:
+      // Update the manager with information about physical instances
+      void allocate_physical_instance(PhysicalManager *manager);
+      void free_physical_instance(PhysicalManager *manager);
+    public:
+      void recycle_physical_instance(InstanceManager *manager, Event use_event);
+      bool reclaim_physical_instance(InstanceManager *manager);
+    public:
+      PhysicalInstance find_physical_instance(size_t field_size,
+                                              const Domain &dom, 
+                                              const unsigned depth,
+                                              Event &use_event);
+      PhysicalInstance find_physical_instance(
+                          const std::vector<size_t> &field_sizes,
+                          const Domain &dom, const size_t blocking_factor,
+                          const unsigned depth, Event &use_event);
+    protected:
+      // The memory that we are managing
+      const Memory memory;
+      // The capacity in bytes of this memory
+      const size_t capacity;
+      // The remaining capacity in this memory
+      size_t remaining_capacity;
+      // The runtime we are associate with
+      Runtime *const runtime;
+      // Reservation for controlling access to the data
+      // structures in this memory manager
+      Reservation manager_lock;
+      // Current set of physical instances and their sizes
+      std::map<InstanceManager*,size_t> physical_instances;
+      // Current set of reduction instances and their sizes
+      std::map<ReductionManager*,size_t> reduction_instances;
+      // Set of physical instances which are currently eligible for recycling
+      std::map<InstanceManager*,Event> available_instances;
     };
 
     /**
@@ -634,7 +688,8 @@ namespace LegionRuntime {
       Runtime(Machine *m, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
               const std::set<AddressSpaceID> &address_spaces,
-              const std::map<Processor,AddressSpaceID> &proc_spaces);
+              const std::map<Processor,AddressSpaceID> &proc_spaces,
+              Processor cleanup, Processor gc, Processor message);
       Runtime(const Runtime &rhs);
       ~Runtime(void);
     public:
@@ -671,6 +726,9 @@ namespace LegionRuntime {
                                     Color color); 
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
+      void get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                            std::set<Color> &colors);
+      bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
     public:
@@ -814,6 +872,24 @@ namespace LegionRuntime {
       const void* get_local_args(Context ctx, DomainPoint &point, 
                                  size_t &local_size);
     public:
+      // Memory manager functions
+      MemoryManager* find_memory(Memory mem);
+      void allocate_physical_instance(PhysicalManager *instance);
+      void free_physical_instance(PhysicalManager *instance);
+    public:
+      // Functions for recycling physical instances
+      void recycle_physical_instance(InstanceManager *instance, 
+                                     Event use_event);
+      bool reclaim_physical_instance(InstanceManager *instance);
+      PhysicalInstance find_physical_instance(Memory mem, size_t field_size,
+                   const Domain &dom, const unsigned depth, Event &use_event);
+      PhysicalInstance find_physical_instance(Memory mem, 
+                                     const std::vector<size_t> &field_sizes,
+                                     const Domain &dom, 
+                                     const size_t blocking_factor,
+                                     const unsigned depth,
+                                     Event &use_event);
+    public:
       // Messaging functions
       MessageManager* find_messenger(AddressSpaceID sid) const;
       MessageManager* find_messenger(Processor target) const;
@@ -947,6 +1023,10 @@ namespace LegionRuntime {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
+    public:
+      Processor get_cleanup_proc(Processor p) const;
+      Processor get_gc_proc(Processor p) const;
+      Processor get_message_proc(Processor p) const;
     public:
       void increment_pending(Processor p);
       void decrement_pending(Processor p);
@@ -1104,12 +1184,20 @@ namespace LegionRuntime {
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
       RegionTreeForest *const forest;
+    public:
+      const Processor cleanup_proc;
+      const Processor gc_proc;
+      const Processor message_proc;
     protected:
       // Internal runtime state 
       // The local processor managed by this runtime
       const std::set<Processor> local_procs;
       // Processor managers for each of the local processors
       std::map<Processor,ProcessorManager*> proc_managers;
+      // Reservation for looking up memory managers
+      Reservation memory_manager_lock;
+      // Memory managers for all the memories we know about
+      std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
       std::map<AddressSpaceID,MessageManager*> message_managers;
       // For every processor map it to its address space
@@ -1191,6 +1279,14 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
+    public:
+      // These are debugging method for the above data
+      // structures.  They are not called anywhere in
+      // actual code.
+      void print_out_individual_tasks(int cnt = 1);
+      void print_out_index_tasks(int cnt = 1);
+      void print_out_slice_tasks(int cnt = 1);
+      void print_out_point_tasks(int cnt = 1);
 #endif
     public:
       // Static methods for start-up and callback phases
@@ -1232,6 +1328,9 @@ namespace LegionRuntime {
       static void register_runtime_tasks(Processor::TaskIDTable &table);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine *machine);
+      static void get_utility_processor_mapping(
+          const std::set<Processor> &util_procs, Processor &cleanup_proc,
+          Processor &gc_proc, Processor &message_proc);
     public:
       // Static member variables
       static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];

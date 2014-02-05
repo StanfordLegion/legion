@@ -854,6 +854,7 @@ namespace LegionRuntime {
       Predicate                          predicate;
       MapperID                           map_id;
       MappingTagID                       tag;
+      DomainPoint                        point;
     };
 
     /**
@@ -868,9 +869,9 @@ namespace LegionRuntime {
     public:
       IndexLauncher(void);
       IndexLauncher(Processor::TaskFuncID tid,
-                    Domain &domain,
+                    Domain domain,
                     TaskArgument global_arg,
-                    const ArgumentMap &map,
+                    ArgumentMap map,
                     Predicate pred = Predicate::TRUE_PRED,
                     bool must = false,
                     MapperID id = 0,
@@ -1350,6 +1351,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const = 0;
     };
 
     /**
@@ -1425,6 +1427,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const;
     };
 
     /**
@@ -1458,6 +1461,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const;
     };
 
     /**
@@ -1487,6 +1491,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const;
     };
 
     /**
@@ -1523,6 +1528,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const;
     };
 
     /**
@@ -1559,6 +1565,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual unsigned get_depth(void) const;
     };
 
     /**
@@ -1577,26 +1584,32 @@ namespace LegionRuntime {
         Processor::Kind proc_kind;
         bool single_task; /**< supports single tasks*/
         bool index_space; /**< supports index tasks*/
+        bool inner;
+        bool leaf;
         VariantID vid;
       public:
         Variant(void)
           : low_id(0) { }
         Variant(Processor::TaskFuncID id, Processor::Kind k, 
-                bool single, bool index, VariantID v)
+                bool single, bool index, 
+                bool in, bool lf,
+                VariantID v)
           : low_id(id), proc_kind(k), 
-            single_task(single), index_space(index), vid(v) { }
+            single_task(single), index_space(index), 
+            inner(in), leaf(lf), vid(v) { }
       };
     protected:
       // Only the runtime should be able to make these
       FRIEND_ALL_RUNTIME_CLASSES
       TaskVariantCollection(Processor::TaskFuncID uid, 
-                            const char *n, const bool lf,
-                            const bool in,
+                            const char *n,
                             const bool idem, size_t ret)
-        : user_id(uid), name(n), leaf(lf), inner(in), 
+        : user_id(uid), name(n), 
           idempotent(idem), return_size(ret) { }
       void add_variant(Processor::TaskFuncID low_id, 
-                       Processor::Kind kind, bool single, bool index,
+                       Processor::Kind kind, 
+                       bool single, bool index,
+                       bool inner, bool leaf,
                        VariantID vid);
       const Variant& select_variant(bool single, bool index, 
                                     Processor::Kind kind);
@@ -1639,8 +1652,6 @@ namespace LegionRuntime {
     public:
       const Processor::TaskFuncID user_id;
       const char *name;
-      const bool leaf;
-      const bool inner;
       const bool idempotent;
       const size_t return_size;
     protected:
@@ -2427,6 +2438,26 @@ namespace LegionRuntime {
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
 
       /**
+       * Return a set that contains the colors of all
+       * the partitions of the index space.  It is unlikely
+       * the colors are numerically dense which precipitates
+       * the need for a set.
+       * @param ctx enclosing task context
+       * @param sp handle for the index space
+       * @param colors reference to the set object in which to place the colors
+       */
+      void get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                            std::set<Color> &colors);
+
+      /**
+       * Return whether a given index partition is disjoint
+       * @param ctx enclosing task context
+       * @param p index partition handle
+       * @return whether the index partition is disjoint
+       */
+      bool is_index_partition_disjoint(Context ctx, IndexPartition p);
+
+      /**
        * Get an index subspace from a partition with a given
        * color point.
        * @param ctx enclosing task context
@@ -3170,7 +3201,7 @@ namespace LegionRuntime {
        * ---------------------
        *  Dependence Analysis
        * ---------------------
-       * -hl:maxfilter <int> Maximum number of tasks allowed in logical
+       * -hl:filter <int> Maximum number of tasks allowed in logical
        *              or physical epochs.  Default value is 32.
        * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined

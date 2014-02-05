@@ -650,6 +650,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Future::Impl::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      // do nothing
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::Impl::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      // do nothing
+    }
+
+    //--------------------------------------------------------------------------
     void Future::Impl::notify_new_remote(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
@@ -958,10 +972,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalRegion::Impl::Impl(const RegionRequirement &r, Event ready, bool m, 
                                SingleTask *ctx, MapperID mid, MappingTagID t,
-                               Runtime *rt)
+                               bool leaf, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
-        ready_event(ready), req(r), mapped(m), valid(false), 
-        trigger_on_unmap(false)
+        leaf_region(leaf), ready_event(ready), req(r), mapped(m), 
+        valid(false), trigger_on_unmap(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -970,7 +984,7 @@ namespace LegionRuntime {
     PhysicalRegion::Impl::Impl(const PhysicalRegion::Impl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         ready_event(Event::NO_EVENT), mapped(false), valid(false),
-        trigger_on_unmap(false)
+        leaf_region(false), trigger_on_unmap(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -988,6 +1002,9 @@ namespace LegionRuntime {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
+      // Remove any valid references we might have
+      if (!leaf_region && reference.has_ref())
+        reference.remove_valid_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -1159,6 +1176,15 @@ namespace LegionRuntime {
       }
       // Wait until we are valid before returning the accessor
       wait_until_valid();
+#ifdef DEBUG_HIGH_LEVEL
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+      {
+        log_inst(LEVEL_ERROR,"Requested field accessor for field %d "
+            "without privleges!", fid);
+        assert(false);
+        exit(ERROR_INVALID_FIELD_PRIVILEGES);
+      }
+#endif
       return reference.get_field_accessor(fid);
     } 
 
@@ -1211,7 +1237,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
+      if (!leaf_region && reference.has_ref())
+        reference.remove_valid_reference();
       reference = ref;
+      if (!leaf_region && reference.has_ref())
+        reference.add_valid_reference();
       termination_event = term_event;
       trigger_on_unmap = true;
     }
@@ -2285,6 +2315,180 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // Memory Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MemoryManager::MemoryManager(Memory m, Runtime *rt)
+      : memory(m), capacity(rt->machine->get_memory_size(m)),
+        remaining_capacity(capacity), runtime(rt), 
+        manager_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager::MemoryManager(const MemoryManager &rhs)
+      : memory(Memory::NO_MEMORY), capacity(0), runtime(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);   
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager::~MemoryManager(void)
+    //--------------------------------------------------------------------------
+    {
+      manager_lock.destroy_reservation();
+      manager_lock = Reservation::NO_RESERVATION;
+      physical_instances.clear();
+      reduction_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager& MemoryManager::operator=(const MemoryManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::allocate_physical_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      const size_t inst_size = manager->get_instance_size();  
+      AutoLock m_lock(manager_lock);
+      remaining_capacity -= inst_size;
+      if (manager->is_reduction_manager())
+      {
+        ReductionManager *reduc = manager->as_reduction_manager();
+        reduction_instances[reduc] = inst_size;
+      }
+      else
+      {
+        InstanceManager *inst = manager->as_instance_manager();
+        physical_instances[inst] = inst_size;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::free_physical_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      if (manager->is_reduction_manager())
+      {
+        std::map<ReductionManager*,size_t>::iterator finder =
+          reduction_instances.find(manager->as_reduction_manager());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != reduction_instances.end());
+#endif
+        remaining_capacity += finder->second;
+        reduction_instances.erase(finder);
+      }
+      else
+      {
+        std::map<InstanceManager*,size_t>::iterator finder = 
+          physical_instances.find(manager->as_instance_manager());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != physical_instances.end());
+#endif
+        remaining_capacity += finder->second;
+        physical_instances.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::recycle_physical_instance(InstanceManager *instance,
+                                                  Event use_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(available_instances.find(instance) == available_instances.end());
+#endif
+      available_instances[instance] = use_event;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::reclaim_physical_instance(InstanceManager *instance)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<InstanceManager*,Event>::iterator finder = 
+        available_instances.find(instance);
+      // If we didn't find it, then we can't reclaim it because someone
+      // else has started using it.
+      if (finder == available_instances.end())
+        return false;
+      // Otherwise remove it from the set of available instances
+      // and indicate that we can now delete it.
+      available_instances.erase(finder);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance MemoryManager::find_physical_instance(size_t field_size,
+                                                           const Domain &dom,
+                                                           const unsigned depth,
+                                                           Event &use_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      for (std::map<InstanceManager*,Event>::iterator it = 
+            available_instances.begin(); it != available_instances.end(); it++)
+      {
+        // To avoid deadlock it is imperative that the recycled instance
+        // be used by an operation which is at the same level or higher
+        // in the task graph.
+        if (depth > it->first->depth)
+          continue;
+        if (it->first->match_instance(field_size, dom))
+        {
+          // Set the use event, remove it from the set and return the value
+          use_event = it->second;
+          PhysicalInstance result = it->first->get_instance();
+          // This invalidates the iterator, but we're done with it anyway
+          available_instances.erase(it);
+          return result;
+        }
+      }
+      return PhysicalInstance::NO_INST;
+    }
+    
+    //--------------------------------------------------------------------------
+    PhysicalInstance MemoryManager::find_physical_instance(
+                    const std::vector<size_t> &field_sizes, const Domain &dom,
+                    const size_t blocking_factor, const unsigned depth,
+                    Event &use_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      for (std::map<InstanceManager*,Event>::iterator it = 
+            available_instances.begin(); it != available_instances.end(); it++)
+      {
+        // To avoid deadlock it is imperative that the recycled instance
+        // be used by an operation which is at the same level or higher
+        // in the task graph.
+        if (depth > it->first->depth)
+          continue;
+        if (it->first->match_instance(field_sizes, dom, blocking_factor))
+        {
+          // Set the use event, remove it from the set and return the value
+          use_event = it->second;
+          PhysicalInstance result = it->first->get_instance();
+          // This invalidates the iterator, but we're done with it anyway
+          available_instances.erase(it);
+          return result;
+        }
+      }
+      return PhysicalInstance::NO_INST;
+    } 
+
+    /////////////////////////////////////////////////////////////
     // Message Manager 
     /////////////////////////////////////////////////////////////
 
@@ -3140,11 +3344,14 @@ namespace LegionRuntime {
     Runtime::Runtime(Machine *m, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<AddressSpaceID> &address_spaces,
-                     const std::map<Processor,AddressSpaceID> &processor_spaces)
+                     const std::map<Processor,AddressSpaceID> &processor_spaces,
+                     Processor cleanup, Processor gc, Processor message)
       : high_level(new HighLevelRuntime(this)), machine(m), 
         address_space(unique), runtime_stride(address_spaces.size()),
         forest(new RegionTreeForest(this)),
+        cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
         local_procs(locals), proc_spaces(processor_spaces),
+        memory_manager_lock(Reservation::create_reservation()),
         unique_partition_id((unique == 0) ? runtime_stride : unique), 
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
         unique_tree_id((unique == 0) ? runtime_stride : unique),
@@ -3283,7 +3490,9 @@ namespace LegionRuntime {
     Runtime::Runtime(const Runtime &rhs)
       : high_level(NULL), machine(NULL), address_space(0), 
         runtime_stride(0), forest(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces),
+        cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
+        message_proc(Processor::NO_PROC)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3341,6 +3550,9 @@ namespace LegionRuntime {
       {
         delete it->second;
       }
+      memory_manager_lock.destroy_reservation();
+      memory_manager_lock = Reservation::NO_RESERVATION;
+      memory_managers.clear();
       message_managers.clear();
       available_lock.destroy_reservation();
       available_lock = Reservation::NO_RESERVATION;
@@ -3623,7 +3835,8 @@ namespace LegionRuntime {
       for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
             const_iterator it = table.begin(); it != table.end(); it++)
       {
-        LegionLogging::log_task_collection(it->first, it->second->leaf,
+        // Leaf task properties are now on variants and not collections
+        LegionLogging::log_task_collection(it->first, false/*leaf*/,
                                            it->second->idempotent,
                                            it->second->name);
         const std::map<VariantID,TaskVariantCollection::Variant> &all_vars = 
@@ -3775,27 +3988,41 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      // Perform the coloring
+      Point<1> lower_bound(coloring.begin()->first);
+      Point<1> upper_bound(coloring.rbegin()->first);
+      Rect<1> color_range(lower_bound,upper_bound);
+      Domain color_space = Domain::from_rect<1>(color_range);
+      // Perform the coloring by iterating over all the colors in the
+      // range.  For unspecified colors there is nothing wrong with
+      // making empty index spaces.  We do this so we can save the
+      // color space as a dense 1D domain.
       std::map<Color,Domain> new_index_spaces; 
-      for (std::map<Color,ColoredPoints<ptr_t> >::const_iterator cit = 
-            coloring.begin(); cit != coloring.end(); cit++)
+      for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
         LowLevel::ElementMask 
                     child_mask(parent.get_valid_mask().get_num_elmts());
-        const ColoredPoints<ptr_t> &pcoloring = cit->second;
-        for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
-              it != pcoloring.points.end(); it++)
+        Color c = pir.p;
+        std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
+          coloring.find(c);
+        // If we had a coloring provided, then fill in all the elements
+        if (finder != coloring.end())
         {
-          child_mask.enable(*it,1);
+          const ColoredPoints<ptr_t> &pcoloring = finder->second;
+          for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
+                it != pcoloring.points.end(); it++)
+          {
+            child_mask.enable(*it,1);
+          }
+          for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+                pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
+          {
+            child_mask.enable(it->first.value, it->second-it->first+1);
+          }
         }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
-        {
-          child_mask.enable(it->first.value, it->second-it->first+1);
-        }
+        // Now make the index space and save the information
         IndexSpace child_space = 
           IndexSpace::create_index_space(parent, child_mask);
-        new_index_spaces[cit->first] = Domain(child_space);
+        new_index_spaces[finder->first] = Domain(child_space);
       }
 #if 0
       // Now check for completeness
@@ -3877,7 +4104,7 @@ namespace LegionRuntime {
       }
 #endif 
       forest->create_index_partition(pid, parent, disjoint,
-                                 part_color, new_index_spaces);
+                                 part_color, new_index_spaces, color_space);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
@@ -3961,6 +4188,7 @@ namespace LegionRuntime {
 #endif
       // Perform the coloring
       std::map<Color,Domain> new_index_spaces;
+      Domain color_space;
       // Iterate over the parent index space and make the sub-index spaces
       // for each of the different points in the space
       Accessor::RegionAccessor<Accessor::AccessorType::Generic,int> 
@@ -3992,16 +4220,34 @@ namespace LegionRuntime {
           }
         }
         // Now make the index spaces and their domains
-        for (std::map<Color,LowLevel::ElementMask>::const_iterator
-              it = child_masks.begin(); it != child_masks.end(); it++)
+        Point<1> lower_bound(child_masks.begin()->first);
+        Point<1> upper_bound(child_masks.rbegin()->first);
+        Rect<1> color_range(lower_bound,upper_bound);
+        color_space = Domain::from_rect<1>(color_range);
+        // Iterate over all the colors in the range from the lower
+        // bound to upper bound so we can store the color space as
+        // a dense array of colors.
+        for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
         {
-          IndexSpace child_space = 
-            IndexSpace::create_index_space(parent, it->second);
-          new_index_spaces[it->first] = Domain(child_space);
+          Color c = pir.p;
+          std::map<Color,LowLevel::ElementMask>::const_iterator finder = 
+            child_masks.find(c);
+          IndexSpace child_space;
+          if (finder != child_masks.end())
+          {
+            child_space = 
+              IndexSpace::create_index_space(parent, finder->second);
+          }
+          else
+          {
+            LowLevel::ElementMask empty_mask;
+            child_space = IndexSpace::create_index_space(parent, empty_mask);
+          }
+          new_index_spaces[c] = Domain(child_space);
         }
       }
       forest->create_index_partition(pid, parent, true/*disjoint*/, 
-                                     part_color, new_index_spaces);
+                                     part_color, new_index_spaces, color_space);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
@@ -4147,8 +4393,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal get index subspace performed in leaf "
-                             "task %s (ID %lld)",
+        log_task(LEVEL_ERROR,"Illegal get index partition color space "
+                             "performed in leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
@@ -4162,6 +4408,41 @@ namespace LegionRuntime {
       }
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                                   std::set<Color> &colors)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get index space partition colors "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      forest->get_index_space_partition_colors(sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal is index partition disjoint "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->is_index_partition_disjoint(p);
     }
 
     //--------------------------------------------------------------------------
@@ -4987,6 +5268,16 @@ namespace LegionRuntime {
       // if it is then we are done
       if (region.impl->is_mapped())
         return;
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal remap operation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
       MapOp *map_op = get_available_map_op();
       map_op->initialize(ctx, region);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
@@ -5902,6 +6193,72 @@ namespace LegionRuntime {
       point = ctx->index_point;
       local_size = ctx->local_arglen;
       return ctx->local_args;
+    }
+
+    //--------------------------------------------------------------------------
+    MemoryManager* Runtime::find_memory(Memory mem)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(memory_manager_lock);
+      std::map<Memory,MemoryManager*>::const_iterator finder = 
+        memory_managers.find(mem);
+      if (finder != memory_managers.end())
+        return finder->second;
+      // Otherwise, if we haven't made it yet, make it now
+      MemoryManager *result = new MemoryManager(mem, this);
+      // Put it in the map
+      memory_managers[mem] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::allocate_physical_instance(PhysicalManager *instance)
+    //--------------------------------------------------------------------------
+    {
+      find_memory(instance->memory)->allocate_physical_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_physical_instance(PhysicalManager *instance)
+    //--------------------------------------------------------------------------
+    {
+      find_memory(instance->memory)->free_physical_instance(instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::recycle_physical_instance(InstanceManager *inst,
+                                            Event use_event)
+    //--------------------------------------------------------------------------
+    {
+      find_memory(inst->memory)->recycle_physical_instance(inst, use_event);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::reclaim_physical_instance(InstanceManager *inst)
+    //--------------------------------------------------------------------------
+    {
+      return find_memory(inst->memory)->reclaim_physical_instance(inst);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance Runtime::find_physical_instance(Memory mem, 
+                                        size_t field_size, const Domain &dom, 
+                                        const unsigned depth, Event &use_event)
+    //--------------------------------------------------------------------------
+    {
+      return find_memory(mem)->find_physical_instance(field_size, 
+                                                      dom, depth, use_event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance Runtime::find_physical_instance(Memory mem,
+        const std::vector<size_t> &field_sizes, const Domain &dom,
+        const size_t blocking_factor, const unsigned depth, Event &use_event)
+    //--------------------------------------------------------------------------
+    {
+      return find_memory(mem)->find_physical_instance(field_sizes, dom,
+                                                      blocking_factor, 
+                                                      depth, use_event);
     }
 
     //--------------------------------------------------------------------------
@@ -6824,6 +7181,33 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Future::Impl::handle_future_result(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    Processor Runtime::get_cleanup_proc(Processor p) const
+    //--------------------------------------------------------------------------
+    {
+      if (cleanup_proc.exists())
+        return cleanup_proc;
+      return p;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor Runtime::get_gc_proc(Processor p) const
+    //--------------------------------------------------------------------------
+    {
+      if (gc_proc.exists())
+        return gc_proc;
+      return p;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor Runtime::get_message_proc(Processor p) const
+    //--------------------------------------------------------------------------
+    {
+      if (message_proc.exists())
+        return message_proc;
+      return p;
     }
 
     //--------------------------------------------------------------------------
@@ -8142,6 +8526,116 @@ namespace LegionRuntime {
     }
 #endif
 
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    void Runtime::print_out_individual_tasks(int cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      // Build a map of the tasks based on their task IDs
+      // so we can print them out in the order that they were created.
+      // No need to hold the lock because we'll only ever call this
+      // in the debugger.
+      std::map<UniqueID,IndividualTask*> out_tasks;
+      for (std::set<IndividualTask*>::const_iterator it = 
+            out_individual_tasks.begin(); it !=
+            out_individual_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::map<UniqueID,IndividualTask*>::const_iterator it = 
+            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        fprintf(stdout,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen); 
+        cnt--;
+      }
+      fflush(stdout);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::print_out_index_tasks(int cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      // Build a map of the tasks based on their task IDs
+      // so we can print them out in the order that they were created.
+      // No need to hold the lock because we'll only ever call this
+      // in the debugger.
+      std::map<UniqueID,IndexTask*> out_tasks;
+      for (std::set<IndexTask*>::const_iterator it = 
+            out_index_tasks.begin(); it !=
+            out_index_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::map<UniqueID,IndexTask*>::const_iterator it = 
+            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        fprintf(stdout,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen); 
+        cnt--;
+      }
+      fflush(stdout);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::print_out_slice_tasks(int cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      // Build a map of the tasks based on their task IDs
+      // so we can print them out in the order that they were created.
+      // No need to hold the lock because we'll only ever call this
+      // in the debugger.
+      std::map<UniqueID,SliceTask*> out_tasks;
+      for (std::set<SliceTask*>::const_iterator it = 
+            out_slice_tasks.begin(); it !=
+            out_slice_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::map<UniqueID,SliceTask*>::const_iterator it = 
+            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        fprintf(stdout,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen); 
+        cnt--;
+      }
+      fflush(stdout);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::print_out_point_tasks(int cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      // Build a map of the tasks based on their task IDs
+      // so we can print them out in the order that they were created.
+      // No need to hold the lock because we'll only ever call this
+      // in the debugger.
+      std::map<UniqueID,PointTask*> out_tasks;
+      for (std::set<PointTask*>::const_iterator it = 
+            out_point_tasks.begin(); it !=
+            out_point_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::map<UniqueID,PointTask*>::const_iterator it = 
+            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        fprintf(stdout,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen); 
+        cnt--;
+      }
+      fflush(stdout);
+    }
+#endif
+
     /*static*/ Runtime *Runtime::runtime_map[(MAX_NUM_PROCS+1)];
     /*static*/ unsigned Runtime::startup_arrivals = 0;
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
@@ -8244,7 +8738,7 @@ namespace LegionRuntime {
           INT_ARG("-hl:sched", min_tasks_to_schedule);
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
-          INT_ARG("-hl:maxfilter", max_filter_size);
+          INT_ARG("-hl:filter", max_filter_size);
 #ifdef DYNAMIC_TESTS
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
@@ -8520,44 +9014,23 @@ namespace LegionRuntime {
         }
         TaskVariantCollection *collec = 
           new TaskVariantCollection(uid, name, 
-            options.leaf, 
-#ifdef LEGION_SPY
-            false, // no inner optimizations for analysis
-#else
-            options.inner, 
-#endif
-            options.idempotent, return_size);
+                options.idempotent, return_size);
 #ifdef DEBUG_HIGH_LEVEL
         assert(collec != NULL);
 #endif
         table[uid] = collec;
         collec->add_variant(low_id, proc_kind, 
-                            single_task, index_space_task, vid);
+                            single_task, index_space_task, 
+#ifdef LEGION_SPY
+                            false, // no inner optimizations for analysis
+#else
+                            options.inner, 
+#endif
+                            options.leaf, 
+                            vid);
       }
       else
       {
-        if (table[uid]->leaf != options.leaf)
-        {
-          log_run(LEVEL_ERROR,"Tasks of variant %s have different leaf "
-                              "options.  All tasks of the "
-                              "same variant must all be leaves, or "
-                              "all be not leaves.", table[uid]->name);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_LEAF_MISMATCH);
-        }
-        if (table[uid]->inner != options.inner)
-        {
-          log_run(LEVEL_ERROR,"Tasks of variant %s have different inner "
-                              "options.  All tasks of the "
-                              "same variant must all be inner tasks, or "
-                              "all be not inner tasks.", table[uid]->name);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INNER_MISMATCH);
-        }
         if (table[uid]->idempotent != options.idempotent)
         {
           log_run(LEVEL_ERROR,"Tasks of variant %s have different idempotent "
@@ -8597,7 +9070,14 @@ namespace LegionRuntime {
         }
         // Update the variants for the attribute
         table[uid]->add_variant(low_id, proc_kind, 
-                                single_task, index_space_task, vid);
+                                single_task, index_space_task, 
+#ifdef LEGION_SPY
+                                false, // no inner optimizations for analysis
+#else
+                                options.inner, 
+#endif
+                                options.leaf, 
+                                vid);
       }
       return uid;
     }
@@ -8827,6 +9307,67 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::get_utility_processor_mapping(
+                const std::set<Processor> &util_procs, Processor &cleanup_proc,
+                Processor &gc_proc, Processor &message_proc)
+    //--------------------------------------------------------------------------
+    {
+      if (util_procs.empty())
+      {
+        cleanup_proc = Processor::NO_PROC;
+        gc_proc = Processor::NO_PROC;
+        message_proc = Processor::NO_PROC;
+        return;
+      }
+      std::set<Processor>::const_iterator set_it = util_procs.begin();
+      // If we only have one utility processor then it does everything
+      // otherwise we skip the first one since it does all the work
+      // for actually being the utility processor for the cores
+      if (util_procs.size() == 1)
+      {
+        cleanup_proc = *set_it;
+        gc_proc = *set_it;
+        message_proc = *set_it;
+        return;
+      }
+      else
+        set_it++;
+      // Put the processors in a vector
+      std::vector<Processor> remaining(set_it,util_procs.end());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!remaining.empty());
+#endif
+      switch (remaining.size())
+      {
+        case 1:
+          {
+            // Have the GC processor share with the actual utility
+            // processor since they touch the same data structures
+            gc_proc = *(util_procs.begin());
+            // Use the other utility processor for the other responsibilites
+            cleanup_proc = remaining[0];
+            message_proc = remaining[0];
+            break;
+          }
+        case 2:
+          {
+            gc_proc = remaining[0];
+            cleanup_proc = remaining[1];
+            message_proc = remaining[1];
+            break;
+          }
+        default:
+          {
+            // Three or more
+            gc_proc = remaining[0];
+            cleanup_proc = remaining[1];
+            message_proc = remaining[2];
+            break;
+          }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::initialize_runtime(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
@@ -8856,6 +9397,7 @@ namespace LegionRuntime {
         // Compute these three data structures necessary for
         // constructing a runtime instance
         std::set<Processor> local_procs;
+        std::set<Processor> local_util_procs;
         std::set<AddressSpaceID> address_spaces;
         std::map<Processor,AddressSpaceID> proc_spaces;
         AddressSpaceID local_space_id = 0;
@@ -8910,21 +9452,20 @@ namespace LegionRuntime {
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++)
           {
-            // Skip any processors which are utility processors
-            if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
-              continue;
             std::map<unsigned,AddressSpaceID>::const_iterator finder = 
               address_space_indexes.find(it->id & 0xffff0000);
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != address_space_indexes.end());
 #endif
             AddressSpaceID sid = finder->second;
-            Processor util = it->get_utility_processor();
-            if (sid == local_space_id)
-              local_procs.insert(*it);
             proc_spaces[*it] = sid;
-            if (util != (*it))
-              proc_spaces[util] = sid;
+            if (sid == local_space_id)
+            {
+              if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
+                local_util_procs.insert(*it);
+              else
+                local_procs.insert(*it);
+            }
           }
 #else
           // There is only one space so let local space ID be zero
@@ -8932,14 +9473,11 @@ namespace LegionRuntime {
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++)
           {
-            // Skip any processors which are utility processors
-            if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
-              continue;
-            local_procs.insert(*it);
             proc_spaces[*it] = local_space_id;
-            Processor util = it->get_utility_processor();
-            if (util != (*it))
-              proc_spaces[util] = local_space_id;
+            if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
+              local_util_procs.insert(*it);
+            else
+              local_procs.insert(*it);
           }
 #endif
         }
@@ -8954,18 +9492,25 @@ namespace LegionRuntime {
 #endif
           exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
         }
+        Processor cleanup_proc, gc_proc, message_proc;
+        Runtime::get_utility_processor_mapping(local_util_procs,
+                                               cleanup_proc, gc_proc,
+                                               message_proc);
         // Set up the runtime mask for this instance
         Runtime *local_rt = new Runtime(machine, local_space_id, local_procs,
-                                        address_spaces, proc_spaces);
+                                        address_spaces, proc_spaces,
+                                        cleanup_proc, gc_proc, message_proc);
         // Now set up the runtime on all of the local processors
         // and their utility processors
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
           runtime_map[(it->id & 0xffff)] = local_rt;
-          Processor util = it->get_utility_processor();
-          if (util != (*it))
-            runtime_map[(util.id & 0xffff)] = local_rt;
+        }
+        for (std::set<Processor>::const_iterator it = local_util_procs.begin();
+              it != local_util_procs.end(); it++)
+        {
+          runtime_map[(it->id & 0xffff)] = local_rt;
         }
       }
       // Arrive at the barrier
@@ -8981,19 +9526,8 @@ namespace LegionRuntime {
 #ifndef SHARED_LOWLEVEL
           if (local_space != (0xffff0000 & it->id))
             continue;
-          // Also skip any explicit utility processors
-          if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
-            continue;
 #endif
           needed_count++;
-          Processor util = it->get_utility_processor();
-          if ((*it) == util)
-            continue;
-          if (utility_procs.find(util) == utility_procs.end())
-          {
-            needed_count++;
-            utility_procs.insert(util);
-          }
         }
       }
       // Yes there is a race condition here on writes, but

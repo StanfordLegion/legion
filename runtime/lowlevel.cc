@@ -241,13 +241,17 @@ namespace LegionRuntime {
                                       RollUpRequestArgs,
                                       handle_roll_up_request> RollUpRequestMessage;
 
-    void handle_roll_up_data(void *rollup_ptr, const void *data, size_t datalen)
+    struct RollUpDataArgs : public BaseMedium {
+      void *rollup_ptr;
+    };
+
+    void handle_roll_up_data(RollUpDataArgs args, const void *data, size_t datalen)
     {
-      ((MultiNodeRollUp *)rollup_ptr)->handle_data(data, datalen);
+      ((MultiNodeRollUp *)args.rollup_ptr)->handle_data(data, datalen); 
     }
 
     typedef ActiveMessageMediumNoReply<ROLL_UP_DATA_MSGID,
-                                       void *,
+                                       RollUpDataArgs,
                                        handle_roll_up_data> RollUpDataMessage;
 
     void handle_roll_up_request(RollUpRequestArgs args)
@@ -264,7 +268,9 @@ namespace LegionRuntime {
         return_data[count+1] = it->second;
         count += 2;
       }
-      RollUpDataMessage::request(args.sender, args.rollup_ptr,
+      RollUpDataArgs return_args;
+      return_args.rollup_ptr = args.rollup_ptr;
+      RollUpDataMessage::request(args.sender, return_args,
                                  return_data, count*sizeof(double),
 				 PAYLOAD_COPY);
     }
@@ -447,7 +453,7 @@ namespace LegionRuntime {
 
     /*static*/ Runtime *Runtime::runtime = 0;
 
-    static const unsigned MAX_LOCAL_EVENTS = 100000;
+    static const unsigned MAX_LOCAL_EVENTS = 200000;
     static const unsigned MAX_LOCAL_LOCKS = 100000;
 
     Node::Node(void)
@@ -482,7 +488,7 @@ namespace LegionRuntime {
 				      LockReleaseArgs,
 				      handle_lock_release> LockReleaseMessage;
 
-    struct LockGrantArgs {
+    struct LockGrantArgs : public BaseMedium {
       Reservation lock;
       unsigned mode;
       uint64_t remote_waiter_mask;
@@ -506,7 +512,7 @@ namespace LegionRuntime {
 				      handle_valid_mask_request> ValidMaskRequestMessage;
 
 
-    struct ValidMaskDataArgs {
+    struct ValidMaskDataArgs : public BaseMedium {
       IndexSpace is;
       unsigned block_id;
     };
@@ -954,18 +960,26 @@ namespace LegionRuntime {
       return e->has_triggered(gen);
     }
 
+
+    // Perform our merging events in a lock free way
+#define LOCK_FREE_MERGED_EVENTS
     class EventMerger : public Event::Impl::EventWaiter {
     public:
       EventMerger(Event _finish_event)
 	: count_needed(1), finish_event(_finish_event)
       {
+#ifndef LOCK_FREE_MERGED_EVENTS
 	gasnet_hsl_init(&mutex);
+#endif
       }
 
       void add_event(Event wait_for)
       {
 	if(wait_for.has_triggered()) return; // early out
 	{
+#ifdef LOCK_FREE_MERGED_EVENTS
+          __sync_fetch_and_add(&count_needed, 1);
+#else
 	  // step 1: increment our count first - we can't hold the lock while
 	  //   we add a listener to the 'wait_for' event (since it might trigger
 	  //   instantly and call our count-decrementing function), and we
@@ -973,6 +987,7 @@ namespace LegionRuntime {
 	  //   decrements
 	  AutoHSLLock a(mutex);
 	  count_needed++;
+#endif
 	}
 	// step 2: enqueue ourselves on the input event
 	wait_for.impl()->add_waiter(wait_for, this);
@@ -980,16 +995,17 @@ namespace LegionRuntime {
 
       // arms the merged event once you're done adding input events - just
       //  decrements the count for the implicit 'init done' event
-      void arm(void)
+      // return a boolean saying whether it triggered upon arming (which
+      //  means the caller should delete this EventMerger)
+      bool arm(void)
       {
 	bool nuke = event_triggered();
-        assert(!nuke);
+        return nuke;
       }
 
       virtual bool event_triggered(void)
       {
 	bool last_trigger = false;
-#define LOCK_FREE_MERGED_EVENTS
 #ifdef LOCK_FREE_MERGED_EVENTS
 	unsigned count_left = __sync_fetch_and_add(&count_needed, -1);
 	log_event(LEVEL_INFO, "recevied trigger merged event %x/%d (%d)",
@@ -1032,7 +1048,9 @@ namespace LegionRuntime {
     protected:
       unsigned count_needed;
       Event finish_event;
+#ifndef LOCK_FREE_MERGED_EVENTS
       gasnet_hsl_t mutex;
+#endif
     };
 
     // creates an event that won't trigger until all input events have
@@ -1070,7 +1088,8 @@ namespace LegionRuntime {
       }
 
       // once they're all added - arm the thing (it might go off immediately)
-      m->arm();
+      if(m->arm())
+        delete m;
 
       return finish_event;
     }
@@ -1107,7 +1126,8 @@ namespace LegionRuntime {
       m->add_event(ev6);
 
       // once they're all added - arm the thing (it might go off immediately)
-      m->arm();
+      if(m->arm())
+        delete m;
 
       return finish_event;
     }
@@ -1214,7 +1234,7 @@ namespace LegionRuntime {
       // couldn't reuse an event - make a new one
       // TODO: take a lock here!?
       unsigned index = events.size();
-      assert(index < MAX_LOCAL_EVENTS);
+      assert((index+1) < MAX_LOCAL_EVENTS);
       events.resize(index + 1);
       Event ev = ID(ID::ID_EVENT, gasnet_mynode(), index).convert<Event>();
       events[index].init(ev, gasnet_mynode());
@@ -1306,7 +1326,7 @@ namespace LegionRuntime {
         // we're allocated on caller's stack, so deleting would be bad
         return false;
       }
-      virtual void print_info(void) { printf("external waiter"); }
+      virtual void print_info(void) { printf("external waiter\n"); }
 
     protected:
       pthread_cond_t *condp;
@@ -2352,7 +2372,7 @@ namespace LegionRuntime {
       // couldn't reuse an lock - make a new one
       // TODO: take a lock here!?
       unsigned index = locks.size();
-      assert(index < MAX_LOCAL_LOCKS);
+      assert((index+1) < MAX_LOCAL_LOCKS);
       locks.resize(index + 1);
       Reservation r = ID(ID::ID_LOCK, gasnet_mynode(), index).convert<Reservation>();
       locks[index].init(r, gasnet_mynode());
@@ -2597,17 +2617,26 @@ namespace LegionRuntime {
 
     class LocalCPUMemory : public Memory::Impl {
     public:
+      static const size_t ALIGNMENT = 256;
+
       LocalCPUMemory(Memory _me, size_t _size) 
-	: Memory::Impl(_me, _size, MKIND_SYSMEM, 256, Memory::SYSTEM_MEM)
+	: Memory::Impl(_me, _size, MKIND_SYSMEM, ALIGNMENT, Memory::SYSTEM_MEM)
       {
-	base = new char[_size];
+        // enforce alignment on the whole memory range
+	base_orig = new char[_size + ALIGNMENT - 1];
+        size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
+        if(ofs > 0) {
+          base = base_orig + (ALIGNMENT - ofs);
+        } else {
+          base = base_orig;
+        }
 	log_copy.debug("CPU memory at %p, size = %zd", base, _size);
 	free_blocks[0] = _size;
       }
 
       virtual ~LocalCPUMemory(void)
       {
-	delete[] base;
+	delete[] base_orig;
       }
 
 #ifdef USE_GPU
@@ -2671,10 +2700,10 @@ namespace LegionRuntime {
       }
 
     public: //protected:
-      char *base;
+      char *base, *base_orig;
     };
 
-    struct RemoteWriteArgs {
+    struct RemoteWriteArgs : public BaseMedium {
       Memory mem;
       off_t offset;
       Event event;
@@ -3120,13 +3149,13 @@ namespace LegionRuntime {
       return i;
     }
 
-    struct CreateInstanceArgs {
+    struct CreateInstanceArgs : public BaseMedium {
       Memory m;
       IndexSpace r;
       size_t bytes_needed;
       size_t block_size;
       size_t element_size;
-      off_t adjust;
+      //off_t adjust;
       off_t list_size;
       ReductionOpID redopid;
       RegionInstance parent_inst;
@@ -4208,7 +4237,8 @@ namespace LegionRuntime {
 
       virtual void print_info(void)
       {
-	printf("utility thread for processor %x", proc->me.id);
+	printf("utility thread for processor %x: after=%x/%d\n", 
+            proc->me.id, finish_event.id, finish_event.gen);
       }
 
       void run(Processor actual_proc = Processor::NO_PROC)
@@ -4525,7 +4555,7 @@ namespace LegionRuntime {
       log_util.info("thread resuming - utility proc has shut down");
     }
 
-    struct SpawnTaskArgs {
+    struct SpawnTaskArgs : public BaseMedium {
       Processor proc;
       Processor::TaskFuncID func_id;
       Event start_event;
@@ -5087,10 +5117,36 @@ namespace LegionRuntime {
       }
     }
 
-    void RegionInstance::destroy(void) const
+    class DeferredInstDestroy : public Event::Impl::EventWaiter {
+    public:
+      DeferredInstDestroy(RegionInstance::Impl *i) : impl(i) { }
+    public:
+      virtual bool event_triggered(void)
+      {
+        StaticAccess<RegionInstance::Impl> i_data(impl);
+        log_meta(LEVEL_INFO, "instance destroyed: space=%x id=%x",
+                 i_data->is.id, impl->me.id);
+        impl->memory.impl()->destroy_instance(impl->me, true); 
+        return true;
+      }
+
+      virtual void print_info(void)
+      {
+        printf("deferred instance destruction\n");
+      }
+    protected:
+      RegionInstance::Impl *impl;
+    };
+
+    void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       RegionInstance::Impl *i_impl = impl();
+      if (!wait_on.has_triggered())
+      {
+        wait_on.impl()->add_waiter(wait_on, new DeferredInstDestroy(i_impl));
+        return;
+      }
       StaticAccess<RegionInstance::Impl> i_data(i_impl);
       log_meta(LEVEL_INFO, "instance destroyed: space=%x id=%x",
 	       i_data->is.id, this->id);
@@ -5679,7 +5735,7 @@ namespace LegionRuntime {
     };
 #endif
 
-    struct RemoteRedListArgs {
+    struct RemoteRedListArgs : public BaseMedium {
       Memory mem;
       off_t offset;
       ReductionOpID redopid;
@@ -6524,7 +6580,7 @@ namespace LegionRuntime {
 
     Logger::Category log_annc("announce");
 
-    struct Machine::NodeAnnounceData {
+    struct Machine::NodeAnnounceData : public BaseMedium {
       gasnet_node_t node_id;
       unsigned num_procs;
       unsigned num_memories;
@@ -6722,6 +6778,7 @@ namespace LegionRuntime {
 	closedir(nd);
       }
       
+#if 0
       printf("Available cores:\n");
       for(SystemProcMap::const_iterator it1 = proc_map.begin(); it1 != proc_map.end(); it1++) {
 	printf("  Node %d:", it1->first);
@@ -6737,6 +6794,7 @@ namespace LegionRuntime {
 	}
 	printf("\n");
       }
+#endif
 
       // count how many actual cores we have
       size_t core_count = 0;
@@ -6744,7 +6802,7 @@ namespace LegionRuntime {
 	core_count += it1->second.size();
       
       if(core_count <= num_local_procs) {
-	printf("not enough cores (%zd) to support %d local processors - skipping binding\n", core_count, num_local_procs);
+	//printf("not enough cores (%zd) to support %d local processors - skipping binding\n", core_count, num_local_procs);
 	return;
       }
       
@@ -6787,6 +6845,7 @@ namespace LegionRuntime {
 	}
       }
 	
+#if 0
       {
 	printf("Local Proc Assignments:");
 	for(std::vector<int>::const_iterator it = local_proc_assignments.begin(); it != local_proc_assignments.end(); it++)
@@ -6799,20 +6858,21 @@ namespace LegionRuntime {
 	    printf(" %d", i);
 	printf("\n");
       }
+#endif
     }
 
     // binds a thread to the right set of cores based (-1 = not a local proc)
     void ProcessorAssignment::bind_thread(int core_id, pthread_attr_t *attr, const char *debug_name /*= 0*/)
     {
       if(!valid) {
-	printf("no processor assignment for %s %d (%p)\n", debug_name ? debug_name : "unknown", core_id, attr);
+	//printf("no processor assignment for %s %d (%p)\n", debug_name ? debug_name : "unknown", core_id, attr);
 	return;
       }
 
       if((core_id >= 0) && (core_id < num_local_procs)) {
 	int cpu_id = local_proc_assignments[core_id];
 
-	printf("processor assignment for %s %d (%p) = %d\n", debug_name ? debug_name : "unknown", core_id, attr, cpu_id);
+	//printf("processor assignment for %s %d (%p) = %d\n", debug_name ? debug_name : "unknown", core_id, attr, cpu_id);
 
 	cpu_set_t cset;
 	CPU_ZERO(&cset);
@@ -6822,7 +6882,7 @@ namespace LegionRuntime {
 	else
 	  CHECK_PTHREAD( pthread_setaffinity_np(pthread_self(), sizeof(cset), &cset) );
       } else {
-	printf("processor assignment for %s %d (%p) = leftovers\n", debug_name ? debug_name : "unknown", core_id, attr);
+	//printf("processor assignment for %s %d (%p) = leftovers\n", debug_name ? debug_name : "unknown", core_id, attr);
 
 	if(attr)
 	  CHECK_PTHREAD( pthread_attr_setaffinity_np(attr, sizeof(leftover_procs), &leftover_procs) );
@@ -6974,6 +7034,15 @@ namespace LegionRuntime {
       }
 
       //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+      // SJT: WAR for issue on Titan with duplicate cookies on Gemini
+      //  communication domains
+      char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
+      if(orig_pmi_gni_cookie) {
+        char *new_pmi_gni_cookie = (char *)malloc(256);
+        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
+        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
+        putenv(new_pmi_gni_cookie);  // libc now owns the memory
+      }
       CHECK_GASNET( gasnet_init(argc, argv) );
 
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
@@ -7093,7 +7162,8 @@ namespace LegionRuntime {
 						cpu_worker_threads, 
 						1); // HLRT not thread-safe yet
 	if(num_util_procs > 0) {
-	  UtilityProcessor *up = local_util_procs[i % num_util_procs];
+	  //UtilityProcessor *up = local_util_procs[i % num_util_procs];
+          UtilityProcessor *up = local_util_procs[0];
 
 	  lp->set_utility_processor(up);
 
@@ -7209,7 +7279,8 @@ namespace LegionRuntime {
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
           {
-            UtilityProcessor *up = local_util_procs[i % num_util_procs];
+            //UtilityProcessor *up = local_util_procs[i % num_util_procs];
+            UtilityProcessor *up = local_util_procs[0];
             gp->set_utility_processor(up);
             std::map<Processor, std::set<Processor>*>::iterator finder = proc_groups.find(up->me);
             if (finder != proc_groups.end())
@@ -7522,8 +7593,8 @@ namespace LegionRuntime {
       Logger::finalize();
 #endif
       log_machine.info("running proc count is now zero - terminating\n");
-      // Exit out of the process with a successful error code
-      exit(0);
+      // Exit out of the thread
+      pthread_exit(0);
     }
 
     void Machine::shutdown(bool local_request /*= true*/)

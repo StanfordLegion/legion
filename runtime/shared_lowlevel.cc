@@ -157,6 +157,9 @@ namespace LegionRuntime {
 
       // Return events that are free
       void free_event(EventImpl *event);
+    public:
+      // A nice helper method for debugging events
+      void print_event_waiters(void);
     protected:
       static Runtime *runtime;
     protected:
@@ -421,6 +424,9 @@ namespace LegionRuntime {
         Barrier get_barrier(unsigned expected_arrivals);
         // Alter the arrival count for the barrier
         Barrier alter_arrival_count(int delta);
+    public:
+        // A debug helper method
+        void print_waiters(void);
     private: 
 	bool in_use;
 	unsigned sources;
@@ -908,6 +914,22 @@ namespace LegionRuntime {
       result.id = current.id;
       result.gen = current.gen;
       return result;
+    }
+
+    void EventImpl::print_waiters(void)
+    {
+      // No need to hold the lock because this method
+      // will only ever be called from a debugger
+      if (in_use && !triggerables.empty())
+      {
+        fprintf(stdout,"Event %d, Generation %d has %ld waiters\n",
+            index, generation, triggerables.size());
+        for (unsigned idx = 0; idx < triggerables.size(); idx++)
+        {
+          fprintf(stdout,"  Waiter: %p\n", triggerables[idx]);
+        }
+        fflush(stdout);
+      }
     }
 
     ////////////////////////////////////////////////////////
@@ -1855,6 +1877,10 @@ namespace LegionRuntime {
                         }
                         else
                         {
+                          PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+                          while (remaining_stops > 0)
+                            PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
+                          PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
                           // Send shutdown messages to all our users that aren't us
                           for (std::set<Processor>::const_iterator it = util_users.begin();
                                 it != util_users.end(); it++)
@@ -2686,10 +2712,32 @@ namespace LegionRuntime {
       return RegionAccessor<AccessorType::Generic>(AccessorType::Generic::Untyped(impl));
     }
 
-    void RegionInstance::destroy(void) const
+    class DeferredInstDestroy : public Triggerable {
+    public:
+      DeferredInstDestroy(RegionInstance::Impl *i) : impl(i) { }
+    public:
+      virtual void trigger(unsigned count = 1, TriggerHandle = 0)
+      {
+        impl->deactivate();
+        // We'll see how well this works
+        delete this;
+      }
+    private:
+      RegionInstance::Impl *impl;
+    };
+
+    void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(*this);
+      if (!wait_on.has_triggered())
+      {
+        EventImpl *wait_impl = Runtime::get_runtime()->get_event_impl(wait_on);
+        DeferredInstDestroy *waiter = new DeferredInstDestroy(impl);
+        if (wait_impl->register_dependent(waiter, wait_on.gen))
+          return;
+        delete waiter;
+      }
       impl->deactivate();
     }
 
@@ -4132,8 +4180,10 @@ namespace LegionRuntime {
           {
             Processor p;
             p.id = num_cpus+idx+1;
+            procs.insert(p);
             // Figure out how many users this guy will have
-            unsigned num_users = (num_cpus/num_utility_cpus) + (idx < (num_cpus%num_utility_cpus) ? 1 : 0);
+            //unsigned num_users = (num_cpus/num_utility_cpus) + (idx < (num_cpus%num_utility_cpus) ? 1 : 0);
+            unsigned num_users = (idx == 0) ? num_cpus : 0;
             temp_utils[idx] = new ProcessorImpl(init_barrier, task_table, p, cpu_stack_size, num_users);
           }
           // Now we can make the processors themselves
@@ -4143,7 +4193,8 @@ namespace LegionRuntime {
             p.id = idx + 1;
             procs.insert(p);
             // Figure out which utility processor this guy gets
-            unsigned utility_idx = idx % num_utility_cpus;
+            //unsigned utility_idx = idx % num_utility_cpus;
+            unsigned utility_idx = 0;
 #ifdef DEBUG_LOW_LEVEL
             assert(utility_idx < num_utility_cpus);
 #endif
@@ -4575,6 +4626,16 @@ namespace LegionRuntime {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(&free_event_lock));
       free_events.push_back(e);
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_event_lock));
+    }
+
+    void Runtime::print_event_waiters(void)
+    {
+      // No need to hold the lock here since we'll only
+      // ever call this method from the debugger
+      for (unsigned idx = 0; idx < events.size(); idx++)
+      {
+        events[idx]->print_waiters();
+      }
     }
 
     ReservationImpl* Runtime::get_reservation_impl(Reservation r)

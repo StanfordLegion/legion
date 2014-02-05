@@ -46,13 +46,21 @@ enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_COPY, // make a copy of the payload
 };
 
+/* Necessary base structure for all medium and long active messages */
+struct BaseMedium {
+  gasnet_handlerarg_t message_id;
+  gasnet_handlerarg_t message_chunks;
+};
+
 extern void enqueue_message(gasnet_node_t target, int msgid,
 			    const void *args, size_t arg_size,
 			    const void *payload, size_t payload_size,
 			    int payload_mode);
 
 extern void handle_long_msgptr(gasnet_node_t source, void *ptr);
-extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
+//extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
+extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
+                                const void *args, size_t arglen);
 
 template <class T> struct HandlerReplyFuture {
   gasnet_hsl_t mutex;
@@ -207,9 +215,12 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
       MSGTYPE typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
-    nbytes = adjust_long_msgsize(src, buf, nbytes);	\
-    (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
-    /*if(nbytes > gasnet_AMMaxMedium())*/ handle_long_msgptr(src, buf);	\
+    /*nbytes = adjust_long_msgsize(src, buf, nbytes);*/	\
+    bool handle_now = adjust_long_msgsize(src, buf, nbytes, &u, sizeof(u)); \
+    if (handle_now) { \
+      (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
+      /*if(nbytes > gasnet_AMMaxMedium())*/ handle_long_msgptr(src, buf);	\
+    } \
   } \
 }; \
 \

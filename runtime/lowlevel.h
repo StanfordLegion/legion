@@ -459,7 +459,7 @@ namespace LegionRuntime {
 
       bool exists(void) const { return id != 0; }
 
-      void destroy(void) const;
+      void destroy(Event wait_on = Event::NO_EVENT) const;
 
       LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
     };

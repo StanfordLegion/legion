@@ -11,3 +11,5 @@ core
 *.bbl
 *.blg
 *.aux
+/profiler/config.js
+

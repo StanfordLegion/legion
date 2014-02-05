@@ -90,6 +90,13 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Task::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return depth;
+    }
+
     /////////////////////////////////////////////////////////////
     // Copy 
     /////////////////////////////////////////////////////////////
@@ -99,6 +106,13 @@ namespace LegionRuntime {
       : Mappable(), parent_task(NULL)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Copy::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -112,6 +126,13 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Inline::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
+    }
+
     /////////////////////////////////////////////////////////////
     // Acquire 
     /////////////////////////////////////////////////////////////
@@ -123,6 +144,13 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Acquire::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
+    }
+
     /////////////////////////////////////////////////////////////
     // Release 
     /////////////////////////////////////////////////////////////
@@ -132,6 +160,13 @@ namespace LegionRuntime {
       : Mappable(), parent_task(NULL)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Release::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1226,7 +1261,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0)
+        map_id(0), tag(0), point(DomainPoint())
     //--------------------------------------------------------------------------
     {
     }
@@ -1235,7 +1270,8 @@ namespace LegionRuntime {
     TaskLauncher::TaskLauncher(Processor::TaskFuncID tid, TaskArgument arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t)
+      : task_id(tid), argument(arg), predicate(pred), 
+        map_id(mid), tag(t), point(DomainPoint())
     //--------------------------------------------------------------------------
     {
     }
@@ -1255,9 +1291,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexLauncher::IndexLauncher(Processor::TaskFuncID tid, Domain &dom,
+    IndexLauncher::IndexLauncher(Processor::TaskFuncID tid, Domain dom,
                                  TaskArgument global,
-                                 const ArgumentMap &map,
+                                 ArgumentMap map,
                                  Predicate pred /*= Predicate::TRUE_PRED*/,
                                  bool must /*=false*/, MapperID mid /*=0*/,
                                  MappingTagID t /*=0*/)
@@ -1718,6 +1754,7 @@ namespace LegionRuntime {
     void TaskVariantCollection::add_variant(Processor::TaskFuncID low_id, 
                                             Processor::Kind kind, 
                                             bool single, bool index,
+                                            bool inner, bool leaf,
                                             VariantID vid)
     //--------------------------------------------------------------------------
     {
@@ -1732,7 +1769,7 @@ namespace LegionRuntime {
           }
         }
       }
-      variants[vid] = Variant(low_id, kind, single, index, vid);
+      variants[vid] = Variant(low_id, kind, single, index, inner, leaf, vid);
     }
 
     //--------------------------------------------------------------------------
@@ -2034,6 +2071,23 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_space(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::get_index_space_partition_colors(Context ctx, 
+                                                            IndexSpace sp,
+                                                        std::set<Color> &colors)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_partition_colors(ctx, sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::is_index_partition_disjoint(Context ctx, 
+                                                       IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_disjoint(ctx, p);
     }
 
     //--------------------------------------------------------------------------

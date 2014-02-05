@@ -58,8 +58,7 @@ namespace LegionRuntime {
       void create_index_space(const Domain &domain);
       void create_index_partition(IndexPartition pid, IndexSpace parent,
           bool disjoint, int part_color,
-          const std::map<Color,Domain> &subspaces,
-          Domain color_space = Domain::NO_DOMAIN);
+          const std::map<Color,Domain> &subspaces, Domain color_space);
       bool destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
@@ -68,6 +67,9 @@ namespace LegionRuntime {
       IndexSpace get_index_subspace(IndexPartition parent, Color color);
       Domain get_index_space_domain(IndexSpace handle);
       Domain get_index_partition_color_space(IndexPartition p);
+      void get_index_space_partition_colors(IndexSpace sp,
+                                            std::set<Color> &colors);
+      bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(IndexSpace handle);
       Color get_index_partition_color(IndexPartition handle);
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
@@ -197,29 +199,10 @@ namespace LegionRuntime {
                                            , RegionTreePath &path
 #endif
                                            );
-      // Same as the one above, but also records inner view information 
-      InstanceRef register_physical_region(RegionTreeContext ctx,
-                                           InnerTaskView *inner_view,
-                                           const MappingRef &ref,
-                                           RegionRequirement &req,
-                                           unsigned idx,
-                                           Mappable *mappable,
-                                           Processor local_proc,
-                                           Event term_event
-#ifdef DEBUG_HIGH_LEVEL
-                                           , const char *log_name
-                                           , UniqueID uid
-                                           , RegionTreePath &path
-#endif
-                                           );
       InstanceRef initialize_physical_context(RegionTreeContext ctx,
                     const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, Processor local_proc,
+                    Event term_event, Processor local_proc, unsigned depth,
                     std::map<PhysicalManager*,PhysicalView*> &top_views);
-      InstanceRef initialize_physical_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
-                    std::map<PhysicalManager*,PhysicalView*> &top_views,
-                    Processor local_proc, const InnerTaskView *inner_view);
       void invalidate_physical_context(RegionTreeContext ctx,
                                        LogicalRegion handle);
       Event close_physical_context(RegionTreeContext ctx,
@@ -329,6 +312,13 @@ namespace LegionRuntime {
       Color generate_unique_color(const std::map<Color,T> &current_map);
     public:
       void resize_node_contexts(unsigned total_contexts);
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      // These are debugging methods and are never called from
+      // actual code, therefore they never take locks
+      void dump_logical_state(LogicalRegion region, ContextID ctx);
+      void dump_physical_state(LogicalRegion region, ContextID ctx);
+#endif
     public:
       Runtime *const runtime;
     protected:
@@ -426,6 +416,7 @@ namespace LegionRuntime {
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
       Color generate_color(void);
+      void get_colors(std::set<Color> &colors);
     public:
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -557,7 +548,7 @@ namespace LegionRuntime {
     public:
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
-                                       size_t blocking_factor,
+                                       size_t blocking_factor, unsigned depth,
                                        RegionNode *node);
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
@@ -626,9 +617,20 @@ namespace LegionRuntime {
       Operation *op;
       unsigned idx;
       GenerationID gen;
+      // This field addresses a problem regarding when
+      // to prune tasks out of logical region tree data
+      // structures.  If no later task ever performs a
+      // dependence test against this user, we might
+      // never prune it from the list.  This timeout
+      // prevents that from happening by forcing a
+      // test to be performed whenever the timeout
+      // reaches zero.
+      int timeout;
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       UniqueID uid;
 #endif
+    public:
+      static const int TIMEOUT = DEFAULT_LOGICAL_USER_TIMEOUT;
     };
 
     /**
@@ -742,7 +744,7 @@ namespace LegionRuntime {
       FieldTree<LogicalUser> *curr_epoch_users;
       FieldTree<LogicalUser> *prev_epoch_users;
 #endif
-      std::list<CloseInfo> close_operations;
+      std::map<Color,std::list<CloseInfo> > close_operations;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask user_level_coherence;
@@ -759,7 +761,7 @@ namespace LegionRuntime {
                          const FieldMask &check_mask,
                          bool validates_regions);
     public:
-      bool analyze(const LogicalUser &user);
+      bool analyze(LogicalUser &user);
       FieldMask get_dominator_mask(void) const;
     public:
       inline void begin_node(FieldTree<LogicalUser> *node) { }
@@ -768,13 +770,14 @@ namespace LegionRuntime {
       const LogicalUser user;
       const bool validates_regions;
       FieldMask dominator_mask;
+      FieldMask observed_mask;
     };
 
     class LogicalOpAnalyzer {
     public:
       LogicalOpAnalyzer(Operation *op);
     public:
-      bool analyze(const LogicalUser &user);
+      bool analyze(LogicalUser &user);
     public:
       inline void begin_node(FieldTree<LogicalUser> *node) { }
       inline void end_node(FieldTree<LogicalUser> *node) { }
@@ -938,7 +941,8 @@ namespace LegionRuntime {
                           std::set<Event> &wait_on);
     public:
       bool analyze(PhysicalUser &user);
-      FieldMask get_non_dominated_mask(void) const { return non_dominated; }
+      const FieldMask& get_observed_mask(void) const;
+      const FieldMask& get_non_dominated_mask(void) const;
     public:
       void begin_node(FieldTree<PhysicalUser> *node);
       void end_node(FieldTree<PhysicalUser> *node);
@@ -949,56 +953,13 @@ namespace LegionRuntime {
       RegionTreeNode *const logical_node;
       std::set<Event> &wait_on;
       FieldMask non_dominated;
+      FieldMask observed;
     private:
       std::deque<PhysicalUser> reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
     private:
       std::deque<PhysicalUser> filtered_users;
-    };
-
-    /**
-     * \class InnerDepAnalyzer
-     * Same class as above except for inner task views
-     */
-    template<bool FILTER>
-    class InnerDepAnalyzer {
-    public:
-      InnerDepAnalyzer(const PhysicalUser &user,
-                       const FieldMask &check_mask,
-                       RegionTreeNode *logical_node,
-                       InnerTaskView *inner_view);
-    public:
-      bool analyze(PhysicalUser &user);
-      FieldMask get_non_dominated_mask(void) const { return non_dominated; }
-    public:
-      void begin_node(FieldTree<PhysicalUser> *node);
-      void end_node(FieldTree<PhysicalUser> *node);
-    public:
-      void insert_filtered_users(FieldTree<PhysicalUser> *target);
-    private:
-      const PhysicalUser user;
-      RegionTreeNode *const logical_node;
-      InnerTaskView *inner_view;
-      FieldMask non_dominated;
-    private:
-      std::deque<PhysicalUser> reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-    private:
-      std::deque<PhysicalUser> filtered_users;
-    };
-
-    class InnerBelowAnalyzer {
-    public:
-      InnerBelowAnalyzer(InnerTaskView *inner_view);
-    public:
-      inline void begin_node(FieldTree<PhysicalUser> *node) { }
-      inline void end_node(FieldTree<PhysicalUser> *node) { }
-    public:
-      bool analyze(const PhysicalUser &user);
-    private:
-      InnerTaskView *const inner_view;
     };
 
     /**
@@ -1204,6 +1165,8 @@ namespace LegionRuntime {
                                  unsigned depth, bool before);
       void record_close_operations(LogicalState &state, RegionTreePath &path,
                                   const FieldMask &field_mask, unsigned depth);
+      void update_close_operations(LogicalState &state, 
+                                   const std::deque<CloseInfo> &close_ops);
       void advance_field_versions(LogicalState &state, const FieldMask &mask);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
@@ -1289,7 +1252,8 @@ namespace LegionRuntime {
       virtual Domain get_domain(void) const = 0;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
-                                            size_t blocking_factor) = 0;
+                                            size_t blocking_factor,
+                                            unsigned depth) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
@@ -1301,6 +1265,16 @@ namespace LegionRuntime {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask) = 0;
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      // These methods are only ever called by a debugger
+      virtual void dump_logical_context(ContextID ctx, 
+                                        TreeStateLogger *logger,
+                                        const FieldMask &mask) = 0;
+      virtual void dump_physical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask) = 0;
+#endif
     public:
       bool pack_send_state(ContextID ctx, Serializer &rez, 
                            AddressSpaceID target,
@@ -1372,7 +1346,8 @@ namespace LegionRuntime {
       virtual Domain get_domain(void) const;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
-                                            size_t blocking_factor);
+                                            size_t blocking_factor,
+                                            unsigned depth);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
@@ -1380,12 +1355,32 @@ namespace LegionRuntime {
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
+    public:
+      // Logging calls
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
+      void print_logical_state(LogicalState &state,
+                               const FieldMask &capture_mask,
+                               std::map<Color,FieldMask> &to_traverse,
+                               TreeStateLogger *logger);
+      void print_physical_state(PhysicalState &state,
+                                const FieldMask &capture_mask,
+                                std::map<Color,FieldMask> &to_traverse,
+                                TreeStateLogger *logger);
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      // These methods are only ever called by a debugger
+      virtual void dump_logical_context(ContextID ctx, 
+                                        TreeStateLogger *logger,
+                                        const FieldMask &mask);
+      virtual void dump_physical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+#endif
     public:
       void remap_region(ContextID ctx, InstanceView *view, 
                         const FieldMask &user_mask, FieldMask &needed_mask);
@@ -1393,18 +1388,9 @@ namespace LegionRuntime {
                                   PhysicalUser &user,
                                   PhysicalView *view,
                                   const FieldMask &needed_fields);
-      InstanceRef register_region(MappableInfo *info,
-                                  PhysicalUser &user,
-                                  PhysicalView *view,
-                                  const FieldMask &needed_fields,
-                                  InnerTaskView *inner_view);
       InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
                              PhysicalView *new_view,
                              Processor local_proc);
-      InstanceRef seed_state(ContextID ctx, PhysicalView *new_view,
-                      const FieldMask &valid_mask,
-                      Processor local_proc, 
-                      const InnerTaskView *inner_view);
       Event close_state(MappableInfo *info, PhysicalUser &user,
                         const InstanceRef &target);
     public:
@@ -1464,18 +1450,39 @@ namespace LegionRuntime {
       virtual Domain get_domain(void) const;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
-                                            size_t blocking_factor);
+                                            size_t blocking_factor,
+                                            unsigned depth);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop);
       virtual void send_node(AddressSpaceID target);
+    public:
+      // Logging calls
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
+      void print_logical_state(LogicalState &state,
+                               const FieldMask &capture_mask,
+                               std::map<Color,FieldMask> &to_traverse,
+                               TreeStateLogger *logger);
+      void print_physical_state(PhysicalState &state,
+                                const FieldMask &capture_mask,
+                                std::map<Color,FieldMask> &to_traverse,
+                                TreeStateLogger *logger);
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      // These methods are only ever called by a debugger
+      virtual void dump_logical_context(ContextID ctx, 
+                                        TreeStateLogger *logger,
+                                        const FieldMask &mask);
+      virtual void dump_physical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+#endif
     public:
       bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
@@ -1857,7 +1864,7 @@ namespace LegionRuntime {
  
     /**
      * \class PhysicalManager
-     * This class abstracts the a physical instance in memory
+     * This class abstracts a physical instance in memory
      * be it a normal instance or a reduction instance.
      */
     class PhysicalManager : public DistributedCollectable {
@@ -1874,8 +1881,11 @@ namespace LegionRuntime {
       virtual bool is_reduction_manager(void) const = 0;
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
+      virtual size_t get_instance_size(void) const = 0;
       virtual void notify_activate(void);
-      virtual void garbage_collect(void);
+      virtual void garbage_collect(void) = 0;
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void) = 0;
       virtual void notify_new_remote(AddressSpaceID sid);
     public:
       inline PhysicalInstance get_instance(void) const
@@ -1903,7 +1913,8 @@ namespace LegionRuntime {
                       Memory mem, PhysicalInstance inst, RegionNode *node,
                       const FieldMask &mask, size_t blocking_factor,
                       const std::map<FieldID,Domain::CopySrcDstField> &infos,
-                      const std::map<unsigned,FieldID> &indexes);
+                      const std::map<unsigned,FieldID> &indexes,
+                      Event use_event, unsigned depth);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -1916,9 +1927,16 @@ namespace LegionRuntime {
       virtual bool is_reduction_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
+      virtual size_t get_instance_size(void) const;
+      virtual void garbage_collect(void);
+      virtual void notify_invalid(void);
     public:
-      InstanceView* create_top_view(void);
+      inline Event get_use_event(void) const { return use_event; }
+    public:
+      InstanceView* create_top_view(unsigned depth);
       void compute_copy_offsets(const FieldMask &copy_mask,
+                                std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
       DistributedID send_manager(AddressSpaceID target, 
@@ -1934,14 +1952,29 @@ namespace LegionRuntime {
                                              DistributedID did,
                                              bool make = true);
     public:
+      void add_valid_view(InstanceView *view);
+      void remove_valid_view(InstanceView *view);
+      bool match_instance(size_t field_size, const Domain &dom) const;
+      bool match_instance(const std::vector<size_t> &fields_sizes,
+                          const Domain &dom, const size_t bf) const;
+    public:
       RegionNode *const region_node;
       const FieldMask allocated_fields;
       const size_t blocking_factor;
+      // Event that needs to trigger before we can start using
+      // this physical instance.
+      const Event use_event;
+      const unsigned depth;
     protected:
       const std::map<FieldID,Domain::CopySrcDstField> field_infos;
       // Remember these indexes are only good on the local node and
       // have to be transformed when the manager is sent remotely
       const std::map<unsigned/*index*/,FieldID> field_indexes;
+    protected:
+      // Keep track of whether we've recycled this instance or not
+      bool recycled;
+      // Keep a set of the views we need to see when recycling
+      std::set<InstanceView*> valid_views;
     };
 
     /**
@@ -1964,6 +1997,9 @@ namespace LegionRuntime {
       virtual bool is_reduction_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
+      virtual size_t get_instance_size(void) const = 0;
+      virtual void garbage_collect(void);
+      virtual void notify_invalid(void);
     public:
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
@@ -2014,6 +2050,7 @@ namespace LegionRuntime {
         get_accessor(void) const;
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_field_accessor(FieldID fid) const;
+      virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
@@ -2048,6 +2085,7 @@ namespace LegionRuntime {
         get_accessor(void) const;
       virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_field_accessor(FieldID fid) const;
+      virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
@@ -2083,9 +2121,6 @@ namespace LegionRuntime {
                                  Processor exec_proc) = 0;
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc,
-                                   InnerTaskView *inner_view) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                              std::set<Event> &preconditions,
@@ -2093,6 +2128,8 @@ namespace LegionRuntime {
     public:
       virtual void notify_activate(void) = 0;
       virtual void garbage_collect(void) = 0;
+      virtual void notify_valid(void) = 0;
+      virtual void notify_invalid(void) = 0;
     public:
       void defer_collect_user(Event term_event, const FieldMask &mask,
                               Processor p, bool gc_epoch);
@@ -2131,7 +2168,7 @@ namespace LegionRuntime {
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, DistributedID own_did,
                    RegionTreeNode *node, InstanceManager *manager,
-                   InstanceView *parent);
+                   InstanceView *parent, unsigned depth);
       InstanceView(const InstanceView &rhs);
       virtual ~InstanceView(void);
     public:
@@ -2154,8 +2191,7 @@ namespace LegionRuntime {
                      std::vector<Domain::CopySrcDstField> &dst_fields);
       bool has_war_dependence(const RegionUsage &usage, 
                               const FieldMask &user_mask);
-      void initialize_view(const InnerTaskView *inner_view, 
-                           Processor local_proc);
+      void accumulate_events(std::set<Event> &all_events);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
@@ -2167,12 +2203,11 @@ namespace LegionRuntime {
                                  Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc,
-                                   InnerTaskView *inner_view);
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
       virtual void collect_user(Event term_event,
                                 const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
@@ -2181,12 +2216,9 @@ namespace LegionRuntime {
                                      PhysicalUser &user); 
     protected:
       void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
-      void add_local_user(std::set<Event> &wait_on, const PhysicalUser &user);
-    protected:
-      void add_user_above(InnerTaskView *inner_view, PhysicalUser &user);
-      void add_local_user(InnerTaskView *inner_view, const PhysicalUser &user);
-      void find_inner_views_below(InnerTaskView *inner_view,
-                                  const FieldMask &field_mask);
+      template<bool ABOVE>
+      void add_local_user(std::set<Event> &wait_on, 
+                          const PhysicalUser &user);
     protected:
       void find_copy_preconditions(std::set<Event> &wait_on, 
                                    bool writing, ReductionOpID redop, 
@@ -2195,6 +2227,11 @@ namespace LegionRuntime {
                                    std::set<Event> &wait_on,
                                    bool writing, ReductionOpID redop,
                                    const FieldMask &copy_mask);
+      template<bool ABOVE>
+      void find_local_copy_preconditions(std::set<Event> &wait_on,
+                                   bool writing, ReductionOpID redop,
+                                   const FieldMask &copy_mask,
+                                   int local_color);
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     Color child_color);
@@ -2203,6 +2240,7 @@ namespace LegionRuntime {
                               const FieldMask &term_mask);
       void notify_subscribers(std::set<AddressSpaceID> &notified, 
                               const PhysicalUser &user);
+      void condense_user_list(std::list<PhysicalUser> &users);
     public:
       DistributedID send_state(AddressSpaceID target,
                       std::set<PhysicalView*> &needed_views,
@@ -2222,6 +2260,7 @@ namespace LegionRuntime {
     public:
       InstanceManager *const manager;
       InstanceView *const parent;
+      const unsigned depth;
     protected:
       // The lock for the instance shared between all views
       // of a physical instance within a context.  The top
@@ -2263,7 +2302,6 @@ namespace LegionRuntime {
     public:
       void perform_reduction(PhysicalView *target, 
                              const FieldMask &copy_mask, Processor local_proc);
-      void initialize_view(const InnerTaskView *view, Processor locl_proc);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
@@ -2275,9 +2313,6 @@ namespace LegionRuntime {
                                  Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc,
-                                   InnerTaskView *inner_view);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -2290,6 +2325,8 @@ namespace LegionRuntime {
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
       virtual void collect_user(Event term_event,
                                 const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
@@ -2397,47 +2434,18 @@ namespace LegionRuntime {
         get_accessor(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_field_accessor(FieldID fid) const;
+      void add_valid_reference(void);
+      void remove_valid_reference(void);
       void pack_reference(Serializer &rez, AddressSpaceID target);
       static InstanceRef unpack_reference(Deserializer &derez,
-                                          RegionTreeForest *context);
+                                          RegionTreeForest *context,
+                                          unsigned depth);
     private:
       Event ready_event;
       Reservation needed_lock;
       ViewHandle handle;
     };
 
-    /**
-     * \class InnerTaskView 
-     * This class stores information necessary for creating a new
-     * instance view as part of the inner task optimization.
-     */
-    class InnerTaskView {
-    public:
-      InnerTaskView(Color local_color); 
-      InnerTaskView(const InnerTaskView &rhs);
-      ~InnerTaskView(void);
-    public:
-      InnerTaskView& operator=(const InnerTaskView &rhs);
-    public:
-      void add_user(const PhysicalUser &user, int child);
-      void find_wait_on_events(std::set<Event> &wait_on);
-    public:
-      void add_child_view(InnerTaskView *child);
-      void add_user_below(const PhysicalUser &user);
-    public:
-      void initialize_children(InstanceView *view,
-                               Processor local_proc) const;
-    public:
-      void pack_inner_view(Serializer &rez);
-      void unpack_inner_view(Deserializer &derez, 
-                    RegionTreeForest *context, FieldSpace handle,
-                    AddressSpaceID source);
-    public:
-      const Color local_color;
-      std::deque<PhysicalUser> users;
-      std::set<InnerTaskView*> child_views;
-    };
-    
     /**
      * \class MappingTraverser
      * A traverser of the physical region tree for

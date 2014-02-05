@@ -35,8 +35,8 @@ namespace LegionRuntime {
                                                    AddressSpaceID loc_space)
       : runtime(rt), did(id), owner_space(own_space), local_space(loc_space),
         owner(owner_space == local_space), 
-        gc_lock(Reservation::create_reservation()),
-        gc_references(0), resource_references(0), held_remote_references(0)
+        gc_lock(Reservation::create_reservation()), gc_references(0), 
+        valid_references(0), resource_references(0), held_remote_references(0)
     //--------------------------------------------------------------------------
     {
       runtime->register_distributed_collectable(did, this);
@@ -86,7 +86,8 @@ namespace LegionRuntime {
       bool need_activate;
       {
         AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (remote_references.empty());
+        need_activate = (gc_references == 0) && (valid_references == 0) &&
+                        (remote_references.empty());
         gc_references += cnt;
       }
       if (need_activate)
@@ -105,27 +106,60 @@ namespace LegionRuntime {
         assert(gc_references >= cnt);
 #endif
         gc_references -= cnt;
-        need_gc = (gc_references == 0) && (remote_references.empty());
-        result = ((gc_references == 0) && (remote_references.empty()) && 
-                  (resource_references == 0));
+        need_gc = (gc_references == 0) && (valid_references == 0) &&
+                  (remote_references.empty());
+        result = need_gc && (resource_references == 0);
         // If we're garbage collecting and we have held remote
         // references then send them back to the owner
         if (need_gc && (held_remote_references > 0))
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!owner);
-#endif
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(held_remote_references);
-          }
-          runtime->send_remove_distributed_remote(owner_space, rez);
-          // Set the references back to zero since we sent them back
-          held_remote_references = 0;
-        }
+          return_held_references();
       }
+      if (need_gc)
+        garbage_collect();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_valid_reference(unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      bool need_activate;
+      bool need_validate;
+      {
+        AutoLock gc(gc_lock);
+        need_validate = (valid_references == 0);
+        need_activate = need_validate && (gc_references == 0) &&
+                        (remote_references.empty());
+        valid_references += cnt;
+      }
+      if (need_activate)
+        notify_activate();
+      if (need_validate)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_valid_reference(unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      bool result;
+      bool need_invalidate;
+      bool need_gc;
+      {
+        AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(valid_references >= cnt);
+#endif
+        valid_references -= cnt;
+        need_invalidate = (valid_references == 0);
+        need_gc = need_invalidate && (gc_references == 0) &&
+                  (remote_references.empty());
+        result = need_gc && (resource_references == 0);
+        if (need_gc && (held_remote_references > 0))
+          return_held_references();
+      }
+      if (need_invalidate)
+        notify_invalid();
       if (need_gc)
         garbage_collect();
       return result;
@@ -287,6 +321,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::return_held_references(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!owner);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(held_remote_references);
+      }
+      runtime->send_remove_distributed_remote(owner_space, rez);
+      // Set the references back to zero since we sent them back
+      held_remote_references = 0;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::process_remove_resource_reference(
                                     Runtime *rt, Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -344,8 +396,9 @@ namespace LegionRuntime {
                                                      AddressSpaceID own_addr, 
                                                      DistributedID own_did)
       : runtime(rt), did(d), gc_lock(Reservation::create_reservation()), 
-        gc_references(0), remote_references(0), resource_references(0),
-        owner_addr(own_addr), owner_did(own_did), held_remote_references(0)
+        gc_references(0), valid_references(0), remote_references(0), 
+        resource_references(0), owner_addr(own_addr), 
+        owner_did(own_did), held_remote_references(0)
     //--------------------------------------------------------------------------
     {
       runtime->register_hierarchical_collectable(did, this);
@@ -387,7 +440,8 @@ namespace LegionRuntime {
       bool need_activate;
       {
         AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (remote_references == 0);
+        need_activate = (gc_references == 0) && (valid_references == 0) &&
+                        (remote_references == 0);
         gc_references += cnt;
       }
       if (need_activate)
@@ -406,27 +460,62 @@ namespace LegionRuntime {
         assert(gc_references >= cnt);
 #endif
         gc_references -= cnt;
-        need_gc = (gc_references == 0) && (remote_references == 0);
-        result = ((gc_references == 0) && (remote_references == 0) && 
-                  (resource_references == 0));
+        need_gc = (gc_references == 0) && (remote_references == 0) &&
+                  (valid_references == 0);
+        result = need_gc && (resource_references == 0);
         // If we're garbage collecting and we have held remote
         // references then send them back to the owner
         if (need_gc && (held_remote_references > 0))
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(did != owner_did);
-#endif
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(owner_did);
-            rez.serialize(held_remote_references);
-          }
-          runtime->send_remove_hierarchical_remote(owner_addr, rez);
-          // Set the references back to zero since we sent them back
-          held_remote_references = 0;
-        }
+          return_held_references();
       }
+      if (need_gc)
+        garbage_collect();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void HierarchicalCollectable::add_valid_reference(unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      bool need_activate;
+      bool need_validate;
+      {
+        AutoLock gc(gc_lock);
+        need_validate = (valid_references == 0);
+        need_activate = need_validate && (gc_references == 0) &&
+                        (remote_references == 0);
+        valid_references += cnt;
+      }
+      if (need_activate)
+        notify_activate();
+      if (need_validate)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool HierarchicalCollectable::remove_valid_reference(unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      bool result;
+      bool need_invalidate;
+      bool need_gc;
+      {
+        AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(valid_references >= cnt);
+#endif
+        valid_references -= cnt;
+        need_invalidate = (valid_references == 0);
+        need_gc = need_invalidate && (gc_references == 0) &&
+                  (remote_references == 0);
+        result = need_gc && (resource_references == 0);
+        // If we're garbage collecting and we have held remote
+        // references then send them back to the owner
+        if (need_gc && (held_remote_references > 0))
+          return_held_references();
+      }
+      if (need_invalidate)
+        notify_invalid();
       if (need_gc)
         garbage_collect();
       return result;
@@ -450,7 +539,7 @@ namespace LegionRuntime {
 #endif
       resource_references -= cnt;
       return ((gc_references == 0) && (remote_references == 0) && 
-              (resource_references == 0));
+              (resource_references == 0) && (valid_references == 0));
     }
 
     //--------------------------------------------------------------------------
@@ -460,7 +549,8 @@ namespace LegionRuntime {
       bool need_activate;
       {
         AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (remote_references == 0);
+        need_activate = (gc_references == 0) && (remote_references == 0) &&
+                        (valid_references == 0);
         remote_references += cnt;
       }
       if (need_activate)
@@ -479,9 +569,9 @@ namespace LegionRuntime {
         assert(remote_references >= cnt);
 #endif
         remote_references -= cnt;
-        need_gc = (gc_references == 0) && (remote_references == 0);
-        result = ((gc_references == 0) && (remote_references == 0) && 
-                  (resource_references == 0));
+        need_gc = (gc_references == 0) && (remote_references == 0) &&
+                  (valid_references == 0);
+        result = need_gc && (resource_references == 0);
         // No need to send back remote references since we are the owner
       }
       if (need_gc)
@@ -522,6 +612,24 @@ namespace LegionRuntime {
       assert(finder != subscribers.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void HierarchicalCollectable::return_held_references(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(did != owner_did);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(owner_did);
+        rez.serialize(held_remote_references);
+      }
+      runtime->send_remove_hierarchical_remote(owner_addr, rez);
+      // Set the references back to zero since we sent them back
+      held_remote_references = 0;
     }
 
     //--------------------------------------------------------------------------

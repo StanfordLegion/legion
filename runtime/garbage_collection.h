@@ -87,6 +87,9 @@ namespace LegionRuntime {
       void add_gc_reference(unsigned cnt = 1);
       bool remove_gc_reference(unsigned cnt = 1);
     public:
+      void add_valid_reference(unsigned cnt = 1);
+      bool remove_valid_reference(unsigned cnt = 1);
+    public:
       void add_resource_reference(unsigned cnt = 1);
       bool remove_resource_reference(unsigned cnt = 1);
     public:
@@ -99,9 +102,15 @@ namespace LegionRuntime {
       bool send_remote_reference(AddressSpaceID sid, unsigned cnt = 1);
       // Update the people who we know have this collectable
       void update_remote_spaces(AddressSpaceID sid);
+    protected:
+      // Must be called while holding the gc lock
+      void return_held_references(void);
     public:
       virtual void notify_activate(void) = 0;
       virtual void garbage_collect(void) = 0;
+    public:
+      virtual void notify_valid(void) = 0;
+      virtual void notify_invalid(void) = 0;
     public:
       // Will only be called on the owner
       virtual void notify_new_remote(AddressSpaceID sid) = 0;
@@ -122,6 +131,7 @@ namespace LegionRuntime {
     protected:
       Reservation gc_lock;
       unsigned gc_references;
+      unsigned valid_references;
       unsigned resource_references;
       // Places where we know there are remote instances
       std::set<AddressSpaceID> remote_spaces;
@@ -170,6 +180,9 @@ namespace LegionRuntime {
       void add_gc_reference(unsigned cnt = 1);
       bool remove_gc_reference(unsigned cnt = 1);
     public:
+      void add_valid_reference(unsigned cnt = 1);
+      bool remove_valid_reference(unsigned cnt = 1);
+    public:
       void add_resource_reference(unsigned cnt = 1);
       bool remove_resource_reference(unsigned cnt = 1);
     public:
@@ -181,9 +194,15 @@ namespace LegionRuntime {
       void add_held_remote_reference(unsigned cnt = 1);
     public:
       DistributedID find_distributed_id(AddressSpaceID target) const;
+    protected:
+      // Must be called while holding the gc lock
+      void return_held_references(void);
     public:
       virtual void notify_activate(void) = 0;
       virtual void garbage_collect(void) = 0;
+    public:
+      virtual void notify_valid(void) = 0;
+      virtual void notify_invalid(void) = 0;
     public:
       static void process_remove_resource_reference(Runtime *rt,
                                                     Deserializer &derez);
@@ -195,6 +214,7 @@ namespace LegionRuntime {
     protected:
       Reservation gc_lock;
       unsigned gc_references;
+      unsigned valid_references;
       unsigned remote_references;
       unsigned resource_references;
     protected:

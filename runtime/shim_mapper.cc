@@ -517,9 +517,6 @@ namespace LegionRuntime {
                           "for processor %x",
                            task->variants->name, 
                            task->get_unique_task_id(), local_proc.id);
-      // If this is a leaf task, map it locally, otherwise map it remotely
-      if (task->variants->leaf)
-        return true;
       return false;
     }
 

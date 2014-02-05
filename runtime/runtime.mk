@@ -34,6 +34,7 @@ endif
 # Handle some of the common machines we frequent
 
 ifeq ($(shell uname -n),sapling-head)
+CC_FLAGS += -march=native
 GASNET=/usr/local/gasnet-1.20.0-openmpi
 MPI=/usr/local/openmpi-1.6.4
 CUDA=/usr/local/cuda-5.0
@@ -41,6 +42,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0000)
+CC_FLAGS += -march=native
 GASNET=/usr/local/gasnet-1.20.0-openmpi
 MPI=/usr/local/openmpi-1.6.4
 CUDA=/usr/local/cuda-5.0
@@ -48,6 +50,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0001)
+CC_FLAGS += -march=native
 GASNET=/usr/local/gasnet-1.20.0-openmpi
 MPI=/usr/local/openmpi-1.6.4
 CUDA=/usr/local/cuda-5.0
@@ -55,6 +58,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0002)
+CC_FLAGS += -march=native
 GASNET=/usr/local/gasnet-1.20.0-openmpi
 MPI=/usr/local/openmpi-1.6.4
 CUDA=/usr/local/cuda-5.0
@@ -62,6 +66,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0003)
+CC_FLAGS += -march=native
 GASNET=/usr/local/gasnet-1.20.0-openmpi
 MPI=/usr/local/openmpi-1.6.4
 CUDA=/usr/local/cuda-5.0
@@ -69,6 +74,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
+CC_FLAGS += -march=native
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
 MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
 CUDA=/sw/kfs/cuda/4.2/linux_binary
@@ -76,13 +82,15 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
-GASNET = /sw/xk6/gasnet/1.20.2/cle4.1_gnu4.7.2_gnumpi_fast
+GCC=CC
+CC_FLAGS += -march=bdver1 -DGASNETI_BUG1389_WORKAROUND=1
+GASNET = ${GASNET_ROOT}
 #GASNET=/ccs/home/mebauer/gasnet-1.20.2-build
-CUDA=/opt/nvidia/cudatoolkit/5.0.35.102
+CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
-LD_FLAGS += -L/opt/cray/ugni/4.0-1.0401.5928.9.5.gem/lib64/ 
-LD_FLAGS += -L/opt/cray/pmi/4.0.1-1.0000.9421.73.3.gem/lib64/
+LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR)
@@ -164,9 +172,9 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb -march=native #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
 else
-CC_FLAGS	+= -O2 -march=native
+CC_FLAGS	+= -O2 -ggdb
 endif
 
 

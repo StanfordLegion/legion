@@ -30,7 +30,7 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void) = 0;
 
-      virtual void print_info(void);
+      virtual void print_info(void) = 0;
 
       virtual void run_or_wait(Event start_event) = 0;
 
@@ -55,6 +55,8 @@ namespace LegionRuntime {
       virtual ~GPUTask(void);
 
       virtual bool event_triggered(void);
+
+      virtual void print_info(void);
 
       virtual void run_or_wait(Event start_event);
 
@@ -359,11 +361,6 @@ namespace LegionRuntime {
       }
     };
 
-    void GPUJob::print_info(void)
-    {
-      printf("gpu job\n");
-    }
-
     GPUTask::GPUTask(GPUProcessor *_gpu, Event _finish_event,
 		     Processor::TaskFuncID _func_id,
 		     const void *_args, size_t _arglen,
@@ -391,6 +388,12 @@ namespace LegionRuntime {
 
       // don't delete
       return false;
+    }
+
+    void GPUTask::print_info(void)
+    {
+      printf("GPU Task: %p after=%x/%d\n",
+          this, finish_event.id, finish_event.gen);
     }
 
     void GPUTask::run_or_wait(Event start_event)
@@ -425,7 +428,7 @@ namespace LegionRuntime {
     void GPUTask::finish_job(void)
     {
       if (finish_event.exists())
-        finish_event.impl()->trigger(finish_event.gen, true);
+        finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
     }
 
     class GPUMemcpy : public GPUJob {
@@ -461,6 +464,12 @@ namespace LegionRuntime {
 
         // don't delete
         return false;
+      }
+
+      virtual void print_info(void)
+      {
+        printf("GPU Memcpy: %p after=%x/%d\n",
+            this, finish_event.id, finish_event.gen);
       }
 
       virtual void run_or_wait(Event start_event)
@@ -526,7 +535,7 @@ namespace LegionRuntime {
       {
         // If we have a finish event then trigger it
         if (finish_event.exists())
-          finish_event.impl()->trigger(finish_event.gen, true);
+          finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
         // Destroy our event
         CHECK_CUDART( cudaEventDestroy(complete_event) );
       }
@@ -714,7 +723,7 @@ namespace LegionRuntime {
         }
         // If we have a finish event then trigger it
         if (finish_event.exists())
-          finish_event.impl()->trigger(finish_event.gen, true);
+          finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
         // Free up any buffers that we made when performing the copy
         for (unsigned idx = 0; idx < allocated_buffers.size(); idx++)
         {

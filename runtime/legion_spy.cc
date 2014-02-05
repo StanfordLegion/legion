@@ -23,6 +23,14 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     //--------------------------------------------------------------------------
+    TreeStateLogger::TreeStateLogger(void)
+      : verbose(false), logical_only(false), physical_only(false),
+        tree_state_log(NULL), depth(0), logger_lock(Reservation::NO_RESERVATION)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     TreeStateLogger::TreeStateLogger(AddressSpaceID sid, bool verb,
         bool log_only, bool phy_only)
       : verbose(verb), logical_only(log_only), physical_only(phy_only),
@@ -42,10 +50,13 @@ namespace LegionRuntime {
     TreeStateLogger::~TreeStateLogger(void)
     //--------------------------------------------------------------------------
     {
-      assert(tree_state_log != NULL);
-      fclose(tree_state_log);
+      if (tree_state_log != NULL)
+        fclose(tree_state_log);
+      else
+        fflush(stdout);
       tree_state_log = NULL;
-      logger_lock.destroy_reservation();
+      if (logger_lock.exists())
+        logger_lock.destroy_reservation();
       logger_lock = Reservation::NO_RESERVATION;
     }
 
@@ -230,11 +241,22 @@ namespace LegionRuntime {
     void TreeStateLogger::println(const char *fmt, va_list args)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < depth; idx++)
-        fprintf(tree_state_log,"  ");
-      vfprintf(tree_state_log,fmt,args);
-      fprintf(tree_state_log,"\n");
-      fflush(tree_state_log);
+      if (tree_state_log != NULL)
+      {
+        for (unsigned idx = 0; idx < depth; idx++)
+          fprintf(tree_state_log,"  ");
+        vfprintf(tree_state_log,fmt,args);
+        fprintf(tree_state_log,"\n");
+        fflush(tree_state_log);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < depth; idx++)
+          fprintf(stdout,"  ");
+        vfprintf(stdout,fmt,args);
+        fprintf(stdout,"\n");
+        fflush(stdout);
+      }
     }
 
   }; // namespace HighLevel
