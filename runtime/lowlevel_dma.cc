@@ -1140,7 +1140,7 @@ namespace LegionRuntime {
 	std::vector<std::pair<const char *, size_t> > src_spans;
       };
 
-      static const size_t TARGET_XFER_SIZE = 4096;
+      static const size_t TARGET_XFER_SIZE = 1 << 20;
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
@@ -1198,6 +1198,23 @@ namespace LegionRuntime {
 
       void copy_gather(const PendingGather *g, Event trigger = Event::NO_EVENT)
       {
+        // special case: if there's only one source span, it's not actually
+        //   a gather (so we don't need to make a copy)
+        if(g->src_spans.size() == 1) {
+          const std::pair<const char *, size_t>& span = *(g->src_spans.begin());
+#ifdef DEBUG_REMOTE_WRITES
+	  printf("remote write of %zd bytes (singleton %x:%zd -> %x:%zd)\n", span.second, src_mem->me.id, span.first - src_base, dst_mem->me.id, g->dst_start);
+          printf("  datb[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                 span.first,
+                 ((unsigned *)(span.first))[0], ((unsigned *)(span.first))[1],
+                 ((unsigned *)(span.first))[2], ((unsigned *)(span.first))[3],
+                 ((unsigned *)(span.first))[4], ((unsigned *)(span.first))[5],
+                 ((unsigned *)(span.first))[6], ((unsigned *)(span.first))[7]);
+#endif
+	  do_remote_write(dst_mem->me, g->dst_start, span.first, span.second, trigger, false /* no copy */);
+          return;
+        }
+
 	// build a buffer we can copy in one block to the destination
 	char *buffer = new char[g->dst_size];
 	char *pos = buffer;
@@ -1211,7 +1228,7 @@ namespace LegionRuntime {
 	}
 
 #ifdef DEBUG_REMOTE_WRITES
-	printf("remote write of %zd bytes (gather -> %x:%zd)\n", g->dst_size, dst_mem->me.id, g->dst_start);
+	printf("remote write of %zd bytes (gather -> %x:%zd), trigger=%x/%d\n", g->dst_size, dst_mem->me.id, g->dst_start, trigger.id, trigger.gen);
 #endif
 	do_remote_write(dst_mem->me, g->dst_start, buffer, g->dst_size, trigger, true /* make copy! */);
 
@@ -1237,7 +1254,16 @@ namespace LegionRuntime {
 	  PendingGather *g = it->second;
 	  gathers.erase(it);
 
+#define NO_SEPARATE_FENCE
+#ifndef SEPARATE_FENCE
 	  copy_gather(g, after_copy);
+#else
+	  copy_gather(g);
+#ifdef DEBUG_REMOTE_WRITES
+	  printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
+#endif
+	  do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
+#endif
 	  delete g;
 	} else {
 	  // didn't have any pending copies, but if we have an event to trigger, send that

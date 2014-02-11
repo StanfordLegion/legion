@@ -4291,10 +4291,37 @@ namespace LegionRuntime {
     bool ReductionCloser::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      PhysicalState &state = 
-        node->acquire_physical_state(ctx, true/*exclusive*/);
-      node->issue_update_reductions(state, target, close_mask, local_proc);
-      node->release_physical_state(state);
+      std::map<ReductionView*,FieldMask> valid_reductions;
+      {
+        PhysicalState &state = 
+          node->acquire_physical_state(ctx, true/*exclusive*/);
+        for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+              state.reduction_views.begin(); it != 
+              state.reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & close_mask;
+          if (!!overlap)
+          {
+            valid_reductions[it->first] = overlap;
+            it->first->add_valid_reference();
+          }
+        }
+        if (!valid_reductions.empty())
+          node->invalidate_reduction_views(state, close_mask);
+        node->release_physical_state(state);
+      }
+      if (!valid_reductions.empty())
+      {
+        node->issue_update_reductions(target, close_mask, 
+                                      local_proc, valid_reductions);
+        // Remove our valid references
+        for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+              valid_reductions.begin(); it != valid_reductions.end(); it++)
+        {
+          if (it->first->remove_valid_reference())
+            delete it->first;
+        }
+      }
       return true;
     }
 
@@ -4302,10 +4329,37 @@ namespace LegionRuntime {
     bool ReductionCloser::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      PhysicalState &state = 
-        node->acquire_physical_state(ctx, true/*exclusive*/);
-      node->issue_update_reductions(state, target, close_mask, local_proc);
-      node->release_physical_state(state);
+      std::map<ReductionView*,FieldMask> valid_reductions;
+      {
+        PhysicalState &state = 
+          node->acquire_physical_state(ctx, true/*exclusive*/);
+        for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+              state.reduction_views.begin(); it != 
+              state.reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & close_mask;
+          if (!!overlap)
+          {
+            valid_reductions[it->first] = overlap;
+            it->first->add_valid_reference();
+          }
+        }
+        if (!valid_reductions.empty())
+          node->invalidate_reduction_views(state, close_mask);
+        node->release_physical_state(state);
+      }
+      if (!valid_reductions.empty())
+      {
+        node->issue_update_reductions(target, close_mask, 
+                                      local_proc, valid_reductions);
+        // Remove our valid references
+        for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+              valid_reductions.begin(); it != valid_reductions.end(); it++)
+        {
+          if (it->first->remove_valid_reference())
+            delete it->first;
+        }
+      }
       return true;
     }
 
@@ -4362,13 +4416,13 @@ namespace LegionRuntime {
                                                    LogicalRegion closing_handle)
     //--------------------------------------------------------------------------
     {
-      PhysicalState &state = 
-        node->acquire_physical_state(info->ctx, true/*exclusive*/);
       // Check to see if we have any close operations to perform
       const std::deque<CloseInfo> &close_ops = path.get_close_operations(depth);
       if (!close_ops.empty())
       {
         PhysicalCloser closer(info, false/*leave open*/, closing_handle);  
+        PhysicalState &state = 
+          node->acquire_physical_state(info->ctx, true/*exclusive*/);
         for (std::deque<CloseInfo>::const_iterator it = close_ops.begin();
               it != close_ops.end(); it++)
         {
@@ -4384,29 +4438,58 @@ namespace LegionRuntime {
             // Release our state
             node->release_physical_state(state);
             RegionTreeNode *child_node = node->get_tree_child(it->target_child);
-            // Acquire the child's state
-            PhysicalState &child_state = 
-              child_node->acquire_physical_state(info->ctx, true/*exclusive*/);
-            // Make a new node for closing the child 
-            PhysicalCloser child_closer(info, true/*leave open*/, 
-                                        closer.handle);
-            // Have the child select it's targets
-            if (!child_node->select_close_targets(child_closer, child_state,
-                                                  it->close_mask, false))
             {
-              // Couldn't close the region
+              // Make a new node for closing the child 
+              PhysicalCloser child_closer(info, true/*leave open*/, 
+                                          closer.handle);
+              std::map<InstanceView*,FieldMask> valid_views;
+              std::map<InstanceView*,FieldMask> update_views;
+              {
+                PhysicalState &child_state = 
+                  child_node->acquire_physical_state(info->ctx, 
+                                                     false/*exclusive*/);
+
+                child_node->find_valid_instance_views(child_state,
+                                                      it->close_mask,
+                                                      it->close_mask,
+                                                      true/*needs space*/,
+                                                      valid_views);
+                child_node->release_physical_state(child_state);
+              }
+              // See if we can make the targets
+              if (child_node->select_close_targets(child_closer, 
+                                                    it->close_mask,
+                                                    false/*complete*/,
+                                                    valid_views,
+                                                    update_views))
+              {
+                // Issue the update copies, then remove valid references
+                for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                      update_views.begin(); it != update_views.end(); it++)
+                {
+                  child_node->issue_update_copies(info, it->first,
+                                                  it->second, valid_views);
+                }
+              }
+              else
+              {
+                // Couldn't make the targets so we failed
+                // Remove valid references and return
+                return false;
+              }
+              // Acquire the child's state
+              PhysicalState &child_state = 
+                child_node->acquire_physical_state(info->ctx, true/*exclusive*/);
+              // Now do the close operation
+              child_node->siphon_physical_children(child_closer, child_state,
+                                                   it->close_mask, 
+                                                   -1/*next child*/,
+                                                   false/*allow next*/);
+              // Finally update the node's state
+              child_closer.update_node_views(child_node, child_state);
+              // Release the child's state
               child_node->release_physical_state(child_state);
-              return false;
             }
-            // Now do the close operation
-            child_node->siphon_physical_children(child_closer, child_state,
-                                                 it->close_mask, 
-                                                 -1/*next child*/,
-                                                 false/*allow next*/);
-            // Finally update the node's state
-            child_closer.update_node_views(child_node, child_state);
-            // Release the child's state
-            child_node->release_physical_state(child_state);
             // Reacquire our state before continuing
             node->acquire_physical_state(state, true/*exclusive*/);
           }
@@ -4434,10 +4517,13 @@ namespace LegionRuntime {
         state.children.valid_fields = next_valid;
         // Update the node views and the dirty mask
         closer.update_node_views(node, state);
+        node->release_physical_state(state);
       }
       // Flush any reduction operations
-      node->flush_reductions(state, info->traversal_mask, 
+      node->flush_reductions(info->traversal_mask, 
                              info->req.redop, info);
+      PhysicalState &state = 
+        node->acquire_physical_state(info->ctx, true/*exclusive*/);
       // Update our physical state to indicate which child
       // we are opening and in which fields
       if (has_child)
@@ -4590,10 +4676,10 @@ namespace LegionRuntime {
         state.children.open_children[next_child] = info->traversal_mask;
       else
         finder->second |= info->traversal_mask;
-      // Flush any outstanding reduction operations
-      node->flush_reductions(state, user_mask, 
-                             info->req.redop, info);
       node->release_physical_state(state);
+      // Flush any outstanding reduction operations
+      node->flush_reductions(user_mask, 
+                             info->req.redop, info);
     }
 
     //--------------------------------------------------------------------------
@@ -7514,7 +7600,6 @@ namespace LegionRuntime {
     {
       // Acquire the physical state of the node to close
       ContextID ctx = closer.info->ctx;
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
       // Figure out if we have dirty data.  If we do, issue copies back to
       // each of the target instances specified by the closer.  Note we
       // don't need to issue copies if the target view is already in
@@ -7525,26 +7610,64 @@ namespace LegionRuntime {
 
       // Not we only need to do this operation for nodes which are
       // actually regions since they are the only ones that store
-      // actual instances
-      FieldMask dirty_fields = state.dirty_mask & closing_mask;
+      // actual instances.
+      
+      FieldMask dirty_fields, reduc_fields;
+      std::map<InstanceView*,FieldMask> valid_instances;
+      std::map<ReductionView*,FieldMask> valid_reductions;
+      {
+        PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+        dirty_fields = state.dirty_mask & closing_mask;
+        reduc_fields = state.reduction_mask & closing_mask;
+        if (is_region())
+        {
+          if (!!dirty_fields)
+          {
+            // Pull down instance views so we don't issue unnecessary copies
+            pull_valid_instance_views(state, closing_mask);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!state.valid_views.empty());
+#endif
+            find_valid_instance_views(state, closing_mask, closing_mask, 
+                                      false/*needs space*/, valid_instances);
+            // Don't need to add valid references here because
+            // we won't invalidate them until after we are done
+            // issuing the copies.
+          }
+          if (!!reduc_fields)
+          {
+            for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+                  state.reduction_views.begin(); it != 
+                  state.reduction_views.end(); it++)
+            {
+              FieldMask overlap = it->second & closing_mask;
+              if (!!overlap)
+              {
+                valid_reductions[it->first] = overlap;
+                it->first->add_valid_reference();
+              }
+            }
+          }
+        }
+        // Invalidate any reduction views we are going to reduce back
+        if (!!reduc_fields)
+          invalidate_reduction_views(state, reduc_fields);
+        release_physical_state(state);
+      }
       if (is_region() && !!dirty_fields)
       {
-        // Pull down instance views so we don't issue unnecessary copies
-        pull_valid_instance_views(state, closing_mask);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!state.valid_views.empty());
-#endif
         const std::vector<InstanceView*> &targets = 
           closer.get_lower_targets();
         for (std::vector<InstanceView*>::const_iterator it = 
               targets.begin(); it != targets.end(); it++)
         {
           std::map<InstanceView*,FieldMask>::const_iterator finder = 
-            state.valid_views.find(*it);
+            valid_instances.find(*it);
           // Check to see if it is already a valid instance for some fields
-          if (finder == state.valid_views.end())
+          if (finder == valid_instances.end())
           {
-            issue_update_copies(state, closer.info, *it, dirty_fields);
+            issue_update_copies(closer.info, *it, 
+                                dirty_fields, valid_instances);
           }
           else
           {
@@ -7552,7 +7675,8 @@ namespace LegionRuntime {
             // we are not currently valid
             FieldMask diff_fields = dirty_fields - finder->second;
             if (!!diff_fields)
-              issue_update_copies(state, closer.info, *it, diff_fields);
+              issue_update_copies(closer.info, *it, 
+                                  diff_fields, valid_instances);
           }
         }
       }
@@ -7560,63 +7684,61 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!closer.needs_targets());
 #endif
-      PhysicalCloser next_closer(closer);
+      {
+        PhysicalCloser next_closer(closer);
+        PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      bool result = 
+        bool result = 
 #endif
-      siphon_physical_children(next_closer, state, closing_mask,
-                               -1/*next child*/, false/*allow next*/);
+        siphon_physical_children(next_closer, state, closing_mask,
+                                 -1/*next child*/, false/*allow next*/);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(result); // should always succeed since targets already exist
+        assert(result); // should always succeed since targets already exist
 #endif
+        // Update the closer's dirty mask
+        closer.update_dirty_mask(dirty_fields | reduc_fields |
+                                 next_closer.get_dirty_mask());
+
+        if (!closer.permit_leave_open)
+          invalidate_instance_views(state, closing_mask, true/*clean*/);
+        else
+          state.dirty_mask -= closing_mask;
+        // Finally release our hold on the state
+        release_physical_state(state);
+      }
       // Apply any reductions that we might have for the closing
       // fields back to the target instances
       // Again this only needs to be done for region nodes but
       // we should always invalidate reduction views
-      FieldMask reduc_fields = state.reduction_mask & closing_mask;
-      if (!!reduc_fields)
+      if (is_region() && !!reduc_fields)
       {
-        if (is_region())
+        const std::vector<InstanceView*> &targets = 
+          closer.get_lower_targets();
+        for (std::vector<InstanceView*>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
         {
-          const std::vector<InstanceView*> &targets = 
-            closer.get_lower_targets();
-          for (std::vector<InstanceView*>::const_iterator it = 
-                targets.begin(); it != targets.end(); it++)
-          {
-            issue_update_reductions(state, *it, reduc_fields,
-                                    closer.info->local_proc);
-          }
+          issue_update_reductions(*it, reduc_fields,
+                                  closer.info->local_proc, valid_reductions);
         }
-        // Invalidate the reduction views we just reduced back
-        invalidate_reduction_views(state, reduc_fields);
       }
-
-      // Update the closer's dirty mask
-      closer.update_dirty_mask(dirty_fields | reduc_fields |
-                               next_closer.get_dirty_mask());
-
-      if (!closer.permit_leave_open)
-        invalidate_instance_views(state, closing_mask, true/*clean*/);
-      else
-        state.dirty_mask -= closing_mask;
-      // Finally release our hold on the state
-      release_physical_state(state);
+      // Remove any valid references we added to views
+      for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        if (it->first->remove_valid_reference())
+          delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool RegionTreeNode::select_close_targets(PhysicalCloser &closer,
-                                              PhysicalState &state,
                                               const FieldMask &closing_mask,
-                                              bool complete)
+                                              bool complete,
+                          const std::map<InstanceView*,FieldMask> &valid_views,
+                          std::map<InstanceView*,FieldMask> &update_views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
-#endif
       // First get the list of valid instances
-      std::map<InstanceView*,FieldMask> valid_views;
-      find_valid_instance_views(state, closing_mask, 
-                                closing_mask, true/*needs space*/, valid_views);
       // Get the set of memories for which we have valid instances
       std::set<Memory> valid_memories;
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
@@ -7728,7 +7850,7 @@ namespace LegionRuntime {
           {
             FieldMask need_update = closing_mask - best_mask;
             if (!!need_update)
-              issue_update_copies(state, closer.info, best, need_update);
+              update_views[best] = need_update;
             // Add it to the list of close targets
             closer.add_target(best);
           }
@@ -7745,7 +7867,7 @@ namespace LegionRuntime {
           if (new_view != NULL)
           {
             // Update all the fields
-            issue_update_copies(state, closer.info, new_view, closing_mask);
+            update_views[new_view] = closing_mask;
             closer.add_target(new_view);
             // If we only needed to make one, then we are done
             if (create_one)
@@ -7824,32 +7946,60 @@ namespace LegionRuntime {
       if (allow_next && (next_child >= 0) && (next_child == int(it->first)))
         return true;
       FieldMask close_mask = it->second & closing_mask;
-      // Now we need to actually close up this child
       // First check to see if the closer needs to make physical
       // instance targets in order to perform the close operation
+      std::map<InstanceView*,FieldMask> valid_views;
+      std::map<InstanceView*,FieldMask> update_views;
       if (closer.needs_targets())
       {
+        find_valid_instance_views(state, closing_mask, closing_mask,
+                                  true/*needs space*/, valid_views);
         // Have the closer make targets and return false indicating
         // we could not successfully perform the close operation
         // if he fails to make them.
         const bool complete = 
           (state.complete_children.find(it->first) !=
            state.complete_children.end());
-        if (!select_close_targets(closer, state, closing_mask, complete))
+        if (!select_close_targets(closer, closing_mask, 
+                                  complete, valid_views, update_views))
+        {
+          // Release any valid references that we have
+          for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            it->first->remove_valid_reference();
+          }
           return false;
+        }
       }
-      // Now we're ready to perform the close operation
-      RegionTreeNode *child_node = get_tree_child(it->first);
-      // Before we do the close, mark that we've done the close
-      // to prevent other traversers from doing it in parallel
+      // Now we need to actually close up this child
+      // Mark that when we are done we will have successfully
+      // closed up this child.  Do this now before we
+      // release the lock and someone invalidates our iterator
       if (!closer.permit_leave_open)
       {
         it->second -= close_mask;
         if (!it->second)
           state.children.open_children.erase(it);
       }
+
       // Release our lock on the current state before going down
       bool was_exclusive = release_physical_state(state);
+      if (closer.needs_targets())
+      {
+        // Issue any update copies, and then release any
+        // valid view references that we are holding
+        for (std::map<InstanceView*,FieldMask>::const_iterator it =
+              update_views.begin(); it != update_views.end(); it++)
+        {
+          issue_update_copies(closer.info, it->first, 
+                              it->second, valid_views);
+        }
+        update_views.clear();
+        valid_views.clear();
+      }
+      // Now we're ready to perform the close operation
+      RegionTreeNode *child_node = get_tree_child(it->first);
       closer.close_tree_node(child_node, close_mask);
       // Reacquire our lock on the state upon returning
       acquire_physical_state(state, was_exclusive);
@@ -7967,22 +8117,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::issue_update_copies(PhysicalState &state,
-                                             MappableInfo *info,
+    void RegionTreeNode::issue_update_copies(MappableInfo *info,
                                              InstanceView *dst,
-                                             FieldMask copy_mask)
+                                             FieldMask copy_mask,
+                       const std::map<InstanceView*,FieldMask> &valid_instances)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
       assert(!!copy_mask);
       assert(dst->logical_node == this);
 #endif
-      // Get the list of valid regions for all the fields we need
-      // to do the copy for
-      std::map<InstanceView*,FieldMask> valid_instances;
-      find_valid_instance_views(state, copy_mask, copy_mask, 
-                                false/*needs space*/, valid_instances);
       // Quick check to see if we are done early
       {
         std::map<InstanceView*,FieldMask>::const_iterator finder = 
@@ -8038,6 +8182,8 @@ namespace LegionRuntime {
           available_memories.insert(it->first->get_location());
         }
         std::vector<Memory> chosen_order;
+        // Make a copy of the map so we can erase instances
+        std::map<InstanceView*,FieldMask> copy_instances = valid_instances;
         context->runtime->invoke_mapper_rank_copy_sources(info->local_proc,
                                                           info->mappable,
                                                           available_memories,
@@ -8051,7 +8197,7 @@ namespace LegionRuntime {
           // Go through all the valid instances and issue copies
           // from instances in the given memory
           for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-                valid_instances.begin(); it != valid_instances.end(); it++)
+                copy_instances.begin(); it != copy_instances.end(); it++)
           {
 #ifdef DEBUG_HIGH_LEVEL
             assert(it->first->logical_node == this);
@@ -8085,8 +8231,10 @@ namespace LegionRuntime {
             to_erase.push_back(it->first);
           }
           // Erase any instances we considered and used
+          // Remove the valid references we hold on them
+          // before erasing them
           for (unsigned idx = 0; idx < to_erase.size(); idx++)
-            valid_instances.erase(to_erase[idx]);
+            copy_instances.erase(to_erase[idx]);
         }
         // Now do any remaining memories not put in order by the mapper
         for (std::set<Memory>::const_iterator mit = 
@@ -8095,7 +8243,7 @@ namespace LegionRuntime {
         {
           std::vector<InstanceView*> to_erase;
           for (std::map<InstanceView*,FieldMask>::const_iterator it =
-                valid_instances.begin(); it != valid_instances.end(); it++)
+                copy_instances.begin(); it != copy_instances.end(); it++)
           {
             if ((*mit) != it->first->get_location())
               continue;
@@ -8123,7 +8271,7 @@ namespace LegionRuntime {
           }
           // Erase any instances we've checked
           for (unsigned idx = 0; idx < to_erase.size(); idx++)
-            valid_instances.erase(to_erase[idx]);
+            copy_instances.erase(to_erase[idx]);
         }
       }
       // Otherwise all the fields have no current data so they are
@@ -8214,20 +8362,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::issue_update_reductions(PhysicalState &state,
-                                                 PhysicalView *target,
+    void RegionTreeNode::issue_update_reductions(PhysicalView *target,
                                                  const FieldMask &mask,
-                                                 Processor local_proc)
+                                                 Processor local_proc,
+                     const std::map<ReductionView*,FieldMask> &valid_reductions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
-#endif
       // Go through all of our reduction instances and issue reductions
       // to the target instances
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
       {
         // Doesn't need to reduce to itself
         if (target == (it->first))
@@ -8402,74 +8546,84 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::flush_reductions(PhysicalState &state,
-                                          const FieldMask &valid_mask,
+    void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
                                           ReductionOpID redop,
                                           MappableInfo *info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
-#endif
       // Go through the list of reduction views and see if there are
       // any that don't mesh with the current user and therefore need
       // to be flushed.
       FieldMask flush_mask;
-      for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it !=
-            state.reduction_views.end(); it++)
+      std::map<InstanceView*,FieldMask> valid_views;
+      std::map<ReductionView*,FieldMask> reduction_views;
       {
-        // Skip reductions that have already been flushed
-        if (!(it->second - flush_mask))
-          continue;
-        // Skip reductions that have the same reduction op ID
-        if (it->first->get_redop() == redop)
-          continue;
-        FieldMask reduc_mask = valid_mask & it->second;
-        if (!!reduc_mask)
+        PhysicalState &state = 
+          acquire_physical_state(info->ctx, false/*exclusive*/);
+        for (std::map<ReductionView*,FieldMask>::const_iterator it = 
+              state.reduction_views.begin(); it != 
+              state.reduction_views.end(); it++)
         {
-          std::map<InstanceView*,FieldMask> valid_views;
-          find_valid_instance_views(state, reduc_mask, 
-                            reduc_mask, false/*need space*/, valid_views);
-#ifdef DEBUG_HIGH_LEVEL
-          FieldMask update_mask;
-#endif
-          // Go through the list of valid instances and find the
-          // ones that have all the required fields for the reduction mask
-          for (std::map<InstanceView*,FieldMask>::const_iterator
-                vit = valid_views.begin(); vit != valid_views.end(); vit++)
-          {
-            FieldMask overlap = vit->second & reduc_mask;
-            if (!!overlap)
-            {
-              issue_update_reductions(state, vit->first, 
-                                      overlap, info->local_proc);
-              // Don't mark it dirty, we'll udpate the dirty mask ourselves
-              // when we are done since we don't want to accidentally
-              // invalidate some of our other instances which will
-              // get updated later in this loop.  Note this is safe
-              // since we're updating all the instances for this field.
-              update_valid_views(state, overlap, false/*dirty*/, vit->first);
-#ifdef DEBUG_HIGH_LEVEL
-              update_mask |= overlap;
-#endif
-            }
-          }
-#ifdef DEBUG_HIGH_LEVEL
-          // We should have issued reduction operations to at least
-          // one place for every singe field.
-          assert(update_mask == reduc_mask);
-#endif
-          flush_mask |= reduc_mask;
+          // Skip reductions that have the same reduction op ID
+          if (it->first->get_redop() == redop)
+            continue;
+          FieldMask overlap = valid_mask & it->second;
+          if (!overlap)
+            continue;
+          flush_mask |= overlap; 
+          reduction_views.insert(*it);
         }
+        // Now get any physical instances to flush to
+        if (!!flush_mask)
+        {
+          find_valid_instance_views(state, flush_mask, flush_mask, 
+                                    false/*needs space*/, valid_views);
+        }
+        release_physical_state(state);
       }
       if (!!flush_mask)
       {
+#ifdef DEBUG_HIGH_LEVEL
+        FieldMask update_mask;
+#endif
+        // Iterate over all the valid instances and issue any reductions
+        // to the target that need to be done
+        for (std::map<InstanceView*,FieldMask>::iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          FieldMask overlap = flush_mask & it->second; 
+          issue_update_reductions(it->first, overlap, info->local_proc,
+                                  reduction_views);
+          // Save the overlap fields
+          it->second = overlap;
+#ifdef DEBUG_HIGH_LEVEL
+          update_mask |= overlap;
+#endif
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        // We should have issued reduction operations to at least
+        // one place for every single reduction field.
+        assert(update_mask == flush_mask);
+#endif
+        // Now update our physical state
+        PhysicalState &state = 
+          acquire_physical_state(info->ctx, true/*exclusive*/);
+        // Update the valid views.  Don't mark them dirty since we
+        // don't want to accidentally invalidate some of our other
+        // instances which get updated later in the loop.  Note this
+        // is safe since we're updating all the instances for each
+        // reduction field.
+        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          update_valid_views(state, it->second, false/*dirty*/, it->first);
+        }
         // Update the dirty mask since we didn't do it when updating
         // the valid instance views do it now
         state.dirty_mask |= flush_mask;
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
+        release_physical_state(state);
       }
     }
 
@@ -9306,8 +9460,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
-      PhysicalState &state = 
-        acquire_physical_state(info->ctx, true/*exclusive*/);
+      
       // This mirrors the if-else statement in MappingTraverser::visit_region
       // for handling the different instance and reduction cases
       if (!IS_REDUCE(info->req))
@@ -9317,13 +9470,23 @@ namespace LegionRuntime {
         // to date with the current versions of those fields
         // (assuming we are not write discard)
         if (!IS_WRITE_ONLY(info->req) && !!needed_fields) 
-          issue_update_copies(state, info, new_view, needed_fields);
+        {
+          PhysicalState &state = 
+            acquire_physical_state(info->ctx, false/*exclusive*/);
+          std::map<InstanceView*,FieldMask> valid_views;
+          find_valid_instance_views(state, needed_fields, needed_fields, 
+                                    false/*needs space*/, valid_views);
+          release_physical_state(state);
+          issue_update_copies(info, new_view, needed_fields, valid_views);
+        }
 
         // If we mapped the region close up any partitions
         // below that might have valid data that we need for
         // this instance.  We only need to do this for 
         // non-read-only tasks, since the read-only close
         // operations happened during the pre-mapping step.
+        PhysicalState &state = 
+          acquire_physical_state(info->ctx, true/*exclusive*/);
         if (!IS_READ_ONLY(info->req))
         {
           if (IS_WRITE_ONLY(info->req))
@@ -9361,12 +9524,11 @@ namespace LegionRuntime {
           update_valid_views(state, user.field_mask,
                              false/*dirty*/, new_view);
         }
-
-        // Flush any reductions that need to be flushed
-        flush_reductions(state, user.field_mask,
-                         info->req.redop, info);
         // Release our hold on the state
         release_physical_state(state);
+        // Flush any reductions that need to be flushed
+        flush_reductions(user.field_mask,
+                         info->req.redop, info);
         // Now add ourselves as a user of this region
         return new_view->add_user(user, info->local_proc);
       }
@@ -9378,8 +9540,10 @@ namespace LegionRuntime {
 #endif
         ReductionView *new_view = view->as_reduction_view();
         // Flush any reductions that need to be flushed
-        flush_reductions(state, user.field_mask,
+        flush_reductions(user.field_mask,
                          info->req.redop, info);
+        PhysicalState &state = 
+          acquire_physical_state(info->ctx, true/*exclusive*/);
         // If there was a needed close for this reduction then
         // it was performed as part of the premapping operation
         update_reduction_views(state, user.field_mask, new_view);
@@ -9438,24 +9602,26 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(info->ctx < physical_state_size);
 #endif
+        InstanceView *target_view = view->as_instance_view();
         PhysicalState &state = 
           acquire_physical_state(info->ctx, true/*exclusive*/);
-        InstanceView *target_view = view->as_instance_view();
         // First check to see if we are in the set of valid views, if
         // not then we need to issue updates for all of our fields
         std::map<InstanceView*,FieldMask>::const_iterator finder = 
           state.valid_views.find(target_view);
-        if (finder == state.valid_views.end())
+        if ((finder == state.valid_views.end()) || 
+            !!(user.field_mask - finder->second))
         {
-          // Need update for all fields
-          issue_update_copies(state, info, target_view, user.field_mask);
+          FieldMask update_mask = user.field_mask;
+          if (finder != state.valid_views.end())
+            update_mask -= finder->second;
+          std::map<InstanceView*,FieldMask> valid_views;
+          find_valid_instance_views(state, update_mask, update_mask,
+                                    false/*needs space*/, valid_views);
+          release_physical_state(state);
+          issue_update_copies(info, target_view, update_mask, valid_views);
+          acquire_physical_state(state, true/*exclusive*/); 
         }
-        else
-        {
-          FieldMask update_mask = user.field_mask - finder->second;
-          if (!!update_mask)
-            issue_update_copies(state, info, target_view, update_mask);
-        } 
         // Now do the close to this physical instance
         PhysicalCloser closer(info, false/*leave open*/, handle);
         closer.add_target(target_view);
@@ -9465,10 +9631,10 @@ namespace LegionRuntime {
                                  false/*allow next*/);
         // Now update the valid views
         closer.update_node_views(this, state);
-        flush_reductions(state, user.field_mask,
-                         info->req.redop, info);
         // Release our hold on the physical state
         release_physical_state(state);
+        flush_reductions(user.field_mask,
+                         info->req.redop, info);
         // Get the resulting instance reference
         InstanceRef result = target_view->add_user(user, info->local_proc);
 #ifdef DEBUG_HIGH_LEVEL

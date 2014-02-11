@@ -346,7 +346,9 @@ namespace LegionRuntime {
       void inline_child_task(TaskOp *child);
       void restart_task(void);
     public:
-      // Provide support for serializing premapping operations
+      // These methods are VERY important.  They serialize premapping
+      // operations to each individual field which considerably simplifies
+      // the needed locking protocol in the premapping traversal.
       UserEvent begin_premapping(RegionTreeID tid, const FieldMask &mask);
       void end_premapping(RegionTreeID tid, UserEvent premap_event);
     public:

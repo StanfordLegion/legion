@@ -1362,6 +1362,10 @@ namespace LegionRuntime {
     public:
       static bool dynamic_independence_tests;
 #endif 
+#ifdef LEGION_PROF
+    public:
+      static int num_profiling_nodes;
+#endif
     public:
       // The baseline time for profiling
       static const long long init_time;

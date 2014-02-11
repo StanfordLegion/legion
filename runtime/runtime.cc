@@ -3414,6 +3414,23 @@ namespace LegionRuntime {
           Memory::Kind kind = machine->get_memory_kind(*it);
           LegionProf::initialize_memory(*it, kind);
         }
+        // Now see if we should disable profiling on this node
+        if (Runtime::num_profiling_nodes == 0)
+          LegionProf::enable_profiling();
+        else if (Runtime::num_profiling_nodes > 0)
+        {
+          unsigned address_space_idx = 0;
+          for (std::set<AddressSpaceID>::const_iterator it = 
+                address_spaces.begin(); it != address_spaces.end(); it++)
+          {
+            if (address_space == (*it))
+              break;
+            address_space_idx++;
+          }
+          if (address_space_idx >= unsigned(Runtime::num_profiling_nodes))
+            LegionProf::disable_profiling();
+        }
+        // If it's less than zero, then they are all enabled by default
       }
 #endif
  
@@ -8672,6 +8689,9 @@ namespace LegionRuntime {
     /*static*/ bool Runtime::verify_disjointness = false;
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
+#ifdef LEGION_PROF
+    /*static*/ int Runtime::num_profiling_nodes = -1;
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -8715,6 +8735,9 @@ namespace LegionRuntime {
 #endif
 #ifdef DYNAMIC_TESTS
         dynamic_independence_tests = true;
+#endif
+#ifdef LEGION_PROF
+        num_profiling_nodes = -1;
 #endif
 #ifdef DEBUG_HIGH_LEVEL
         logging_region_tree_state = false;
@@ -8762,6 +8785,17 @@ namespace LegionRuntime {
             log_run(LEVEL_WARNING,"WARNING: Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
+          }
+#endif
+#ifdef LEGION_PROF
+          INT_ARG("-hl:prof", num_profiling_nodes);
+#else
+          if (!strcmp(argv[i],"-hl:prof"))
+          {
+            log_run(LEVEL_WARNING,"WARNING: Legion Prof is disabled.  The "
+                                  "-hl:prof flag will be ignored.  Recompile "
+                                  "with the -DLEGION_PROF flag to enable "
+                                  "profiling.");
           }
 #endif
         }

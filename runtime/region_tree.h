@@ -690,7 +690,10 @@ namespace LegionRuntime {
      * \struct ChildState
      * Tracks the which fields have open children
      * and then which children are open for each
-     * field.
+     * field. We also keep track of the children
+     * that are in the process of being closed
+     * to avoid races on two different operations
+     * trying to close the same child.
      */
     struct ChildState {
     public:
@@ -1187,9 +1190,10 @@ namespace LegionRuntime {
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
-                                PhysicalState &state,
                                 const FieldMask &closing_mask,
-                                bool complete);
+                                bool complete,
+                          const std::map<InstanceView*,FieldMask> &valid_views,
+                          std::map<InstanceView*,FieldMask> &update_views);
       bool siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState &state,
                                     const FieldMask &closing_mask,
@@ -1211,14 +1215,16 @@ namespace LegionRuntime {
                                       std::set<ReductionView*> &valid_views);
       void pull_valid_instance_views(PhysicalState &state,
                                      const FieldMask &mask);
-      void issue_update_copies(PhysicalState &state,
-                               MappableInfo *info,
+      // Since figuring out how to issue copies is expensive, try not
+      // to hold the physical state lock when doing them.
+      void issue_update_copies(MappableInfo *info,
                                InstanceView *target, 
-                               FieldMask copy_mask);
-      void issue_update_reductions(PhysicalState &state,
-                                   PhysicalView *target,
+                               FieldMask copy_mask,
+                      const std::map<InstanceView*,FieldMask> &valid_instances);
+      void issue_update_reductions(PhysicalView *target,
                                    const FieldMask &update_mask,
-                                   Processor local_proc);
+                                   Processor local_proc,
+                    const std::map<ReductionView*,FieldMask> &valid_reductions);
       void invalidate_instance_views(PhysicalState &state,
                                      const FieldMask &invalid_mask, bool clean);
       void invalidate_reduction_views(PhysicalState &state,
@@ -1231,7 +1237,7 @@ namespace LegionRuntime {
       void update_reduction_views(PhysicalState &state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
-      void flush_reductions(PhysicalState &state,  const FieldMask &flush_mask,
+      void flush_reductions(const FieldMask &flush_mask,
                             ReductionOpID redop, MappableInfo *info);
       // Entry
       void initialize_physical_state(ContextID ctx);

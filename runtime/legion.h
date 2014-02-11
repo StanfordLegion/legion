@@ -3231,6 +3231,14 @@ namespace LegionRuntime {
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
+       * -------------
+       *  Profiling
+       * -------------
+       * -hl:prof <int> Specify the number of nodes on which to enable
+       *              profiling information to be collected.  By default
+       *              all nodes are enabled.  Zero will disable all
+       *              profiling while each number greater than zero will
+       *              profile on that number of nodes.
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
@@ -3330,6 +3338,10 @@ namespace LegionRuntime {
        * Disable recording of profiling information.
        */
       static void disable_profiling(void);
+      /**
+       * Dump the current profiling information to file.
+       */
+      static void dump_profiling(void);
     public:
       //------------------------------------------------------------------------
       // Task Registration Operations

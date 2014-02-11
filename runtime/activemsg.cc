@@ -76,7 +76,7 @@ void deferred_free(void *ptr)
 #ifdef DEBUG_MEM_REUSE
     printf("%d: actual free of %p\n", gasnet_mynode(), oldptr);
 #endif
-    //free(oldptr);
+    free(oldptr);
   }
 }
 
@@ -191,6 +191,9 @@ public:
 	  //  sending the message
 	  char *dest_ptr = lmb_w_bases[cur_write_lmb] + cur_write_offset;
 	  cur_write_offset += hdr->payload_size;
+          // keep write offset aligned to 128B
+          if(cur_write_offset & 0x7f)
+            cur_write_offset = ((cur_write_offset >> 7) + 1) << 7;
 	  cur_write_count++;
 	  out_long_hdrs.pop();
 
@@ -622,7 +625,7 @@ protected:
   {
     LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
 
-    const size_t max_long_req = 65000; // gasnet_AMMaxLongRequest();
+    const size_t max_long_req = gasnet_AMMaxLongRequest();
 
     // Get a new message ID for this message
     // We know that all medium and long active messages use the
@@ -655,7 +658,11 @@ protected:
 
     for (int i = (chunks-1); i >= 0; i--)
     {
-      size_t size = ((i == (chunks-1)) ? (hdr->payload_size % max_long_req) : max_long_req);
+      // every chunk but the last is the max size - the last one is whatever
+      //   is left (which may also be the max size if it divided evenly)
+      size_t size = ((i < (chunks - 1)) ?
+                       max_long_req :
+                       (hdr->payload_size - (chunks - 1) * max_long_req));
       switch(hdr->num_args) {
       case 1:
         // should never get this case since we

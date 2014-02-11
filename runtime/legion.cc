@@ -2700,7 +2700,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF
-      LegionProf::profiling_enabled = true;
+      LegionProf::enable_profiling();
 #endif
     }
 
@@ -2709,7 +2709,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF
-      LegionProf::profiling_enabled = false;
+      LegionProf::disable_profiling();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void HighLevelRuntime::dump_profiling(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_PROF
+      LegionProf::dump_profiling();
 #endif
     }
 

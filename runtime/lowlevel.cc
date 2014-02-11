@@ -2717,6 +2717,17 @@ namespace LegionRuntime {
       log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
 		     args.mem.id, args.offset, datalen,
 		     args.event.id, args.event.gen);
+#ifdef DEBUG_REMOTE_WRITES
+      printf("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d\n",
+		     args.mem.id, args.offset, datalen,
+		     args.event.id, args.event.gen);
+      printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+             data,
+             ((unsigned *)(data))[0], ((unsigned *)(data))[1],
+             ((unsigned *)(data))[2], ((unsigned *)(data))[3],
+             ((unsigned *)(data))[4], ((unsigned *)(data))[5],
+             ((unsigned *)(data))[6], ((unsigned *)(data))[7]);
+#endif
 
       switch(impl->kind) {
       case Memory::Impl::MKIND_SYSMEM:

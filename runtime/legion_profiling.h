@@ -190,18 +190,21 @@ namespace LegionRuntime {
               inst.point.get_dim(), inst.point.point_data[0],
               inst.point.point_data[1], inst.point.point_data[2]);
         }
+        prof.tasks.clear();
         for (unsigned idx = 0; idx < prof.mappings.size(); idx++)
         {
           const OpInstance &inst = prof.mappings[idx];
           log_prof(LEVEL_INFO,"Prof Unique Map %u %llu %llu",
               proc.id, inst.unique_id, inst.parent_id);
         }
+        prof.mappings.clear();
         for (unsigned idx = 0; idx < prof.closes.size(); idx++)
         {
           const OpInstance &inst = prof.closes[idx];
           log_prof(LEVEL_INFO,"Prof Unique Close %u %llu %llu",
               proc.id, inst.unique_id, inst.parent_id);
         }
+        prof.closes.clear();
         for (unsigned idx = 0; idx < prof.proc_events.size(); idx++)
         {
           ProfilingEvent &event = prof.proc_events[idx]; 
@@ -211,6 +214,7 @@ namespace LegionRuntime {
           log_prof(LEVEL_INFO, "Prof Event %u %u %llu %llu", 
             proc.id, event.kind, event.unique_id, (event.time-prof.init_time));
         }
+        prof.proc_events.clear();
         for (unsigned idx = 0; idx < prof.mem_events.size(); idx++)
         {
           MemoryEvent &event = prof.mem_events[idx];
@@ -237,6 +241,7 @@ namespace LegionRuntime {
                 event.inst_id , (event.time - prof.init_time));
           }
         }
+        prof.mem_events.clear();
       }
 
       static inline void register_event(UniqueID uid, ProfKind kind)
@@ -297,6 +302,26 @@ namespace LegionRuntime {
           unsigned long long time = TimeStamp::get_current_time_in_micros();
           Processor proc = Machine::get_executing_processor();
           get_profiler(proc).add_event(MemoryEvent(inst_id, time));
+        }
+      }
+
+      static inline void enable_profiling(void)
+      {
+        profiling_enabled = true;        
+      }
+
+      static inline void disable_profiling(void)
+      {
+        profiling_enabled = false;
+      }
+
+      static inline void dump_profiling(void)
+      {
+        for (unsigned idx = 0; idx < (MAX_NUM_PROCS+1); idx++)
+        {
+          Processor proc = legion_prof_table[idx].proc;
+          if (proc.exists())
+            finalize_processor(proc);
         }
       }
 
