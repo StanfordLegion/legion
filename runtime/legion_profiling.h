@@ -113,7 +113,7 @@ namespace LegionRuntime {
         ProcessorProfiler(void)
           : proc(Processor::NO_PROC), utility(false), init_time(0) { }
         ProcessorProfiler(Processor p, bool util, Processor::Kind k) 
-          : proc(p), utility(util), kind(k),
+          : proc(p), utility(util), kind(k), dumped(0),
             init_time(TimeStamp::get_current_time_in_micros()) { }
       public:
         inline void add_event(const ProfilingEvent &event) 
@@ -126,6 +126,8 @@ namespace LegionRuntime {
                           { mappings.push_back(inst); }
         inline void add_close(const OpInstance &inst)
                           { closes.push_back(inst); }
+        inline void add_copy(const OpInstance &inst)
+                          { copies.push_back(inst); }
       private:
 	// no copy constructor or assignment
 	ProcessorProfiler(const ProcessorProfiler& copy_from) 
@@ -136,12 +138,14 @@ namespace LegionRuntime {
         Processor proc;
         bool utility;
         Processor::Kind kind;
+        int dumped;
         unsigned long long init_time;
         std::deque<ProfilingEvent> proc_events;
         std::deque<MemoryEvent> mem_events;
         std::deque<TaskInstance> tasks;
         std::deque<OpInstance> mappings;
         std::deque<OpInstance> closes;
+        std::deque<OpInstance> copies;
       };
 
       extern Logger::Category log_prof;
@@ -180,6 +184,10 @@ namespace LegionRuntime {
       static inline void finalize_processor(Processor proc)
       {
         ProcessorProfiler &prof = get_profiler(proc);
+        int perform_dump = __sync_fetch_and_add(&prof.dumped, 1);
+        // Someone else has already dumped this processor
+        if (perform_dump > 0)
+          return;
         log_prof(LEVEL_INFO,"Prof Processor %u %u %u", 
                   proc.id, prof.utility, prof.kind);
         for (unsigned idx = 0; idx < prof.tasks.size(); idx++)
@@ -205,6 +213,13 @@ namespace LegionRuntime {
               proc.id, inst.unique_id, inst.parent_id);
         }
         prof.closes.clear();
+        for (unsigned idx = 0; idx < prof.copies.size(); idx++)
+        {
+          const OpInstance &inst = prof.copies[idx];
+          log_prof(LEVEL_INFO,"Prof Unique Copy %u %llu %llu",
+              proc.id, inst.unique_id, inst.parent_id);
+        }
+        prof.copies.clear();
         for (unsigned idx = 0; idx < prof.proc_events.size(); idx++)
         {
           ProfilingEvent &event = prof.proc_events[idx]; 
@@ -279,6 +294,15 @@ namespace LegionRuntime {
         {
           Processor proc = Machine::get_executing_processor();
           get_profiler(proc).add_close(OpInstance(uid, pid));
+        }
+      }
+
+      static inline void register_copy(UniqueID uid, UniqueID pid)
+      {
+        if (profiling_enabled)
+        {
+          Processor proc = Machine::get_executing_processor();
+          get_profiler(proc).add_copy(OpInstance(uid, pid));
         }
       }
 

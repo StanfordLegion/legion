@@ -3078,6 +3078,25 @@ namespace LegionRuntime {
       void issue_execution_fence(Context ctx); 
     public:
       //------------------------------------------------------------------------
+      // Tracing Operations 
+      //------------------------------------------------------------------------
+      /**
+       * Start a new trace of legion operations. Tracing enables
+       * the runtime to memoize the dynamic logical dependence
+       * analysis for these operations.  Future executions of
+       * the trace will no longer need to perform the dynamic
+       * dependence analysis, reducing overheads and improving
+       * the parallelism available in the physical analysis.
+       * The trace ID need only be local to the enclosing context.
+       * Traces are currently not permitted to be nested.
+       */
+      void begin_trace(Context ctx, TraceID tid);
+      /**
+       * Mark the end of trace that was being performed.
+       */
+      void end_trace(Context ctx, TraceID tid);
+    public:
+      //------------------------------------------------------------------------
       // Miscellaneous Operations
       //------------------------------------------------------------------------
       /**

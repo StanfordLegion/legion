@@ -496,7 +496,7 @@ namespace LegionRuntime {
     void RegionTreeForest::perform_dependence_analysis(RegionTreeContext ctx,
                                                   Operation *op, unsigned idx,
                                                   RegionRequirement &req,
-                                                  RegionTreePath &path) 
+                                                  RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -520,7 +520,8 @@ namespace LegionRuntime {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_node(ctx.get_id(), user, path);
+      parent_node->register_logical_node(ctx.get_id(), user, 
+                                         path, op->already_traced());
       // Now check to see if we have any simultaneous restrictions
       // we need to check
       if (req.restricted)
@@ -555,8 +556,8 @@ namespace LegionRuntime {
     {
       // Register dependences for this fence on all users in the tree
       RegionNode *top_node = get_node(handle);
-      LogicalRegistrar registrar(ctx.get_id(), fence, 
-                                 FieldMask(FIELD_ALL_ONES));
+      LogicalRegistrar<true> registrar(ctx.get_id(), fence, 
+                                       FieldMask(FIELD_ALL_ONES));
       top_node->visit_node(&registrar);
     }
 
@@ -630,8 +631,8 @@ namespace LegionRuntime {
       if (delete_node->has_instance(region.get_tree_id()))
       {
         RegionNode *start_node = get_node(region);
-        LogicalRegistrar registrar(ctx.get_id(), op, 
-                                   FieldMask(FIELD_ALL_ONES));
+        LogicalRegistrar<false> registrar(ctx.get_id(), op, 
+                                          FieldMask(FIELD_ALL_ONES));
         start_node->visit_node(&registrar);
       }
     }
@@ -648,8 +649,8 @@ namespace LegionRuntime {
       if (delete_node->has_instance(region.get_tree_id()))
       {
         RegionNode *start_node = get_node(region);
-        LogicalRegistrar registrar(ctx.get_id(), op, 
-                                   delete_node->get_field_mask(to_delete));
+        LogicalRegistrar<false> registrar(ctx.get_id(), op, 
+                                        delete_node->get_field_mask(to_delete));
         start_node->visit_node(&registrar);
       }
     }
@@ -3851,11 +3852,11 @@ namespace LegionRuntime {
     bool LogicalPathRegistrar::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->register_logical_dependences(ctx, op, field_mask);
+      node->register_logical_dependences<false>(ctx, op, field_mask);
       if (!has_child)
       {
         // If we're at the bottom, fan out and do all the children
-        LogicalRegistrar registrar(ctx, op, field_mask);
+        LogicalRegistrar<false> registrar(ctx, op, field_mask);
         return node->visit_node(&registrar);
       }
       return true;
@@ -3865,11 +3866,11 @@ namespace LegionRuntime {
     bool LogicalPathRegistrar::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->register_logical_dependences(ctx, op, field_mask);
+      node->register_logical_dependences<false>(ctx, op, field_mask);
       if (!has_child)
       {
         // If we're at the bottom, fan out and do all the children
-        LogicalRegistrar registrar(ctx, op, field_mask);
+        LogicalRegistrar<false> registrar(ctx, op, field_mask);
         return node->visit_node(&registrar);
       }
       return true;
@@ -3881,15 +3882,17 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalRegistrar::LogicalRegistrar(ContextID c, Operation *o,
-                                       const FieldMask &m)
+    template<bool DOMINATE>
+    LogicalRegistrar<DOMINATE>::LogicalRegistrar(ContextID c, Operation *o,
+                                                 const FieldMask &m)
       : ctx(c), field_mask(m), op(o)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegistrar::LogicalRegistrar(const LogicalRegistrar &rhs)
+    template<bool DOMINATE>
+    LogicalRegistrar<DOMINATE>::LogicalRegistrar(const LogicalRegistrar &rhs)
       : ctx(0), field_mask(FieldMask()), op(NULL)
     //--------------------------------------------------------------------------
     {
@@ -3898,13 +3901,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegistrar::~LogicalRegistrar(void)
+    template<bool DOMINATE>
+    LogicalRegistrar<DOMINATE>::~LogicalRegistrar(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegistrar& LogicalRegistrar::operator=(const LogicalRegistrar &rhs)
+    template<bool DOMINATE>
+    LogicalRegistrar<DOMINATE>& LogicalRegistrar<DOMINATE>::operator=(
+                                                    const LogicalRegistrar &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3913,25 +3919,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_only_valid(void) const
+    template<bool DOMINATE>
+    bool LogicalRegistrar<DOMINATE>::visit_only_valid(void) const
     //--------------------------------------------------------------------------
     {
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_region(RegionNode *node)
+    template<bool DOMINATE>
+    bool LogicalRegistrar<DOMINATE>::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->register_logical_dependences(ctx, op, field_mask);
+      node->register_logical_dependences<DOMINATE>(ctx, op, field_mask);
       return true;
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalRegistrar::visit_partition(PartitionNode *node)
+    template<bool DOMINATE>
+    bool LogicalRegistrar<DOMINATE>::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->register_logical_dependences(ctx, op, field_mask);
+      node->register_logical_dependences<DOMINATE>(ctx, op, field_mask);
       return true;
     }
 
@@ -4437,46 +4446,12 @@ namespace LegionRuntime {
           {
             // Release our state
             node->release_physical_state(state);
-            RegionTreeNode *child_node = node->get_tree_child(it->target_child);
+            RegionTreeNode *child = node->get_tree_child(it->target_child);
+            RegionNode *child_node = static_cast<RegionNode*>(child);
             {
               // Make a new node for closing the child 
               PhysicalCloser child_closer(info, true/*leave open*/, 
-                                          closer.handle);
-              std::map<InstanceView*,FieldMask> valid_views;
-              std::map<InstanceView*,FieldMask> update_views;
-              {
-                PhysicalState &child_state = 
-                  child_node->acquire_physical_state(info->ctx, 
-                                                     false/*exclusive*/);
-
-                child_node->find_valid_instance_views(child_state,
-                                                      it->close_mask,
-                                                      it->close_mask,
-                                                      true/*needs space*/,
-                                                      valid_views);
-                child_node->release_physical_state(child_state);
-              }
-              // See if we can make the targets
-              if (child_node->select_close_targets(child_closer, 
-                                                    it->close_mask,
-                                                    false/*complete*/,
-                                                    valid_views,
-                                                    update_views))
-              {
-                // Issue the update copies, then remove valid references
-                for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-                      update_views.begin(); it != update_views.end(); it++)
-                {
-                  child_node->issue_update_copies(info, it->first,
-                                                  it->second, valid_views);
-                }
-              }
-              else
-              {
-                // Couldn't make the targets so we failed
-                // Remove valid references and return
-                return false;
-              }
+                                          child_node->handle);
               // Acquire the child's state
               PhysicalState &child_state = 
                 child_node->acquire_physical_state(info->ctx, true/*exclusive*/);
@@ -5264,8 +5239,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     LogicalDepAnalyzer::LogicalDepAnalyzer(const LogicalUser &u,
                                            const FieldMask &check_mask,
-                                           bool validates)
-      : user(u), validates_regions(validates), dominator_mask(check_mask)
+                                           bool validates, bool trace)
+      : user(u), validates_regions(validates), 
+        tracing(trace), dominator_mask(check_mask)
     //--------------------------------------------------------------------------
     {
     }
@@ -5359,6 +5335,9 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+      // When tracing we don't do timeouts because it is unsound
+      if (tracing)
+        return true;
       // See if the timeout has expired
       if (prev_user.timeout <= 0)
       {
@@ -5384,14 +5363,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalOpAnalyzer::LogicalOpAnalyzer(Operation *o)
+    template<bool DOMINATE>
+    LogicalOpAnalyzer<DOMINATE>::LogicalOpAnalyzer(Operation *o)
       : op(o)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalOpAnalyzer::analyze(LogicalUser &prev_user)
+    template<bool DOMINATE>
+    bool LogicalOpAnalyzer<DOMINATE>::analyze(LogicalUser &prev_user)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
@@ -5412,6 +5393,8 @@ namespace LegionRuntime {
         // Prune it from the list
         return false;
       }
+      else if (DOMINATE)
+        return false;
       // Check to see if the timeout has expired
       if (prev_user.timeout <= 0)
       {
@@ -6457,7 +6440,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_node(ContextID ctx,
                                                const LogicalUser &user,
-                                               RegionTreePath &path)
+                                               RegionTreePath &path,
+                                               const bool already_traced)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6470,33 +6454,37 @@ namespace LegionRuntime {
       record_field_versions(state,path,user.field_mask,depth,true/*before*/);
       if (!path.has_child(depth))
       {
-        // We've arrived at our destination node
-        FieldMask dominator_mask = perform_dependence_checks(user,
+        // Don't need to do these things if we've already traced
+        if (!already_traced)
+        {
+          // We've arrived at our destination node
+          FieldMask dominator_mask = perform_dependence_checks(user,
                     state.curr_epoch_users, user.field_mask, true/*validates*/);
-        FieldMask non_dominated_mask = user.field_mask - dominator_mask;
-        // For the fields that weren't dominated, we have to check
-        // those fields against the previous epoch's users
-        if (!!non_dominated_mask)
-        {
-          perform_dependence_checks(user,state.prev_epoch_users,
-                                    non_dominated_mask, true/*validates*/);
-        }
-        // Update the dominated fields
-        if (!!dominator_mask)
-        {
-          // Dominator mask is not empty
-          // Mask off all the dominated fields from the previous set
-          // of epoch users and remove any previous epoch users
-          // that were totally dominated
-          filter_prev_epoch_users(state, dominator_mask); 
-          // Mask off all dominated fields from current epoch users and move
-          // them to prev epoch users.  If all fields masked off, then remove
-          // them from the list of current epoch users.
-          filter_curr_epoch_users(state, dominator_mask); 
-          // Finally remove any close operations which have now been dominated
-          filter_close_operations(state, dominator_mask); 
-          // Update the version IDs of any fields which we dominated
-          advance_field_versions(state, dominator_mask); 
+          FieldMask non_dominated_mask = user.field_mask - dominator_mask;
+          // For the fields that weren't dominated, we have to check
+          // those fields against the previous epoch's users
+          if (!!non_dominated_mask)
+          {
+            perform_dependence_checks(user,state.prev_epoch_users,
+                                      non_dominated_mask, true/*validates*/);
+          }
+          // Update the dominated fields
+          if (!!dominator_mask)
+          {
+            // Dominator mask is not empty
+            // Mask off all the dominated fields from the previous set
+            // of epoch users and remove any previous epoch users
+            // that were totally dominated
+            filter_prev_epoch_users(state, dominator_mask); 
+            // Mask off all dominated fields from current epoch users and move
+            // them to prev epoch users.  If all fields masked off, then remove
+            // them from the list of current epoch users.
+            filter_curr_epoch_users(state, dominator_mask); 
+            // Finally remove any close operations which have now been dominated
+            filter_close_operations(state, dominator_mask); 
+            // Update the version IDs of any fields which we dominated
+            advance_field_versions(state, dominator_mask); 
+          }
         }
         // Now close up any children which we may have dependences on below
         LogicalCloser closer(ctx, user, true/*validates*/);
@@ -6529,23 +6517,31 @@ namespace LegionRuntime {
           update_close_operations(state, closer.close_operations);
         // Record any close operations that need to be done
         record_close_operations(state, path, user.field_mask, depth); 
-        // Record a mapping reference on this operation
-        user.op->add_mapping_reference(user.gen);
+        // No need to do this if we've already traced
+        if (!already_traced)
+        {
+          // Record a mapping reference on this operation
+          user.op->add_mapping_reference(user.gen);
 #ifndef LOGICAL_FIELD_TREE
-        // Add ourselves to the current epoch
-        state.curr_epoch_users.push_back(user);
+          // Add ourselves to the current epoch
+          state.curr_epoch_users.push_back(user);
 #else
-        state.curr_epoch_users->insert(user);
+          state.curr_epoch_users->insert(user);
 #endif
+        }
       }
       else
       {
-        // First perform dependence checks on the current and 
-        // previous epoch users since we're still traversing
-        perform_dependence_checks(user, state.curr_epoch_users, 
-                                  user.field_mask, false/*validates*/);
-        perform_dependence_checks(user, state.prev_epoch_users,
-                                  user.field_mask, false/*validates*/);
+        // No need to do this if we've already traced
+        if (!already_traced)
+        {
+          // First perform dependence checks on the current and 
+          // previous epoch users since we're still traversing
+          perform_dependence_checks(user, state.curr_epoch_users, 
+                                    user.field_mask, false/*validates*/);
+          perform_dependence_checks(user, state.prev_epoch_users,
+                                    user.field_mask, false/*validates*/);
+        }
         // Otherwise see what we have to close up and
         // then continue the traversal
         // Close up any children that are open which we
@@ -6592,9 +6588,9 @@ namespace LegionRuntime {
         
         RegionTreeNode *child = get_tree_child(next_child);
         if (open_only)
-          child->open_logical_node(ctx, user, path);
+          child->open_logical_node(ctx, user, path, already_traced);
         else
-          child->register_logical_node(ctx, user, path);
+          child->register_logical_node(ctx, user, path, already_traced);
       }
       record_field_versions(state,path,user.field_mask,depth,false/*before*/);
     }
@@ -6602,7 +6598,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::open_logical_node(ContextID ctx,
                                              const LogicalUser &user,
-                                             RegionTreePath &path)
+                                             RegionTreePath &path,
+                                             const bool already_traced)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6615,15 +6612,19 @@ namespace LegionRuntime {
       record_field_versions(state,path,user.field_mask,depth,true/*before*/);
       if (!path.has_child(depth))
       {
-        // We've arrived where we're going,
-        // add ourselves as a user
-        // Record a mapping reference on this operation
-        user.op->add_mapping_reference(user.gen);
+        // No need to record ourselves if we've already traced
+        if (!already_traced)
+        {
+          // We've arrived where we're going,
+          // add ourselves as a user
+          // Record a mapping reference on this operation
+          user.op->add_mapping_reference(user.gen);
 #ifndef LOGICAL_FIELD_TREE
-        state.curr_epoch_users.push_back(user);
+          state.curr_epoch_users.push_back(user);
 #else
-        state.curr_epoch_users->insert(user);
+          state.curr_epoch_users->insert(user);
 #endif
+        }
       }
       else
       {
@@ -6636,7 +6637,7 @@ namespace LegionRuntime {
 #endif
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
-        child_node->open_logical_node(ctx, user, path);
+        child_node->open_logical_node(ctx, user, path, already_traced);
       }
       record_field_versions(state,path,user.field_mask,depth,false/*before*/);
     }
@@ -7477,6 +7478,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<bool DOMINATE>
     void RegionTreeNode::register_logical_dependences(ContextID ctx, 
                                     Operation *op, const FieldMask &field_mask)
     //--------------------------------------------------------------------------
@@ -7512,9 +7514,13 @@ namespace LegionRuntime {
             // Prune it from the list
             it = state.curr_epoch_users.erase(it);
           }
+          else if (DOMINATE)
+            it = state.curr_epoch_users.erase(it);
           else
             it++;
         }
+        else if (DOMINATE)
+          it = state.curr_epoch_users.erase(it);
         else
           it++;
       }
@@ -7544,16 +7550,22 @@ namespace LegionRuntime {
             // Prune it from the list
             it = state.prev_epoch_users.erase(it);
           }
+          else if (DOMINATE)
+            it = state.prev_epoch_users.erase(it);
           else
             it++;
         }
+        else if (DOMINATE)
+          it = state.prev_epoch_users.erase(it);
         else
           it++;
       }
 #else
-      LogicalOpAnalyzer analyzer(op);
-      state.curr_epoch_users->analyze<LogicalOpAnalyzer>(field_mask, analyzer);
-      state.prev_epoch_users->analyze<LogicalOpAnalyzer>(field_mask, analyzer);
+      LogicalOpAnalyzer<DOMINATE> analyzer(op);
+      state.curr_epoch_users->analyze<LogicalOpAnalyzer<DOMINATE> >(
+                                                          field_mask, analyzer);
+      state.prev_epoch_users->analyze<LogicalOpAnalyzer<DOMINATE> >(
+                                                          field_mask, analyzer);
 #endif
     }
 
@@ -7931,37 +7943,41 @@ namespace LegionRuntime {
       assert(state.node == this);
 #endif
       // See if we can find the child
-      std::map<Color,FieldMask>::iterator it = 
+      std::map<Color,FieldMask>::iterator finder = 
         state.children.open_children.find(target_child);
-      if (it == state.children.open_children.end())
+      if (finder == state.children.open_children.end())
         return true;
       // Check field disjointness
-      if (it->second * closing_mask)
+      if (finder->second * closing_mask)
         return true;
       // Check for child disjointness
       if ((next_child >= 0) && 
-          are_children_disjoint(it->first, unsigned(next_child)))
+          are_children_disjoint(finder->first, unsigned(next_child)))
         return true;
       // Check for same child
-      if (allow_next && (next_child >= 0) && (next_child == int(it->first)))
+      if (allow_next && (next_child >= 0) && (next_child == int(finder->first)))
         return true;
-      FieldMask close_mask = it->second & closing_mask;
+      FieldMask close_mask = finder->second & closing_mask;
       // First check to see if the closer needs to make physical
       // instance targets in order to perform the close operation
+      std::map<InstanceView*,FieldMask> space_views;
       std::map<InstanceView*,FieldMask> valid_views;
       std::map<InstanceView*,FieldMask> update_views;
       if (closer.needs_targets())
       {
-        find_valid_instance_views(state, closing_mask, closing_mask,
-                                  true/*needs space*/, valid_views);
         // Have the closer make targets and return false indicating
         // we could not successfully perform the close operation
-        // if he fails to make them.
+        // if he fails to make them. When making close targets pick
+        // them for the full traversal mask so that other close
+        // operations can reuse the same physical instances.
+        find_valid_instance_views(state, closer.info->traversal_mask, 
+                                  closer.info->traversal_mask,
+                                  true/*needs space*/, space_views);
         const bool complete = 
-          (state.complete_children.find(it->first) !=
+          (state.complete_children.find(finder->first) !=
            state.complete_children.end());
-        if (!select_close_targets(closer, closing_mask, 
-                                  complete, valid_views, update_views))
+        if (!select_close_targets(closer, closer.info->traversal_mask, 
+                                  complete, space_views, update_views))
         {
           // Release any valid references that we have
           for (std::map<InstanceView*,FieldMask>::const_iterator it = 
@@ -7971,18 +7987,27 @@ namespace LegionRuntime {
           }
           return false;
         }
+        else
+        {
+          // We succeeded, so get the set of valid views
+          // for issuing update copies
+          find_valid_instance_views(state, closer.info->traversal_mask,
+                                    closer.info->traversal_mask,
+                                    false/*needs space*/, valid_views);
+        }
       }
+      // Need to get this value before the iterator is invalidated
+      RegionTreeNode *child_node = get_tree_child(finder->first);
       // Now we need to actually close up this child
       // Mark that when we are done we will have successfully
       // closed up this child.  Do this now before we
       // release the lock and someone invalidates our iterator
       if (!closer.permit_leave_open)
       {
-        it->second -= close_mask;
-        if (!it->second)
-          state.children.open_children.erase(it);
+        finder->second -= close_mask;
+        if (!finder->second)
+          state.children.open_children.erase(finder);
       }
-
       // Release our lock on the current state before going down
       bool was_exclusive = release_physical_state(state);
       if (closer.needs_targets())
@@ -7999,7 +8024,7 @@ namespace LegionRuntime {
         valid_views.clear();
       }
       // Now we're ready to perform the close operation
-      RegionTreeNode *child_node = get_tree_child(it->first);
+      
       closer.close_tree_node(child_node, close_mask);
       // Reacquire our lock on the state upon returning
       acquire_physical_state(state, was_exclusive);
@@ -8452,6 +8477,7 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
+      assert(!(valid_mask - new_view->manager->allocated_fields));
 #endif
       // Add our reference first in case the new view is also currently in
       // the list of valid views.  We don't want it to be prematurely deleted
@@ -8519,6 +8545,10 @@ namespace LegionRuntime {
           // need to check for the deletion condition
           (*it)->remove_valid_reference();
         }
+#ifdef DEBUG_HIGH_LEVEL
+        finder = state.valid_views.find(*it);
+        assert(!(finder->second - (*it)->manager->allocated_fields));
+#endif
       }
     }
 
@@ -8958,6 +8988,7 @@ namespace LegionRuntime {
       // at the end when computing the final dominator mask.
       FieldMask observed_mask;
       FieldMask user_check_mask = user.field_mask & check_mask;
+      const bool tracing = user.op->is_tracing();
       for (std::list<LogicalUser>::iterator it = prev_users.begin();
             it != prev_users.end(); /*nothing*/)
       {
@@ -9050,35 +9081,42 @@ namespace LegionRuntime {
           }
         }
         // If we didn't register any kind of dependence, check
-        // to see if the timeout has expired.
-        if (it->timeout <= 0)
+        // to see if the timeout has expired.  Note that it is
+        // unsound to do this if we are tracing so don't perform
+        // the check in that case.
+        if (!tracing)
         {
-          // Timeout has expired.  Check whether the operation
-          // has committed. If it has prune it from the list.
-          // Otherwise reset its timeout and continue.
-          if (it->op->is_operation_committed(it->gen))
+          if (it->timeout <= 0)
           {
+            // Timeout has expired.  Check whether the operation
+            // has committed. If it has prune it from the list.
+            // Otherwise reset its timeout and continue.
+            if (it->op->is_operation_committed(it->gen))
+            {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
-            it = prev_users.erase(it);
+              it = prev_users.erase(it);
 #else
-            // Can't prune things early for these cases
-            it->timeout = LogicalUser::TIMEOUT;
-            it++;
+              // Can't prune things early for these cases
+              it->timeout = LogicalUser::TIMEOUT;
+              it++;
 #endif
+            }
+            else
+            {
+              // Operation hasn't committed, reset timeout
+              it->timeout = LogicalUser::TIMEOUT;
+              it++;
+            }
           }
           else
           {
-            // Operation hasn't committed, reset timeout
-            it->timeout = LogicalUser::TIMEOUT;
+            // Timeout hasn't expired, decrement it and continue
+            it->timeout--;
             it++;
           }
         }
         else
-        {
-          // Timeout hasn't expired, decrement it and continue
-          it->timeout--;
-          it++;
-        }
+          it++; // Tracing so no timeouts
       }
       // The result of this computation is the dominator mask.
       // It's only sound to say that we dominate fields that
@@ -9096,7 +9134,8 @@ namespace LegionRuntime {
       FieldMask user_check_mask = user.field_mask & check_mask;
       if (!user_check_mask)
         return user_check_mask;
-      LogicalDepAnalyzer analyzer(user, check_mask, validates_regions);
+      LogicalDepAnalyzer analyzer(user, check_mask, 
+                                  validates_regions, user.op->tracing());
       users->analyze<LogicalDepAnalyzer>(user_check_mask, analyzer);
       return analyzer.get_dominator_mask();
     }
@@ -11796,7 +11835,11 @@ namespace LegionRuntime {
         if (epoch_event.exists())
           term_event = Event::merge_events(term_event, epoch_event);
       }
+#ifdef SPECIALIZED_UTIL_PROCS
       Processor util_proc = context->runtime->get_gc_proc(p);
+#else
+      Processor util_proc = p.get_utility_processor();
+#endif
       // Now launch the task on the runtime's utility processor
       util_proc.spawn(DEFERRED_COLLECT_ID,
                       rez.get_buffer(), rez.get_used_bytes(), term_event);
@@ -12415,7 +12458,8 @@ namespace LegionRuntime {
           case SIMULTANEOUS_DEPENDENCE:
             {
               // No actual dependence
-              non_dominated |= overlap;
+              if (!ABOVE)
+                non_dominated |= overlap;
               it++;
               continue;
             }
@@ -12444,8 +12488,12 @@ namespace LegionRuntime {
             assert(false); // should never get here
         }
       }
-      // It's only safe to dominate fields we 
+      // It's only safe to dominate fields we observed 
       FieldMask dominated = (observed & (user.field_mask - non_dominated));
+      // Update the non-dominated mask with what we
+      // we're actually not-dominated by 
+      if (!ABOVE)
+        non_dominated = user.field_mask - dominated;
       // Filter any dominated users
       if (!ABOVE && !!dominated)
       {
@@ -12479,7 +12527,9 @@ namespace LegionRuntime {
                                                     unsigned(it->child)))
               continue;
           }
-          if (it->field_mask * non_dominated)
+          if (!ABOVE && (it->field_mask * non_dominated))
+            continue;
+          if (ABOVE && (it->field_mask * user.field_mask))
             continue;
           // Now we need to do an actual dependence analysis
           DependenceType dt = check_dependence_type(it->usage, user.usage);
@@ -12509,6 +12559,7 @@ namespace LegionRuntime {
       // Add ourselves to the list of current users
       curr_epoch_users.push_back(user);
       // See if we need to compress the lists
+#ifndef LEGION_SPY
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
@@ -12516,6 +12567,7 @@ namespace LegionRuntime {
         if (curr_epoch_users.size() >= Runtime::max_filter_size)
           condense_user_list(curr_epoch_users);
       }
+#endif
 #else
       // First do the analysis on the current epcoh users and filter
       // out any that can be sent back to the previous epoch users
@@ -12525,6 +12577,8 @@ namespace LegionRuntime {
       FieldMask non_dominated = curr_analyzer.get_non_dominated_mask();
       FieldMask dominated = ((user.field_mask - non_dominated) &
                               curr_analyzer.get_observed_mask());
+      if (!ABOVE)
+        non_dominated = user.field_mask - dominated;
       // Filter any dominated users from the previous users
       if (!ABOVE && !!dominated)
       {
@@ -12535,8 +12589,8 @@ namespace LegionRuntime {
       // on the previous epoch users for the non-dominated fields
       if (ABOVE || !!non_dominated)
       {
-        PhysicalDepAnalyzer<false> prev_analyzer(user, non_dominated,
-                                                 logical_node, wait_on);
+        PhysicalDepAnalyzer<false> prev_analyzer(user, 
+          (ABOVE ? user.field_mask : non_dominated), logical_node, wait_on);
         prev_epoch_users->analyze(non_dominated, prev_analyzer);
       }
       // Now we can add the filtered users into the previous users

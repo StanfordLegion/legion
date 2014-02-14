@@ -4193,8 +4193,11 @@ namespace LegionRuntime {
             p.id = idx + 1;
             procs.insert(p);
             // Figure out which utility processor this guy gets
-            //unsigned utility_idx = idx % num_utility_cpus;
+#ifdef SPECIALIZED_UTIL_PROCS
             unsigned utility_idx = 0;
+#else
+            unsigned utility_idx = idx % num_utility_cpus;
+#endif
 #ifdef DEBUG_LOW_LEVEL
             assert(utility_idx < num_utility_cpus);
 #endif

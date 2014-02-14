@@ -39,6 +39,8 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <list>
 #include <map>
 
+// Comment this out to disable shared task queue
+
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -54,8 +56,6 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
     exit(1); \
   } \
 } while(0)
-
-// this is an implementation of the low level region runtime on top of GASnet+pthreads+CUDA
 
 // GASnet helper stuff
 
@@ -521,10 +521,20 @@ namespace LegionRuntime {
       pthread_t thread;
     };
 
+#define SHARED_UTILITY_QUEUE
+#ifdef SHARED_UTILITY_QUEUE
+    class UtilityQueue;
+#endif
+
     class UtilityProcessor : public Processor::Impl {
     public:
-      UtilityProcessor(Processor _me, int core_id = -1, 
+      UtilityProcessor(Processor _me, 
+#ifdef SHARED_UTILITY_QUEUE
+                       UtilityQueue *_shared_queue,
+#endif
+                       int core_id = -1, 
                        int _num_worker_threads = 1);
+
       virtual ~UtilityProcessor(void);
 
       void start_worker_threads(size_t stack_size);
@@ -541,6 +551,10 @@ namespace LegionRuntime {
       void disable_idle_task(Processor::Impl *proc);
 
       void wait_for_shutdown(void);
+
+#ifdef SHARED_UTILITY_QUEUE
+      void shared_tasks_available(void);
+#endif
 
       class UtilityThread;
       class UtilityTask;
@@ -560,6 +574,10 @@ namespace LegionRuntime {
 
       UtilityTask *idle_task;
 
+#ifdef SHARED_UTILITY_QUEUE
+      UtilityQueue *shared_queue;
+#endif
+
       std::set<UtilityThread *> threads;
       std::list<UtilityTask *> tasks;
       std::set<Processor::Impl *> idle_procs;
@@ -570,7 +588,8 @@ namespace LegionRuntime {
     public:
       enum MemoryKind {
 	MKIND_SYSMEM,  // directly accessible from CPU
-	MKIND_GASNET,  // accessible via GASnet RDMA
+	MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
+	MKIND_RDMA,    // remote, but accessible via RDMA
 	MKIND_REMOTE,  // not accessible
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access

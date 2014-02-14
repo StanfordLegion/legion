@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
+#include "legion_trace.h"
 #include "legion_utilities.h"
 #include "region_tree.h"
 #include "default_mapper.h"
@@ -2137,6 +2138,11 @@ namespace LegionRuntime {
       // the utility processor
       for (unsigned idx = 0; idx < ops.size(); idx++)
       {
+        TriggerOpArgs args;
+        args.op = ops[idx];
+        args.manager = this;
+        utility_proc.spawn(TRIGGER_OP_ID, &args, sizeof(args));
+#if 0
         bool mapped = ops[idx]->trigger_execution();
         if (!mapped)
         {
@@ -2145,6 +2151,7 @@ namespace LegionRuntime {
           AutoLock q_lock(queue_lock);
           local_ready_queue.push_front(ops[idx]);
         }
+#endif
       }
       return remaining_ops;
     }
@@ -2259,9 +2266,16 @@ namespace LegionRuntime {
             // itself back on the list of tasks to map.
             if (defer)
               continue;
+            TriggerTaskArgs args;
+            args.op = *vis_it;
+            args.manager = this;
+            utility_proc.spawn(TRIGGER_TASK_ID, &args, sizeof(args));
+            continue;
+#if 0
             bool executed = (*vis_it)->trigger_execution();
             if (executed)
               continue;
+#endif
           }
           // Otherwise if we make it here, then we didn't map it and we
           // didn't send it so put it back on the ready queue
@@ -3349,7 +3363,9 @@ namespace LegionRuntime {
       : high_level(new HighLevelRuntime(this)), machine(m), 
         address_space(unique), runtime_stride(address_spaces.size()),
         forest(new RegionTreeForest(this)),
+#ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
+#endif
         local_procs(locals), proc_spaces(processor_spaces),
         memory_manager_lock(Reservation::create_reservation()),
         unique_partition_id((unique == 0) ? runtime_stride : unique), 
@@ -3380,7 +3396,9 @@ namespace LegionRuntime {
         and_pred_op_lock(Reservation::create_reservation()),
         or_pred_op_lock(Reservation::create_reservation()),
         acquire_op_lock(Reservation::create_reservation()),
-        release_op_lock(Reservation::create_reservation())
+        release_op_lock(Reservation::create_reservation()),
+        capture_op_lock(Reservation::create_reservation()),
+        trace_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run(LEVEL_DEBUG,"Initializing high-level runtime in address space %x",
@@ -3507,9 +3525,11 @@ namespace LegionRuntime {
     Runtime::Runtime(const Runtime &rhs)
       : high_level(NULL), machine(NULL), address_space(0), 
         runtime_stride(0), forest(NULL),
-        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces),
-        cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
+        local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
+#ifdef SPECIALIZE_UTIL_PROCS
+        , cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
         message_proc(Processor::NO_PROC)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3736,6 +3756,24 @@ namespace LegionRuntime {
       available_release_ops.clear();
       release_op_lock.destroy_reservation();
       release_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<TraceCaptureOp*>::const_iterator it = 
+            available_capture_ops.begin(); it !=
+            available_capture_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_capture_ops.clear();
+      capture_op_lock.destroy_reservation();
+      capture_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<TraceCompleteOp*>::const_iterator it = 
+            available_trace_ops.begin(); it !=
+            available_trace_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_trace_ops.clear();
+      trace_op_lock.destroy_reservation();
+      trace_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -5999,6 +6037,46 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::begin_trace(Context ctx, TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Beginning a trace in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal Legion begin trace call in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      // Mark that we are starting a trace
+      ctx->begin_trace(tid); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_trace(Context ctx, TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Ending a trace in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal Legion end trace call in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      // Mark that we are done with the trace
+      ctx->end_trace(tid); 
+    }
+
+    //--------------------------------------------------------------------------
     Mapper* Runtime::get_mapper(Context ctx, MapperID id)
     //--------------------------------------------------------------------------
     {
@@ -7200,6 +7278,7 @@ namespace LegionRuntime {
       Future::Impl::handle_future_result(derez, this);
     }
 
+#ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
     Processor Runtime::get_cleanup_proc(Processor p) const
     //--------------------------------------------------------------------------
@@ -7226,6 +7305,7 @@ namespace LegionRuntime {
         return message_proc;
       return p;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::process_schedule_request(Processor proc)
@@ -8195,6 +8275,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    TraceCaptureOp* Runtime::get_available_capture_op(void)
+    //--------------------------------------------------------------------------
+    {
+      TraceCaptureOp *result = NULL;
+      {
+        AutoLock c_lock(capture_op_lock);
+        if (!available_capture_ops.empty())
+        {
+          result = available_capture_ops.front();
+          available_capture_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = new TraceCaptureOp(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TraceCompleteOp* Runtime::get_available_trace_op(void)
+    //--------------------------------------------------------------------------
+    {
+      TraceCompleteOp *result = NULL;
+      {
+        AutoLock t_lock(trace_op_lock);
+        if (!available_trace_ops.empty())
+        {
+          result = available_trace_ops.front();
+          available_trace_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = new TraceCompleteOp(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -8351,6 +8475,22 @@ namespace LegionRuntime {
     {
       AutoLock r_lock(release_op_lock);
       available_release_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_capture_op(TraceCaptureOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(capture_op_lock);
+      available_capture_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_trace_op(TraceCompleteOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_op_lock);
+      available_trace_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -9273,6 +9413,8 @@ namespace LegionRuntime {
       table[DEFERRED_COMPLETE_ID] = Runtime::deferred_complete_task;
       table[RECLAIM_LOCAL_FID]    = Runtime::reclaim_local_field_task;
       table[DEFERRED_COLLECT_ID]  = Runtime::deferred_collect_task;
+      table[TRIGGER_OP_ID]        = Runtime::trigger_op_task;
+      table[TRIGGER_TASK_ID]      = Runtime::trigger_task_task;
       table[LEGION_LOGGING_ID]    = Runtime::legion_logging_task;
     }
 
@@ -9340,6 +9482,7 @@ namespace LegionRuntime {
 #endif
     }
 
+#ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::get_utility_processor_mapping(
                 const std::set<Processor> &util_procs, Processor &cleanup_proc,
@@ -9400,6 +9543,7 @@ namespace LegionRuntime {
           }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::initialize_runtime(
@@ -9526,10 +9670,14 @@ namespace LegionRuntime {
 #endif
           exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
         }
-        Processor cleanup_proc, gc_proc, message_proc;
+        Processor cleanup_proc = Processor::NO_PROC;
+        Processor gc_proc = Processor::NO_PROC;
+        Processor message_proc = Processor::NO_PROC;
+#ifdef SPECIALIZED_UTIL_PROCS
         Runtime::get_utility_processor_mapping(local_util_procs,
                                                cleanup_proc, gc_proc,
                                                message_proc);
+#endif
         // Set up the runtime mask for this instance
         Runtime *local_rt = new Runtime(machine, local_space_id, local_procs,
                                         address_spaces, proc_spaces,
@@ -9654,6 +9802,38 @@ namespace LegionRuntime {
     {
       Deserializer derez(args, arglen);
       PhysicalView::handle_deferred_collect(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::trigger_op_task(
+                                  const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      const ProcessorManager::TriggerOpArgs *trigger_args = 
+                                  (const ProcessorManager::TriggerOpArgs*)args;
+      Operation *op = trigger_args->op;
+      bool mapped = op->trigger_execution();
+      if (!mapped)
+      {
+        ProcessorManager *manager = trigger_args->manager;
+        manager->add_to_local_ready_queue(op, true/*failure*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::trigger_task_task(
+                                  const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      const ProcessorManager::TriggerTaskArgs *trigger_args = 
+                                (const ProcessorManager::TriggerTaskArgs*)args;
+      TaskOp *op = trigger_args->op; 
+      bool mapped = op->trigger_execution();
+      if (!mapped)
+      {
+        ProcessorManager *manager = trigger_args->manager;
+        manager->add_to_ready_queue(op, true/*failure*/);
+      }
     }
 
     //--------------------------------------------------------------------------

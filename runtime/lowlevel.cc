@@ -453,7 +453,7 @@ namespace LegionRuntime {
 
     /*static*/ Runtime *Runtime::runtime = 0;
 
-    static const unsigned MAX_LOCAL_EVENTS = 200000;
+    static const unsigned MAX_LOCAL_EVENTS = 300000;
     static const unsigned MAX_LOCAL_LOCKS = 100000;
 
     Node::Node(void)
@@ -1500,24 +1500,26 @@ namespace LegionRuntime {
 	Event event;
 	Barrier::timestamp_t timestamp;
 	int delta;
+        Event wait_on;
       };
 
       static void handle_request(RequestArgs args)
       {
-	args.event.impl()->adjust_arrival(args.event.gen, args.delta, args.timestamp);
+	args.event.impl()->adjust_arrival(args.event.gen, args.delta, args.timestamp, args.wait_on);
       }
 
       typedef ActiveMessageShortNoReply<BARRIER_ADJUST_MSGID,
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Event event, int delta, Barrier::timestamp_t timestamp)
+      static void send_request(gasnet_node_t target, Event event, int delta, Barrier::timestamp_t timestamp, Event wait_on)
       {
 	RequestArgs args;
 	
 	args.event = event;
 	args.timestamp = timestamp;
 	args.delta = delta;
+        args.wait_on = wait_on;
 
 	Message::request(target, args);
       }
@@ -1617,7 +1619,19 @@ namespace LegionRuntime {
     {
       if(!wait_on.has_triggered()) {
 	// deferred arrival
-	// TODO: forward the deferred arrival to the owning node if it's remote
+#ifndef DEFER_ARRIVALS_LOCALLY
+        if(owner != gasnet_mynode()) {
+	  // let deferral happen on owner node (saves latency if wait_on event
+          //   gets triggered there)
+          Event e;
+          e.id = me.id;
+          e.gen = barrier_gen;
+          //printf("sending deferred arrival to %d for %x/%d (%x/%d)\n",
+          //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
+	  BarrierAdjustMessage::send_request(owner, e, delta, timestamp, wait_on);
+	  return;
+        }
+#endif
 	Barrier b;
 	b.id = me.id;
 	b.gen = barrier_gen;
@@ -1636,7 +1650,7 @@ namespace LegionRuntime {
         Event e;
         e.id = me.id;
         e.gen = barrier_gen;
-	BarrierAdjustMessage::send_request(owner, e, delta, timestamp);
+	BarrierAdjustMessage::send_request(owner, e, delta, timestamp, Event::NO_EVENT);
 	return;
       }
 
@@ -2619,24 +2633,37 @@ namespace LegionRuntime {
     public:
       static const size_t ALIGNMENT = 256;
 
-      LocalCPUMemory(Memory _me, size_t _size) 
+      LocalCPUMemory(Memory _me, size_t _size,
+		     void *prealloc_base = 0, bool _registered = false) 
 	: Memory::Impl(_me, _size, MKIND_SYSMEM, ALIGNMENT, Memory::SYSTEM_MEM)
       {
-        // enforce alignment on the whole memory range
-	base_orig = new char[_size + ALIGNMENT - 1];
-        size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
-        if(ofs > 0) {
-          base = base_orig + (ALIGNMENT - ofs);
-        } else {
-          base = base_orig;
-        }
-	log_copy.debug("CPU memory at %p, size = %zd", base, _size);
+	if(prealloc_base) {
+	  base = (char *)prealloc_base;
+	  prealloced = true;
+	  registered = _registered;
+	} else {
+	  // allocate our own space
+	  // enforce alignment on the whole memory range
+	  base_orig = new char[_size + ALIGNMENT - 1];
+	  size_t ofs = reinterpret_cast<size_t>(base_orig) % ALIGNMENT;
+	  if(ofs > 0) {
+	    base = base_orig + (ALIGNMENT - ofs);
+	  } else {
+	    base = base_orig;
+	  }
+	  prealloced = false;
+	  assert(!_registered);
+	  registered = false;
+	}
+	log_copy.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
+		       prealloced ? " (prealloced)" : "", registered ? " (registered)" : "");
 	free_blocks[0] = _size;
       }
 
       virtual ~LocalCPUMemory(void)
       {
-	delete[] base_orig;
+	if(!prealloced)
+	  delete[] base_orig;
       }
 
 #ifdef USE_GPU
@@ -2701,98 +2728,13 @@ namespace LegionRuntime {
 
     public: //protected:
       char *base, *base_orig;
+      bool prealloced, registered;
     };
-
-    struct RemoteWriteArgs : public BaseMedium {
-      Memory mem;
-      off_t offset;
-      Event event;
-    };
-
-    void handle_remote_write(RemoteWriteArgs args,
-			     const void *data, size_t datalen)
-    {
-      Memory::Impl *impl = args.mem.impl();
-
-      log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
-		     args.mem.id, args.offset, datalen,
-		     args.event.id, args.event.gen);
-#ifdef DEBUG_REMOTE_WRITES
-      printf("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d\n",
-		     args.mem.id, args.offset, datalen,
-		     args.event.id, args.event.gen);
-      printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
-             data,
-             ((unsigned *)(data))[0], ((unsigned *)(data))[1],
-             ((unsigned *)(data))[2], ((unsigned *)(data))[3],
-             ((unsigned *)(data))[4], ((unsigned *)(data))[5],
-             ((unsigned *)(data))[6], ((unsigned *)(data))[7]);
-#endif
-
-      switch(impl->kind) {
-      case Memory::Impl::MKIND_SYSMEM:
-	{
-	  impl->put_bytes(args.offset, data, datalen);
-	  if(args.event.exists())
-	    args.event.impl()->trigger(args.event.gen,
-				       gasnet_mynode());
-	  break;
-	}
-
-      case Memory::Impl::MKIND_ZEROCOPY:
-      case Memory::Impl::MKIND_GPUFB:
-      default:
-	assert(0);
-      }
-    }
-
-    typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
-				       RemoteWriteArgs,
-				       handle_remote_write> RemoteWriteMessage;
-
-    void do_remote_write(Memory mem, off_t offset,
-			 const void *data, size_t datalen,
-			 Event event, bool make_copy = false)
-    {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
-		     mem.id, offset, datalen,
-		     event.id, event.gen);
-      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
-      if(datalen > MAX_SEND_SIZE) {
-	log_copy.info("breaking large send into pieces");
-	const char *pos = (const char *)data;
-	RemoteWriteArgs args;
-	args.mem = mem;
-	args.offset = offset;
-	args.event = Event::NO_EVENT;
-	while(datalen > MAX_SEND_SIZE) {
-	  RemoteWriteMessage::request(ID(mem).node(), args,
-				      pos, MAX_SEND_SIZE,
-				      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	  args.offset += MAX_SEND_SIZE;
-	  pos += MAX_SEND_SIZE;
-	  datalen -= MAX_SEND_SIZE;
-	}
-	// last send includes the trigger event
-	args.event = event;
-	RemoteWriteMessage::request(ID(mem).node(), args,
-				    pos, datalen, 
-				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-      } else {
-	RemoteWriteArgs args;
-	args.mem = mem;
-	args.offset = offset;
-	args.event = event;
-	RemoteWriteMessage::request(ID(mem).node(), args,
-				    data, datalen,
-				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-      }
-    }
 
     class RemoteMemory : public Memory::Impl {
     public:
-      RemoteMemory(Memory _me, size_t _size, Memory::Kind k)
-	: Memory::Impl(_me, _size, MKIND_REMOTE, 0, k)
+      RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase)
+	: Memory::Impl(_me, _size, _regbase ? MKIND_RDMA : MKIND_REMOTE, 0, k), regbase(_regbase)
       {
       }
 
@@ -2833,16 +2775,7 @@ namespace LegionRuntime {
 	assert(0);
       }
 
-      virtual void put_bytes(off_t offset, const void *src, size_t size)
-      {
-	// can't read/write a remote memory
-#define ALLOW_REMOTE_MEMORY_WRITES
-#ifdef ALLOW_REMOTE_MEMORY_WRITES
-	do_remote_write(me, offset, src, size, Event::NO_EVENT, true /* make copy! */);
-#else
-	assert(0);
-#endif
-      }
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size)
       {
@@ -2853,10 +2786,168 @@ namespace LegionRuntime {
       {
 	return ID(me).node();
       }
+
+    public:
+      void *regbase;
     };
 
+    struct RemoteWriteArgs : public BaseMedium {
+      Memory mem;
+      off_t offset;
+      Event event;
+    };
+
+    void handle_remote_write(RemoteWriteArgs args,
+			     const void *data, size_t datalen)
+    {
+      Memory::Impl *impl = args.mem.impl();
+
+      log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+		     args.mem.id, args.offset, datalen,
+		     args.event.id, args.event.gen);
+#ifdef DEBUG_REMOTE_WRITES
+      printf("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d\n",
+		     args.mem.id, args.offset, datalen,
+		     args.event.id, args.event.gen);
+      printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+             data,
+             ((unsigned *)(data))[0], ((unsigned *)(data))[1],
+             ((unsigned *)(data))[2], ((unsigned *)(data))[3],
+             ((unsigned *)(data))[4], ((unsigned *)(data))[5],
+             ((unsigned *)(data))[6], ((unsigned *)(data))[7]);
+#endif
+
+      switch(impl->kind) {
+      case Memory::Impl::MKIND_SYSMEM:
+	{
+	  LocalCPUMemory *cpumem = (LocalCPUMemory *)impl;
+	  if(cpumem->registered) {
+	    if(data == (cpumem->base + args.offset)) {
+	      // copy is in right spot - yay!
+	      if(args.event.exists())
+		args.event.impl()->trigger(args.event.gen,
+					   gasnet_mynode());
+	      return;
+	    } else {
+	      printf("%d: received remote write to registered memory in wrong spot: %p != %p+%zd = %p\n",
+		     gasnet_mynode(), data, cpumem->base, args.offset, cpumem->base + args.offset);
+	      // fall through
+	    }
+	  }
+	    
+	  impl->put_bytes(args.offset, data, datalen);
+	  if(args.event.exists())
+	    args.event.impl()->trigger(args.event.gen,
+				       gasnet_mynode());
+	  break;
+	}
+
+      case Memory::Impl::MKIND_ZEROCOPY:
+      case Memory::Impl::MKIND_GPUFB:
+      default:
+	assert(0);
+      }
+    }
+
+    typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
+				       RemoteWriteArgs,
+				       handle_remote_write> RemoteWriteMessage;
+
+    void do_remote_write(Memory mem, off_t offset,
+			 const void *data, size_t datalen,
+			 Event event, bool make_copy = false)
+    {
+      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+		     mem.id, offset, datalen,
+		     event.id, event.gen);
+      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+      Memory::Impl *m_impl = mem.impl();
+      char *dstptr;
+      if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
+	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
+      } else
+	dstptr = 0;
+      if(datalen > MAX_SEND_SIZE) {
+	// as written, this assumes in-order delivery of messages, which isn't guaranteed
+	assert(0);
+	log_copy.info("breaking large send into pieces");
+	const char *pos = (const char *)data;
+	RemoteWriteArgs args;
+	args.mem = mem;
+	args.offset = offset;
+	args.event = Event::NO_EVENT;
+	while(datalen > MAX_SEND_SIZE) {
+	  RemoteWriteMessage::request(ID(mem).node(), args,
+				      pos, MAX_SEND_SIZE,
+				      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  args.offset += MAX_SEND_SIZE;
+	  pos += MAX_SEND_SIZE;
+	  datalen -= MAX_SEND_SIZE;
+	}
+	// last send includes the trigger event
+	args.event = event;
+	RemoteWriteMessage::request(ID(mem).node(), args,
+				    pos, datalen, 
+				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+      } else {
+	RemoteWriteArgs args;
+	args.mem = mem;
+	args.offset = offset;
+	args.event = event;
+	RemoteWriteMessage::request(ID(mem).node(), args,
+				    data, datalen,
+				    ((datalen == 0) ? PAYLOAD_NONE :
+                                       (make_copy ? PAYLOAD_COPY :
+                                                    PAYLOAD_KEEP)),
+				    dstptr);
+      }
+    }
+
+    void do_remote_write(Memory mem, off_t offset,
+			 const SpanList &spans, size_t datalen,
+			 Event event, bool make_copy = false)
+    {
+      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+		     mem.id, offset, datalen,
+		     event.id, event.gen);
+      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+      Memory::Impl *m_impl = mem.impl();
+      char *dstptr;
+      if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
+	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
+      } else
+	dstptr = 0;
+      if(datalen > MAX_SEND_SIZE) {
+	// as written, this assumes in-order delivery of messages, which isn't guaranteed
+	assert(0);
+	// doing this with spans is even more complicated...
+      } else {
+	RemoteWriteArgs args;
+	args.mem = mem;
+	args.offset = offset;
+	args.event = event;
+	RemoteWriteMessage::request(ID(mem).node(), args,
+				    spans, datalen,
+				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
+				    dstptr);
+      }
+    }
+
+    void RemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
+    {
+      // can't read/write a remote memory
+#define ALLOW_REMOTE_MEMORY_WRITES
+#ifdef ALLOW_REMOTE_MEMORY_WRITES
+      do_remote_write(me, offset, src, size, Event::NO_EVENT, true /* make copy! */);
+#else
+      assert(0);
+#endif
+    }
+
     GASNetMemory::GASNetMemory(Memory _me, size_t size_per_node)
-      : Memory::Impl(_me, 0 /* we'll calculate it below */, MKIND_GASNET,
+      : Memory::Impl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
 		     MEMORY_STRIDE, Memory::GLOBAL_MEM)
     {
       num_nodes = gasnet_nodes();
@@ -3165,14 +3256,14 @@ namespace LegionRuntime {
       IndexSpace r;
       size_t bytes_needed;
       size_t block_size;
-      size_t element_size;
+      unsigned element_size; // reduced from size_t for space constraints
       //off_t adjust;
-      off_t list_size;
+      int list_size; // reduced from off_t for space constraints
       ReductionOpID redopid;
       RegionInstance parent_inst;
     };
 
-    struct CreateInstanceResp {
+    struct CreateInstanceResp : public BaseReply {
       RegionInstance i;
       off_t inst_offset;
       off_t count_offset;
@@ -3239,8 +3330,10 @@ namespace LegionRuntime {
       args.bytes_needed = bytes_needed;
       args.block_size = block_size;
       args.element_size = element_size;
+      assert(args.element_size == element_size); // did it fit into 32 bits?
       args.redopid = redopid;
       args.list_size = list_size;
+      assert(args.list_size == list_size); // did it fit into 32 bits?
       args.parent_inst = parent_inst;
       log_inst(LEVEL_DEBUG, "creating remote instance: node=%d", ID(me).node());
       CreateInstanceResp resp = CreateInstanceMessage::request(ID(me).node(), args,
@@ -4325,6 +4418,68 @@ namespace LegionRuntime {
       return 0;
     }
 
+#ifdef SHARED_UTILITY_QUEUE
+    class UtilityQueue {
+    public:
+      UtilityQueue(void)
+      {
+        gasnet_hsl_init(&mutex);
+      }
+
+      void add_processor(UtilityProcessor *p)
+      {
+        AutoHSLLock a(mutex);
+        procs.insert(p);
+      }
+
+      void remove_processor(UtilityProcessor *p)
+      {
+        AutoHSLLock a(mutex);
+        procs.erase(p);
+      }
+
+      bool empty(void)
+      {
+        AutoHSLLock a(mutex);
+        return tasks.empty();
+      }
+
+      UtilityProcessor::UtilityTask* pop(void)
+      {
+        if (!tasks.empty()) {
+          AutoHSLLock a(mutex);
+          if (!tasks.empty()) {
+            UtilityProcessor::UtilityTask *t = tasks.front();
+            tasks.pop_front();
+            return t;
+          }
+        }
+        return 0;
+      }
+
+      void add(UtilityProcessor::UtilityTask *to_add)
+      {
+        bool was_empty = false;
+        {
+          AutoHSLLock a(mutex);
+          was_empty = tasks.empty();
+          tasks.pri_insert(to_add);
+        }
+
+        if(was_empty) {
+          for(std::set<UtilityProcessor*>::const_iterator it = procs.begin();
+              it != procs.end(); it++)
+            (*it)->shared_tasks_available();
+        }
+      }
+
+    protected:
+      gasnet_hsl_t mutex;
+      std::set<UtilityProcessor*> procs;
+      pri_list<UtilityProcessor::UtilityTask*> tasks;
+    };
+#endif
+
     class UtilityProcessor::UtilityThread : public PreemptableThread {
     public:
       UtilityThread(UtilityProcessor *_proc)
@@ -4384,6 +4539,20 @@ namespace LegionRuntime {
 	    gasnet_hsl_lock(&proc->mutex);
 	  }
 
+#ifdef SHARED_UTILITY_QUEUE
+          if (proc->shared_queue) { 
+            UtilityTask *task = proc->shared_queue->pop();
+            if (task) {
+              gasnet_hsl_unlock(&proc->mutex);
+              log_util.debug("running shared task %p in utility thread", task);
+              task->run();
+              delete task;
+              log_util.debug("done with shared task %p in utility thread", task);
+              gasnet_hsl_lock(&proc->mutex);
+            }
+          }
+#endif
+
 	  // run some/all of the idle tasks for idle processors
 	  // the set can change, so grab a copy, then let go of the lock
 	  //  while we walk the list - for each item, retake the lock to
@@ -4418,7 +4587,11 @@ namespace LegionRuntime {
 	  
 	  // if we really have nothing to do, it's ok to go to sleep
 	  if((proc->tasks.size() == 0) && (proc->idle_procs.size() == 0) &&
-	     !proc->shutdown_requested) {
+	     !proc->shutdown_requested
+#ifdef SHARED_UTILITY_QUEUE
+              && ((proc->shared_queue == NULL) || proc->shared_queue->empty())
+#endif
+             ) {
 	    log_util.info("utility thread going to sleep");
 	    gasnett_cond_wait(&proc->condvar, &proc->mutex.lock);
 	    log_util.info("utility thread awake again");
@@ -4450,10 +4623,16 @@ namespace LegionRuntime {
     };
 
     UtilityProcessor::UtilityProcessor(Processor _me,
+#ifdef SHARED_UTILITY_QUEUE
+                                       UtilityQueue *_shared_queue,
+#endif
                                        int _core_id /*=-1*/,
 				       int _num_worker_threads /*= 1*/)
       : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
 	core_id(_core_id), num_worker_threads(_num_worker_threads), shutdown_requested(false)
+#ifdef SHARED_UTILITY_QUEUE
+        , shared_queue(_shared_queue)
+#endif
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
@@ -4464,10 +4643,18 @@ namespace LegionRuntime {
 				     Processor::TASK_ID_PROCESSOR_IDLE, 
 				     0, 0, Event::NO_EVENT, 0) :
 		     0);
+#ifdef SHARED_UTILITY_QUEUE
+      if (shared_queue)
+        shared_queue->add_processor(this);
+#endif
     }
 
     UtilityProcessor::~UtilityProcessor(void)
     {
+#ifdef SHARED_UTILITY_QUEUE
+      if (shared_queue)
+        shared_queue->remove_processor(this);
+#endif
       if(idle_task)
 	delete idle_task;
     }
@@ -4508,6 +4695,13 @@ namespace LegionRuntime {
 
     void UtilityProcessor::enqueue_runnable_task(UtilityTask *task)
     {
+#ifdef SHARED_UTILITY_QUEUE
+      if (shared_queue)
+      {
+        shared_queue->add(task);
+        return;
+      }
+#endif
       AutoHSLLock al(mutex);
       // Common case: if the guy on the back has our priority or higher
       // then just put us on the back too
@@ -4535,6 +4729,14 @@ namespace LegionRuntime {
       }
       gasnett_cond_signal(&condvar);
     }
+
+#ifdef SHARED_UTILITY_QUEUE
+    void UtilityProcessor::shared_tasks_available(void)
+    {
+      AutoHSLLock al(mutex);
+      gasnett_cond_signal(&condvar);
+    }
+#endif
 
     void UtilityProcessor::enable_idle_task(Processor::Impl *proc)
     {
@@ -5767,7 +5969,7 @@ namespace LegionRuntime {
       default:
 	assert(0);
 
-      case Memory::Impl::MKIND_GASNET:
+      case Memory::Impl::MKIND_GLOBAL:
 	{
 	  const ReductionOpUntyped *redop = reduce_op_table[args.redopid];
 	  assert((datalen % redop->sizeof_list_entry) == 0);
@@ -6121,7 +6323,7 @@ namespace LegionRuntime {
 
       // another interesting case: if the destination is remote, and the source
       //  is gasnet, then the destination can read the source itself
-      if((src_mem->kind == Memory::Impl::MKIND_GASNET) &&
+      if((src_mem->kind == Memory::Impl::MKIND_GLOBAL) &&
 	 (dst_mem->kind == Memory::Impl::MKIND_REMOTE)) {
 	unsigned delegate = ID(dst_impl->memory).node();
 	assert(delegate != gasnet_mynode());
@@ -6601,8 +6803,8 @@ namespace LegionRuntime {
 					   const Machine::NodeAnnounceData& annc_data,
 					   bool remote)
     {
-      const unsigned *cur = (const unsigned *)args;
-      const unsigned *limit = (const unsigned *)(((const char *)args)+arglen);
+      const size_t *cur = (const size_t *)args;
+      const size_t *limit = (const size_t *)(((const char *)args)+arglen);
 
       while(1) {
 	assert(cur < limit);
@@ -6610,11 +6812,11 @@ namespace LegionRuntime {
 	switch(*cur++) {
 	case NODE_ANNOUNCE_PROC:
 	  {
-	    ID id(*cur++);
+	    ID id((unsigned)*cur++);
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < annc_data.num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
-	    ID util_id(*cur++);
+	    ID util_id((unsigned)*cur++);
 	    Processor util = util_id.convert<Processor>();
 	    if(remote) {
 	      RemoteProcessor *proc = new RemoteProcessor(p, kind, util);
@@ -6625,13 +6827,14 @@ namespace LegionRuntime {
 
 	case NODE_ANNOUNCE_MEM:
 	  {
-	    ID id(*cur++);
+	    ID id((unsigned)*cur++);
 	    Memory m = id.convert<Memory>();
 	    assert(id.index_h() < annc_data.num_memories);
             Memory::Kind kind = (Memory::Kind)(*cur++);
 	    unsigned size = *cur++;
+	    void *regbase = (void *)(*cur++);
 	    if(remote) {
-	      RemoteMemory *mem = new RemoteMemory(m, size, kind);
+	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
 	      Runtime::runtime->nodes[ID(m).node()].memories[ID(m).index_h()] = mem;
 	    }
 	  }
@@ -6640,8 +6843,8 @@ namespace LegionRuntime {
 	case NODE_ANNOUNCE_PMA:
 	  {
 	    ProcessorMemoryAffinity pma;
-	    pma.p = ID(*cur++).convert<Processor>();
-	    pma.m = ID(*cur++).convert<Memory>();
+	    pma.p = ID((unsigned)*cur++).convert<Processor>();
+	    pma.m = ID((unsigned)*cur++).convert<Memory>();
 	    pma.bandwidth = *cur++;
 	    pma.latency = *cur++;
 
@@ -6652,8 +6855,8 @@ namespace LegionRuntime {
 	case NODE_ANNOUNCE_MMA:
 	  {
 	    MemoryMemoryAffinity mma;
-	    mma.m1 = ID(*cur++).convert<Memory>();
-	    mma.m2 = ID(*cur++).convert<Memory>();
+	    mma.m1 = ID((unsigned)*cur++).convert<Memory>();
+	    mma.m2 = ID((unsigned)*cur++).convert<Memory>();
 	    mma.bandwidth = *cur++;
 	    mma.latency = *cur++;
 
@@ -6964,6 +7167,7 @@ namespace LegionRuntime {
       // low-level runtime parameters
       size_t gasnet_mem_size_in_mb = 256;
       size_t cpu_mem_size_in_mb = 512;
+      size_t reg_mem_size_in_mb = 0;
       size_t zc_mem_size_in_mb = 64;
       size_t fb_mem_size_in_mb = 256;
       // Static variable for stack size since we need to 
@@ -7003,6 +7207,7 @@ namespace LegionRuntime {
 
 	INT_ARG("-ll:gsize", gasnet_mem_size_in_mb);
 	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
+	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
 	INT_ARG("-ll:fsize", fb_mem_size_in_mb);
 	INT_ARG("-ll:zsize", zc_mem_size_in_mb);
         INT_ARG("-ll:stack", stack_size_in_mb);
@@ -7089,7 +7294,7 @@ namespace LegionRuntime {
       //hcount += TestMessage::add_handler_entries(&handlers[hcount]);
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount]);
 
-      init_endpoints(handlers, hcount, gasnet_mem_size_in_mb);
+      init_endpoints(handlers, hcount, gasnet_mem_size_in_mb, reg_mem_size_in_mb);
 
       init_dma_handler();
 
@@ -7127,27 +7332,38 @@ namespace LegionRuntime {
 
       NodeAnnounceData announce_data;
       const unsigned ADATA_SIZE = 4096;
-      unsigned adata[ADATA_SIZE];
+      size_t adata[ADATA_SIZE];
       unsigned apos = 0;
 
       announce_data.node_id = gasnet_mynode();
       announce_data.num_procs = num_local_cpus + num_local_gpus + num_util_procs;
-      announce_data.num_memories = (1 + 2 * num_local_gpus);
+      announce_data.num_memories = (1 + 
+				    (reg_mem_size_in_mb > 0 ? 1 : 0) + 
+				    2 * num_local_gpus);
 
       // create utility processors (if any)
       explicit_utility_procs = (num_util_procs > 0);
-      for(unsigned i = 0; i < num_util_procs; i++) {
-	UtilityProcessor *up = new UtilityProcessor(ID(ID::ID_PROCESSOR, 
-						       gasnet_mynode(), 
-						       n->processors.size()).convert<Processor>(),
-                                                    num_local_cpus+i/*core id*/);
+      if (num_util_procs > 0)
+      {
+#ifdef SHARED_UTILITY_QUEUE
+        UtilityQueue *shared_utility_queue = new UtilityQueue();
+#endif
+        for(unsigned i = 0; i < num_util_procs; i++) {
+          UtilityProcessor *up = new UtilityProcessor(ID(ID::ID_PROCESSOR, 
+                                                         gasnet_mynode(), 
+                                                         n->processors.size()).convert<Processor>(),
+#ifdef SHARED_UTILITY_QUEUE
+                                                      shared_utility_queue,
+#endif
+                                                      num_local_cpus+i/*core id*/);
 
-	n->processors.push_back(up);
-	local_util_procs.push_back(up);
-	adata[apos++] = NODE_ANNOUNCE_PROC;
-	adata[apos++] = up->me.id;
-	adata[apos++] = Processor::UTIL_PROC;
-	adata[apos++] = up->util.id;
+          n->processors.push_back(up);
+          local_util_procs.push_back(up);
+          adata[apos++] = NODE_ANNOUNCE_PROC;
+          adata[apos++] = up->me.id;
+          adata[apos++] = Processor::UTIL_PROC;
+          adata[apos++] = up->util.id;
+        }
       }
 
 #ifdef USE_GPU
@@ -7158,7 +7374,8 @@ namespace LegionRuntime {
       // create local processors
 #ifdef SHARED_TASK_QUEUE
       // until we handle numa better, we might as well share tasks between all CPUs
-      LocalProcessor::SharedTaskQueue *shared_task_queue = new LocalProcessor::SharedTaskQueue(0);
+      LocalProcessor::SharedTaskQueue *shared_task_queue = 
+        new LocalProcessor::SharedTaskQueue(0);
 #endif
       for(unsigned i = 0; i < num_local_cpus; i++) {
 	Processor p = ID(ID::ID_PROCESSOR, 
@@ -7173,8 +7390,11 @@ namespace LegionRuntime {
 						cpu_worker_threads, 
 						1); // HLRT not thread-safe yet
 	if(num_util_procs > 0) {
-	  //UtilityProcessor *up = local_util_procs[i % num_util_procs];
+#ifdef SPECIALIZED_UTIL_PROCS
           UtilityProcessor *up = local_util_procs[0];
+#else
+	  UtilityProcessor *up = local_util_procs[i % num_util_procs];
+#endif
 
 	  lp->set_utility_processor(up);
 
@@ -7220,8 +7440,33 @@ namespace LegionRuntime {
 	adata[apos++] = cpumem->me.id;
         adata[apos++] = Memory::SYSTEM_MEM;
 	adata[apos++] = cpumem->size;
+	adata[apos++] = 0; // not registered
       } else
 	cpumem = 0;
+
+      LocalCPUMemory *regmem;
+      if(reg_mem_size_in_mb > 0) {
+	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
+	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
+	char *regmem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20);
+	delete[] seginfos;
+	regmem = new LocalCPUMemory(ID(ID::ID_MEMORY,
+				       gasnet_mynode(),
+				       n->memories.size(), 0).convert<Memory>(),
+				    reg_mem_size_in_mb << 20,
+				    regmem_base,
+				    true);
+	n->memories.push_back(regmem);
+#ifdef USE_GPU
+        local_mems.push_back(regmem);
+#endif
+	adata[apos++] = NODE_ANNOUNCE_MEM;
+	adata[apos++] = regmem->me.id;
+        adata[apos++] = Memory::SYSTEM_MEM;
+	adata[apos++] = regmem->size;
+	adata[apos++] = (size_t)(regmem->base);
+      } else
+	regmem = 0;
 
       // list affinities between local CPUs / memories
       for(std::vector<UtilityProcessor *>::iterator it = local_util_procs.begin();
@@ -7233,6 +7478,14 @@ namespace LegionRuntime {
 	  adata[apos++] = cpumem->me.id;
 	  adata[apos++] = 100;  // "large" bandwidth
 	  adata[apos++] = 1;    // "small" latency
+	}
+
+	if(reg_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = regmem->me.id;
+	  adata[apos++] = 80;  // "large" bandwidth
+	  adata[apos++] = 5;    // "small" latency
 	}
 
 	adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -7252,6 +7505,14 @@ namespace LegionRuntime {
 	  adata[apos++] = cpumem->me.id;
 	  adata[apos++] = 100;  // "large" bandwidth
 	  adata[apos++] = 1;    // "small" latency
+	}
+
+	if(reg_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = regmem->me.id;
+	  adata[apos++] = 80;  // "large" bandwidth
+	  adata[apos++] = 5;    // "small" latency
 	}
 
 	adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -7290,8 +7551,11 @@ namespace LegionRuntime {
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
           {
-            //UtilityProcessor *up = local_util_procs[i % num_util_procs];
+#ifdef SPECIALIZED_UTIL_PROCS
             UtilityProcessor *up = local_util_procs[0];
+#else
+            UtilityProcessor *up = local_util_procs[i % num_util_procs];
+#endif
             gp->set_utility_processor(up);
             std::map<Processor, std::set<Processor>*>::iterator finder = proc_groups.find(up->me);
             if (finder != proc_groups.end())
@@ -7333,6 +7597,7 @@ namespace LegionRuntime {
 	  adata[apos++] = m.id;
           adata[apos++] = Memory::GPU_FB_MEM;
 	  adata[apos++] = fbm->size;
+	  adata[apos++] = 0; // not registered
 
 	  // FB has very good bandwidth and ok latency to GPU
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -7351,6 +7616,7 @@ namespace LegionRuntime {
 	  adata[apos++] = m2.id;
           adata[apos++] = Memory::Z_COPY_MEM;
 	  adata[apos++] = zcm->size;
+	  adata[apos++] = 0; // not registered
 
 	  // ZC has medium bandwidth and bad latency to GPU
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -7383,7 +7649,7 @@ namespace LegionRuntime {
       // parse our own data (but don't create remote proc/mem objects)
       {
 	AutoHSLLock al(announcement_mutex);
-	parse_node_announce_data(adata, apos*sizeof(unsigned), 
+	parse_node_announce_data(adata, apos*sizeof(adata[0]), 
 				 announce_data, false);
       }
 
@@ -7391,7 +7657,7 @@ namespace LegionRuntime {
       for(int i = 0; i < gasnet_nodes(); i++)
 	if(i != gasnet_mynode())
 	  NodeAnnounceMessage::request(i, announce_data, 
-				       adata, apos*sizeof(unsigned),
+				       adata, apos*sizeof(adata[0]),
 				       PAYLOAD_COPY);
 
       // wait until we hear from everyone else?

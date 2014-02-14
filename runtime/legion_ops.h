@@ -49,6 +49,9 @@ namespace LegionRuntime {
       inline Event get_completion_event(void) const { return completion_event; }
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
+      inline bool is_tracing(void) const { return tracing; }
+      inline bool already_traced(void) const 
+        { return ((trace != NULL) && !tracing); }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -65,6 +68,7 @@ namespace LegionRuntime {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
+      void set_trace(LegionTrace *trace);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -141,7 +145,7 @@ namespace LegionRuntime {
       // dependence on the operation so that it doesn't
       // prematurely trigger before the analysis is
       // complete.  The end call will trigger the
-      // operation if it is complete
+      // operation if it is complete.
       void begin_dependence_analysis(void);
       void end_dependence_analysis(void);
       // Operations for registering dependences and
@@ -248,6 +252,10 @@ namespace LegionRuntime {
       SingleTask *parent_ctx;
       // The completion event for this operation
       UserEvent completion_event;
+      // The trace for this operation if any
+      LegionTrace *trace;
+      // Whether we are tracing or already traced
+      bool tracing;
     };
 
     /**

@@ -297,6 +297,10 @@ namespace LegionRuntime {
 				const void *data, size_t datalen,
 				Event event, bool make_copy = false);
 
+    extern void do_remote_write(Memory mem, off_t offset,
+				const SpanList& spans, size_t datalen,
+				Event event, bool make_copy = false);
+
     extern void do_remote_apply_red_list(int node, Memory mem, off_t offset,
 					 ReductionOpID redopid,
 					 const void *data, size_t datalen);
@@ -1137,10 +1141,10 @@ namespace LegionRuntime {
       struct PendingGather {
 	off_t dst_start;
 	off_t dst_size;
-	std::vector<std::pair<const char *, size_t> > src_spans;
+	SpanList src_spans;
       };
 
-      static const size_t TARGET_XFER_SIZE = 1 << 20;
+      static const size_t TARGET_XFER_SIZE = 512 << 10; //1 << 20;
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
@@ -1171,8 +1175,8 @@ namespace LegionRuntime {
 
 	  // now see if this particular span is disjoint or can be tacked on to the end of the last one
 	  if(g->src_spans.size() > 0) {
-	    std::pair<const char *, size_t>& last_span = g->src_spans.back();
-	    if((last_span.first + last_span.second) == (src_base + src_offset)) {
+	    SpanListEntry& last_span = g->src_spans.back();
+	    if(((char *)(last_span.first) + last_span.second) == (src_base + src_offset)) {
 	      // append
 	      last_span.second += bytes;
 	    } else {
@@ -1201,9 +1205,9 @@ namespace LegionRuntime {
         // special case: if there's only one source span, it's not actually
         //   a gather (so we don't need to make a copy)
         if(g->src_spans.size() == 1) {
-          const std::pair<const char *, size_t>& span = *(g->src_spans.begin());
+          const SpanListEntry& span = *(g->src_spans.begin());
 #ifdef DEBUG_REMOTE_WRITES
-	  printf("remote write of %zd bytes (singleton %x:%zd -> %x:%zd)\n", span.second, src_mem->me.id, span.first - src_base, dst_mem->me.id, g->dst_start);
+	  printf("remote write of %zd bytes (singleton %x:%zd -> %x:%zd)\n", span.second, src_mem->me.id, (char *)span.first - src_base, dst_mem->me.id, g->dst_start);
           printf("  datb[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
                  span.first,
                  ((unsigned *)(span.first))[0], ((unsigned *)(span.first))[1],
@@ -1215,24 +1219,15 @@ namespace LegionRuntime {
           return;
         }
 
-	// build a buffer we can copy in one block to the destination
-	char *buffer = new char[g->dst_size];
-	char *pos = buffer;
-
-	// copy each of the spans
-	for(std::vector<std::pair<const char *, size_t> >::const_iterator it = g->src_spans.begin();
-	    it != g->src_spans.end();
-	    it++) {
-	  memcpy(pos, it->first, it->second);
-	  pos += it->second;
-	}
-
+	// general case: do_remote_write knows how to take a span list now, so let it
+	//  handle the actual gathering
 #ifdef DEBUG_REMOTE_WRITES
 	printf("remote write of %zd bytes (gather -> %x:%zd), trigger=%x/%d\n", g->dst_size, dst_mem->me.id, g->dst_start, trigger.id, trigger.gen);
 #endif
-	do_remote_write(dst_mem->me, g->dst_start, buffer, g->dst_size, trigger, true /* make copy! */);
+	do_remote_write(dst_mem->me, g->dst_start, 
+			g->src_spans, g->dst_size,
+			trigger, false /* no copy - data won't change til copy event triggers */);
 
-	delete[] buffer;
       }
 
       virtual void flush(Event after_copy)
@@ -1323,7 +1318,8 @@ namespace LegionRuntime {
       }
 
       // try as many things as we can think of
-      if(dst_kind == Memory::Impl::MKIND_REMOTE) {
+      if((dst_kind == Memory::Impl::MKIND_REMOTE) ||
+	 (dst_kind == Memory::Impl::MKIND_RDMA)) {
         assert(src_kind != Memory::Impl::MKIND_REMOTE);
         return new RemoteWriteMemPairCopier(src_mem, dst_mem);
       }
@@ -1509,7 +1505,7 @@ namespace LegionRuntime {
 	    }
 	    break;
 
-	  case Memory::Impl::MKIND_GASNET:
+	  case Memory::Impl::MKIND_GLOBAL:
 	    {
 	      if(redop) {
 		if(red_list) {
@@ -1595,7 +1591,7 @@ namespace LegionRuntime {
 	}
 	break;
 
-      case Memory::Impl::MKIND_GASNET:
+      case Memory::Impl::MKIND_GLOBAL:
 	{
 	  switch(tgt_mem->kind) {
 	  case Memory::Impl::MKIND_SYSMEM:
@@ -1620,7 +1616,7 @@ namespace LegionRuntime {
 	    }
 	    break;
 
-	  case Memory::Impl::MKIND_GASNET:
+	  case Memory::Impl::MKIND_GLOBAL:
 	    {
 	      assert(!redop);
 	      RangeExecutors::GasnetGetAndPut rexec(tgt_mem, tgt_data->alloc_offset,
@@ -1677,7 +1673,7 @@ namespace LegionRuntime {
 	    }
 	    break;
 
-	  case Memory::Impl::MKIND_GASNET:
+	  case Memory::Impl::MKIND_GLOBAL:
 	    {
 	      assert(!redop);
 	      // all GPU operations are deferred, so we need an event if
@@ -1843,8 +1839,8 @@ namespace LegionRuntime {
       int src_node = ID(src_mem).node();
       int dst_node = ID(dst_mem).node();
 
-      bool src_is_rdma = src_mem.impl()->kind == Memory::Impl::MKIND_GASNET;
-      bool dst_is_rdma = dst_mem.impl()->kind == Memory::Impl::MKIND_GASNET;
+      bool src_is_rdma = src_mem.impl()->kind == Memory::Impl::MKIND_GLOBAL;
+      bool dst_is_rdma = dst_mem.impl()->kind == Memory::Impl::MKIND_GLOBAL;
 
       if(src_is_rdma) {
 	if(dst_is_rdma) {

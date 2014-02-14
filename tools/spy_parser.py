@@ -359,6 +359,8 @@ def parse_log_file(file_name, state):
         # If not then we're not making forward progress which is bad
         if len(to_delete) == 0:
             print "ERROR: NO PROGRESS PARSING! BUG IN LEGION SPY LOGGING ASSUMPTIONS!"
+            for line in replay_lines:
+                print line
             assert False
         # Now delete any lines to delete and go again until we're done
         for line in to_delete:

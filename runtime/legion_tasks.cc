@@ -16,6 +16,7 @@
 
 #include "legion_tasks.h"
 #include "legion_spy.h"
+#include "legion_trace.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
 #include <algorithm>
@@ -1785,6 +1786,7 @@ namespace LegionRuntime {
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
+      current_trace = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1810,6 +1812,12 @@ namespace LegionRuntime {
         (*it)->deactivate();
       }
       reclaim_children.clear();
+      for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
+            it != traces.end(); it++)
+      {
+        delete it->second;
+      }
+      traces.clear();
       // Clean up any locks and barriers that the user
       // asked us to destroy
       while (!context_locks.empty())
@@ -2065,8 +2073,10 @@ namespace LegionRuntime {
             wait_on = Event::merge_events(wait_on_events);
         }
       }
+      // Since we shouldn't be holding any locks here, it should be safe
+      // to wait withinout blocking the processor.
       if (wait_on.exists())
-        wait_on.wait(true/*block*/);
+        wait_on.wait();
       return result;
     }
 
@@ -2229,6 +2239,9 @@ namespace LegionRuntime {
                                    PROF_END_WAIT);
 #endif
       }
+      // Finally if we are performing a trace mark that the child has a trace
+      if (current_trace != NULL)
+        op->set_trace(current_trace);
     }
 
     //--------------------------------------------------------------------------
@@ -2396,8 +2409,11 @@ namespace LegionRuntime {
     void SingleTask::update_current_fence(FenceOp *op)
     //--------------------------------------------------------------------------
     {
+      if (current_fence != NULL)
+        current_fence->remove_mapping_reference(fence_gen);
       current_fence = op;
       fence_gen = op->get_generation();
+      current_fence->add_mapping_reference(fence_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -2406,6 +2422,96 @@ namespace LegionRuntime {
     {
       if (current_fence != NULL)
         op->register_dependence(current_fence, fence_gen);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::begin_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      // No need to hold the lock here, this is only ever called
+      // by the one thread that is running the task.
+      if (current_trace != NULL)
+      {
+        log_task(LEVEL_ERROR,"Illegal nested trace with ID %d attempted in "
+                             "task %s (ID %lld)", tid, variants->name,
+                             get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_NESTED_TRACE);
+      }
+      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
+      if (finder == traces.end())
+      {
+        // Trace does not exist yet, so make one and record it
+        current_trace = new LegionTrace(tid, this);
+        traces[tid] = current_trace;
+      }
+      else
+      {
+        // Issue the mapping fence first
+        runtime->issue_mapping_fence(this);
+        // Now mark that we are starting a trace
+        current_trace = finder->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::end_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      if (current_trace == NULL)
+      {
+        log_task(LEVEL_ERROR,"Unmatched end trace for ID %d in task %s "
+                             "(ID %lld)", tid, variants->name,
+                             get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_UNMATCHED_END_TRACE);
+      }
+      if (current_trace->is_fixed())
+      {
+        // Already fixed, dump a complete trace op into the stream
+        TraceCompleteOp *complete_op = runtime->get_available_trace_op();
+        complete_op->initialize_complete(this);
+#ifdef INORDER_EXECUTION
+        Event term_event = capture_op->get_completion_event();
+#endif
+        runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
+#ifdef INORDER_EXECUTION
+        if (Runtime::program_order_execution && !term_event.has_triggered())
+        {
+          Processor proc = get_executing_processor();
+          runtime->pre_wait(proc);
+          term_event.wait();
+          runtime->post_wait(proc);
+        }
+#endif
+      }
+      else
+      {
+        // Not fixed yet, dump a capture trace op into the stream
+        TraceCaptureOp *capture_op = runtime->get_available_capture_op(); 
+        capture_op->initialize_capture(this);
+#ifdef INORDER_EXECUTION
+        Event term_event = capture_op->get_completion_event();
+#endif
+        runtime->add_to_dependence_queue(get_executing_processor(), capture_op);
+#ifdef INORDER_EXECUTION
+        if (Runtime::program_order_execution && !term_event.has_triggered())
+        {
+          Processor proc = get_executing_processor();
+          runtime->pre_wait(proc);
+          term_event.wait();
+          runtime->post_wait(proc);
+        }
+#endif
+        // Mark that the current trace is now fixed
+        current_trace->fix_trace();
+      }
+      // We no longer have a trace that we're executing 
+      current_trace = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -2452,7 +2558,11 @@ namespace LegionRuntime {
           rez.serialize(info.handle);
           rez.serialize(info.fid);
         }
+#ifdef SPECIALIZED_UTIL_PROCS
         Processor util = runtime->get_cleanup_proc(executing_processor);
+#else
+        Processor util = executing_processor.get_utility_processor();
+#endif
         util.spawn(RECLAIM_LOCAL_FID,rez.get_buffer(),
                    rez.get_used_bytes(),info.reclaim_event);
       }
@@ -4024,7 +4134,11 @@ namespace LegionRuntime {
       
       // See if we want to move the rest of this computation onto
       // the utility processor
+#ifdef SPECIALIZED_UTIL_PROCS
       Processor util = runtime->get_cleanup_proc(executing_processor);
+#else
+      Processor util = executing_processor.get_utility_processor();
+#endif
       if (util != executing_processor)
       {
         SingleTask *proxy_this = this; 

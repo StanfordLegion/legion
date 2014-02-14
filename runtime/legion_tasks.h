@@ -280,6 +280,9 @@ namespace LegionRuntime {
       virtual void update_current_fence(FenceOp *op);
       virtual void register_fence_dependence(Operation *op);
     public:
+      void begin_trace(TraceID tid);
+      void end_trace(TraceID tid);
+    public:
       void add_local_field(FieldSpace handle, FieldID fid, size_t size);
       void add_local_fields(FieldSpace handle, 
                             const std::vector<FieldID> &fields,
@@ -412,6 +415,9 @@ namespace LegionRuntime {
       std::set<Operation*> executed_children;
       std::set<Operation*> complete_children;
       std::set<Operation*> reclaim_children;
+      // Traces for this task's execution
+      std::map<TraceID,LegionTrace*> traces;
+      LegionTrace *current_trace;
       // Event for waiting when the number of mapping+executing
       // child operations has grown too large.
       bool valid_wait_event;

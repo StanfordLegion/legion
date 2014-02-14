@@ -242,6 +242,8 @@ namespace LegionRuntime {
       ERROR_RELEASE_MISMATCH = 96,
       ERROR_INNER_LEAF_MISMATCH = 97,
       ERROR_INVALID_FIELD_PRIVILEGES = 98,
+      ERROR_ILLEGAL_NESTED_TRACE = 99,
+      ERROR_UNMATCHED_END_TRACE = 100,
     };
 
     // enum and namepsaces don't really get along well
@@ -310,8 +312,10 @@ namespace LegionRuntime {
       DEFERRED_COMPLETE_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
       RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
       DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
-      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
-      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
+      TRIGGER_OP_ID        = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
+      TRIGGER_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
+      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
+      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
     };
 
     // Forward declarations for user level objects
@@ -397,6 +401,11 @@ namespace LegionRuntime {
     class IndexTask;
     class SliceTask;
     class RemoteTask;
+    
+    // legion_trace.h
+    class LegionTrace;
+    class TraceCaptureOp;
+    class TraceCompleteOp;
 
     // region_tree.h
     class RegionTreeForest;
@@ -412,6 +421,7 @@ namespace LegionRuntime {
     class RegionTreePath;
     class PathTraverser;
     class NodeTraverser;
+    template<bool DOM>
     class LogicalRegistrar;
     class LogicalInitializer;
     class LogicalInvalidator;
@@ -485,6 +495,7 @@ namespace LegionRuntime {
     typedef unsigned int Color;
     typedef unsigned int IndexPartition;
     typedef unsigned int FieldID;
+    typedef unsigned int TraceID;
     typedef unsigned int MapperID;
     typedef unsigned int ContextID;
     typedef unsigned int InstanceID;

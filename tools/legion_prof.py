@@ -26,6 +26,7 @@ task_variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<n
 unique_task_pat = re.compile(prefix + r'Prof Unique Task (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<tid>[0-9]+) (?P<dim>[0-9]+) (?P<p0>[0-9\-]+) (?P<p1>[0-9\-]+) (?P<p2>[0-9\-]+)')
 unique_map_pat = re.compile(prefix + r'Prof Unique Map (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
 unique_close_pat = re.compile(prefix + r'Prof Unique Close (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
+unique_copy_pat = re.compile(prefix + r'Prof Unique Copy (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
 event_pat = re.compile(prefix + r'Prof Event (?P<proc>[0-9]+) (?P<kind>[0-9]+) (?P<uid>[0-9]+) (?P<time>[0-9]+)')
 create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
 field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
@@ -201,7 +202,7 @@ class UniqueOp(object):
         self.messages = list()
 
         # Used construction of event begin/end pairs.
-        self.event_stack = []
+        self.event_match = dict()
 
     def add_event(self, event, proc):
         if event.kind_id == 12:
@@ -209,8 +210,8 @@ class UniqueOp(object):
             if self.execution_range is None:
                 return True 
             assert self.completion_range is None
-            self.completion_range = \
-                EventRange(self, self.execution_range.end_event, event, COMPLETION_RANGE)
+            #self.completion_range = \
+            #    EventRange(self, self.execution_range.end_event, event, COMPLETION_RANGE)
             # Don't add the completion range
         elif event.kind_id == 13:
             # Handle the launch case
@@ -219,12 +220,15 @@ class UniqueOp(object):
             assert self.launch_range is None
             self.launch_range = \
                 EventRange(self, event, self.execution_range.start_event, LAUNCH_RANGE)
-            # Don't add the launch range
+        elif event.kind_id == 8 or event.kind_id == 9:
+            return True
         elif event.is_end():
             # If it is an end event
-            assert len(self.event_stack) > 0
-            begin_event = self.event_stack[-1]
-            self.event_stack.pop()
+            key = (event.category,proc)
+            #assert key in self.event_match
+            if key not in self.event_match:
+                return True
+            begin_event = self.event_match[key].pop()
             assert begin_event.category == event.category
             if event.kind_id == 1:
                 assert self.dependence_range is None
@@ -275,7 +279,10 @@ class UniqueOp(object):
                 assert False
         else:
             assert event.is_begin()
-            self.event_stack.append(event)
+            key = (event.category,proc)
+            if key not in self.event_match:
+                self.event_match[key] = list()
+            self.event_match[key].append(event)
         return True
 
     def waiting_time(self):
@@ -312,6 +319,9 @@ class UniqueTask(UniqueOp):
     def is_close(self):
         return False
 
+    def is_copy(self):
+        return False
+
 class UniqueMap(UniqueOp):
     def __init__(self, proc, uid, parent):
         UniqueOp.__init__(self, proc, uid, "#009999")
@@ -329,9 +339,12 @@ class UniqueMap(UniqueOp):
     def is_close(self):
         return False
 
+    def is_copy(self):
+        return False
+
 class UniqueClose(UniqueOp):
     def __init__(self, proc, uid, parent):
-        UniqueOp.__init__(self, proc, uid, "FF3300")
+        UniqueOp.__init__(self, proc, uid, "#FF3300")
         self.parent = parent
 
     def __repr__(self):
@@ -345,6 +358,29 @@ class UniqueClose(UniqueOp):
 
     def is_close(self):
         return True
+
+    def is_copy(self):
+        return False
+
+class UniqueCopy(UniqueOp):
+    def __init__(self, proc, uid, parent):
+        UniqueOp.__init__(self, proc, uid, "#FF3300")
+        self.parent = parent
+
+    def __repr__(self):
+        return 'Copy (UID %s) in %s' % (self.uid, self.get_variant().name)
+
+    def get_variant(self):
+        return self.parent.get_variant()
+
+    def is_mapping(self):
+        return False
+
+    def is_close(self):
+        return False
+
+    def is_copy(self):
+        return False
 
 class UniqueScheduler(UniqueOp):
     def __init__(self, proc, uid):
@@ -565,6 +601,8 @@ class EventRange(TimeRange):
                     stat.update_inline_dep_analysis(variant, cum_time, non_cum_time)
                 elif self.op.is_close():
                     stat.update_close_dep_analysis(variant, cum_time, non_cum_time)
+                elif self.op.is_copy():
+                    stat.update_copy_dep_analysis(variant, cum_time, non_cum_time)
                 else:
                     stat.update_dependence_analysis(variant, cum_time, non_cum_time)
             elif self.range_kind == PREMAP_RANGE:
@@ -574,6 +612,8 @@ class EventRange(TimeRange):
                     stat.update_inline_mappings(variant, cum_time, non_cum_time)
                 elif self.op.is_close():
                     stat.update_close_operations(variant, cum_time, non_cum_time)
+                elif self.op.is_copy():
+                    stat.update_copy_operations(variant, cum_time, non_cum_time)
                 else:
                     stat.update_mapping_analysis(variant, cum_time, non_cum_time)
             elif self.range_kind == EXECUTION_RANGE:
@@ -699,8 +739,8 @@ class Memory(object):
         self.time_points = None
 
     def add_instance(self, inst):
-        assert inst not in self.instances
-        self.instances.add(inst)
+        if inst not in self.instances:
+            self.instances.add(inst)
 
     def __repr__(self):
         return 'Memory %s' % hex(self.mem)
@@ -825,22 +865,24 @@ class Instance(object):
         self.fields = dict()
 
     def set_create(self, memory, redop, blocking_factor, create_time):
-        assert self.memory is None
-        assert self.redop is None
-        assert self.blocking_factor is None
-        assert self.create_time is None
+        assert self.memory is None or self.memory == memory
+        assert self.redop is None or self.redop == redop
+        assert self.blocking_factor is None or self.blocking_factor == blocking_factor
         self.memory = memory
         self.redop = redop
         self.blocking_factor = blocking_factor
-        self.create_time = create_time
+        if self.create_time is None:
+            self.create_time = create_time
 
     def set_destroy(self, time):
         assert self.destroy_time is None
         self.destroy_time = time
 
     def add_field(self, fid, size):
-        assert fid not in self.fields
-        self.fields[fid] = size
+        if fid not in self.fields:
+            self.fields[fid] = size
+        else:
+            assert self.fields[fid] == size
 
     def compute_color(self, step, num_steps):
         assert self.color is None
@@ -969,6 +1011,8 @@ class StatVariant(object):
         self.inline_mappings = CallTracker()
         self.close_dep_analysis = CallTracker()
         self.close_operations = CallTracker()
+        self.copy_dep_analysis = CallTracker()
+        self.copy_operations = CallTracker()
         self.dependence_analysis = CallTracker()
         self.premappings = CallTracker()
         self.mapping_analysis = CallTracker()
@@ -989,6 +1033,12 @@ class StatVariant(object):
 
     def update_close_operations(self, cum, non_cum):
         self.close_operations.increment(cum, non_cum)
+
+    def update_copy_dep_analysis(self, cum, non_cum):
+        self.copy_dep_analysis.increment(cum, num_cum)
+
+    def update_copy_operations(self, cum, non_cum):
+        self.copy_operations.increment(cum, non_cum)
 
     def update_dependence_analysis(self, cum, non_cum):
         self.dependence_analysis.increment(cum, non_cum)
@@ -1012,6 +1062,8 @@ class StatVariant(object):
         time = time + self.inline_mappings.cum_time
         time = time + self.close_dep_analysis.cum_time
         time = time + self.close_operations.cum_time
+        time = time + self.copy_dep_analysis.cum_time
+        time = time + self.copy_operations.cum_time
         time = time + self.dependence_analysis.cum_time
         time = time + self.premappings.cum_time
         time = time + self.mapping_analysis.cum_time
@@ -1026,6 +1078,8 @@ class StatVariant(object):
         time = time + self.inline_mappings.non_cum_time
         time = time + self.close_dep_analysis.non_cum_time
         time = time + self.close_operations.non_cum_time
+        time = time + self.copy_dep_analysis.non_cum_time
+        time = time + self.copy_operations.non_cum_time
         time = time + self.dependence_analysis.non_cum_time
         time = time + self.premappings.non_cum_time
         time = time + self.mapping_analysis.non_cum_time
@@ -1070,6 +1124,8 @@ class StatVariant(object):
             self.emit_call_stat(self.inline_mappings,"Inline Mapping Analysis (META):",total_time)
             self.emit_call_stat(self.close_dep_analysis,"Close Dependence Analysis (META):",total_time)
             self.emit_call_stat(self.close_operations,"Close Mapping Analysis (META):",total_time)
+            self.emit_call_stat(self.copy_dep_analysis,"Copy Dependence Analysis (META):",total_time)
+            self.emit_call_stat(self.copy_operations,"Copy Mapping Analysis (META):",total_time)
             self.emit_call_stat(self.triggers,"Trigger Calls (META):",total_time)
             self.emit_call_stat(self.post_operations,"Post Operations (META):",total_time)
 
@@ -1113,6 +1169,16 @@ class StatGatherer(object):
     def update_close_operations(self, var, cum, non_cum):
         assert var in self.variants
         self.variants[var].update_close_operations(cum, non_cum)
+        self.mapping_analysis.increment(cum, non_cum)
+
+    def update_copy_dep_analysis(self, var, cum_non_cum):
+        assert var in self.variants
+        self.variants[var].update_copy_dep_analysis(cum, non_cum)
+        self.dependence_analysis.increment(cum, non_cum)
+
+    def update_copy_operations(self, var, cum, non_cum):
+        assert var in self.variants
+        self.variants[var].update_copy_operations(cum, non_cum)
         self.mapping_analysis.increment(cum, non_cum)
 
     def update_dependence_analysis(self, var, cum, non_cum):
@@ -1236,6 +1302,17 @@ class State(object):
             parent = self.unique_ops[parent_uid])
         return True
 
+    def create_unique_copy(self, proc_id, uid, parent_uid):
+        assert uid not in self.unique_ops
+        if parent_uid not in self.unique_ops:
+            return False
+        assert proc_id in self.processors
+        self.unique_ops[uid] = UniqueCopy(
+            proc = self.processors[proc_id],
+            uid = uid,
+            parent = self.unique_ops[parent_uid])
+        return True
+
     def create_event(self, proc_id, uid, kind_id, time):
         assert proc_id in self.processors
         if uid <> 0 and uid not in self.unique_ops:
@@ -1278,8 +1355,8 @@ class State(object):
         # Now that we have all the time ranges added, sort themselves
         for proc in self.processors.itervalues():
             proc.sort_time_range()
-        for mem in self.memories.itervalues():
-            mem.sort_time_range()
+        #for mem in self.memories.itervalues():
+        #    mem.sort_time_range()
 
     def print_processor_stats(self):
         print '****************************************************'
@@ -1393,6 +1470,14 @@ def parse_log_file(file_name, state):
                     parent_uid = int(m.group('puid'))):
                     replay_lines.append(line)
                 continue
+            m = unique_copy_pat.match(line)
+            if m is not None:
+                if not state.create_unique_copy(
+                    proc_id = int(m.group('proc')),
+                    uid = int(m.group('uid')),
+                    parent_uid = int(m.group('puid'))):
+                    replay_lines.append(line)
+                continue
             m = event_pat.match(line)
             if m is not None:
                 time = long(m.group('time'))
@@ -1450,6 +1535,14 @@ def parse_log_file(file_name, state):
                     parent_uid = int(m.group('puid'))):
                     to_delete.add(line)
                 continue
+            m = unique_copy_pat.match(line)
+            if m is not None:
+                if state.create_unique_copy(
+                    proc_id = int(m.group('proc')),
+                    uid = int(m.group('uid')),
+                    parent_uid = int(m.group('puid'))):
+                    to_delete.add(line)
+                continue
             m = event_pat.match(line)
             if m is not None:
                 time = long(m.group('time'))
@@ -1462,7 +1555,7 @@ def parse_log_file(file_name, state):
                 continue
         if len(to_delete) == 0:
             print "ERROR: NO FORWARD PROGRESS ON REPLAY LINES!  BAD LEGION PROF ASSUMPTION!"
-            assert False
+            break
         for line in to_delete:
             replay_lines.remove(line)
     return matches

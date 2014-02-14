@@ -54,6 +54,16 @@ gasnet_hsl_t deferred_free_mutex;
 int deferred_free_pos;
 void *deferred_frees[DEFERRED_FREE_COUNT];
 
+gasnet_seginfo_t *segment_info = 0;
+
+static bool is_registered(void *ptr)
+{
+  off_t offset = ((char *)ptr) - ((char *)(segment_info[gasnet_mynode()].addr));
+  if((offset >= 0) && (offset < segment_info[gasnet_mynode()].size))
+    return true;
+  return false;
+}
+
 void init_deferred_frees(void)
 {
   gasnet_hsl_init(&deferred_free_mutex);
@@ -80,10 +90,193 @@ void deferred_free(void *ptr)
   }
 }
 
+class SrcDataPool {
+public:
+  SrcDataPool(void *base, size_t size);
+  ~SrcDataPool(void);
+
+  // debug
+  void record_srcptr(void *ptr);
+  void *alloc_srcptr(size_t size_needed);
+  void release_srcptr(void *srcptr);
+
+  static void release_srcptr_handler(gasnet_token_t token, gasnet_handlerarg_t arg0, gasnet_handlerarg_t arg1);
+
+protected:
+  gasnet_hsl_t mutex;
+  std::map<char *, size_t> free_list;
+  std::map<char *, size_t> in_use;
+  // debug
+  std::map<void *, off_t> alloc_counts;
+};
+
+static SrcDataPool *srcdatapool = 0;
+
+/*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
+						    gasnet_handlerarg_t arg0,
+						    gasnet_handlerarg_t arg1)
+{
+  uintptr_t srcptr = (((uintptr_t)(unsigned)arg1) << 32) | ((uintptr_t)(unsigned)arg0);
+  assert(srcdatapool != 0);
+  srcdatapool->release_srcptr((void *)srcptr);
+}
+
+// wrapper so we don't have to expose SrcDataPool implementation
+void release_srcptr(void *srcptr)
+{
+  assert(srcdatapool != 0);
+  srcdatapool->release_srcptr(srcptr);
+}
+
+SrcDataPool::SrcDataPool(void *base, size_t size)
+{
+  gasnet_hsl_init(&mutex);
+  free_list[(char *)base] = size;
+}
+
+SrcDataPool::~SrcDataPool(void)
+{
+  size_t total = 0;
+  size_t nonzero = 0;
+  for(std::map<void *, off_t>::const_iterator it = alloc_counts.begin(); it != alloc_counts.end(); it++) {
+    total++;
+    if(it->second != 0) {
+      printf("HELP!  srcptr %p on node %d has final count of %zd\n", it->first, gasnet_mynode(), it->second);
+      nonzero++;
+    }
+  }
+  printf("SrcDataPool:  node %d: %zd total srcptrs, %zd nonzero\n", gasnet_mynode(), total, nonzero);
+}
+
+void SrcDataPool::record_srcptr(void *srcptr)
+{
+#ifdef DEBUG_SRCPTRPOOL
+  printf("recording srcptr = %p (node %d)\n", srcptr, gasnet_mynode());
+#endif
+  gasnet_hsl_lock(&mutex);
+  alloc_counts[srcptr]++;
+  gasnet_hsl_unlock(&mutex);
+}
+
+void *SrcDataPool::alloc_srcptr(size_t size_needed)
+{
+  // round up size to something reasonable
+  const size_t BLOCK_SIZE = 64;
+  if(size_needed % BLOCK_SIZE) {
+    size_needed = BLOCK_SIZE * ((size_needed / BLOCK_SIZE) + 1);
+  }
+
+  gasnet_hsl_lock(&mutex);
+  // walk the free list until we find something big enough
+  std::map<char *, size_t>::iterator it = free_list.begin();
+  while(it != free_list.end()) {
+    if(it->second == size_needed) {
+      // exact match
+#ifdef DEBUG_SRCPTRPOOL
+      printf("found %p + %zd - exact\n", it->first, it->second);
+#endif
+      char *srcptr = it->first;
+      free_list.erase(it);
+      in_use[srcptr] = size_needed;
+      gasnet_hsl_unlock(&mutex);
+      return srcptr;
+    }
+
+    if(it->second > size_needed) {
+      // match with some left over
+#ifdef DEBUG_SRCPTRPOOL
+      printf("found %p + %zd > %zd\n", it->first, it->second, size_needed);
+#endif
+      char *srcptr = it->first + (it->second - size_needed);
+      it->second -= size_needed;
+      in_use[srcptr] = size_needed;
+      gasnet_hsl_unlock(&mutex);
+      return srcptr;
+    }
+
+    // not big enough - keep looking
+    it++;
+  }
+  gasnet_hsl_unlock(&mutex);
+  return 0;
+}
+
+void SrcDataPool::release_srcptr(void *srcptr)
+{
+  char *srcptr_c = (char *)srcptr;
+#ifdef DEBUG_SRCPTRPOOL
+  printf("releasing srcptr = %p (node %d)\n", srcptr, gasnet_mynode());
+#endif
+  gasnet_hsl_lock(&mutex);
+  // look up the pointer to find its size
+  std::map<char *, size_t>::iterator it = in_use.find(srcptr_c);
+  assert(it != in_use.end());
+  size_t size = it->second;
+  in_use.erase(it);  // remove from in use list
+
+  // we'd better not be in the free list ourselves
+  assert(free_list.find(srcptr_c) == free_list.end());
+
+  // now add to the free list
+  if(free_list.size() == 0) {
+    // no free entries, so just add ourselves
+    free_list[srcptr_c] = size;
+  } else {
+    // find the ranges above and below us to see if we can merge
+    std::map<char *, size_t>::iterator below = free_list.lower_bound(srcptr_c);
+    if(below == free_list.end()) {
+      // nothing below us
+      std::map<char *, size_t>::iterator above = free_list.begin();
+#ifdef DEBUG_SRCPTRPOOL
+      printf("merge?  NONE %p+%zd %p+%zd\n", srcptr, size, above->first, above->second);
+#endif
+      if(above->first == (srcptr_c + size)) {
+	// yes, remove the above entry and add its size to ours
+	size += above->second;
+	free_list.erase(above);
+      }
+      // either way, insert ourselves now
+      free_list[srcptr_c] = size;
+    } else {
+      std::map<char *, size_t>::iterator above = below;  above++;
+      if(above == free_list.end()) {
+	// nothing above us
+#ifdef DEBUG_SRCPTRPOOL
+	printf("merge?  %p+%zd %p+%zd NONE\n", below->first, below->second, srcptr, size);
+#endif
+	if(srcptr_c == (below->first + below->second)) {
+	  // yes, change the below entry instead of adding ourselves
+	  below->second += size;
+	} else {
+	  free_list[srcptr_c] = size;
+	}
+      } else {
+#ifdef DEBUG_SRCPTRPOOL
+	printf("merge?  %p+%zd %p+%zd %p+%zd\n", below->first, below->second, srcptr, size, above->first, above->second);
+#endif
+	// first check the above
+	if(above->first == (srcptr_c + size)) {
+	  // yes, remove the above entry and add its size to ours
+	  size += above->second;
+	  free_list.erase(above);
+	}
+	// now check the below
+	if(srcptr_c == (below->first + below->second)) {
+	  // yes, change the below entry instead of adding ourselves
+	  below->second += size;
+	} else {
+	  free_list[srcptr_c] = size;
+	}
+      }
+    }
+  }
+  gasnet_hsl_unlock(&mutex);
+}
+
 struct OutgoingMessage {
   OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args)
     : msgid(_msgid), num_args(_num_args),
-      payload(0), payload_size(0), payload_mode(PAYLOAD_NONE)
+      payload(0), payload_size(0), payload_mode(PAYLOAD_NONE), dstptr(0)
   {
     for(unsigned i = 0; i < _num_args; i++)
       args[i] = ((const int *)_args)[i];
@@ -105,13 +298,15 @@ struct OutgoingMessage {
     }
   }
 
-  void set_payload(void *_payload, size_t _payload_size, int _payload_mode);
+  void set_payload(void *_payload, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
+  void set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
 
   unsigned msgid;
   unsigned num_args;
   void *payload;
   size_t payload_size;
   int payload_mode;
+  void *dstptr;
   int args[16];
 #ifdef DEBUG_MEM_REUSE
   int payload_num;
@@ -134,7 +329,7 @@ public:
   static const int NUM_LMBS = 2;
   static const size_t LMB_SIZE = (4 << 20);
 
-  ActiveMessageEndpoint(gasnet_node_t _peer, const gasnet_seginfo_t *seginfos)
+  ActiveMessageEndpoint(gasnet_node_t _peer)
     : peer(_peer)
   {
     gasnet_hsl_init(&mutex);
@@ -150,8 +345,8 @@ public:
     next_outgoing_message_id = 0;
 
     for(int i = 0; i < NUM_LMBS; i++) {
-      lmb_w_bases[i] = ((char *)(seginfos[peer].addr)) + (seginfos[peer].size - LMB_SIZE * (gasnet_mynode() * NUM_LMBS + i + 1));
-      lmb_r_bases[i] = ((char *)(seginfos[gasnet_mynode()].addr)) + (seginfos[peer].size - LMB_SIZE * (peer * NUM_LMBS + i + 1));
+      lmb_w_bases[i] = ((char *)(segment_info[peer].addr)) + (segment_info[peer].size - LMB_SIZE * (gasnet_mynode() * NUM_LMBS + i + 1));
+      lmb_r_bases[i] = ((char *)(segment_info[gasnet_mynode()].addr)) + (segment_info[peer].size - LMB_SIZE * (peer * NUM_LMBS + i + 1));
       lmb_r_counts[i] = 0;
       lmb_w_avail[i] = true;
     }
@@ -178,6 +373,17 @@ public:
 	  out_long_hdrs.pop();
 	  gasnet_hsl_unlock(&mutex);
 	  send_short(hdr);
+	  delete hdr;
+	  count++;
+	  continue;
+	}
+
+	// do we have a known destination pointer on the target?  if so, no need to use LMB
+	if(hdr->dstptr != 0) {
+	  //printf("sending long message directly to %p (%zd bytes)\n", hdr->dstptr, hdr->payload_size);
+	  out_long_hdrs.pop();
+	  gasnet_hsl_unlock(&mutex);
+	  send_long(hdr, hdr->dstptr);
 	  delete hdr;
 	  count++;
 	  continue;
@@ -635,6 +841,17 @@ protected:
     hdr->args[0] = next_outgoing_message_id++;
     int chunks = (hdr->payload_size + max_long_req - 1) / max_long_req;
     hdr->args[1] = chunks;
+    if(hdr->payload_mode == PAYLOAD_SRCPTR) {
+      //srcdatapool->record_srcptr(hdr->payload);
+      gasnet_handlerarg_t srcptr_lo = ((uint64_t)(hdr->payload)) & 0x0FFFFFFFFULL;
+      gasnet_handlerarg_t srcptr_hi = ((uint64_t)(hdr->payload)) >> 32;
+      hdr->args[2] = srcptr_lo;
+      hdr->args[3] = srcptr_hi;
+    } else {
+      hdr->args[2] = 0;
+      hdr->args[3] = 0;
+    }
+      
 
 #if 0
     size_t msg_size = hdr->payload_size;
@@ -646,7 +863,7 @@ protected:
 
       for(unsigned i = chunks-1; i > 0; i--) {
 	size_t size = ((i == (chunks-1)) ? (hdr->payload_size % max_long_req) : max_long_req);
-	gasnet_AMRequestLong3(peer, MSGID_LONG_EXTENSION, 
+	gasnet_AMRequestLongAsync3(peer, MSGID_LONG_EXTENSION, 
 			      ((char *)(hdr->payload))+(i * max_long_req), size, 
 			      ((char *)dest_ptr)+(i * max_long_req),
 			      dest_ptr_lo, dest_ptr_hi, i);
@@ -668,48 +885,48 @@ protected:
         // should never get this case since we
         // should always be sending at least two args
         assert(false);
-        //gasnet_AMRequestLong1(peer, hdr->msgid, 
+        //gasnet_AMRequestLongAsync1(peer, hdr->msgid, 
         //                      hdr->payload, msg_size, dest_ptr,
         //                      hdr->args[0]);
         break;
 
       case 2:
-        gasnet_AMRequestLong2(peer, hdr->msgid, 
+        gasnet_AMRequestLongAsync2(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1]);
         break;
 
       case 3:
-        gasnet_AMRequestLong3(peer, hdr->msgid, 
+        gasnet_AMRequestLongAsync3(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2]);
         break;
 
       case 4:
-        gasnet_AMRequestLong4(peer, hdr->msgid, 
+        gasnet_AMRequestLongAsync4(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3]);
         break;
       case 5:
-        gasnet_AMRequestLong5(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync5(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size,
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4]);
         break;
       case 6:
-        gasnet_AMRequestLong6(peer, hdr->msgid, 
+        gasnet_AMRequestLongAsync6(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5]);
         break;
       case 7:
-        gasnet_AMRequestLong7(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync7(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -717,7 +934,7 @@ protected:
                               hdr->args[6]);
         break;
       case 8:
-        gasnet_AMRequestLong8(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync8(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -725,7 +942,7 @@ protected:
                               hdr->args[6], hdr->args[7]);
         break;
       case 9:
-        gasnet_AMRequestLong9(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync9(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -733,7 +950,7 @@ protected:
                               hdr->args[6], hdr->args[7], hdr->args[8]);
         break;
       case 10:
-        gasnet_AMRequestLong10(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync10(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -742,7 +959,7 @@ protected:
                               hdr->args[9]);
         break;
       case 11:
-        gasnet_AMRequestLong11(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync11(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -751,7 +968,7 @@ protected:
                               hdr->args[9], hdr->args[10]);
         break;
       case 12:
-        gasnet_AMRequestLong12(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync12(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -760,7 +977,7 @@ protected:
                               hdr->args[9], hdr->args[10], hdr->args[11]);
         break;
       case 13:
-        gasnet_AMRequestLong13(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync13(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -770,7 +987,7 @@ protected:
                               hdr->args[12]);
         break;
       case 14:
-        gasnet_AMRequestLong14(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync14(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -780,7 +997,7 @@ protected:
                               hdr->args[12], hdr->args[13]);
         break;
       case 15:
-        gasnet_AMRequestLong15(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync15(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -790,7 +1007,7 @@ protected:
                               hdr->args[12], hdr->args[13], hdr->args[14]);
         break;
       case 16:
-        gasnet_AMRequestLong16(peer, hdr->msgid,
+        gasnet_AMRequestLongAsync16(peer, hdr->msgid,
                               ((char*)hdr->payload+(i*max_long_req)), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -828,33 +1045,133 @@ protected:
   int next_outgoing_message_id;
 };
 
-void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _payload_mode)
+void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _payload_mode,
+				  void *_dstptr)
 {
-  if(_payload_mode != PAYLOAD_NONE) {
-    assert(_payload_size <= ActiveMessageEndpoint::LMB_SIZE);
-    //assert(_payload_size <= gasnet_AMMaxLongRequest());
-#ifdef ENFORCE_MPI_CONDUIT_MAX_LONG_REQUEST
-    assert(_payload_size <= 65000); // MPI conduit's max
-#endif
-    payload_mode = _payload_mode;
-    payload_size = _payload_size;
-    if(_payload && (payload_mode == PAYLOAD_COPY)) {
-      payload = malloc(payload_size);
-      assert(payload != 0);
+  // die if a payload has already been attached
+  assert(payload_mode == PAYLOAD_NONE);
+
+  // no payload?  easy case
+  if(_payload_mode == PAYLOAD_NONE)
+    return;
+
+  // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
+  assert(_payload_size > 0);
+  assert((_dstptr != 0) || (_payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+
+  // copy the destination pointer through
+  dstptr = _dstptr;
+
+  // do we need to place this data in the srcdata pool?
+  // for now, yes, unless it's KEEP and in already-registered memory
+  bool need_srcdata;
+  if(_payload_mode == PAYLOAD_KEEP) {
+    bool is_reg = is_registered(_payload);
+    //printf("KEEP payload registration: %p %d\n", _payload, is_reg ? 1 : 0);
+    need_srcdata = !is_reg;
+  } else {
+    need_srcdata = true;
+  }
+  // if we don't have a srcdata pool, obviously don't try to use it
+  if(!srcdatapool)
+    need_srcdata = false;
+  
+  if(need_srcdata) {
+    // try to get the needed space in the srcdata pool
+    assert(srcdatapool);
+    void *srcptr = srcdatapool->alloc_srcptr(_payload_size);
+    if(srcptr != 0) {
+      // printf("%d: copying payload to srcdatapool: %p -> %p (%zd)\n", 
+      // 	     gasnet_mynode(), _payload, srcptr, _payload_size);
+      memcpy(srcptr, _payload, _payload_size);
+
+      if(_payload_mode == PAYLOAD_FREE) {
+	// done with the requestor's data - free it now
+	free(_payload);
+      }
+
+      payload_mode = PAYLOAD_SRCPTR;
+      payload = srcptr;
+      payload_size = _payload_size;
+      return;
+    }
+
+    // fall through or die?
+    assert(0);
+  }
+
+  // use data where it is or copy to non-registered memory
+  payload_mode = _payload_mode;
+  payload_size = _payload_size;
+  // make a copy if we were asked to
+  if(_payload_mode == PAYLOAD_COPY) {
+    payload = malloc(payload_size);
+    assert(payload != 0);
 #ifdef DEBUG_MEM_REUSE
 #ifdef __GNUC__
-      payload_num = __sync_add_and_fetch(&payload_count, 1);
+    payload_num = __sync_add_and_fetch(&payload_count, 1);
 #else
-      payload_num = LegionRuntime::LowLevel::__sync_add_and_fetch(&payload_count, 1);
+    payload_num = LegionRuntime::LowLevel::__sync_add_and_fetch(&payload_count, 1);
 #endif
-      printf("%d: copying payload %x = [%p, %p) (%zd)\n",
-	     gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size,
-	     payload_size);
+    printf("%d: copying payload %x = [%p, %p) (%zd)\n",
+	   gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size,
+	   payload_size);
 #endif
-      memcpy(payload, _payload, payload_size);
-    } else 
-      payload = _payload;
+    memcpy(payload, _payload, payload_size);
+  } else
+    payload = _payload;
+}
+
+static void gather_spans(const SpanList& spans, void *dst, size_t expected_size)
+{
+  char *dst_c = (char *)dst;
+  off_t bytes_left = expected_size;
+  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
+    assert(it->second <= bytes_left);
+    memcpy(dst_c, it->first, it->second);
+    dst_c += it->second;
+    bytes_left -= it->second;
   }
+  assert(bytes_left == 0);
+}
+
+void OutgoingMessage::set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode,
+				  void *_dstptr)
+{
+  // die if a payload has already been attached
+  assert(payload_mode == PAYLOAD_NONE);
+
+  // no payload?  easy case
+  if(_payload_mode == PAYLOAD_NONE)
+    return;
+
+  // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
+  assert(_payload_size > 0);
+  assert((_dstptr != 0) || (_payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+
+  // copy the destination pointer through
+  dstptr = _dstptr;
+
+  // we always need to allocate some memory to gather the data for sending - prefer to get this
+  //  from srcdata pool
+  payload_size = _payload_size;
+  if(srcdatapool) {
+    payload = srcdatapool->alloc_srcptr(_payload_size);
+    if(payload) {
+      payload_mode = PAYLOAD_SRCPTR;
+    } else {
+      assert(0);
+    }
+  }
+  if(!payload) {
+    payload = malloc(_payload_size);
+    assert(payload != 0);
+    payload_mode = PAYLOAD_COPY;
+  }
+
+  gather_spans(spans, payload, payload_size);
+  // doesn't really make sense to call this one with PAYLOAD_FREE
+  assert(_payload_mode != PAYLOAD_FREE);
 }
 
 static ActiveMessageEndpoint **endpoints;
@@ -888,13 +1205,19 @@ static void handle_flip_ack(gasnet_token_t token,
 }
 
 void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
-		    int gasnet_mem_size_in_mb)
+		    int gasnet_mem_size_in_mb,
+		    int registered_mem_size_in_mb)
 {
+  size_t srcdatapool_size = 64 << 20;
+  size_t lmb_size = (gasnet_nodes() * 
+		     ActiveMessageEndpoint::NUM_LMBS *
+		     ActiveMessageEndpoint::LMB_SIZE);
+
   // add in our internal handlers and space we need for LMBs
   int attach_size = ((gasnet_mem_size_in_mb << 20) +
-		     (gasnet_nodes() * 
-		      ActiveMessageEndpoint::NUM_LMBS *
-		      ActiveMessageEndpoint::LMB_SIZE));
+		     (registered_mem_size_in_mb << 20) +
+		     srcdatapool_size +
+		     lmb_size);
 
 #if 0
   handlers[hcount].index = MSGID_LONG_EXTENSION;
@@ -907,22 +1230,34 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   handlers[hcount].index = MSGID_FLIP_ACK;
   handlers[hcount].fnptr = (void (*)())handle_flip_ack;
   hcount++;
+  handlers[hcount].index = MSGID_RELEASE_SRCPTR;
+  handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
+  hcount++;
 
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );
 
-  endpoints = new ActiveMessageEndpoint *[gasnet_nodes()];
+  segment_info = new gasnet_seginfo_t[gasnet_nodes()];
+  CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
-  gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
-  CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
+  char *my_segment = (char *)(segment_info[gasnet_mynode()].addr);
+  char *gasnet_mem_base = my_segment;  my_segment += (gasnet_mem_size_in_mb << 20);
+  char *reg_mem_base = my_segment;  my_segment += (registered_mem_size_in_mb << 20);
+  char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
+  char *lmb_base = my_segment;  my_segment += lmb_size;
+  assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size));
+
+#ifndef NO_SRCDATAPOOL
+  srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
+#endif
+
+  endpoints = new ActiveMessageEndpoint *[gasnet_nodes()];
 
   for(int i = 0; i < gasnet_nodes(); i++)
     if(i == gasnet_mynode())
       endpoints[i] = 0;
     else
-      endpoints[i] = new ActiveMessageEndpoint(i, seginfos);
-
-  delete[] seginfos;
+      endpoints[i] = new ActiveMessageEndpoint(i);
 
   init_deferred_frees();
 }
@@ -1002,7 +1337,7 @@ void start_sending_threads(void)
 void enqueue_message(gasnet_node_t target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t payload_size,
-		     int payload_mode)
+		     int payload_mode, void *dstptr)
 {
   assert(target != gasnet_mynode());
 
@@ -1010,7 +1345,23 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
 					     args);
 
-  hdr->set_payload((void *)payload, payload_size, payload_mode);
+  hdr->set_payload((void *)payload, payload_size, payload_mode, dstptr);
+
+  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
+}
+
+void enqueue_message(gasnet_node_t target, int msgid,
+		     const void *args, size_t arg_size,
+		     const SpanList& spans, size_t payload_size,
+		     int payload_mode, void *dstptr)
+{
+  assert(target != gasnet_mynode());
+
+  OutgoingMessage *hdr = new OutgoingMessage(msgid, 
+  					     (arg_size + sizeof(int) - 1) / sizeof(int),
+  					     args);
+
+  hdr->set_payload(spans, payload_size, payload_mode, dstptr);
 
   endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
 }

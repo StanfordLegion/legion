@@ -308,6 +308,17 @@ namespace LegionRuntime {
      */
     class ProcessorManager {
     public:
+      struct TriggerOpArgs {
+      public:
+        Operation *op;
+        ProcessorManager *manager;
+      };
+      struct TriggerTaskArgs {
+      public:
+        TaskOp *op;
+        ProcessorManager *manager;
+      };
+    public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt, unsigned min_out,
                        unsigned width, unsigned default_mappers,  
@@ -848,6 +859,8 @@ namespace LegionRuntime {
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       void issue_mapping_fence(Context ctx);
       void issue_execution_fence(Context ctx);
+      void begin_trace(Context ctx, TraceID tid);
+      void end_trace(Context ctx, TraceID tid);
     public:
       Mapper* get_mapper(Context ctx, MapperID id);
       Processor get_executing_processor(Context ctx);
@@ -1023,10 +1036,12 @@ namespace LegionRuntime {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
+#ifdef SPECIALIZED_UTIL_PROCS
     public:
       Processor get_cleanup_proc(Processor p) const;
       Processor get_gc_proc(Processor p) const;
       Processor get_message_proc(Processor p) const;
+#endif
     public:
       void increment_pending(Processor p);
       void decrement_pending(Processor p);
@@ -1093,23 +1108,25 @@ namespace LegionRuntime {
     public:
       Event find_gc_epoch_event(Processor local_proc);
     public:
-      IndividualTask* get_available_individual_task(void);
-      PointTask*      get_available_point_task(void);
-      IndexTask*      get_available_index_task(void);
-      SliceTask*      get_available_slice_task(void);
-      RemoteTask*     get_available_remote_task(void);
-      InlineTask*     get_available_inline_task(void);
-      MapOp*          get_available_map_op(void);
-      CopyOp*         get_available_copy_op(void);
-      FenceOp*        get_available_fence_op(void);
-      DeletionOp*     get_available_deletion_op(void);
-      CloseOp*        get_available_close_op(void);
-      FuturePredOp*   get_available_future_pred_op(void);
-      NotPredOp*      get_available_not_pred_op(void);
-      AndPredOp*      get_available_and_pred_op(void);
-      OrPredOp*       get_available_or_pred_op(void);
-      AcquireOp*      get_available_acquire_op(void);
-      ReleaseOp*      get_available_release_op(void);
+      IndividualTask*  get_available_individual_task(void);
+      PointTask*       get_available_point_task(void);
+      IndexTask*       get_available_index_task(void);
+      SliceTask*       get_available_slice_task(void);
+      RemoteTask*      get_available_remote_task(void);
+      InlineTask*      get_available_inline_task(void);
+      MapOp*           get_available_map_op(void);
+      CopyOp*          get_available_copy_op(void);
+      FenceOp*         get_available_fence_op(void);
+      DeletionOp*      get_available_deletion_op(void);
+      CloseOp*         get_available_close_op(void);
+      FuturePredOp*    get_available_future_pred_op(void);
+      NotPredOp*       get_available_not_pred_op(void);
+      AndPredOp*       get_available_and_pred_op(void);
+      OrPredOp*        get_available_or_pred_op(void);
+      AcquireOp*       get_available_acquire_op(void);
+      ReleaseOp*       get_available_release_op(void);
+      TraceCaptureOp*  get_available_capture_op(void);
+      TraceCompleteOp* get_available_trace_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1128,6 +1145,8 @@ namespace LegionRuntime {
       void free_or_predicate_op(OrPredOp *op);
       void free_acquire_op(AcquireOp *op);
       void free_release_op(ReleaseOp *op);
+      void free_capture_op(TraceCaptureOp *op);
+      void free_trace_op(TraceCompleteOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
@@ -1169,6 +1188,10 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void deferred_collect_task(
                           const void *args, size_t arglen, Processor p);
+      static void trigger_op_task(
+                          const void *args, size_t arglen, Processor p);
+      static void trigger_task_task(
+                          const void *args, size_t arglen, Processor p);
       static void legion_logging_task(
                           const void *args, size_t arglen, Processor p);
     protected:
@@ -1184,10 +1207,12 @@ namespace LegionRuntime {
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
       RegionTreeForest *const forest;
+#ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;
       const Processor gc_proc;
       const Processor message_proc;
+#endif
     protected:
       // Internal runtime state 
       // The local processor managed by this runtime
@@ -1253,24 +1278,28 @@ namespace LegionRuntime {
       Reservation or_pred_op_lock;
       Reservation acquire_op_lock;
       Reservation release_op_lock;
+      Reservation capture_op_lock;
+      Reservation trace_op_lock;
     protected:
-      std::deque<IndividualTask*> available_individual_tasks;
-      std::deque<PointTask*>      available_point_tasks;
-      std::deque<IndexTask*>      available_index_tasks;
-      std::deque<SliceTask*>      available_slice_tasks;
-      std::deque<RemoteTask*>     available_remote_tasks;
-      std::deque<InlineTask*>     available_inline_tasks;
-      std::deque<MapOp*>          available_map_ops;
-      std::deque<CopyOp*>         available_copy_ops;
-      std::deque<FenceOp*>        available_fence_ops;
-      std::deque<DeletionOp*>     available_deletion_ops;
-      std::deque<CloseOp*>        available_close_ops;
-      std::deque<FuturePredOp*>   available_future_pred_ops;
-      std::deque<NotPredOp*>      available_not_pred_ops;
-      std::deque<AndPredOp*>      available_and_pred_ops;
-      std::deque<OrPredOp*>       available_or_pred_ops;
-      std::deque<AcquireOp*>      available_acquire_ops;
-      std::deque<ReleaseOp*>      available_release_ops;
+      std::deque<IndividualTask*>  available_individual_tasks;
+      std::deque<PointTask*>       available_point_tasks;
+      std::deque<IndexTask*>       available_index_tasks;
+      std::deque<SliceTask*>       available_slice_tasks;
+      std::deque<RemoteTask*>      available_remote_tasks;
+      std::deque<InlineTask*>      available_inline_tasks;
+      std::deque<MapOp*>           available_map_ops;
+      std::deque<CopyOp*>          available_copy_ops;
+      std::deque<FenceOp*>         available_fence_ops;
+      std::deque<DeletionOp*>      available_deletion_ops;
+      std::deque<CloseOp*>         available_close_ops;
+      std::deque<FuturePredOp*>    available_future_pred_ops;
+      std::deque<NotPredOp*>       available_not_pred_ops;
+      std::deque<AndPredOp*>       available_and_pred_ops;
+      std::deque<OrPredOp*>        available_or_pred_ops;
+      std::deque<AcquireOp*>       available_acquire_ops;
+      std::deque<ReleaseOp*>       available_release_ops;
+      std::deque<TraceCaptureOp*>  available_capture_ops;
+      std::deque<TraceCompleteOp*> available_trace_ops;
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -1328,9 +1357,11 @@ namespace LegionRuntime {
       static void register_runtime_tasks(Processor::TaskIDTable &table);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine *machine);
+#ifdef SPECIALIZED_UTIL_PROCS
       static void get_utility_processor_mapping(
           const std::set<Processor> &util_procs, Processor &cleanup_proc,
           Processor &gc_proc, Processor &message_proc);
+#endif
     public:
       // Static member variables
       static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];

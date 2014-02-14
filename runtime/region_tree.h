@@ -762,7 +762,8 @@ namespace LegionRuntime {
     public:
       LogicalDepAnalyzer(const LogicalUser &user,
                          const FieldMask &check_mask,
-                         bool validates_regions);
+                         bool validates_regions,
+                         bool tracing);
     public:
       bool analyze(LogicalUser &user);
       FieldMask get_dominator_mask(void) const;
@@ -772,10 +773,12 @@ namespace LegionRuntime {
     private:
       const LogicalUser user;
       const bool validates_regions;
+      const bool tracing;
       FieldMask dominator_mask;
       FieldMask observed_mask;
     };
 
+    template<bool DOMINATE>
     class LogicalOpAnalyzer {
     public:
       LogicalOpAnalyzer(Operation *op);
@@ -1139,10 +1142,12 @@ namespace LegionRuntime {
       // Logical traversal operations
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
-                                 RegionTreePath &path);
+                                 RegionTreePath &path,
+                                 const bool already_traced);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
-                             RegionTreePath &path);
+                             RegionTreePath &path,
+                             const bool already_traced);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask);
       bool siphon_logical_children(LogicalCloser &closer,
@@ -1177,6 +1182,7 @@ namespace LegionRuntime {
       void sanity_check_logical_state(LogicalState &state);
       void initialize_logical_state(ContextID ctx);
       void invalidate_logical_state(ContextID ctx);
+      template<bool DOMINATE>
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
       void record_user_coherence(ContextID ctx, FieldMask &coherence_mask);
@@ -1216,7 +1222,9 @@ namespace LegionRuntime {
       void pull_valid_instance_views(PhysicalState &state,
                                      const FieldMask &mask);
       // Since figuring out how to issue copies is expensive, try not
-      // to hold the physical state lock when doing them.
+      // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
+      // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
+      // 'TRUE' TO THE find_valid_instance_views METHOD!!!!!!!!
       void issue_update_copies(MappableInfo *info,
                                InstanceView *target, 
                                FieldMask copy_mask,
@@ -1618,6 +1626,7 @@ namespace LegionRuntime {
      * against all other operations with an overlapping
      * field mask.
      */
+    template<bool DOMINATE>
     class LogicalRegistrar : public NodeTraverser {
     public:
       LogicalRegistrar(ContextID ctx, Operation *op,
