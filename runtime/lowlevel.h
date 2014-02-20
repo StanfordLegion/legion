@@ -286,7 +286,7 @@ namespace LegionRuntime {
 			       bool do_enabled1 = true,
 			       bool do_enabled2 = true);
 
-    protected:
+    public:
       friend class Enumerator;
       int first_element;
       int num_elements;
