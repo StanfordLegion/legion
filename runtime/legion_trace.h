@@ -121,3 +121,4 @@ namespace LegionRuntime {
 }; // namespace LegionRuntime
 
 #endif // __LEGION_TRACE__
+
