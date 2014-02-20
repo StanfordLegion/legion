@@ -106,8 +106,8 @@ void top_level_task(const Task *task,
   // Here we wait for all the futures to be ready
   fm.wait_all_results();
   // Now we can check that the future results that came back
-  // from all the points in the index task are double what
-  // we expected.
+  // from all the points in the index task are double 
+  // their input.
   bool all_passed = true;
   for (int i = 0; i < num_points; i++)
   {
