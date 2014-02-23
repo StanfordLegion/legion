@@ -246,7 +246,7 @@ AdversarialMapper::AdversarialMapper(Machine *m,
             break;
           }
         // Pinned memory on a single node
-        case Memory::PINNED_MEM:
+        case Memory::REGDMA_MEM:
           {
             printf("  Pinned Memory ID %x has %ld KB\n",
                     it->id, memory_size_in_kb);

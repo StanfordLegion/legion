@@ -19,23 +19,23 @@ $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 #Flags for directing the runtime makefile what to include
-DEBUG=1                   # Include debugging symbols
-OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
-SHARED_LOWLEVEL=1	  # Use the shared low level
-#ALT_MAPPERS=1		  # Compile the alternative mappers
+DEBUG           ?= 1		# Include debugging symbols
+OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time print level
+SHARED_LOWLEVEL ?= 1		# Use the shared low level
+ALT_MAPPERS     ?= 0		# Compile the alternative mappers
 
 # Put the binary file name here
-OUTFILE		:= ckt_sim 
+OUTFILE		?= ckt_sim
 # List all the application source files here
-GEN_SRC		:= circuit.cc circuit_cpu.cc 	# .cc files
-GEN_GPU_SRC	:= circuit_gpu.cu				# .cu files
+GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
+GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	:=
-CC_FLAGS	:=
-NVCC_FLAGS	:=
-GASNET_FLAGS	:=
-LD_FLAGS	:=
+INC_FLAGS	?=
+CC_FLAGS	?=
+NVCC_FLAGS	?=
+GASNET_FLAGS	?=
+LD_FLAGS	?=
 
 ###########################################################################
 #
@@ -72,16 +72,12 @@ endif
 SSH	:= ssh
 SCP	:= scp
 
-common_all : all
-
-.PHONY	: common_all
-
 GEN_OBJS	:= $(GEN_SRC:.cc=.o)
 LOW_RUNTIME_OBJS:= $(LOW_RUNTIME_SRC:.cc=.o)
 HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.o)
 # Only compile the gpu objects if we need to 
-ifndef SHARED_LOWLEVEL
+ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.o)
 GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.o)
 else
@@ -91,13 +87,13 @@ endif
 
 ALL_OBJS	:= $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS)
 
-all:
-	$(MAKE) $(OUTFILE)
+.PHONY: all
+all: $(OUTFILE)
 
 # If we're using the general low-level runtime we have to link with nvcc
 $(OUTFILE) : $(ALL_OBJS)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-ifdef SHARED_LOWLEVEL
+ifeq ($(strip $(SHARED_LOWLEVEL)),1)
 	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
 else
 	$(NVCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)

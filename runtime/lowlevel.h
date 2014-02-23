@@ -211,7 +211,7 @@ namespace LegionRuntime {
       enum Kind {
         GLOBAL_MEM, // Guaranteed visible to all processors on all nodes (e.g. GASNet memory, universally slow)
         SYSTEM_MEM, // Visible to all processors on a node
-        PINNED_MEM, // Visible to all processors on a node, can be a target of RDMA
+        REGDMA_MEM, // Registered memory visible to all processors on a node, can be a target of RDMA
         SOCKET_MEM, // Memory visible to all processors within a node, better performance to processors on same socket 
         Z_COPY_MEM, // Zero-Copy memory visible to all CPUs within a node and one or more GPUs 
         GPU_FB_MEM,   // Framebuffer memory for one GPU and all its SMs
@@ -654,6 +654,7 @@ namespace LegionRuntime {
 	default:
 	  assert(0);
 	}
+        return 0;
       }
 
       protected:

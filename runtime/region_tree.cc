@@ -1134,13 +1134,8 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
       LegionSpy::log_event_dependence(precondition, copy_pre);
 #endif
-      RegionNode *src_node = get_node(src_req.region);
-      Domain copy_domain = src_node->get_domain();
-#if defined(DEBUG_HIGH_LEVEL) || defined(LEGION_SPY)
-      // They should be the same domain
       RegionNode *dst_node = get_node(dst_req.region);
-      assert(copy_domain == dst_node->get_domain());
-#endif
+      Domain copy_domain = dst_node->get_domain();
       Event result = copy_domain.copy(src_fields, dst_fields, copy_pre);
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
@@ -1152,6 +1147,7 @@ namespace LegionRuntime {
         result = new_result;
       }
       {
+        RegionNode *src_node = get_node(src_req.region);
         FieldMask src_mask = 
           src_node->column_source->get_field_mask(src_req.privilege_fields);
         FieldMask dst_mask = 
@@ -8170,7 +8166,7 @@ namespace LegionRuntime {
       std::vector<std::pair<InstanceView*,FieldMask> > src_instances;
       std::vector<Domain::CopySrcDstField> dst_fields;
 
-      // No need to call the mapper if there is only a one valid instance
+      // No need to call the mapper if there is only one valid instance
       if (valid_instances.size() == 1)
       {
         const std::pair<InstanceView*,FieldMask> &src_info = 

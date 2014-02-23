@@ -2635,7 +2635,8 @@ namespace LegionRuntime {
 
       LocalCPUMemory(Memory _me, size_t _size,
 		     void *prealloc_base = 0, bool _registered = false) 
-	: Memory::Impl(_me, _size, MKIND_SYSMEM, ALIGNMENT, Memory::SYSTEM_MEM)
+	: Memory::Impl(_me, _size, MKIND_SYSMEM, ALIGNMENT, 
+            (_registered ? Memory::REGDMA_MEM : Memory::SYSTEM_MEM))
       {
 	if(prealloc_base) {
 	  base = (char *)prealloc_base;
@@ -2669,9 +2670,9 @@ namespace LegionRuntime {
 #ifdef USE_GPU
       // For pinning CPU memories for use with asynchronous
       // GPU copies
-      void pin_memory(void)
+      void pin_memory(GPUProcessor *proc)
       {
-        CHECK_CUDART( cudaHostRegister(base, size, cudaHostRegisterPortable) );
+        proc->register_host_memory(base, size);
       }
 #endif
 
@@ -7180,6 +7181,7 @@ namespace LegionRuntime {
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       bool     active_msg_sender_threads = false;
+      bool     gpu_dma_thread = true;
 #ifdef EVENT_TRACING
       size_t   event_trace_block_size = 1 << 20;
       double   event_trace_exp_arrv_rate = 1e3;
@@ -7217,6 +7219,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
+        BOOL_ARG("-ll:gpudma", gpu_dma_thread);
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
 	INT_ARG("-ll:bind", bind_localproc_threads);
         INT_ARG("-ll:pin", pin_sysmem_for_gpu);
@@ -7367,6 +7370,8 @@ namespace LegionRuntime {
       }
 
 #ifdef USE_GPU
+      // Initialize the driver API
+      CHECK_CU( cuInit(0) );
       // Keep track of the local system memories so we can pin them
       // after we've initialized the GPU
       std::vector<LocalCPUMemory*> local_mems;
@@ -7462,7 +7467,7 @@ namespace LegionRuntime {
 #endif
 	adata[apos++] = NODE_ANNOUNCE_MEM;
 	adata[apos++] = regmem->me.id;
-        adata[apos++] = Memory::SYSTEM_MEM;
+        adata[apos++] = Memory::REGDMA_MEM;
 	adata[apos++] = regmem->size;
 	adata[apos++] = (size_t)(regmem->base);
       } else
@@ -7547,7 +7552,8 @@ namespace LegionRuntime {
 #endif
 					      zc_mem_size_in_mb << 20,
 					      fb_mem_size_in_mb << 20,
-                                              stack_size_in_mb << 20);
+                                              stack_size_in_mb << 20,
+                                              gpu_dma_thread);
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
           {
@@ -7639,7 +7645,10 @@ namespace LegionRuntime {
         // Now pin any CPU memories
         if(pin_sysmem_for_gpu)
           for (unsigned idx = 0; idx < local_mems.size(); idx++)
-            local_mems[idx]->pin_memory();
+            local_mems[idx]->pin_memory(local_gpus[0]);
+
+        if (gpu_dma_thread)
+          GPUProcessor::start_gpu_dma_thread(local_gpus);
       }
 #endif
 
@@ -8070,8 +8079,28 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_soa_parameters(void *&base, size_t &stride) const
     {
-      // TODO: implement this
-      return false;
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      Memory::Impl *mem = impl->memory.impl();
+      StaticAccess<RegionInstance::Impl> idata(impl);
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+      
+      if (idata->block_size == 1) {
+        offset += field_offset;
+        elmt_stride = idata->elmt_size;
+      } else {
+        off_t field_start;
+        int field_size;
+        find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+        offset += (field_start * idata->block_size) + (field_offset - field_start);
+	elmt_stride = field_size;
+      }
+      base = mem->get_direct_ptr(offset, 0);
+      if (!base) return false;
+      stride = elmt_stride;
+      return true;
     }
 
     bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *&base, size_t &stride, 
@@ -8083,8 +8112,29 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_redfold_parameters(void *&base) const
     {
-      // TODO: implement this
-      return false;
+      RegionInstance::Impl *impl = (RegionInstance::Impl *)internal;
+      Memory::Impl *mem = impl->memory.impl();
+      StaticAccess<RegionInstance::Impl> idata(impl);
+      if (idata->redopid == 0) return false;
+      if (idata->red_list_size > 0) return false;
+
+      off_t offset = idata->alloc_offset + field_offset;
+      off_t elmt_stride;
+
+      if (idata->block_size == 1) {
+        offset += field_offset;
+        elmt_stride = idata->elmt_size;
+      } else {
+        off_t field_start;
+        int field_size;
+        find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+        offset += (field_start * idata->block_size) + (field_offset - field_start);
+	elmt_stride = field_size;
+      }
+      base = mem->get_direct_ptr(offset, 0);
+      if (!base) return false;
+      return true;
     }
 
     bool AccessorType::Generic::Untyped::get_redlist_parameters(void *&base, ptr_t *&next_ptr) const

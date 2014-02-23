@@ -74,10 +74,11 @@ namespace LegionRuntime {
 
     class GPUProcessor::Internal {
     public:
-      GPUProcessor *gpu;
-      int gpu_index;
-      size_t zcmem_size, fbmem_size;
-      size_t zcmem_reserve, fbmem_reserve;
+      GPUProcessor *const gpu;
+      const int gpu_index;
+      const size_t zcmem_size, fbmem_size;
+      const size_t zcmem_reserve, fbmem_reserve;
+      const bool gpu_dma_thread;
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
@@ -93,22 +94,42 @@ namespace LegionRuntime {
       std::list<GPUTask*> tasks;
       std::deque<GPUJob*> copies;
 
+      // Our CUDA context that we will create
+      CUcontext proc_ctx;
+
       // Streams for different copy types
       cudaStream_t host_to_device_stream;
       cudaStream_t device_to_host_stream;
       cudaStream_t device_to_device_stream;
+
       // List of pending copies on each stream
       std::deque<GPUJob*> host_device_copies;
       std::deque<GPUJob*> device_host_copies;
       std::deque<GPUJob*> device_device_copies;
 
-      Internal(void)
-	: initialized(false), worker_enabled(false), shutdown_requested(false),
-	  idle_task_enabled(true)
+      Internal(GPUProcessor *_gpu, int _gpu_index, 
+               size_t _zcmem_size, size_t _fbmem_size,
+               size_t _zcmem_res, size_t _fbmem_res,
+               bool enabled, bool gpu_dma)
+	: gpu(_gpu), gpu_index(_gpu_index),
+          zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
+          zcmem_reserve(_zcmem_res), fbmem_reserve(_fbmem_res),
+          gpu_dma_thread(gpu_dma),
+          initialized(false), worker_enabled(false), 
+          shutdown_requested(false),
+	  idle_task_enabled(enabled)
       {
 	gasnet_hsl_init(&mutex);
 	gasnett_cond_init(&parent_condvar);
 	gasnett_cond_init(&worker_condvar);
+        // Make our context and then immediately pop it off
+        CUdevice cuDevice;
+        CHECK_CU( cuDeviceGet(&cuDevice, gpu_index) );
+
+        CHECK_CU( cuCtxCreate(&proc_ctx, CU_CTX_MAP_HOST |
+                              CU_CTX_SCHED_BLOCKING_SYNC, cuDevice) );
+
+        CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
       }
 
       Processor get_processor(void) const
@@ -120,11 +141,10 @@ namespace LegionRuntime {
       {
 	gasnett_threadkey_set(gpu_thread, this);
 
-	CHECK_CUDART( cudaSetDevice(gpu_index) );
-	CHECK_CUDART( cudaSetDeviceFlags(cudaDeviceMapHost |
-					 cudaDeviceScheduleBlockingSync) );
-
-	// allocate zero-copy memory
+        // Push our context onto the stack
+        CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+        
+        // allocate zero-copy memory
 	CHECK_CUDART( cudaHostAlloc(&zcmem_cpu_base, 
 				    zcmem_size + zcmem_reserve,
 				    (cudaHostAllocPortable |
@@ -136,9 +156,12 @@ namespace LegionRuntime {
 	CHECK_CUDART( cudaMalloc(&fbmem_gpu_base, fbmem_size + fbmem_reserve) );
 
         // initialize the streams for copy operations
-        CHECK_CUDART( cudaStreamCreate(&host_to_device_stream) );
-        CHECK_CUDART( cudaStreamCreate(&device_to_host_stream) );
-        CHECK_CUDART( cudaStreamCreate(&device_to_device_stream) );
+        CHECK_CUDART( cudaStreamCreateWithFlags(&host_to_device_stream,
+                                                cudaStreamNonBlocking) );
+        CHECK_CUDART( cudaStreamCreateWithFlags(&device_to_host_stream,
+                                                cudaStreamNonBlocking) );
+        CHECK_CUDART( cudaStreamCreateWithFlags(&device_to_device_stream,
+                                                cudaStreamNonBlocking) );
 
 	log_gpu(LEVEL_INFO, "gpu initialized: zcmem=%p/%p fbmem=%p",
 		zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
@@ -165,9 +188,10 @@ namespace LegionRuntime {
 	    while(tasks.empty() && copies.empty() && !shutdown_requested) {
 	      // see if there's an idle task we should run
 	      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
-              const bool has_pending_copies = !host_device_copies.empty() ||
-                                              !device_host_copies.empty() ||
-                                              !device_device_copies.empty();
+              const bool has_pending_copies = !gpu_dma_thread &&
+                                              (!host_device_copies.empty() ||
+                                               !device_host_copies.empty() ||
+                                               !device_device_copies.empty());
 	      if(idle_task_enabled && (it != task_id_table.end())) {
 		gasnet_hsl_unlock(&mutex);
 		log_gpu.spew("running scheduler thread");
@@ -191,8 +215,11 @@ namespace LegionRuntime {
               }
 	    }
 	    if(shutdown_requested) break;
-            ready_copies.insert(ready_copies.end(),copies.begin(),copies.end());
-            copies.clear();
+            if (!gpu_dma_thread)
+            {
+              ready_copies.insert(ready_copies.end(),copies.begin(),copies.end());
+              copies.clear();
+            }
             if (!tasks.empty())
             {
               job = tasks.front();
@@ -200,51 +227,19 @@ namespace LegionRuntime {
             }
 	  }
 
-          // Check to see if we have any pending copies to query
-          while (!host_device_copies.empty())
+          if (!gpu_dma_thread)
           {
-            GPUJob *next = host_device_copies.front();
-            if (next->is_finished())
-            {
-              next->finish_job();
-              delete next;
-              host_device_copies.pop_front();
-            }
-            else
-              break; // If the first one wasn't done, the others won't be either
-          }
-          while (!device_host_copies.empty())
-          {
-            GPUJob *next = device_host_copies.front();
-            if (next->is_finished())
-            {
-              next->finish_job();
-              delete next;
-              device_host_copies.pop_front();
-            }
-            else
-              break;
-          }
-          while (!device_device_copies.empty())
-          {
-            GPUJob *next = device_device_copies.front();
-            if (next->is_finished())
-            {
-              next->finish_job();
-              delete next;
-              device_device_copies.pop_front();
-            }
-            else
-              break;
-          }
+            // Check to see if any of our copies have completed
+            check_for_complete_copies();  
 
-          // Launch all the copies first since we know that they
-          // are going to be asynchronous on streams that won't block tasks
-          // These calls well enqueue the copies on the right queue.
-          for (std::vector<GPUJob*>::const_iterator it = ready_copies.begin();
-                it != ready_copies.end(); it++)
-          {
-            (*it)->execute();
+            // Launch all the copies first since we know that they
+            // are going to be asynchronous on streams that won't block tasks
+            // These calls well enqueue the copies on the right queue.
+            for (std::vector<GPUJob*>::const_iterator it = ready_copies.begin();
+                  it != ready_copies.end(); it++)
+            {
+              (*it)->execute();
+            }
           }
 
 	  // charge all the time from the start of the execute until the end
@@ -359,6 +354,80 @@ namespace LegionRuntime {
       {
         device_device_copies.push_back(copy);
       }
+      void check_for_complete_copies(void)
+      {
+        // Check to see if we have any pending copies to query
+        while (!host_device_copies.empty())
+        {
+          GPUJob *next = host_device_copies.front();
+          if (next->is_finished())
+          {
+            next->finish_job();
+            delete next;
+            host_device_copies.pop_front();
+          }
+          else
+            break; // If the first one wasn't done, the others won't be either
+        }
+        while (!device_host_copies.empty())
+        {
+          GPUJob *next = device_host_copies.front();
+          if (next->is_finished())
+          {
+            next->finish_job();
+            delete next;
+            device_host_copies.pop_front();
+          }
+          else
+            break;
+        }
+        while (!device_device_copies.empty())
+        {
+          GPUJob *next = device_device_copies.front();
+          if (next->is_finished())
+          {
+            next->finish_job();
+            delete next;
+            device_device_copies.pop_front();
+          }
+          else
+            break;
+        }
+      }
+      void register_host_memory(void *base, size_t size)
+      {
+        if (!shutdown_requested)
+        {
+          CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          CHECK_CU( cuMemHostRegister(base, size, CU_MEMHOSTREGISTER_PORTABLE) ); 
+          CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+        }
+      }
+      void handle_copies(void)
+      {
+        if (!shutdown_requested)
+        {
+          // Push our context onto the stack
+          CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          // First see if any of our copies are ready
+          check_for_complete_copies();
+          std::vector<GPUJob*> ready_copies;
+          // Get any copies that are ready to be performed
+          {
+            AutoHSLLock a(mutex);
+            ready_copies.insert(ready_copies.end(),copies.begin(),copies.end());
+            copies.clear();
+          }
+          // Issue our copies
+          for (std::vector<GPUJob*>::const_iterator it = ready_copies.begin();
+                it != ready_copies.end(); it++)
+          {
+            (*it)->execute();
+          }
+          // Now pop our context back off the stack
+          CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+        }
+      }
     };
 
     GPUTask::GPUTask(GPUProcessor *_gpu, Event _finish_event,
@@ -452,9 +521,11 @@ namespace LegionRuntime {
 	off_t span_start = pos * elmt_size;
 	size_t span_bytes = len * elmt_size;
 
-	CHECK_CUDART( cudaMemcpyAsync(((char *)dst)+span_start,
-				 ((char *)src)+span_start,
-				 span_bytes, kind, local_stream) );
+        CHECK_CUDART( cudaMemcpyAsync(((char *)dst)+span_start,
+                                      ((char *)src)+span_start,
+                                      span_bytes,
+                                      cudaMemcpyDefault,
+                                      local_stream) );
       }
 
       virtual bool event_triggered(void)
@@ -513,7 +584,7 @@ namespace LegionRuntime {
 		     dst, src, elmt_size, kind);
         // Create an event for us to use and put it on the stream
         CHECK_CUDART( cudaEventCreateWithFlags(&complete_event,
-                                                cudaEventDisableTiming) );
+                                               cudaEventDisableTiming) );
         CHECK_CUDART( cudaEventRecord(complete_event, local_stream) );
       }
 
@@ -600,30 +671,7 @@ namespace LegionRuntime {
       {
 	off_t span_start = pos * elmt_size;
 	size_t span_bytes = len * elmt_size;
-#if 0
-	const size_t BUFFER_SIZE = 65536;
-	char buffer[BUFFER_SIZE];
-        size_t bytes_done = 0;
-	while(bytes_done < span_bytes) {
-	  size_t chunk_size = span_bytes - bytes_done;
-	  if(chunk_size > BUFFER_SIZE) chunk_size = BUFFER_SIZE;
 
-	  if(kind == cudaMemcpyDeviceToHost) {
-	    CHECK_CUDART( cudaMemcpy(buffer, 
-				     ((char *)gpu_ptr)+span_start+bytes_done, 
-				     chunk_size, kind) );
-	    memory->put_bytes(mem_offset+span_start+bytes_done, 
-			      buffer, chunk_size);
-	  } else {
-	    memory->get_bytes(mem_offset+span_start+bytes_done,
-			      buffer, chunk_size);
-	    CHECK_CUDART( cudaMemcpy(((char *)gpu_ptr)+span_start+bytes_done,
-				     buffer, 
-				     chunk_size, kind) );
-	  }
-	  bytes_done += chunk_size;
-	}
-#else
         // First check to see if we need to make a new buffer
         if (span_bytes > remaining_bytes)
         {
@@ -646,19 +694,23 @@ namespace LegionRuntime {
           // the memory copy until we know the full copy is complete
           CHECK_CUDART( cudaMemcpyAsync(current_buffer,
                                         ((char*)gpu_ptr)+span_start,
-                                        span_bytes, kind, local_stream) );
+                                        span_bytes,
+                                        cudaMemcpyDefault,
+                                        local_stream) );
           pending_copies.push_back(PendingMemcpy(mem_offset+span_start,
                                                  current_buffer, span_bytes));
         } else {
           memory->get_bytes(mem_offset+span_start, current_buffer, span_bytes);
           CHECK_CUDART( cudaMemcpyAsync(((char*)gpu_ptr)+span_start,
-                             current_buffer, span_bytes, kind, local_stream) );
+                                        current_buffer,
+                                        span_bytes,
+                                        cudaMemcpyDefault,
+                                        local_stream) );
         }
         // Update the pointer
         current_buffer += span_bytes;
         // Mark how many bytes we used
         remaining_bytes -= span_bytes;
-#endif
       }
 
       virtual void execute(void)
@@ -695,7 +747,7 @@ namespace LegionRuntime {
 		     gpu_ptr, memory->me.id, mem_offset, elmt_size, kind);
         // Make an event and put it on the stream
         CHECK_CUDART( cudaEventCreateWithFlags(&completion_event,
-                                                cudaEventDisableTiming) );
+                                               cudaEventDisableTiming) );
         CHECK_CUDART( cudaEventRecord(completion_event, local_stream) );
       }
 
@@ -731,7 +783,7 @@ namespace LegionRuntime {
         }
         allocated_buffers.clear();
         // Free up our event
-        CHECK_CUDART( cudaEventDestroy(completion_event) );
+        CHECK_CU( cuEventDestroy(completion_event) );
       }
 
     protected:
@@ -754,18 +806,14 @@ namespace LegionRuntime {
     };
 
     GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, Processor _util,
-	     size_t _zcmem_size, size_t _fbmem_size, size_t _stack_size)
+	     size_t _zcmem_size, size_t _fbmem_size, 
+             size_t _stack_size, bool gpu_dma_thread)
       : Processor::Impl(_me, Processor::TOC_PROC, _util)
     {
-      internal = new GPUProcessor::Internal;
-      internal->gpu = this;
-      internal->gpu_index = _gpu_index;
-      internal->zcmem_size = _zcmem_size;
-      internal->fbmem_size = _fbmem_size;
-      internal->idle_task_enabled = !_util.exists();
-
-      internal->zcmem_reserve = 16 << 20;
-      internal->fbmem_reserve = 32 << 20;
+      internal = new GPUProcessor::Internal(this, _gpu_index,
+                                            _zcmem_size, _fbmem_size,
+                                            (16 << 20), (32 << 20),
+                                            !_util.exists(), gpu_dma_thread);
 
       // enqueue a GPU init job before we do anything else
       Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
@@ -916,6 +964,46 @@ namespace LegionRuntime {
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + src_offset),
 		     mask, elmt_size,
 		     cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
+    }
+
+    void GPUProcessor::register_host_memory(void *base, size_t size)
+    {
+      internal->register_host_memory(base, size);
+    }
+
+    void GPUProcessor::handle_copies(void)
+    {
+      internal->handle_copies();
+    }
+
+    /*static*/ std::vector<GPUProcessor*> GPUProcessor::local_gpus;
+
+    /*static*/
+    void* GPUProcessor::gpu_dma_worker_loop(void *args)
+    {
+      while (true)
+      {
+        // Iterate over all the GPU processors and perform the copies
+        for (std::vector<GPUProcessor*>::const_iterator it = local_gpus.begin();
+              it != local_gpus.end(); it++)
+        {
+          (*it)->handle_copies();
+        }
+      }
+      return NULL;
+    }
+
+    /*static*/
+    void GPUProcessor::start_gpu_dma_thread(const std::vector<GPUProcessor*> &local)
+    {
+      local_gpus = local;
+      pthread_attr_t attr;
+      CHECK_PTHREAD( pthread_attr_init(&attr) );
+      if (proc_assignment)
+        proc_assignment->bind_thread(-1, &attr, "GPU DMA worker");
+      pthread_t thread;
+      CHECK_PTHREAD( pthread_create(&thread, 0, gpu_dma_worker_loop, 0) );
+      CHECK_PTHREAD( pthread_attr_destroy(&attr) );
     }
 
 #if 0

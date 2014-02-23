@@ -31,6 +31,7 @@
 #define INDEX_DIM     1
 
 using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::Accessor;
 
 // Data type definitions
 
@@ -53,13 +54,20 @@ enum {
 };
 
 enum NodeFields {
-  FID_NODE_PROP,
+  FID_NODE_CAP,
+  FID_LEAKAGE,
   FID_CHARGE,
   FID_NODE_VOLTAGE,
 };
 
 enum WireFields {
-  FID_WIRE_PROP,
+  FID_IN_PTR,
+  FID_OUT_PTR,
+  FID_IN_LOC,
+  FID_OUT_LOC,
+  FID_INDUCTANCE,
+  FID_RESISTANCE,
+  FID_WIRE_CAP,
   FID_CURRENT,
   FID_WIRE_VOLTAGE = (FID_CURRENT+WIRE_SEGMENTS),
   FID_LAST = (FID_WIRE_VOLTAGE+WIRE_SEGMENTS-1),
@@ -87,21 +95,6 @@ struct CircuitPiece {
   ptr_t         first_wire;
   unsigned      num_nodes;
   ptr_t         first_node;
-};
-
-struct NodeProperties {
-  float capacitance;
-  float leakage;
-};
-
-struct WireProperties {
-  ptr_t           in_ptr;
-  ptr_t           out_ptr;
-  PointerLocation in_loc;
-  PointerLocation out_loc;
-  float           inductance;
-  float           resistance;
-  float           capacitance;
 };
 
 struct Partitions {
@@ -140,6 +133,20 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
+protected:
+  static bool dense_calc_new_currents(const CircuitPiece &piece,
+                              RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr,
+                              RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr,
+                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc,
+                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc,
+                              RegionAccessor<AccessorType::Generic, float> fa_inductance,
+                              RegionAccessor<AccessorType::Generic, float> fa_resistance,
+                              RegionAccessor<AccessorType::Generic, float> fa_wire_cap,
+                              RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage,
+                              RegionAccessor<AccessorType::Generic, float> fa_shr_voltage,
+                              RegionAccessor<AccessorType::Generic, float> fa_ghost_voltage,
+                              RegionAccessor<AccessorType::Generic, float> *fa_current,
+                              RegionAccessor<AccessorType::Generic, float> *fa_voltage);
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);

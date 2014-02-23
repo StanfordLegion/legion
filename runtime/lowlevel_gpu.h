@@ -17,7 +17,8 @@
 #define LOWLEVEL_GPU_H
 
 #include "lowlevel_impl.h"
-#include <cuda_runtime.h>
+#include "cuda.h"
+#include "cuda_runtime.h"
 
 #define CHECK_CUDART(cmd) do { \
   cudaError_t ret = (cmd); \
@@ -28,14 +29,27 @@
   } \
 } while(0)
 
+#define CHECK_CU(cmd) do { \
+  CUresult ret = (cmd); \
+  if(ret != CUDA_SUCCESS) { \
+    fprintf(stderr, "CU: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString((cudaError_t)ret)); \
+    assert(0); \
+    exit(1); \
+  } \
+} while(0)
+
 GASNETT_THREADKEY_DECLARE(gpu_thread);
 
 namespace LegionRuntime {
   namespace LowLevel {
+
+    void start_gpu_dma_thread(void);
+
     class GPUProcessor : public Processor::Impl {
     public:
       GPUProcessor(Processor _me, int _gpu_index, Processor _util,
-		   size_t _zcmem_size, size_t _fbmem_size, size_t _stack_size);
+		   size_t _zcmem_size, size_t _fbmem_size, 
+                   size_t _stack_size, bool gpu_dma_thread);
 
       ~GPUProcessor(void);
 
@@ -95,10 +109,16 @@ namespace LegionRuntime {
       //				off_t src_offset,
       //				const ElementMask *mask, size_t elmt_size,
       //				Event start_event, Event finish_event);
-
+    public:
+      void register_host_memory(void *base, size_t size);
+      void handle_copies(void);
     public:
       // Helper method for getting a thread's processor value
       static Processor get_processor(void);
+      static void* gpu_dma_worker_loop(void *args);
+      static void start_gpu_dma_thread(const std::vector<GPUProcessor*> &local_gpus);
+    private:
+      static std::vector<GPUProcessor*> local_gpus;
     public:
       class Internal;
 

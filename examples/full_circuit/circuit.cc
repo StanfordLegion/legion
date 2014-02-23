@@ -23,7 +23,7 @@
 #include <time.h>
 
 #include "circuit.h"
-//#include "circuit_mapper.h"
+#include "circuit_mapper.h"
 #include "legion.h"
 
 using namespace LegionRuntime::HighLevel;
@@ -174,6 +174,16 @@ void top_level_task(const Task *task,
   }
 }
 
+static void update_mappers(Machine *machine, HighLevelRuntime *rt,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    rt->replace_default_mapper(new CircuitMapper(machine, rt, *it), *it);
+  }
+}
+
 int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
@@ -191,6 +201,7 @@ int main(int argc, char **argv)
 #endif
   CheckTask::register_task();
   HighLevelRuntime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
+  HighLevelRuntime::set_registration_callback(update_mappers);
 
   return HighLevelRuntime::start(argc, argv);
 }
@@ -255,7 +266,8 @@ void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
 void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace node_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, node_space);
-  allocator.allocate_field(sizeof(NodeProperties), FID_NODE_PROP);
+  allocator.allocate_field(sizeof(float), FID_NODE_CAP);
+  allocator.allocate_field(sizeof(float), FID_LEAKAGE);
   allocator.allocate_field(sizeof(float), FID_CHARGE);
   allocator.allocate_field(sizeof(float), FID_NODE_VOLTAGE);
 }
@@ -263,7 +275,13 @@ void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace nod
 void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, wire_space);
-  allocator.allocate_field(sizeof(WireProperties), FID_WIRE_PROP);
+  allocator.allocate_field(sizeof(ptr_t), FID_IN_PTR);
+  allocator.allocate_field(sizeof(ptr_t), FID_OUT_PTR);
+  allocator.allocate_field(sizeof(PointerLocation), FID_IN_LOC);
+  allocator.allocate_field(sizeof(PointerLocation), FID_OUT_LOC);
+  allocator.allocate_field(sizeof(float), FID_INDUCTANCE);
+  allocator.allocate_field(sizeof(float), FID_RESISTANCE);
+  allocator.allocate_field(sizeof(float), FID_WIRE_CAP);
   for (int i = 0; i < WIRE_SEGMENTS; i++)
     allocator.allocate_field(sizeof(float), FID_CURRENT+i);
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
@@ -312,13 +330,20 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   log_circuit(LEVEL_PRINT,"Initializing circuit simulation...");
   // inline map physical instances for the nodes and wire regions
   RegionRequirement wires_req(ckt.all_wires, READ_WRITE, EXCLUSIVE, ckt.all_wires);
-  wires_req.add_field(FID_WIRE_PROP);
+  wires_req.add_field(FID_IN_PTR);
+  wires_req.add_field(FID_OUT_PTR);
+  wires_req.add_field(FID_IN_LOC);
+  wires_req.add_field(FID_OUT_LOC);
+  wires_req.add_field(FID_INDUCTANCE);
+  wires_req.add_field(FID_RESISTANCE);
+  wires_req.add_field(FID_WIRE_CAP);
   for (int i = 0; i < WIRE_SEGMENTS; i++)
     wires_req.add_field(FID_CURRENT+i);
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
     wires_req.add_field(FID_WIRE_VOLTAGE+i);
   RegionRequirement nodes_req(ckt.all_nodes, READ_WRITE, EXCLUSIVE, ckt.all_nodes);
-  nodes_req.add_field(FID_NODE_PROP);
+  nodes_req.add_field(FID_NODE_CAP);
+  nodes_req.add_field(FID_LEAKAGE);
   nodes_req.add_field(FID_CHARGE);
   nodes_req.add_field(FID_NODE_VOLTAGE);
   RegionRequirement locator_req(ckt.node_locator, READ_WRITE, EXCLUSIVE, ckt.node_locator);
@@ -338,8 +363,10 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   srand48(random_seed);
 
   nodes.wait_until_valid();
-  RegionAccessor<AccessorType::Generic, NodeProperties> fa_node_prop = 
-    nodes.get_field_accessor(FID_NODE_PROP).typeify<NodeProperties>();
+  RegionAccessor<AccessorType::Generic, float> fa_node_cap = 
+    nodes.get_field_accessor(FID_NODE_CAP).typeify<float>();
+  RegionAccessor<AccessorType::Generic, float> fa_node_leakage = 
+    nodes.get_field_accessor(FID_LEAKAGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_node_charge = 
     nodes.get_field_accessor(FID_CHARGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_node_voltage = 
@@ -362,10 +389,10 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         ptr_t node_ptr = itr.next();
         if (i == 0)
           first_nodes[n] = node_ptr;
-        NodeProperties prop;
-        prop.capacitance = drand48() + 1.f;
-        prop.leakage = 0.1f * drand48();
-        fa_node_prop.write(node_ptr, prop);
+        float capacitance = drand48() + 1.f;
+        fa_node_cap.write(node_ptr, capacitance);
+        float leakage = 0.1f * drand48();
+        fa_node_leakage.write(node_ptr, leakage);
         fa_node_charge.write(node_ptr, 0.f);
         float init_voltage = 2*drand48() - 1.f;
         fa_node_voltage.write(node_ptr, init_voltage);
@@ -386,8 +413,20 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   RegionAccessor<AccessorType::Generic, float> fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
     fa_wire_voltages[i] = wires.get_field_accessor(FID_WIRE_VOLTAGE+i).typeify<float>();
-  RegionAccessor<AccessorType::Generic, WireProperties> fa_wire_prop = 
-    wires.get_field_accessor(FID_WIRE_PROP).typeify<WireProperties>();
+  RegionAccessor<AccessorType::Generic, ptr_t> fa_wire_in_ptr = 
+    wires.get_field_accessor(FID_IN_PTR).typeify<ptr_t>();
+  RegionAccessor<AccessorType::Generic, ptr_t> fa_wire_out_ptr = 
+    wires.get_field_accessor(FID_OUT_PTR).typeify<ptr_t>();
+  RegionAccessor<AccessorType::Generic, PointerLocation> fa_wire_in_loc = 
+    wires.get_field_accessor(FID_IN_LOC).typeify<PointerLocation>();
+  RegionAccessor<AccessorType::Generic, PointerLocation> fa_wire_out_loc = 
+    wires.get_field_accessor(FID_OUT_LOC).typeify<PointerLocation>();
+  RegionAccessor<AccessorType::Generic, float> fa_wire_inductance = 
+    wires.get_field_accessor(FID_INDUCTANCE).typeify<float>();
+  RegionAccessor<AccessorType::Generic, float> fa_wire_resistance = 
+    wires.get_field_accessor(FID_RESISTANCE).typeify<float>();
+  RegionAccessor<AccessorType::Generic, float> fa_wire_cap = 
+    wires.get_field_accessor(FID_WIRE_CAP).typeify<float>();
   ptr_t *first_wires = new ptr_t[num_pieces];
   // Allocate all the wires
   {
@@ -410,17 +449,19 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         for (int j = 0; j < WIRE_SEGMENTS-1; j++) 
           fa_wire_voltages[j].write(wire_ptr, 0.f);
 
-        WireProperties prop;
-        prop.resistance = drand48() * 10 + 1;
+        float resistance = drand48() * 10.0 + 1.0;
+        fa_wire_resistance.write(wire_ptr, resistance);
         // Keep inductance on the order of dt to avoid stability problems
-        prop.inductance = (drand48() + 0.1) * DELTAT;
-        prop.capacitance = drand48() * 0.1;
+        float inductance = (drand48() + 0.1) * DELTAT;
+        fa_wire_inductance.write(wire_ptr, inductance);
+        float capacitance = drand48() * 0.1;
+        fa_wire_cap.write(wire_ptr, capacitance);
 
-        prop.in_ptr = random_element(private_node_map[n].points);
+        fa_wire_in_ptr.write(wire_ptr, random_element(private_node_map[n].points));
 
         if ((100 * drand48()) < pct_wire_in_piece)
         {
-          prop.out_ptr = random_element(private_node_map[n].points);
+          fa_wire_out_ptr.write(wire_ptr, random_element(private_node_map[n].points));
         }
         else
         {
@@ -428,16 +469,13 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
           int nn = int(drand48() * (num_pieces - 1));
           if(nn >= n) nn++;
 
-          prop.out_ptr = random_element(private_node_map[nn].points); 
+          ptr_t out_ptr = random_element(private_node_map[nn].points);
+          fa_wire_out_ptr.write(wire_ptr, out_ptr); 
           // This node is no longer private
-          privacy_map[0].points.erase(prop.out_ptr);
-          privacy_map[1].points.insert(prop.out_ptr);
-          ghost_node_map[n].points.insert(prop.out_ptr);
+          privacy_map[0].points.erase(out_ptr);
+          privacy_map[1].points.insert(out_ptr);
+          ghost_node_map[n].points.insert(out_ptr);
         }
-
-        // Write the wire
-        fa_wire_prop.write(wire_ptr, prop);
-
         wire_owner_map[n].points.insert(wire_ptr);
       }
     }
@@ -475,13 +513,15 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
       {
         assert(itr.has_next());
         ptr_t wire_ptr = itr.next();
-        WireProperties prop = fa_wire_prop.read(wire_ptr); 
+        ptr_t in_ptr = fa_wire_in_ptr.read(wire_ptr);
+        ptr_t out_ptr = fa_wire_out_ptr.read(wire_ptr);
 
-        prop.in_loc = find_location(prop.in_ptr, private_node_map[n].points, shared_node_map[n].points, ghost_node_map[n].points);     
-        prop.out_loc = find_location(prop.out_ptr, private_node_map[n].points, shared_node_map[n].points, ghost_node_map[n].points);
-
-        // Write the wire back
-        fa_wire_prop.write(wire_ptr, prop);
+        fa_wire_in_loc.write(wire_ptr, 
+            find_location(in_ptr, private_node_map[n].points, 
+              shared_node_map[n].points, ghost_node_map[n].points));     
+        fa_wire_out_loc.write(wire_ptr, 
+            find_location(out_ptr, private_node_map[n].points, 
+              shared_node_map[n].points, ghost_node_map[n].points));
       }
     }
   }

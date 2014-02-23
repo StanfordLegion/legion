@@ -1989,20 +1989,24 @@ namespace LegionRuntime {
           }
           check_copy_privilege(dst_requirements[idx], idx, false/*src*/);
         }
+        std::vector<Color> path;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
+          path.clear();  
           IndexSpace src_space = src_requirements[idx].region.get_index_space();
           IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-          if (src_space != dst_space)
+          bool has_path = runtime->forest->compute_index_path(src_space,
+                                                              dst_space, path);
+          if (!has_path)
           {
-            log_run(LEVEL_ERROR,"Source and destination index spaces for "
-                                "requirements %d of cross region copy "
-                                "(ID %lld) in task %s (ID %lld) are not "
-                                "permitted to be different: %x vs %x.",
-                                idx, get_unique_copy_id(), 
+            log_run(LEVEL_ERROR,"Destination index space %x for requirement %d "
+                                "of cross-region copy (ID %lld) in task %s "
+                                "(ID %lld) is not a sub-region of the source "
+                                "index space %x.",
+                                dst_space.id, idx, get_unique_copy_id(),
                                 parent_ctx->variants->name,
                                 parent_ctx->get_unique_task_id(),
-                                src_space.id, dst_space.id);
+                                src_space.id);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif

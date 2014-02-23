@@ -1313,7 +1313,6 @@ namespace LegionRuntime {
          (dst_kind == Memory::Impl::MKIND_GPUFB)) {
 	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
 	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-        assert(src_gpu == dst_gpu);
 	return new GPUinFBMemPairCopier(src_gpu);
       }
 

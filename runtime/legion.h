@@ -938,10 +938,10 @@ namespace LegionRuntime {
      * WRITE_ONLY, or REDUCE with a reduction function.  While
      * the regions in a source and a destination pair do not have
      * to be in the same region tree, they must share an index space
-     * tree.  Furthermore, the index space of the source region
+     * tree.  Furthermore, the index space of the destination region
      * requirement will determine the data copied, and therefore
-     * the source index space must be the same or a sub-space of
-     * the index space of the destination region.
+     * the destination index space must be the same or a sub-space of
+     * the source index space.
      * @see HighLevelRuntime
      */
     struct CopyLauncher {

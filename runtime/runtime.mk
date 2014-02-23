@@ -119,7 +119,7 @@ NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 else
 NVCC_FLAGS	+= -O2
 endif
-LD_FLAGS	+= -L$(CUDA)/lib64 -lcudart -Xlinker -rpath=$(CUDA)/lib64
+LD_FLAGS	+= -L$(CUDA)/lib64 -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
 NVCC_FLAGS	+= -arch=compute_20 -code=sm_20
@@ -133,7 +133,7 @@ ifeq ($(strip $(GPU_ARCH)),k20)
 NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
-NVCC_FLAGS	+= -Xptxas "-v -abi=no"
+NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 
 # General GASNET variables
 INC_FLAGS	+= -I$(GASNET)/include
@@ -174,7 +174,7 @@ endif # ifeq SHARED_LOWLEVEL
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
 else
-CC_FLAGS	+= -O2 -ggdb
+CC_FLAGS	+= -O2 #-ggdb
 endif
 
 

@@ -147,7 +147,9 @@ namespace LegionRuntime {
 
       struct Generic {
 	struct Untyped {
+          CUDAPREFIX
 	  Untyped() : internal(0), field_offset(0) {}
+          CUDAPREFIX
 	  Untyped(void *_internal, off_t _field_offset = 0) : internal(_internal), field_offset(_field_offset) {}
 
 	  template <typename ET>
@@ -206,7 +208,9 @@ namespace LegionRuntime {
 
 	template <typename T, typename PT>
 	struct Typed : public Untyped, public StructSpecific<T, PT, TemplateFu::IsAStruct<T>::value> {
+          CUDAPREFIX
 	  Typed() : Untyped() {}
+          CUDAPREFIX
 	  Typed(void *_internal, off_t _field_offset = 0) : Untyped(_internal, _field_offset) {}
 
 #ifdef PRIVILEGE_CHECKS
