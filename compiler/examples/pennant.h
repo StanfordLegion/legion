@@ -230,6 +230,42 @@ extern void foreign_calc_force_tts(HighLevelRuntime *runtime,
                                    PhysicalRegion rz[1],
                                    PhysicalRegion rs[2]);
 
+extern void foreign_qcs_zone_center_velocity(HighLevelRuntime *runtime,
+                                             Context ctx,
+                                             intptr_t sstart,
+                                             intptr_t send,
+                                             PhysicalRegion rz[2],
+                                             PhysicalRegion rpp[1],
+                                             PhysicalRegion rpg[1],
+                                             PhysicalRegion rs[1]);
+
+extern void foreign_qcs_corner_divergence(HighLevelRuntime *runtime,
+                                          Context ctx,
+                                          intptr_t sstart,
+                                          intptr_t send,
+                                          PhysicalRegion rz[1],
+                                          PhysicalRegion rpp[1],
+                                          PhysicalRegion rpg[1],
+                                          PhysicalRegion rs[2]);
+
+extern void foreign_qcs_qcn_force(HighLevelRuntime *runtime,
+                                  Context ctx,
+                                  double gamma,
+                                  double q1,
+                                  double q2,
+                                  intptr_t sstart,
+                                  intptr_t send,
+                                  PhysicalRegion rz[1],
+                                  PhysicalRegion rpp[1],
+                                  PhysicalRegion rpg[1],
+                                  PhysicalRegion rs[2]);
+
+extern void foreign_qcs_force(HighLevelRuntime *runtime,
+                              Context ctx,
+                              intptr_t sstart,
+                              intptr_t send,
+                              PhysicalRegion rs[2]);
+
 extern void foreign_sum_point_force(HighLevelRuntime *runtime,
                                     Context ctx,
                                     intptr_t sstart,

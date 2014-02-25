@@ -46,11 +46,21 @@ reduction_op_table = {
     '|': {'name': 'bitwise_or',   'identity': '0',  'fold': '|'},
 }
 
+AOS = 'AOS'
+SOA = 'SOA'
+variant_table = [
+    AOS,
+    SOA,
+]
+
 def mangle_header_def(filename):
     return '_%s' % filename.upper().replace('.', '_')
 
 def mangle_init_function(filename):
     return 'init_%s' % os.path.splitext(filename)[0].lower().replace('.', '_')
+
+def mangle_variant_enum(variant):
+    return 'VARIANT_%s' % variant
 
 def mangle_field_enum(field_path):
     return ('field_%s' % '_'.join(field_path)).upper()
@@ -69,14 +79,14 @@ def mangle_reduction_op_enum(op, element_type, cx):
 def mangle_struct_name(name):
     return 'struct_%s' % name
 
-def mangle_task_name(name):
-    return 'task_%s' % name
+def mangle_task_name(task, variant):
+    return 'task_%s_%s' % (task.name.name, variant)
 
-def mangle_task_enum(name):
-    return name.upper()
+def mangle_task_enum(task):
+    return ('task_%s' % task.name.name).upper()
 
-def mangle_task_params_struct(name):
-    return 'params_%s' % name
+def mangle_task_params_struct(task):
+    return 'params_%s' % task.name.name
 
 def mangle_task_param(name):
     return 'param_%s' % name
@@ -131,8 +141,6 @@ def mangle_unpack(node, cx):
 def mangle(node, cx):
     if isinstance(node, ast.Struct):
         return mangle_struct_name(node.name.name)
-    if isinstance(node, ast.Function):
-        return mangle_task_name(node.name.name)
     if isinstance(node, ast.FunctionParam):
         return mangle_task_param(node.name)
     if isinstance(node, ast.StatementFor):
@@ -209,9 +217,10 @@ class ReductionOp(Value):
         self.element_type = element_type
 
 class Function(Value):
-    def __init__(self, node, expr, type, params):
+    def __init__(self, node, expr, type, params, variants):
         Value.__init__(self, node, expr, type)
         self.params = params
+        self.variants = variants
 
 class ForeignFunction(Value):
     def __init__(self, expr, type):
@@ -333,6 +342,7 @@ class Context:
         self.ll_type_map = None
         self.ll_field_map = None
         self.reduction_ops = None
+        self.task_variant = None
     def new_block_scope(self):
         cx = copy.copy(self)
         cx.env = cx.env.new_scope()
@@ -340,12 +350,13 @@ class Context:
         cx.created_regions = cx.created_regions + ([],)
         cx.created_ispaces = cx.created_ispaces + ([],)
         return cx
-    def new_function_scope(self):
+    def new_function_scope(self, task_variant):
         cx = copy.copy(self)
         cx.env = cx.env.new_scope()
         cx.regions = {}
         cx.created_regions = ([],)
         cx.created_ispaces = ([],)
+        cx.task_variant = task_variant
         return cx
     def new_struct_scope(self):
         cx = copy.copy(self)
@@ -389,6 +400,9 @@ def trans_program(node, cx):
     cpp_header.write(trans_header_prologue(cx))
     cpp_header.write(sep)
     cpp_header.write(sep.join(line for d in import_defs for line in d.read(cx).render()))
+    cpp_header.write(sep)
+    cpp_header.write(sep)
+    cpp_header.write(trans_variant_list(cx))
     cpp_header.write(sep)
     cpp_header.write(sep)
     cpp_header.write(trans_field_list(cx))
@@ -472,7 +486,7 @@ LegionRuntime::Logger::Category log_app("app");
 
 def trans_task_list(task_list, cx):
     return 'enum {\n%s\n};' % (
-        '\n'.join('  %s = %s,' % (mangle_task_enum(mangle(task, cx)), index)
+        '\n'.join('  %s = %s,' % (mangle_task_enum(task), index)
                   for task, index in zip(task_list, xrange(1, len(task_list) + 1))))
 
 def trans_init_function_prototype(cx):
@@ -491,14 +505,16 @@ def trans_init_function_def(reduction_op_defs, task_list, cx):
             mangle_reduction_op_enum(redop.op, redop.element_type, cx))
         for redop in reduction_op_defs)
     task_registrations = '\n  '.join(
-        'HighLevelRuntime::register_single_task<%s%s>(%s, Processor::LOC_PROC, %s, "%s");' % (
-            ('%s,' % trans_return_type(cx.type_map[task].return_type, cx)
+        'HighLevelRuntime::register_legion_task<%s%s>(%s, Processor::LOC_PROC, true, false, %s, TaskConfigOptions(%s, false, false), "%s");' % (
+            ('%s, ' % trans_return_type(cx.type_map[task].return_type, cx)
              if not types.is_void(cx.type_map[task].return_type) else ''),
-            mangle(task, cx),
-            mangle_task_enum(mangle(task, cx)),
+            mangle_task_name(task, variant),
+            mangle_task_enum(task),
+            mangle_variant_enum(variant),
             ('true' if cx.leaf_tasks[task] else 'false'),
             task.name.name)
-        for task in task_list)
+        for task in task_list
+        for variant in variant_table)
     return '''
 void %s() {
   %s
@@ -510,7 +526,7 @@ def trans_main(top_level_task, cx):
     header_name = os.path.basename(cx.opts.output_filename[0])
     init_function = mangle_init_function(header_name)
 
-    set_top_level_task = 'HighLevelRuntime::set_top_level_task_id(%s);' % mangle_task_enum(mangle(top_level_task, cx))
+    set_top_level_task = 'HighLevelRuntime::set_top_level_task_id(%s);' % mangle_task_enum(top_level_task)
     return '''
 void create_mappers(Machine *machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs) {}
 
@@ -526,6 +542,11 @@ int main(int argc, char **argv) {
 class TypeTranslationFailedException(Exception):
     pass
 
+def trans_variant_list(cx):
+    return 'enum {\n%s\n};' % (
+        '\n'.join('  %s = %s,' % (mangle_variant_enum(variant), index)
+                  for variant, index in zip(variant_table, xrange(1, len(variant_table) + 1))))
+
 def trans_field_list(cx):
     field_paths = set()
     for t in types.unwrap_iter(cx.type_set):
@@ -533,6 +554,8 @@ def trans_field_list(cx):
             field_paths.update(trans_fields(t, cx).iterkeys())
         else:
             field_paths.add(())
+    if len(field_paths) == 0:
+        return '// no fields'
     return 'enum {\n%s\n};' % (
         '\n'.join('  %s = %s,' % (mangle_field_enum(field_path), index)
                   for field_path, index in zip(field_paths, xrange(1, len(field_paths) + 1))))
@@ -596,6 +619,8 @@ def trans_type_def(t, cx):
     return None
 
 def trans_reduction_op_list(reduction_op_defs, cx):
+    if len(reduction_op_defs) == 0:
+        return '// no reduction ops'
     return 'enum {\n%s\n};' % (
         '\n'.join(
             '  %s = %s,' % (
@@ -791,7 +816,7 @@ def trans_param_type_deserialize(task, buffer, param, param_type, cx):
         'ptr += sizeof(%s);' % trans_type(param_type, cx)]
 
 def trans_params_size(task, params, cx):
-    struct_name = mangle_task_params_struct(mangle(task, cx))
+    struct_name = mangle_task_params_struct(task)
     return [
         'size_t %s::legion_buffer_size() const {' % struct_name,
         Block(
@@ -803,7 +828,7 @@ def trans_params_size(task, params, cx):
         '}']
 
 def trans_params_serialize(task, params, cx):
-    struct_name = mangle_task_params_struct(mangle(task, cx))
+    struct_name = mangle_task_params_struct(task)
     return [
         'void %s::legion_serialize(void *buffer) const {' % struct_name,
         Block(['char *ptr = reinterpret_cast<char *>(buffer);'] +
@@ -813,7 +838,7 @@ def trans_params_serialize(task, params, cx):
         '}']
 
 def trans_params_deserialize(task, params, cx):
-    struct_name = mangle_task_params_struct(mangle(task, cx))
+    struct_name = mangle_task_params_struct(task)
     return [
         'size_t %s::legion_deserialize(const void *buffer) {' % struct_name,
         Block(['const char *start = reinterpret_cast<const char *>(buffer);'] +
@@ -825,7 +850,7 @@ def trans_params_deserialize(task, params, cx):
         '}']
 
 def trans_params_prototype(task, params, cx):
-    struct_name = mangle_task_params_struct(mangle(task, cx))
+    struct_name = mangle_task_params_struct(task)
     struct_def = (
         ['struct %s' % struct_name,
          '{',
@@ -840,78 +865,34 @@ def trans_params_prototype(task, params, cx):
     return Expr(struct_name, struct_def)
 
 def trans_params(task, params, cx):
-    struct_name = mangle_task_params_struct(mangle(task, cx))
+    struct_name = mangle_task_params_struct(task)
     struct_def = (
         trans_params_size(task, params, cx) +
+        [''] +
         trans_params_serialize(task, params, cx) +
+        [''] +
         trans_params_deserialize(task, params, cx))
     return Expr(struct_name, struct_def)
 
 def trans_function_prototype(task, cx):
     task_type = cx.type_map[task]
 
-    param_nodes = [
-        param for param, param_type in zip(task.params.params, task_type.param_types)
-        if not types.is_region(param_type)]
-    param_types = [
-        param_type.as_read() for param_type in task_type.param_types
-        if not types.is_region(param_type)]
-    params = [mangle(param, cx) for param in param_nodes]
-
-    all_region_nodes = [
-        param for param, param_type in zip(task.params.params, task_type.param_types)
-        if types.is_region(param_type)]
-    all_region_types = [
-        param_type for param_type in task_type.param_types
-        if types.is_region(param_type)]
-    all_regions = [mangle_region(region, cx) for region in all_region_nodes]
-
-    privileges_requested = [
-        trans_privilege_mode(region_type, task_type.privileges, cx)
-        for region_type in all_region_types]
-
-    field_privileges = [
-        OrderedDict(
-            (field, privilege)
-            for privilege, fields in privileges.iteritems()
-            for field in fields)
-        for privileges in privileges_requested]
-
-    field_types = [
-        OrderedDict(
-            (field, field_type)
-            for field, field_type in trans_fields(region_type.kind.contains_type, cx).iteritems()
-            if field in region_field_privileges)
-        for region_type, region_field_privileges in zip(all_region_types, field_privileges)]
-
-    fields = [
-        OrderedDict(
-            (field, 'field_%s' % ('_'.join((region,) + field)))
-            for field in region_field_types.iterkeys())
-        for region, region_field_types in zip(all_regions, field_types)]
-
-    region_params = [
-        (region_type, region)
-        for region, region_type in zip(all_regions, all_region_types)]
+    params = [mangle(param, cx) for param in task.params.params]
+    param_types = [param_type.as_read() for param_type in task_type.param_types]
 
     task_params_struct = trans_params_prototype(
         task,
-        region_params +
-        [(param_type, param)
-         for param, param_type in zip(params, param_types)],
+        zip(param_types, params),
         cx)
 
     return Statement(task_params_struct.actions)
 
-def trans_function(task, cx):
-    original_cx = cx
-    cx = cx.new_function_scope()
+def trans_function_variant(task, variant, task_params_struct, cx):
+    cx = cx.new_function_scope(variant)
 
-    task_name = mangle(task, cx)
+    task_name = mangle_task_name(task, variant)
     task_inputs = ', '.join([
-        'const void *input',
-        'size_t input_size',
-        'const std::vector<RegionRequirement> &reqs',
+        'const Task *task',
         'const std::vector<PhysicalRegion> &regions',
         'Context ctx',
         'HighLevelRuntime *runtime',
@@ -920,13 +901,8 @@ def trans_function(task, cx):
     ll_return_type = trans_return_type(task_type.return_type, cx)
 
     # Normal parameters are passed via TaskArgument.
-    param_nodes = [
-        param for param, param_type in zip(task.params.params, task_type.param_types)
-        if not types.is_region(param_type)]
-    param_types = [
-        param_type.as_read() for param_type in task_type.param_types
-        if not types.is_region(param_type)]
-    params = [mangle(param, cx) for param in param_nodes]
+    params = [mangle(param, cx) for param in task.params.params]
+    param_types = [param_type.as_read() for param_type in task_type.param_types]
 
     # Region parameters are passed via RegionRequirement.
     all_region_nodes = [
@@ -935,7 +911,10 @@ def trans_function(task, cx):
     all_region_types = [
         param_type for param_type in task_type.param_types
         if types.is_region(param_type)]
-    all_regions = [mangle_region(region, cx) for region in all_region_nodes]
+    all_regions = [
+        param
+        for param, param_type in zip(params, param_types)
+        if types.is_region(param_type)]
 
     # Each task has zero or more regions.
     # Each region has zero or more physical regions.
@@ -992,9 +971,6 @@ def trans_function(task, cx):
             (field, mangle_field_enum(field))
             for field in region_field_types.iterkeys())
         for region, region_field_types in zip(all_regions, field_types)]
-    region_params = [
-        (region_type, region)
-        for region, region_type in zip(all_regions, all_region_types)]
 
     # Use the results of region analysis to determine whether physical
     # regions can be unmapped entirely within the function, and
@@ -1053,25 +1029,11 @@ def trans_function(task, cx):
         for region_needs_accessor, region_fields in zip(
             needs_accessor, accessor_fields)]
 
-    accessor_type = trans_accessor_type(cx)
-
-    # Build a struct to hold the task's parameters.
-    task_params_struct = trans_params(
-        task,
-        region_params +
-        [(param_type, param)
-         for param, param_type in zip(params, param_types)],
-        cx)
-
     task_header = (
         ['log_app.spew("In %s...");' % task.name.name] +
         (['%s params;' % (task_params_struct.value),
-          'params.legion_deserialize(input);']
+          'params.legion_deserialize(task->args);']
          if len(task.params.params) > 0 else []) +
-        ['%s %s = params.%s;' % (
-                trans_type(region_type, cx),
-                region, region)
-         for region_type, region in region_params] +
         ['%s %s = params.%s;' % (
                 trans_type(param_type, cx),
                 param,
@@ -1096,26 +1058,18 @@ def trans_function(task, cx):
                 region_physical_regions, region_needs_mapping)
          if not (physical_region_needs_mapping or cx.leaf_tasks[task])] +
         ['RegionAccessor<%s, %s> %s = %s.get_%saccessor(%s).typeify<%s>().convert<%s >();' % (
-                accessor_type,
+                trans_accessor_type(field_type[field], cx),
                 ll_field_type[field], accessor, physical_region,
                 ('field_' if field_accessor else ''),
                 (region_fields[field] if field_accessor else ''),
                 ll_field_type[field],
-                accessor_type)
-         for ll_field_type, region_fields, region_accessors, region_physical_regions, region_needs_field_accessor in zip(
-                ll_field_types, fields, accessors, physical_regions, needs_field_accessor)
+                trans_accessor_type(field_type[field], cx))
+         for field_type, ll_field_type, region_fields, region_accessors, region_physical_regions, region_needs_field_accessor in zip(
+                field_types, ll_field_types, fields, accessors, physical_regions, needs_field_accessor)
          for physical_region, physical_region_accessors, physical_needs_field_accessor in zip(
                 region_physical_regions, region_accessors, region_needs_field_accessor)
          for (field, accessor), field_accessor in zip(physical_region_accessors.iteritems(), physical_needs_field_accessor)])
 
-    # insert function name into global scope
-    task_value = Function(
-        node = task,
-        expr = Expr(mangle(task, cx), []),
-        type = task_type,
-        params = task_params_struct.value)
-    original_cx.env.insert(task.name.name, task_value)
-    cx = cx.new_function_scope()
     # insert function regions and params into local scope
     for region_node, region, region_type, ispace, fspace, \
         region_fields, region_field_types, region_needs_mapping, \
@@ -1156,31 +1110,66 @@ def trans_function(task, cx):
             cx.env.insert(region_node.name, region_value)
             cx.regions[region_type] = region_value
 
-    for param_node, param, param_type in zip(param_nodes, params, param_types):
-        value = Value(param_node, Expr(param, []), param_type)
-        if types.allows_var_binding(param_type):
-            value = StackReference(param_node, Expr(param, []), types.StackReference(param_type))
-        cx.env.insert(param_node.name, value)
+    for param_node, param, param_type in zip(task.params.params, params, param_types):
+        if not types.is_region(param_type):
+            value = Value(param_node, Expr(param, []), param_type)
+            if types.allows_var_binding(param_type):
+                value = StackReference(param_node, Expr(param, []), types.StackReference(param_type))
+            cx.env.insert(param_node.name, value)
 
     task_body = trans_node(task.block, cx)
     task_cleanup = trans_cleanup(0, cx)
 
-    task_definition = [
-        '%s %s(%s)' % (
+    task_definition = Expr(
+        task_name,
+        ['%s %s(%s)' % (
             ll_return_type,
             task_name,
             task_inputs),
-        '{',
-        Block(task_header + [task_body] + task_cleanup),
-        '}']
+         '{',
+         Block(task_header + [task_body] + task_cleanup),
+         '}'])
+
+    return task_definition
+
+def trans_function(task, cx):
+    task_type = cx.type_map[task]
+
+    # Normal parameters are passed via TaskArgument.
+    params = [mangle(param, cx) for param in task.params.params]
+    param_types = [param_type.as_read() for param_type in task_type.param_types]
+
+    # Build a struct to hold the task's parameters.
+    task_params_struct = trans_params(
+        task,
+        zip(param_types, params),
+        cx)
+
+    # insert function name into global scope
+    task_value = Function(
+        node = task,
+        expr = Expr(mangle_task_enum(task), []),
+        type = task_type,
+        params = task_params_struct.value,
+        variants = [])
+    cx.env.insert(task.name.name, task_value)
+
+    task_variants = OrderedDict(
+        (variant, trans_function_variant(task, variant, task_params_struct, cx))
+        for variant in variant_table)
+
+    actions = []
+    actions.extend(task_params_struct.actions)
+    for task_variant in task_variants.itervalues():
+        actions.append('')
+        actions.extend(task_variant.actions)
 
     task_definition = Function(
         node = task,
-        expr = Expr(
-            mangle(task, cx),
-            task_params_struct.actions + [''] + task_definition),
+        expr = Expr(None, actions),
         type = task_type,
-        params = task_params_struct.value)
+        params = task_params_struct.value,
+        variants = task_variants)
     return task_definition
 
 def trans_cleanup(index, cx):
@@ -1295,7 +1284,6 @@ def trans_region(node, cx):
     privileges = OrderedDict((field, privilege) for field in field_types.iterkeys())
     physical_region = mangle_temp()
     accessors = OrderedDict((field, mangle_temp()) for field in field_types.iterkeys())
-    accessor_type = trans_accessor_type(cx)
     create_region = (
         ll_size_expr.actions +
         ['IndexSpace %s = runtime->create_index_space(ctx, %s);' % (
@@ -1322,9 +1310,11 @@ def trans_region(node, cx):
                 physical_region, region_requirement),
          '%s.wait_until_valid();' % physical_region] +
         ['RegionAccessor<%s, %s> %s = %s.get_field_accessor(%s).typeify<%s>().convert<%s >();' % (
-                accessor_type, ll_field_type, accessor, physical_region, field, ll_field_type, accessor_type)
-         for accessor, field, ll_field_type in zip(
-                accessors.itervalues(), fields.itervalues(), ll_field_types)])
+            trans_accessor_type(field_type, cx),
+            ll_field_type, accessor, physical_region, field, ll_field_type,
+            trans_accessor_type(field_type, cx))
+         for accessor, field, field_type, ll_field_type in zip(
+                accessors.itervalues(), fields.itervalues(), field_types.itervalues(), ll_field_types)])
 
     region_value = Region(
         node = node,
@@ -1369,7 +1359,6 @@ def trans_array(node, cx):
     privileges = OrderedDict((field, privilege) for field in field_types.iterkeys())
     physical_region = mangle_temp()
     accessors = OrderedDict((field, mangle_temp()) for field in field_types.iterkeys())
-    accessor_type = trans_accessor_type(cx)
     create_region = (
         ispace_expr.actions +
         ['IndexSpace %s = %s;' % (
@@ -1394,9 +1383,11 @@ def trans_array(node, cx):
                 physical_region, region_requirement),
          '%s.wait_until_valid();' % physical_region] +
         ['RegionAccessor<%s, %s> %s = %s.get_field_accessor(%s).typeify<%s>().convert<%s >();' % (
-                accessor_type, ll_field_type, accessor, physical_region, field, ll_field_type, accessor_type)
-         for accessor, field, ll_field_type in zip(
-                accessors.itervalues(), fields.itervalues(), ll_field_types)])
+            trans_accessor_type(field_type, cx),
+            ll_field_type, accessor, physical_region, field, ll_field_type,
+            trans_accessor_type(field_type, cx))
+         for accessor, field, field_type, ll_field_type in zip(
+                accessors.itervalues(), fields.itervalues(), field_types.itervalues(), ll_field_types)])
 
     region_value = Region(
         node = node,
@@ -2149,27 +2140,18 @@ def trans_call(node, cx):
     actions = []
 
     # Normal parameters are passed via TaskArgument.
-    params = [mangle(param_node, cx)
-              for param_node, param_type in zip(task.node.params.params, task.type.param_types)
-              if not types.is_region(param_type)]
-    arg_values = [arg.read(cx)
-            for arg, arg_node in zip(all_args, node.args.args)
-            if not types.is_region(cx.type_map[arg_node])]
+    params = [mangle(param, cx) for param in task.node.params.params]
+    arg_values = [arg.read(cx) for arg in all_args]
     args = [arg.value for arg in arg_values]
     for arg in arg_values:
         actions.extend(arg.actions)
     assert len(params) == len(args)
 
-    # Region parameters are (mostly) passed via RegionRequirement.
+    # Region parameters are passed via RegionRequirement.
     region_param_types = [
         param_type
         for param_type in task.type.param_types
         if types.is_region(param_type)]
-    region_params = [
-        mangle_region(param_node, cx)
-        for param_node, param_type in zip(task.node.params.params, task.type.param_types)
-        if types.is_region(param_type)]
-    assert len(region_param_types) == len(region_params)
 
     region_arg_types = [
         cx.type_map[arg_node]
@@ -2179,10 +2161,7 @@ def trans_call(node, cx):
         arg
         for arg_node, arg in zip(node.args.args, all_args)
         if types.is_region(cx.type_map[arg_node])]
-    for region_arg in region_args:
-        actions.extend(region_arg.read(cx).actions)
     assert len(region_arg_types) == len(region_args)
-    assert len(region_params) == len(region_args)
 
     region_roots = [
         cx.regions[cx.regions[region_type].region_root]
@@ -2205,8 +2184,7 @@ def trans_call(node, cx):
     task_result = mangle_temp()
     ispaces = [
         (region.ispace, parent.ispace)
-        for region_type, region, parent
-        in zip(region_param_types, region_args, region_roots)]
+        for region, parent in zip(region_args, region_roots)]
     field_sets = [
         [mangle_temp() for privilege in privileges]
         for privileges in privileges_requested]
@@ -2215,10 +2193,6 @@ def trans_call(node, cx):
         [[region_arg.field_map[field_path] for field_path in field_paths]
          for field_paths in privileges.itervalues()]
         for region_arg, privileges in zip(region_args, privileges_requested)]
-
-    region_meta = (
-        [(region_param, region_arg.read(cx).value)
-         for region_param, region_arg in zip(region_params, region_args)])
 
     actions.append('Future %s;' % task_result)
 
@@ -2248,7 +2222,6 @@ def trans_call(node, cx):
                 region_args, region_roots, field_sets, privileges_requested)
          for field_set, privilege in zip(region_field_sets, privileges.iterkeys())] +
         ['%s args;' % task_params_struct_name] +
-        ['args.%s = %s;' % meta for meta in region_meta] +
         ['args.%s = %s;' % (param, arg)
          for param, arg in zip(params, args)] +
         ['size_t buffer_size = args.legion_buffer_size();',
@@ -2262,7 +2235,7 @@ def trans_call(node, cx):
          if len(physical_region_accessors) > 0] +
         [('%s = runtime->execute_task(ctx, %s, ispaces, fspaces, regions,' +
           'TaskArgument(buffer, buffer_size), Predicate::TRUE_PRED, false);') %
-         (task_result, mangle_task_enum(mangle(task.node, cx)))] +
+         (task_result, mangle_task_enum(task.node))] +
         ['runtime->remap_region(ctx, %s);' % physical_region
          for region in unmap_regions
          for physical_region, physical_region_accessors in zip(
@@ -2434,9 +2407,15 @@ def trans_privilege_mode(region, requested_privileges, cx):
 
     return image_map(ll_nested_field_privileges)
 
-def trans_accessor_type(cx):
-    # For the moment, accessor type is a global setting.
-    return 'AccessorType::AOS<0>'
+def trans_accessor_type(t, cx):
+    assert cx.task_variant is not None
+
+    if cx.task_variant == SOA:
+        return 'AccessorType::%s<sizeof(%s)>' % (
+            cx.task_variant,
+            trans_type(t, cx))
+
+    return 'AccessorType::%s<0>' % cx.task_variant
 
 # A method combination around wrapper a la Common Lisp.
 class DispatchAround:
@@ -3056,14 +3035,14 @@ def _(node, cx):
 def _(node, cx):
     return Value(
         node,
-        Expr('((intptr_t)INTMAX_C(%s))' % str(node.value), []),
+        Expr('(static_cast<intptr_t>(INTMAX_C(%s)))' % str(node.value), []),
         cx.type_map[node])
 
 @trans_node.register(ast.ExprConstUInt)
 def _(node, cx):
     return Value(
         node,
-        Expr('((uintptr_t)UINTMAX_C(%s))' % str(node.value), []),
+        Expr('(static_cast<uintptr_t>(UINTMAX_C(%s)))' % str(node.value), []),
         cx.type_map[node])
 
 def trans(program, opts, type_map, constraints, foreign_types, region_usage, leaf_tasks):

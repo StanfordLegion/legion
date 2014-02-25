@@ -13,6 +13,13 @@
  * limitations under the License.
  */
 
+#line 0
+
+// fails-with:
+// TypeError:
+// tests/compile_fail/fluid_union.lg:291:18:
+// Name union is undefined
+
 struct point
 {
   buffer_phase: int,
@@ -50,32 +57,22 @@ task int_to_point(i: int, ncx: int, np: int): point
 }
 
 task init_simulation(
-  owned_is: ispace<int>, owned: array<owned_is, particle>,
-  ghost_bot_is: ispace<int>, ghost_bot: array<ghost_bot_is, particle>,
-  ghost_top_is: ispace<int>, ghost_top: array<ghost_top_is, particle>,
+  cells_is: ispace<int>, cells: array<cells_is, particle>,
   phase: int)
-  , writes(owned, ghost_top, ghost_bot)
+  , writes(cells)
 {
   let zero = {x: 0.0f, y: 0.0f, z: 0.0f};
-  for i in owned_is {
-    owned[i] = {p: zero, hv: zero, v: zero, a: zero, density: 0.0f};
-  }
-  for i in ghost_top_is {
-    ghost_top[i] = {p: zero, hv: zero, v: zero, a: zero, density: 0.0f};
-  }
-  for i in ghost_bot_is {
-    ghost_bot[i] = {p: zero, hv: zero, v: zero, a: zero, density: 0.0f};
+  for i in cells_is {
+    cells[i] = {p: zero, hv: zero, v: zero, a: zero, density: 0.0f};
   }
 }
 
 task init_step(
-  last_owned_is: ispace<int>, last_owned: array<last_owned_is, particle>,
-  owned_is: ispace<int>, owned: array<owned_is, particle>,
-  ghost_bot_is: ispace<int>, ghost_bot: array<ghost_bot_is, particle>,
-  ghost_top_is: ispace<int>, ghost_top: array<ghost_top_is, particle>,
+  last_cells_is: ispace<int>, last_cells: array<last_cells_is, particle>,
+  cells_is: ispace<int>, cells: array<cells_is, particle>,
   phase: int)
-  , reads(last_owned, ghost_top, ghost_bot)
-  , writes(owned, ghost_top, ghost_bot)
+  , reads(last_cells, cells)
+  , writes(cells)
 {
   // Move particles that have wandered outside of their cells into the
   // cells they are supposed to be. Ghost cells in this phase are used
@@ -83,18 +80,16 @@ task init_step(
   // different parts of computation.
 
   // Involves a stencil operation over owned cells, which means that
-  // accesses to cells have to be checked dynamically to see which
-  // region they land in (owned or ghost, and if ghost which
-  // direction).
+  // accesses to cells may access owned or ghost cells. But because
+  // the cells region is a union over the owned *and* ghost cells, we
+  // don't need a dynamic check in the inner loop.
 }
 
 task rebuild_reduce(
-  owned_is: ispace<int>, owned: array<owned_is, particle>,
-  ghost_bot_is: ispace<int>, ghost_bot: array<ghost_bot_is, particle>,
-  ghost_top_is: ispace<int>, ghost_top: array<ghost_top_is, particle>,
+  cells_is: ispace<int>, cells: array<cells_is, particle>,
   phase: int)
-  , reads(owned, ghost_top, ghost_bot)
-  , writes(owned, ghost_top, ghost_bot)
+  , reads(cells)
+  , writes(cells)
 {
   // Move particles that have wandered outside of their cells into the
   // cells they are supposed to be. Ghost cells in this phase are used
@@ -102,45 +97,41 @@ task rebuild_reduce(
   // different parts of the computation.
 
   // Involves a stencil operation over owned cells, which means that
-  // accesses to cells have to be checked dynamically to see which
-  // region they land in (owned or ghost, and if ghost which
-  // direction).
+  // accesses to cells may access owned or ghost cells. But because
+  // the cells region is a union over the owned *and* ghost cells, we
+  // don't need a dynamic check in the inner loop.
 }
 
 task scatter_densities(
-  owned_is: ispace<int>, owned: array<owned_is, particle>,
-  ghost_bot_is: ispace<int>, ghost_bot: array<ghost_bot_is, particle>,
-  ghost_top_is: ispace<int>, ghost_top: array<ghost_top_is, particle>,
+  cells_is: ispace<int>, cells: array<cells_is, particle>,
   phase: int)
-  , reads(owned, ghost_top, ghost_bot)
-  , writes(owned, ghost_top, ghost_bot)
+  , reads(cells)
+  , writes(cells)
 {
   // Calculate density for each particle. Ghost cells in this phase
   // are used to scatter density values from neighboring parts of the
   // computation.
 
   // Involves a stencil operation over owned cells, which means that
-  // accesses to cells have to be checked dynamically to see which
-  // region they land in (owned or ghost, and if ghost which
-  // direction).
+  // accesses to cells may access owned or ghost cells. But because
+  // the cells region is a union over the owned *and* ghost cells, we
+  // don't need a dynamic check in the inner loop.
 }
 
 task gather_forces(
-  owned_is: ispace<int>, owned: array<owned_is, particle>,
-  ghost_bot_is: ispace<int>, ghost_bot: array<ghost_bot_is, particle>,
-  ghost_top_is: ispace<int>, ghost_top: array<ghost_top_is, particle>,
+  cells_is: ispace<int>, cells: array<cells_is, particle>,
   phase: int)
-  , reads(owned, ghost_top, ghost_bot)
-  , writes(owned, ghost_top, ghost_bot)
+  , reads(cells)
+  , writes(cells)
 {
   // Calculate acceleration for each particle. Ghost cells in this
   // phase are used to gather density values from neighboring parts of
   // the computation.
 
   // Involves a stencil operation over owned cells, which means that
-  // accesses to cells have to be checked dynamically to see which
-  // region they land in (owned or ghost, and if ghost which
-  // direction).
+  // accesses to cells may access owned or ghost cells. But because
+  // the cells region is a union over the owned *and* ghost cells, we
+  // don't need a dynamic check in the inner loop.
 }
 
 task owned_color(bx: int, buffer_phase: int, nbx: int): int
@@ -311,10 +302,13 @@ task fluid(nx: int, nbx: int, np: int, steps: int, double_buffer: bool)
     let owned = owned_part[owned_color(bx, buffer_phase, nbx)];
     let ghost_bot = ghost_part[ghost_color(bx, -1, buffer_phase, edge_phase, nbx)];
     let ghost_top = ghost_part[ghost_color(bx, 1, buffer_phase, edge_phase, nbx)];
+    // Take the union of the index spaces to calculate the set of all
+    // nodes this phase needs to read or write. Then ask for a logical
+    // region on the resulting index space.
+    let touched = union(owned, ghost_bot, ghost_top);
+
     init_simulation(
-      owned, cells[owned],
-      ghost_bot, cells[ghost_bot],
-      ghost_top, cells[ghost_top],
+      touched, cells[touched],
       edge_phase);
   }
 
@@ -333,11 +327,13 @@ task fluid(nx: int, nbx: int, np: int, steps: int, double_buffer: bool)
       let owned = owned_part[owned_color(bx, buffer_phase, nbx)];
       let ghost_bot = ghost_part[ghost_color(bx, -1, buffer_phase, edge_phase, nbx)];
       let ghost_top = ghost_part[ghost_color(bx, 1, buffer_phase, edge_phase, nbx)];
+      // Take the union of the index spaces to calculate the set of
+      // all nodes this phase needs to read or write. Then ask for a
+      // logical region on the resulting index space.
+      let touched = union(owned, ghost_bot, ghost_top);
       init_step(
         last_owned, cells[last_owned],
-        owned, cells[owned],
-        ghost_bot, cells[ghost_bot],
-        ghost_top, cells[ghost_top],
+        touched, cells[touched],
         edge_phase);
     }
     for bx in block_is {
@@ -345,10 +341,12 @@ task fluid(nx: int, nbx: int, np: int, steps: int, double_buffer: bool)
       let owned = owned_part[owned_color(bx, buffer_phase, nbx)];
       let ghost_bot = ghost_part[ghost_color(bx, -1, buffer_phase, edge_phase, nbx)];
       let ghost_top = ghost_part[ghost_color(bx, 1, buffer_phase, edge_phase, nbx)];
+      // Take the union of the index spaces to calculate the set of
+      // all nodes this phase needs to read or write. Then ask for a
+      // logical region on the resulting index space.
+      let touched = union(owned, ghost_bot, ghost_top);
       rebuild_reduce(
-        owned, cells[owned],
-        ghost_bot, cells[ghost_bot],
-        ghost_top, cells[ghost_top],
+        touched, cells[touched],
         edge_phase);
     }
     for bx in block_is {
@@ -356,10 +354,12 @@ task fluid(nx: int, nbx: int, np: int, steps: int, double_buffer: bool)
       let owned = owned_part[owned_color(bx, buffer_phase, nbx)];
       let ghost_bot = ghost_part[ghost_color(bx, -1, buffer_phase, edge_phase, nbx)];
       let ghost_top = ghost_part[ghost_color(bx, 1, buffer_phase, edge_phase, nbx)];
+      // Take the union of the index spaces to calculate the set of
+      // all nodes this phase needs to read or write. Then ask for a
+      // logical region on the resulting index space.
+      let touched = union(owned, ghost_bot, ghost_top);
       scatter_densities(
-        owned, cells[owned],
-        ghost_bot, cells[ghost_bot],
-        ghost_top, cells[ghost_top],
+        touched, cells[touched],
         edge_phase);
     }
     for bx in block_is {
@@ -367,10 +367,12 @@ task fluid(nx: int, nbx: int, np: int, steps: int, double_buffer: bool)
       let owned = owned_part[owned_color(bx, buffer_phase, nbx)];
       let ghost_bot = ghost_part[ghost_color(bx, -1, buffer_phase, edge_phase, nbx)];
       let ghost_top = ghost_part[ghost_color(bx, 1, buffer_phase, edge_phase, nbx)];
+      // Take the union of the index spaces to calculate the set of
+      // all nodes this phase needs to read or write. Then ask for a
+      // logical region on the resulting index space.
+      let touched = union(owned, ghost_bot, ghost_top);
       gather_forces(
-        owned, cells[owned],
-        ghost_bot, cells[ghost_bot],
-        ghost_top, cells[ghost_top],
+        touched, cells[touched],
         edge_phase);
     }
   }

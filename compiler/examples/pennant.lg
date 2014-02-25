@@ -15,10 +15,14 @@
 
 // run-with-params:
 // [
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1", "-foreign", "0"],
+//   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1", "-foreign", "1"],
 //   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "2", "-foreign", "0"],
 //   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "2", "-foreign", "1"],
 //   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "4", "-foreign", "0"],
 //   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "4", "-foreign", "1"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-foreign", "0"],
+//   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-foreign", "1"],
 //   ["pennant.tests/sedov/sedov.pnt", "-npieces", "2", "-foreign", "0"],
 //   ["pennant.tests/sedov/sedov.pnt", "-npieces", "2", "-foreign", "1"],
 //   ["pennant.tests/sedov/sedov.pnt", "-npieces", "4", "-foreign", "0"],
@@ -448,8 +452,9 @@ task calc_rho_half(rz: region<zone>,
 task sum_point_mass(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                     rs: region<side<rz, rpp, rpg, rs>>,
                     sstart: int, send: int, use_foreign: bool)
-  , reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf})
-  , reduces<+>(rpp.pmaswt, rpg.pmaswt)
+  , reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf})
+  , writes(rpp.pmaswt)
+  , reduces<+>(rpg.pmaswt)
 {
   if (use_foreign) {
     foreign_sum_point_mass(sstart, send, rz, rpp, rpg, rs);
@@ -552,195 +557,217 @@ task calc_force_tts(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 }
 
 task qcs_zone_center_velocity(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                              rs: region<side<rz, rpp, rpg, rs>>)
+                              rs: region<side<rz, rpp, rpg, rs>>,
+                              sstart: int, send: int, use_foreign: bool)
   , reads(rz.{znump, zuc}, rpp.pu, rpg.pu, rs.{mapsz, mapsp1})
   , writes(rz.zuc)
 {
-  for s in rs {
-    let z = s->mapsz;
-    let p1 = s->mapsp1;
+  if (use_foreign) {
+    foreign_qcs_zone_center_velocity(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s in rs {
+      let z = s->mapsz;
+      let p1 = s->mapsp1;
 
-    let zuc = scale(p1->pu, 1.0 / double(z->znump));
-    z->zuc.x += zuc.x;
-    z->zuc.y += zuc.y;
+      let zuc = scale(p1->pu, 1.0 / double(z->znump));
+      z->zuc.x += zuc.x;
+      z->zuc.y += zuc.y;
+    }
   }
 }
 
 task qcs_corner_divergence(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-                           rs: region<side<rz, rpp, rpg, rs>>)
+                           rs: region<side<rz, rpp, rpg, rs>>,
+                           sstart: int, send: int, use_foreign: bool)
   , reads(rz.{zxp, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
           rs.{mapsz, mapsp1, mapsp2, mapss3, exp, elen})
   , writes(rs.{carea, ccos, cdiv, cevol, cdu})
 {
-  for s2 in rs {
-    let c = s2;
-    let s = s2->mapss3;
-    let z = s->mapsz;
-    let p = s->mapsp2;
-    let p1 = s->mapsp1;
-    let p2 = s2->mapsp2;
-    let e1 = s;
-    let e2 = s2;
+  if (use_foreign) {
+    foreign_qcs_corner_divergence(sstart, send, rz, rpp, rpg, rs);
+  } else {
+    for s2 in rs {
+      let c = s2;
+      let s = s2->mapss3;
+      let z = s->mapsz;
+      let p = s->mapsp2;
+      let p1 = s->mapsp1;
+      let p2 = s2->mapsp2;
+      let e1 = s;
+      let e2 = s2;
 
-    // velocities and positions
-    // point p
-    let up0 = p->pu;
-    let xp0 = p->pxp;
-    // edge e2
-    let up1 = scale(add(p->pu, p2->pu), 0.5);
-    let xp1 = e2->exp;
-    // zone center z
-    let up2 = z->zuc;
-    let xp2 = z->zxp;
-    // edge e1
-    let up3 = scale(add(p1->pu, p->pu), 0.5);
-    let xp3 = e1->exp;
+      // velocities and positions
+      // point p
+      let up0 = p->pu;
+      let xp0 = p->pxp;
+      // edge e2
+      let up1 = scale(add(p->pu, p2->pu), 0.5);
+      let xp1 = e2->exp;
+      // zone center z
+      let up2 = z->zuc;
+      let xp2 = z->zxp;
+      // edge e1
+      let up3 = scale(add(p1->pu, p->pu), 0.5);
+      let xp3 = e1->exp;
 
-    // compute 2d cartesian volume of corner
-    let cvolume = 0.5 * cross(sub(xp2, xp0), sub(xp3, xp1));
-    c->carea = cvolume;
+      // compute 2d cartesian volume of corner
+      let cvolume = 0.5 * cross(sub(xp2, xp0), sub(xp3, xp1));
+      c->carea = cvolume;
 
-    // compute cosine angle
-    let v1 = sub(xp3, xp0);
-    let v2 = sub(xp1, xp0);
-    let de1 = e1->elen;
-    let de2 = e2->elen;
-    let minelen = fmin(de1, de2);
-    if (minelen < 1e-12) {
-      c->ccos = 0.0;
-    } else {
-      c->ccos = 4.0 * dot(v1, v2) / (de1 * de2);
-    }
+      // compute cosine angle
+      let v1 = sub(xp3, xp0);
+      let v2 = sub(xp1, xp0);
+      let de1 = e1->elen;
+      let de2 = e2->elen;
+      let minelen = fmin(de1, de2);
+      if (minelen < 1e-12) {
+        c->ccos = 0.0;
+      } else {
+        c->ccos = 4.0 * dot(v1, v2) / (de1 * de2);
+      }
 
-    // compute divergence of corner
-    let cdiv = (cross(sub(up2, up0), sub(xp3, xp1)) -
-                cross(sub(up3, up1), sub(xp2, xp0))) / (2.0 * cvolume);
-    c->cdiv = cdiv;
+      // compute divergence of corner
+      let cdiv = (cross(sub(up2, up0), sub(xp3, xp1)) -
+                  cross(sub(up3, up1), sub(xp2, xp0))) / (2.0 * cvolume);
+      c->cdiv = cdiv;
 
-    // compute evolution factor
-    let dxx1 = scale(sub(sub(add(xp1, xp2), xp0), xp3), 0.5);
-    let dxx2 = scale(sub(sub(add(xp2, xp3), xp0), xp1), 0.5);
-    let dx1 = length(dxx1);
-    let dx2 = length(dxx2);
+      // compute evolution factor
+      let dxx1 = scale(sub(sub(add(xp1, xp2), xp0), xp3), 0.5);
+      let dxx2 = scale(sub(sub(add(xp2, xp3), xp0), xp1), 0.5);
+      let dx1 = length(dxx1);
+      let dx2 = length(dxx2);
 
-    // average corner-centered velocity
-    let duav = scale(add(add(add(up0, up1), up2), up3), 0.25);
+      // average corner-centered velocity
+      let duav = scale(add(add(add(up0, up1), up2), up3), 0.25);
 
-    let test1 = fabs(dot(dxx1, duav) * dx2);
-    let test2 = fabs(dot(dxx2, duav) * dx1);
-    var num = 0.0;
-    var den = 0.0;
-    if (test1 > test2) {
-      num = dx1;
-      den = dx2;
-    } else {
-      num = dx2;
-      den = dx1;
-    }
-    let r = num / den;
-    let evol = fmin(sqrt(4.0 * cvolume * r), 2.0 * minelen);
+      let test1 = fabs(dot(dxx1, duav) * dx2);
+      let test2 = fabs(dot(dxx2, duav) * dx1);
+      var num = 0.0;
+      var den = 0.0;
+      if (test1 > test2) {
+        num = dx1;
+        den = dx2;
+      } else {
+        num = dx2;
+        den = dx1;
+      }
+      let r = num / den;
+      let evol = fmin(sqrt(4.0 * cvolume * r), 2.0 * minelen);
 
-    // compute delta velocity
-    let dv1 = length(sub(sub(add(up1, up2), up0), up3));
-    let dv2 = length(sub(sub(add(up2, up3), up0), up1));
-    let du = fmax(dv1, dv2);
+      // compute delta velocity
+      let dv1 = length(sub(sub(add(up1, up2), up0), up3));
+      let dv2 = length(sub(sub(add(up2, up3), up0), up1));
+      let du = fmax(dv1, dv2);
 
-    if (cdiv < 0.0) {
-      c->cevol = evol;
-      c->cdu = du;
-    } else {
-      c->cevol = 0.0;
-      c->cdu = 0.0;
+      if (cdiv < 0.0) {
+        c->cevol = evol;
+        c->cdu = du;
+      } else {
+        c->cevol = 0.0;
+        c->cdu = 0.0;
+      }
     }
   }
 }
 
 task qcs_qcn_force(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                    rs: region<side<rz, rpp, rpg, rs>>,
-                   gamma: double, q1: double, q2: double)
+                   gamma: double, q1: double, q2: double,
+                   sstart: int, send: int, use_foreign: bool)
   , reads(rz.{zrp, zss}, rpp.pu, rpg.pu,
           rs.{mapsz, mapsp1, mapsp2, mapss3, elen, cdiv, cdu, cevol})
   , writes(rs.{cqe1, cqe2})
 {
-  let gammap1 = gamma + 1.0;
+  if (use_foreign) {
+    foreign_qcs_qcn_force(gamma, q1, q2, sstart, send, rz, rpp, rpg, rs);
+  } else {
+    let gammap1 = gamma + 1.0;
 
-  for s4 in rs {
-    let c = s4;
-    let z = c->mapsz;
+    for s4 in rs {
+      let c = s4;
+      let z = c->mapsz;
 
-    let ztmp2 = q2 * 0.25 * gammap1 * c->cdu;
-    let ztmp1 = q1 * z->zss;
-    let zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1);
-    var rmu = zkur * z->zrp * c->cevol;
-    if (c->cdiv > 0.0) {
-      rmu = 0.0;
+      let ztmp2 = q2 * 0.25 * gammap1 * c->cdu;
+      let ztmp1 = q1 * z->zss;
+      let zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1);
+      var rmu = zkur * z->zrp * c->cevol;
+      if (c->cdiv > 0.0) {
+        rmu = 0.0;
+      }
+
+      let s = c->mapss3;
+      let p = s->mapsp2;
+      let p1 = s->mapsp1;
+      let e1 = s;
+      let p2 = s4->mapsp2;
+      let e2 = s4;
+
+      c->cqe1 = scale(sub(p->pu, p1->pu), rmu / e1->elen);
+      c->cqe2 = scale(sub(p2->pu, p->pu), rmu / e2->elen);
     }
-
-    let s = c->mapss3;
-    let p = s->mapsp2;
-    let p1 = s->mapsp1;
-    let e1 = s;
-    let p2 = s4->mapsp2;
-    let e2 = s4;
-
-    c->cqe1 = scale(sub(p->pu, p1->pu), rmu / e1->elen);
-    c->cqe2 = scale(sub(p2->pu, p->pu), rmu / e2->elen);
   }
 }
 
 task qcs_force(rz: region<zone>, rpp: region<point>, rpg: region<point>,
-               rs: region<side<rz, rpp, rpg, rs>>)
+               rs: region<side<rz, rpp, rpg, rs>>,
+               sstart: int, send: int, use_foreign: bool)
   , reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2})
   , writes(rs.sfq)
 {
-  for s in rs {
-    let c1 = s;
-    let c2 = s->mapss4;
-    let e = s;
-    let el = e->elen;
+  if (use_foreign) {
+    foreign_qcs_force(sstart, send, rs);
+  } else {
+    for s in rs {
+      let c1 = s;
+      let c2 = s->mapss4;
+      let e = s;
+      let el = e->elen;
 
-    let c1sin2 = 1.0 - c1->ccos * c1->ccos;
-    var c1w = 0.0;
-    var c1cos = 0.0;
-    if (c1sin2 >= 1e-4) {
-      c1w = c1->carea / c1sin2;
-      c1cos = c1->ccos;
+      let c1sin2 = 1.0 - c1->ccos * c1->ccos;
+      var c1w = 0.0;
+      var c1cos = 0.0;
+      if (c1sin2 >= 1e-4) {
+        c1w = c1->carea / c1sin2;
+        c1cos = c1->ccos;
+      }
+
+      let c2sin2 = 1.0 - c2->ccos * c2->ccos;
+      var c2w = 0.0;
+      var c2cos = 0.0;
+      if (c2sin2 >= 1e-4) {
+        c2w = c2->carea / c2sin2;
+        c2cos = c2->ccos;
+      }
+
+      s->sfq = scale(add(scale(add(c1->cqe2, scale(c1->cqe1, c1cos)), c1w),
+                         scale(add(c2->cqe1, scale(c2->cqe2, c2cos)), c2w)),
+                     1.0 / el);
     }
-
-    let c2sin2 = 1.0 - c2->ccos * c2->ccos;
-    var c2w = 0.0;
-    var c2cos = 0.0;
-    if (c2sin2 >= 1e-4) {
-      c2w = c2->carea / c2sin2;
-      c2cos = c2->ccos;
-    }
-
-    s->sfq = scale(add(scale(add(c1->cqe2, scale(c1->cqe1, c1cos)), c1w),
-                       scale(add(c2->cqe1, scale(c2->cqe2, c2cos)), c2w)),
-                   1.0 / el);
   }
 }
 
 // Compute QCS forces.
 task calc_force_qcs(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                     rs: region<side<rz, rpp, rpg, rs>>,
-                    gamma: double, q1: double, q2: double)
+                    gamma: double, q1: double, q2: double,
+                    sstart: int, send: int, use_foreign: bool)
   , reads(rz.{zxp, zrp, znump, zss, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
           rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4, exp, elen, carea, ccos, cevol, cdiv, cdu, cqe1, cqe2})
   , writes(rz.zuc, rs.{sfq, carea, cdiv, cevol, ccos, cdu, cqe1, cqe2})
 {
-  qcs_zone_center_velocity(rz, rpp, rpg, rs);
-  qcs_corner_divergence(rz, rpp, rpg, rs);
-  qcs_qcn_force(rz, rpp, rpg, rs, gamma, q1, q2);
-  qcs_force(rz, rpp, rpg, rs);
+  qcs_zone_center_velocity(rz, rpp, rpg, rs, sstart, send, use_foreign);
+  qcs_corner_divergence(rz, rpp, rpg, rs, sstart, send, use_foreign);
+  qcs_qcn_force(rz, rpp, rpg, rs, gamma, q1, q2, sstart, send, use_foreign);
+  qcs_force(rz, rpp, rpg, rs, sstart, send, use_foreign);
 }
 
 // Reduce forces into points.
 task sum_point_force(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                      rs: region<side<rz, rpp, rpg, rs>>,
                      sstart: int, send: int, use_foreign: bool)
-  , reads(rs.{mapsz, mapsp1, mapss3, sfp, sfq, sft})
-  , reduces<+>(rpp.pf.{x, y}, rpg.pf.{x, y})
+  , reads(rpp.pf, rs.{mapsz, mapsp1, mapss3, sfp, sfq, sft})
+  , writes(rpp.pf)
+  , reduces<+>(rpg.pf.{x, y})
 {
   if (use_foreign) {
     foreign_sum_point_force(sstart, send, rpp, rpg, rs);
@@ -1152,7 +1179,7 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_force_qcs(rz, rpp, rpg, rs, qgamma, q1, q2);
+      calc_force_qcs(rz, rpp, rpg, rs, qgamma, q1, q2, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {
