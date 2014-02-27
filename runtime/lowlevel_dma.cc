@@ -1125,6 +1125,10 @@ namespace LegionRuntime {
 	assert(src_base);
 
 	dst_mem = _dst_mem.impl();
+#ifdef TIME_REMOTE_WRITES
+        span_time = 0;
+        gather_time = 0;
+#endif
       }
 
       ~RemoteWriteMemPairCopier(void)
@@ -1149,6 +1153,9 @@ namespace LegionRuntime {
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	//printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
 
 	if(bytes >= TARGET_XFER_SIZE) {
 	  // large enough that we can transfer it by itself
@@ -1198,10 +1205,17 @@ namespace LegionRuntime {
 	    gathers.insert(std::make_pair(g->dst_start + g->dst_size, g));
 	  }
 	}
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long stop = TimeStamp::get_current_time_in_micros();
+        span_time += (stop - start);
+#endif
       }
 
       void copy_gather(const PendingGather *g, Event trigger = Event::NO_EVENT)
       {
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
         // special case: if there's only one source span, it's not actually
         //   a gather (so we don't need to make a copy)
         if(g->src_spans.size() == 1) {
@@ -1227,11 +1241,24 @@ namespace LegionRuntime {
 	do_remote_write(dst_mem->me, g->dst_start, 
 			g->src_spans, g->dst_size,
 			trigger, false /* no copy - data won't change til copy event triggers */);
-
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long stop = TimeStamp::get_current_time_in_micros();
+        gather_time += (stop - start);
+#endif
       }
 
       virtual void flush(Event after_copy)
       {
+#ifdef TIME_REMOTE_WRITES
+        size_t total_gathers = gathers.size();
+        size_t total_spans = 0;
+        for (std::map<off_t,PendingGather*>::const_iterator it = gathers.begin();
+              it != gathers.end(); it++)
+        {
+          total_spans += it->second->src_spans.size();
+        }
+        unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
 	// do we have any pending gathers to push out?
 	if(gathers.size() > 0) {
 	  // push out all but the last one with events triggered
@@ -1270,12 +1297,23 @@ namespace LegionRuntime {
 	    do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
 	  }
 	}
+#ifdef TIME_REMOTE_WRITES
+        unsigned long long stop = TimeStamp::get_current_time_in_micros();
+        gather_time += (stop - start);
+        printf("Remote Write: span time: %lld  gather time %lld "
+                "total gathers %ld total spans %d\n", 
+                span_time, gather_time, total_gathers, total_spans);
+#endif
       }
 
     protected:
       Memory::Impl *src_mem, *dst_mem;
       const char *src_base;
       std::map<off_t, PendingGather *> gathers;
+#ifdef TIME_REMOTE_WRITES
+      unsigned long long span_time;
+      unsigned long long gather_time;
+#endif
     };
      
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem)

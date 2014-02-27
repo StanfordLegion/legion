@@ -307,14 +307,23 @@ namespace LegionRuntime {
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                              Operation *op);
     public:
-      bool has_region_dependence(unsigned idx, TaskOp *task);
-      bool has_region_dependence(unsigned idx, CopyOp *copy);
-      bool has_region_dependence(unsigned idx, AcquireOp *acquire);
-      bool has_region_dependence(unsigned idx, ReleaseOp *release);
+      int has_conflicting_regions(MapOp *map, bool &parent_conflict,
+                                  bool &inline_conflict);
+      void find_conflicting_regions(TaskOp *task,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(CopyOp *copy,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(AcquireOp *acquire,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(ReleaseOp *release,
+                                    std::vector<PhysicalRegion> &conflicting);
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
                                   const RegionRequirement &our_req,
                                   const RegionUsage &our_usage,
                                   const RegionRequirement &req);
+      void register_inline_mapped_region(PhysicalRegion &region);
+      void unregister_inline_mapped_region(PhysicalRegion &region);
+    public:
       bool is_region_mapped(unsigned idx);
       unsigned find_parent_region(unsigned idx, TaskOp *task);
       unsigned find_parent_index_region(unsigned idx, TaskOp *task);
@@ -407,6 +416,9 @@ namespace LegionRuntime {
       std::deque<InstanceRef> local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions; 
+      // Keep track of inline mapping regions for this task
+      // so we can see when there are conflicts
+      std::list<PhysicalRegion> inline_regions;
       // Context for this task
       RegionTreeContext context; 
     protected:

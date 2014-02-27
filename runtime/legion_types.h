@@ -244,6 +244,8 @@ namespace LegionRuntime {
       ERROR_INVALID_FIELD_PRIVILEGES = 98,
       ERROR_ILLEGAL_NESTED_TRACE = 99,
       ERROR_UNMATCHED_END_TRACE = 100,
+      ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK = 101,
+      ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK = 102,
     };
 
     // enum and namepsaces don't really get along well

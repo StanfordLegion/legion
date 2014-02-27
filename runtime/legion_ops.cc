@@ -1231,6 +1231,14 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
+      if (launcher.requirement.privilege_fields.empty())
+      {
+        log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT OF INLINE MAPPING "
+                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                               "FIELDS! DID YOU FORGET THEM?!?",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id());
+      }
       requirement.copy_without_mapping_info(launcher.requirement);
       requirement.initialize_mapping_fields();
       if (parent_ctx->has_simultaneous_coherence())
@@ -1292,6 +1300,14 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
       requirement = req;
+      if (requirement.privilege_fields.empty())
+      {
+        log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT OF INLINE MAPPING "
+                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                               "FIELDS! DID YOU FORGET THEM?!?",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id());
+      }
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       if (parent_ctx->has_simultaneous_coherence())
@@ -1855,6 +1871,15 @@ namespace LegionRuntime {
       dst_requirements.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          log_task(LEVEL_WARNING,"WARNING: SOURCE REGION REQUIREMENT %d OF "
+                                 "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                                 idx, get_unique_op_id(),
+                                 parent_ctx->variants->name, 
+                                 parent_ctx->get_unique_task_id());
+        }
         src_requirements[idx].copy_without_mapping_info(
             launcher.src_requirements[idx]);
         src_requirements[idx].initialize_mapping_fields();
@@ -1862,6 +1887,15 @@ namespace LegionRuntime {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          log_task(LEVEL_WARNING,"WARNING: DESTINATION REGION REQUIREMENT %d OF"
+                                 " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                                 idx, get_unique_op_id(),
+                                 parent_ctx->variants->name, 
+                                 parent_ctx->get_unique_task_id());
+        }
         dst_requirements[idx].copy_without_mapping_info(
             launcher.dst_requirements[idx]);
         dst_requirements[idx].initialize_mapping_fields();

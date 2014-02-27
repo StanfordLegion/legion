@@ -230,7 +230,7 @@ namespace LegionRuntime {
 
       bool operator!=(const Rect<DIM>& other)
       {
-	return ((lo != other.lo) && (hi != other.hi));
+	return ((lo != other.lo) || (hi != other.hi));
       }
 
       bool overlaps(const Rect<DIM>& other) const

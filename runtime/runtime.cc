@@ -5265,6 +5265,47 @@ namespace LegionRuntime {
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  false/*check privileges*/);
 #endif
+      bool parent_conflict = false, inline_conflict = false;  
+      int index = ctx->has_conflicting_regions(map_op, parent_conflict, 
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+                            "that conflicts with mapped region (%x,%x,%x) at "
+                            "index %d of parent task %s (ID %lld) that would "
+                            "ultimately result in deadlock.  Instead you "
+                            "receive this error message.",
+                            launcher.requirement.region.index_space.id,
+                            launcher.requirement.region.field_space.id,
+                            launcher.requirement.region.tree_id,
+                            ctx->regions[index].region.index_space.id,
+                            ctx->regions[index].region.field_space.id,
+                            ctx->regions[index].region.tree_id,
+                            index, ctx->variants->name, 
+                            ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+                            "that conflicts with previous inline mapping in "
+                            "task %s (ID %lld) that would "
+                            "ultimately result in deadlock.  Instead you "
+                            "receive this error message.",
+                            launcher.requirement.region.index_space.id,
+                            launcher.requirement.region.field_space.id,
+                            launcher.requirement.region.tree_id,
+                            ctx->variants->name, 
+                            ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -5293,6 +5334,46 @@ namespace LegionRuntime {
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  false/*check privileges*/);
 #endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(map_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+                            "that conflicts with mapped region (%x,%x,%x) at "
+                            "index %d of parent task %s (ID %lld) that would "
+                            "ultimately result in deadlock.  Instead you "
+                            "receive this error message.",
+                            req.region.index_space.id,
+                            req.region.field_space.id,
+                            req.region.tree_id,
+                            ctx->regions[index].region.index_space.id,
+                            ctx->regions[index].region.field_space.id,
+                            ctx->regions[index].region.tree_id,
+                            index, ctx->variants->name, 
+                            ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+                            "that conflicts with previous inline mapping in "
+                            "task %s (ID %lld) that would "
+                            "ultimately result in deadlock.  Instead you "
+                            "receive this error message.",
+                            req.region.index_space.id,
+                            req.region.field_space.id,
+                            req.region.tree_id,
+                            ctx->variants->name, 
+                            ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -5335,6 +5416,7 @@ namespace LegionRuntime {
 #endif
       MapOp *map_op = get_available_map_op();
       map_op->initialize(ctx, region);
+      ctx->register_inline_mapped_region(region);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -5358,6 +5440,7 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      ctx->unregister_inline_mapped_region(region);
       if (region.impl->is_mapped())
         region.impl->unmap_region();
     }
@@ -5427,13 +5510,13 @@ namespace LegionRuntime {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
-      for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+      ctx->find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
       {
-        if (ctx->is_region_mapped(idx) &&
-            ctx->has_region_dependence(idx, copy_op))
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          unmapped_regions.push_back(ctx->get_physical_region(idx));
-          unmapped_regions.back().impl->unmap_region();
+          unmapped_regions[idx].impl->unmap_region();
         }
       }
       // Issue the copy operation
@@ -5811,13 +5894,12 @@ namespace LegionRuntime {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this acquire operation.
       std::vector<PhysicalRegion> unmapped_regions;
-      for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+      ctx->find_conflicting_regions(acquire_op, unmapped_regions);
+      if (!unmapped_regions.empty())
       {
-        if (ctx->is_region_mapped(idx) &&
-            ctx->has_region_dependence(idx, acquire_op))
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          unmapped_regions.push_back(ctx->get_physical_region(idx));
-          unmapped_regions.back().impl->unmap_region();
+          unmapped_regions[idx].impl->unmap_region();
         }
       }
       // Issue the acquire operation
@@ -5904,13 +5986,12 @@ namespace LegionRuntime {
       // Check to see if we need to do any unmappings and remappings
       // before we can issue the release operation
       std::vector<PhysicalRegion> unmapped_regions;
-      for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+      ctx->find_conflicting_regions(release_op, unmapped_regions);
+      if (!unmapped_regions.empty())
       {
-        if (ctx->is_region_mapped(idx) &&
-            ctx->has_region_dependence(idx, release_op))
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
-          unmapped_regions.push_back(ctx->get_physical_region(idx));
-          unmapped_regions.back().impl->unmap_region();
+          unmapped_regions[idx].impl->unmap_region();
         }
       }
       // Issue the release operation
@@ -7421,13 +7502,12 @@ namespace LegionRuntime {
         // Normal task launch, iterate over the context task's
         // regions and see if we need to unmap any of them
         std::vector<PhysicalRegion> unmapped_regions;
-        for (unsigned idx = 0; idx < ctx->regions.size(); idx++)
+        ctx->find_conflicting_regions(task, unmapped_regions);
+        if (!unmapped_regions.empty())
         {
-          if (ctx->is_region_mapped(idx) && 
-              ctx->has_region_dependence(idx, task))
+          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           {
-            unmapped_regions.push_back(ctx->get_physical_region(idx));
-            unmapped_regions.back().impl->unmap_region();
+            unmapped_regions[idx].impl->unmap_region();
           }
         }
         // Issue the task call
