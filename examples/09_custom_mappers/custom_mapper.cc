@@ -555,24 +555,18 @@ void top_level_task(const Task *task,
   IndexPartition ip;
   if ((num_elements % num_subregions) != 0)
   {
-    const int elmts_per_subregion = (num_elements + (num_subregions-1))/num_subregions;
+    const int lower_bound = num_elements/num_subregions;
+    const int upper_bound = lower_bound+1;
+    const int number_small = num_subregions - (num_elements % num_subregions);
     DomainColoring coloring;
     int index = 0;
     for (int color = 0; color < num_subregions; color++)
     {
-      if ((index+elmts_per_subregion) > num_elements)
-      {
-        // Handle the overflow case
-        Rect<1> subrect(Point<1>(index),Point<1>(num_elements-1));
-        coloring[color] = Domain::from_rect<1>(subrect);
-      }
-      else
-      {
-        // Default case
-        Rect<1> subrect(Point<1>(index),Point<1>(index+elmts_per_subregion-1));
-        coloring[color] = Domain::from_rect<1>(subrect);
-        index += elmts_per_subregion;
-      }
+      int num_elmts = color < number_small ? lower_bound : upper_bound;
+      assert((index+num_elmts) <= num_elements);
+      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
+      coloring[color] = Domain::from_rect<1>(subrect);
+      index += num_elmts;
     }
     ip = runtime->create_index_partition(ctx, is, color_domain, 
                                       coloring, true/*disjoint*/);

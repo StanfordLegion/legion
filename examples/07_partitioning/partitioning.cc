@@ -128,9 +128,10 @@ void top_level_task(const Task *task,
     // to the sub index spaces that will be made and each sub-domain
     // describes the set points to be kept in that domain.
 
-    // Compute an upper bound on the elements per subregion
-    // by rounding up when dividing by the number of subregions.
-    const int elmts_per_subregion = (num_elements + (num_subregions-1))/num_subregions;
+    // Computer upper and lower bounds on the number of elements per subregion
+    const int lower_bound = num_elements/num_subregions;
+    const int upper_bound = lower_bound+1;
+    const int number_small = num_subregions - (num_elements % num_subregions);
     // Create a coloring object to store the domain coloring.  A
     // DomainColoring type is a typedef of an STL map from Colors
     // (unsigned integers) to Domain objects and can be found in
@@ -144,21 +145,11 @@ void top_level_task(const Task *task,
     // value to the maximum number of elements.
     for (int color = 0; color < num_subregions; color++)
     {
-      if ((index+elmts_per_subregion) > num_elements)
-      {
-        // Handle the overflow case
-        Rect<1> subrect(Point<1>(index),Point<1>(num_elements-1));
-        coloring[color] = Domain::from_rect<1>(subrect);
-      }
-      else
-      {
-        // Default case
-        // Remember when creating domains that they are inclusive
-        // on both their start and end points.
-        Rect<1> subrect(Point<1>(index),Point<1>(index+elmts_per_subregion-1));
-        coloring[color] = Domain::from_rect<1>(subrect);
-        index += elmts_per_subregion;
-      }
+      int num_elmts = color < number_small ? lower_bound : upper_bound;
+      assert((index+num_elmts) <= num_elements);
+      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
+      coloring[color] = Domain::from_rect<1>(subrect);
+      index += num_elmts;
     }
     // Once we have computed our domain coloring we are now ready
     // to create the partition.  Creating a partitiong simply

@@ -4199,6 +4199,57 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
+      if (disjoint && verify_disjointness)
+      {
+        std::set<Color> current_colors;
+        for (std::map<Color,Domain>::const_iterator it1 = 
+              coloring.begin(); it1 != coloring.end(); it1++)
+        {
+          current_colors.insert(it1->first);
+          for (std::map<Color,Domain>::const_iterator it2 = 
+                coloring.begin(); it2 != coloring.end(); it2++)
+          {
+            if (current_colors.find(it2->first) != current_colors.end())
+              continue;
+            assert(it1->second.get_dim() == it2->second.get_dim());
+            bool overlaps = false;
+            switch (it1->second.get_dim())
+            {
+              case 1:
+                {
+                  Rect<1> d1 = it1->second.get_rect<1>();
+                  Rect<1> d2 = it2->second.get_rect<1>();
+                  overlaps = d1.overlaps(d2);
+                  break;
+                }
+              case 2:
+                {
+                  Rect<2> d1 = it1->second.get_rect<2>();
+                  Rect<2> d2 = it2->second.get_rect<2>();
+                  overlaps = d1.overlaps(d2);
+                  break;
+                }
+              case 3:
+                {
+                  Rect<3> d1 = it1->second.get_rect<3>();
+                  Rect<3> d2 = it2->second.get_rect<3>();
+                  overlaps = d1.overlaps(d2);
+                  break;
+                }
+              default:
+                assert(false); // should never get here
+            }
+            if (overlaps)
+            {
+              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of partition %d "
+                              "are not disjoint when they are claimed to be!",
+                              it1->first, it2->first, pid);
+              assert(false);
+              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+            }
+          }
+        }
+      }
 #endif
       forest->create_index_partition(pid, parent, disjoint, 
                                      part_color, coloring, color_space);

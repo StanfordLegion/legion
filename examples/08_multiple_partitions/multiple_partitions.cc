@@ -97,32 +97,19 @@ void top_level_task(const Task *task,
   // subregions in the second partition will be aliased.
   IndexPartition disjoint_ip, ghost_ip;
   {
-    const int elmts_per_subregion = 
-      (num_elements + (num_subregions-1))/num_subregions; 
+    const int lower_bound = num_elements/num_subregions;
+    const int upper_bound = lower_bound+1;
+    const int number_small = num_subregions - (num_elements % num_subregions);
     DomainColoring disjoint_coloring, ghost_coloring;
     int index = 0;
     // Iterate over all the colors and compute the entry
     // for both partitions for each color.
     for (int color = 0; color < num_subregions; color++)
     {
-      // First we'll compute the points assigned to the color
-      // for the disjoint partition.  This computation is
-      // identical to the one performed in earlier examples
-      // for the daxpy computation.  We again handle the
-      // default case the edge case when we reach the upper
-      // bound of the index space.
-      if ((index+elmts_per_subregion) > num_elements)
-      {
-        // Upper bound case
-        Rect<1> subrect(Point<1>(index),Point<1>(num_elements-1));
-        disjoint_coloring[color] = Domain::from_rect<1>(subrect);
-      }
-      else
-      {
-        // Default case
-        Rect<1> subrect(Point<1>(index),Point<1>(index+elmts_per_subregion-1));
-        disjoint_coloring[color] = Domain::from_rect<1>(subrect);
-      }
+      int num_elmts = color < number_small ? lower_bound : upper_bound;
+      assert((index+num_elmts) <= num_elements);
+      Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
+      disjoint_coloring[color] = Domain::from_rect<1>(subrect);
       // Now compute the points assigned to this color for
       // the second partition.  Here we need a superset of the
       // points that we just computed including the two additional
@@ -132,7 +119,7 @@ void top_level_task(const Task *task,
       // clamping above, and no clamping.
       if (index < 2)
       {
-        if ((index+elmts_per_subregion+2) > num_elements)
+        if ((index+num_elmts+2) > num_elements)
         {
           // Clamp both
           Rect<1> ghost_rect(Point<1>(0),Point<1>(num_elements-1));
@@ -141,13 +128,13 @@ void top_level_task(const Task *task,
         else
         {
           // Clamp below
-          Rect<1> ghost_rect(Point<1>(0),Point<1>(index+elmts_per_subregion+1));
+          Rect<1> ghost_rect(Point<1>(0),Point<1>(index+num_elmts+1));
           ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
         }
       }
       else
       {
-        if ((index+elmts_per_subregion+2) > num_elements)
+        if ((index+num_elmts+2) > num_elements)
         {
           // Clamp above
           Rect<1> ghost_rect(Point<1>(index-2),Point<1>(num_elements-1));
@@ -156,11 +143,11 @@ void top_level_task(const Task *task,
         else
         {
           // Normal case
-          Rect<1> ghost_rect(Point<1>(index-2),Point<1>(index+elmts_per_subregion+1));
+          Rect<1> ghost_rect(Point<1>(index-2),Point<1>(index+num_elmts+1));
           ghost_coloring[color] = Domain::from_rect<1>(ghost_rect);
         }
       }
-      index += elmts_per_subregion;
+      index += num_elmts;
     }
     // Once we've computed both of our colorings then we can
     // create our partitions.  Note that we tell the runtime
