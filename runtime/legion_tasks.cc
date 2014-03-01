@@ -394,6 +394,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::check_empty_field_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].privilege_fields.empty())
+        {
+          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
+                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
+                                 "FIELDS! DID YOU FORGET THEM?!?",
+                                 idx, variants->name, 
+                                 get_unique_task_id());
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     const char* TaskOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
@@ -4965,14 +4982,6 @@ namespace LegionRuntime {
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (launcher.region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
         regions[idx].copy_without_mapping_info(
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
@@ -5006,6 +5015,7 @@ namespace LegionRuntime {
       result = Future(new Future::Impl(runtime, 
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_task_id(),
@@ -5046,15 +5056,7 @@ namespace LegionRuntime {
       regions = region_requirements;
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
+      { 
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
@@ -5080,6 +5082,7 @@ namespace LegionRuntime {
       result = Future(new Future::Impl(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_task_id(),
@@ -6832,14 +6835,6 @@ namespace LegionRuntime {
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (launcher.region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
         regions[idx].copy_without_mapping_info(
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
@@ -6872,6 +6867,7 @@ namespace LegionRuntime {
       annotate_early_mapped_regions();
       future_map = FutureMap(new FutureMap::Impl(ctx, this, 
                                              variants->return_size, runtime));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
@@ -6907,14 +6903,6 @@ namespace LegionRuntime {
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (launcher.region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
         regions[idx].copy_without_mapping_info(
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
@@ -6959,6 +6947,7 @@ namespace LegionRuntime {
       reduction_future = Future(new Future::Impl(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
@@ -7001,14 +6990,6 @@ namespace LegionRuntime {
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
@@ -7036,6 +7017,7 @@ namespace LegionRuntime {
       annotate_early_mapped_regions();
       future_map = FutureMap(new FutureMap::Impl(ctx, this, 
                                              variants->return_size, runtime));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),
@@ -7080,14 +7062,6 @@ namespace LegionRuntime {
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (region_requirements[idx].privilege_fields.empty())
-        {
-          log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
-        }
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
@@ -7127,6 +7101,7 @@ namespace LegionRuntime {
       reduction_future = Future(new Future::Impl(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
+      check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
                                           parent_ctx->get_unique_task_id(),

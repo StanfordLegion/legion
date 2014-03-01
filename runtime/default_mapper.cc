@@ -786,12 +786,16 @@ namespace LegionRuntime {
           num_chunks = num_elmts;
         // Number of elements per chunk rounded up
         // which works because we know that rectangles are contiguous
-        unsigned elmts_per_chunk = (num_elmts+(num_chunks-1))/num_chunks;
+        unsigned lower_bound = num_elmts/num_chunks;
+        unsigned upper_bound = lower_bound+1;
+        unsigned number_small = num_chunks - (num_elmts % num_chunks);
+        unsigned index = 0;
         for (unsigned idx = 0; idx < num_chunks; idx++)
         {
-          Arrays::Point<1> lo(idx*elmts_per_chunk);  
-          Arrays::Point<1> hi((((idx+1)*elmts_per_chunk > num_elmts) ? 
-                                num_elmts : (idx+1)*elmts_per_chunk)-1);
+          unsigned elmts = (idx < number_small) ? lower_bound : upper_bound;
+          Arrays::Point<1> lo(index);  
+          Arrays::Point<1> hi(index+elmts-1);
+          index += elmts;
           Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
           slices.push_back(DomainSplit(

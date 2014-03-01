@@ -500,34 +500,23 @@ namespace LegionRuntime {
         finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
     }
 
+    // An abstract base class for all GPU memcpy operations
     class GPUMemcpy : public GPUJob {
     public:
       GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-		void *_dst, const void *_src, size_t _bytes, cudaMemcpyKind _kind)
-	: GPUJob(_gpu, _finish_event), dst(_dst), src(_src), 
-	  mask(0), elmt_size(_bytes), kind(_kind)
-      {}
-
-      GPUMemcpy(GPUProcessor *_gpu, Event _finish_event,
-		void *_dst, const void *_src, 
-		const ElementMask *_mask, size_t _elmt_size,
-		cudaMemcpyKind _kind)
-	: GPUJob(_gpu, _finish_event), dst(_dst), src(_src),
-	  mask(_mask), elmt_size(_elmt_size), kind(_kind)
-      {}
-
-      void do_span(off_t pos, size_t len)
+                cudaMemcpyKind _kind)
+        : GPUJob(_gpu, _finish_event), kind(_kind)
       {
-	off_t span_start = pos * elmt_size;
-	size_t span_bytes = len * elmt_size;
-
-        CHECK_CUDART( cudaMemcpyAsync(((char *)dst)+span_start,
-                                      ((char *)src)+span_start,
-                                      span_bytes,
-                                      cudaMemcpyDefault,
-                                      local_stream) );
+        if (kind == cudaMemcpyHostToDevice)
+          local_stream = gpu->internal->host_to_device_stream;
+        else if (kind == cudaMemcpyDeviceToHost)
+          local_stream = gpu->internal->device_to_host_stream;
+        else if (kind == cudaMemcpyDeviceToDevice)
+          local_stream = gpu->internal->device_to_device_stream;
+        else
+          assert(false); // who does host to host here?!?
       }
-
+    public:
       virtual bool event_triggered(void)
       {
         log_gpu.info("gpu job %p now runnable", this);
@@ -554,38 +543,21 @@ namespace LegionRuntime {
         }
       }
 
-      virtual void execute(void)
+      virtual void execute(void) = 0;
+
+      void post_execute(void)
       {
-	DetailedTimer::ScopedPush sp(TIME_COPY);
-        // Figure out which stream we are based on our kind
-        // and add ourselves to the right queue
-        if (kind == cudaMemcpyHostToDevice) {
-          local_stream = gpu->internal->host_to_device_stream;
-          gpu->internal->add_host_device_copy(this);
-        }
-        else if (kind == cudaMemcpyDeviceToHost) {
-          local_stream = gpu->internal->device_to_host_stream;
-          gpu->internal->add_device_host_copy(this);
-        }
-        else if (kind == cudaMemcpyDeviceToDevice) {
-          local_stream = gpu->internal->device_to_device_stream;
-          gpu->internal->add_device_device_copy(this);
-        }
-        else
-          assert(false); // who does host to host here?!?
-	log_gpu.info("gpu memcpy: dst=%p src=%p bytes=%zd kind=%d",
-		     dst, src, elmt_size, kind);
-	if(mask) {
-	  ElementMask::forall_ranges(*this, *mask);
-	} else {
-	  do_span(0, 1);
-	}
-	log_gpu.info("gpu memcpy complete: dst=%p src=%p bytes=%zd kind=%d",
-		     dst, src, elmt_size, kind);
-        // Create an event for us to use and put it on the stream
         CHECK_CUDART( cudaEventCreateWithFlags(&complete_event,
                                                cudaEventDisableTiming) );
         CHECK_CUDART( cudaEventRecord(complete_event, local_stream) );
+        if (kind == cudaMemcpyHostToDevice)
+          gpu->internal->add_host_device_copy(this);
+        else if (kind == cudaMemcpyDeviceToHost)
+          gpu->internal->add_device_host_copy(this);
+        else if (kind == cudaMemcpyDeviceToDevice)
+          gpu->internal->add_device_device_copy(this);
+        else
+          assert(false);
       }
 
       virtual bool is_finished(void)
@@ -610,15 +582,90 @@ namespace LegionRuntime {
         // Destroy our event
         CHECK_CUDART( cudaEventDestroy(complete_event) );
       }
+    protected:
+      cudaMemcpyKind kind;
+      cudaStream_t local_stream;
+      cudaEvent_t complete_event;
+    };
 
+    class GPUMemcpy1D : public GPUMemcpy {
+    public:
+      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+		void *_dst, const void *_src, size_t _bytes, cudaMemcpyKind _kind)
+	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src), 
+	  mask(0), elmt_size(_bytes)
+      {}
+
+      GPUMemcpy1D(GPUProcessor *_gpu, Event _finish_event,
+		void *_dst, const void *_src, 
+		const ElementMask *_mask, size_t _elmt_size,
+		cudaMemcpyKind _kind)
+	: GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+	  mask(_mask), elmt_size(_elmt_size)
+      {}
+
+      void do_span(off_t pos, size_t len)
+      {
+	off_t span_start = pos * elmt_size;
+	size_t span_bytes = len * elmt_size;
+
+        CHECK_CUDART( cudaMemcpyAsync(((char *)dst)+span_start,
+                                      ((char *)src)+span_start,
+                                      span_bytes,
+                                      cudaMemcpyDefault,
+                                      local_stream) );
+      }
+
+      virtual void execute(void)
+      {
+	DetailedTimer::ScopedPush sp(TIME_COPY);
+	log_gpu.info("gpu memcpy: dst=%p src=%p bytes=%zd kind=%d",
+		     dst, src, elmt_size, kind);
+	if(mask) {
+	  ElementMask::forall_ranges(*this, *mask);
+	} else {
+	  do_span(0, 1);
+	}
+        post_execute();  
+	log_gpu.info("gpu memcpy complete: dst=%p src=%p bytes=%zd kind=%d",
+		     dst, src, elmt_size, kind);
+      } 
     protected:
       void *dst;
       const void *src;
       const ElementMask *mask;
       size_t elmt_size;
-      cudaMemcpyKind kind;
-      cudaStream_t local_stream;
-      cudaEvent_t complete_event;
+    };
+
+    class GPUMemcpy2D : public GPUMemcpy {
+    public:
+      GPUMemcpy2D(GPUProcessor *_gpu, Event _finish_event,
+                  void *_dst, const void *_src,
+                  off_t _dst_stride, off_t _src_stride,
+                  size_t _bytes, size_t _lines,
+                  cudaMemcpyKind _kind)
+        : GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
+          dst_stride(_dst_stride), src_stride(_src_stride),
+          bytes(_bytes), lines(_lines)
+      {}
+    public:
+      virtual void execute(void)
+      {
+        log_gpu.info("gpu memcpy 2d: dst=%p src=%p "
+                     "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
+                     dst, src, dst_stride, src_stride, bytes, lines, kind); 
+        CHECK_CUDART( cudaMemcpy2DAsync(dst, dst_stride, src, src_stride,
+                        bytes, lines, cudaMemcpyDefault, local_stream) );
+        post_execute();
+        log_gpu.info("gpu memcpy 2d complete: dst=%p src=%p "
+                     "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
+                     dst, src, dst_stride, src_stride, bytes, lines, kind);
+      }
+    protected:
+      void *dst;
+      const void *src;
+      off_t dst_stride, src_stride;
+      size_t bytes, lines;
     };
 
     class GPUMemcpyGeneric : public GPUJob {
@@ -905,7 +952,7 @@ namespace LegionRuntime {
     void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
 				  Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + dst_offset),
 		     src,
 		     bytes,
@@ -916,7 +963,7 @@ namespace LegionRuntime {
 				  const ElementMask *mask, size_t elmt_size,
 				  Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + dst_offset),
 		     src,
 		     mask, elmt_size,
@@ -926,18 +973,18 @@ namespace LegionRuntime {
     void GPUProcessor::copy_from_fb(void *dst, off_t src_offset, size_t bytes,
 				    Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     dst,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + src_offset),
 		     bytes,
 		     cudaMemcpyDeviceToHost))->run_or_wait(start_event);
-    }
+    } 
 
     void GPUProcessor::copy_from_fb(void *dst, off_t src_offset,
 				    const ElementMask *mask, size_t elmt_size,
 				    Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     dst,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + src_offset),
 		     mask, elmt_size,
@@ -948,7 +995,7 @@ namespace LegionRuntime {
 				      size_t bytes,
 				      Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + dst_offset),
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + src_offset),
 		     bytes,
@@ -959,11 +1006,49 @@ namespace LegionRuntime {
 				      const ElementMask *mask, size_t elmt_size,
 				      Event start_event, Event finish_event)
     {
-      (new GPUMemcpy(this, finish_event,
+      (new GPUMemcpy1D(this, finish_event,
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + dst_offset),
 		     ((char *)internal->fbmem_gpu_base) + (internal->fbmem_reserve + src_offset),
 		     mask, elmt_size,
 		     cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
+    }
+
+    void GPUProcessor::copy_to_fb_2d(off_t dst_offset, const void *src, 
+                                     off_t dst_stride, off_t src_stride,
+                                     size_t bytes, size_t lines,
+                                     Event start_event, Event finish_event)
+    {
+      (new GPUMemcpy2D(this, finish_event,
+                       ((char*)internal->fbmem_gpu_base)+
+                        (internal->fbmem_reserve + dst_offset),
+                        src, dst_stride, src_stride, bytes, lines,
+                        cudaMemcpyHostToDevice))->run_or_wait(start_event);
+    }
+
+    void GPUProcessor::copy_from_fb_2d(void *dst, off_t src_offset,
+                                       off_t dst_stride, off_t src_stride,
+                                       size_t bytes, size_t lines,
+                                       Event start_event, Event finish_event)
+    {
+      (new GPUMemcpy2D(this, finish_event, dst,
+                       ((char*)internal->fbmem_gpu_base)+
+                        (internal->fbmem_reserve + src_offset),
+                        dst_stride, src_stride, bytes, lines,
+                        cudaMemcpyDeviceToHost))->run_or_wait(start_event);
+    }
+
+    void GPUProcessor::copy_within_fb_2d(off_t dst_offset, off_t src_offset,
+                                         off_t dst_stride, off_t src_stride,
+                                         size_t bytes, size_t lines,
+                                         Event start_event, Event finish_event)
+    {
+      (new GPUMemcpy2D(this, finish_event,
+                       ((char*)internal->fbmem_gpu_base) + 
+                        (internal->fbmem_reserve + dst_offset),
+                       ((char*)internal->fbmem_gpu_base) + 
+                        (internal->fbmem_reserve + src_offset),
+                        dst_stride, src_stride, bytes, lines,
+                        cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
     }
 
     void GPUProcessor::register_host_memory(void *base, size_t size)

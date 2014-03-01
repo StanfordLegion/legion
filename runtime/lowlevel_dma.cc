@@ -298,6 +298,11 @@ namespace LegionRuntime {
 				Event event, bool make_copy = false);
 
     extern void do_remote_write(Memory mem, off_t offset,
+				const void *data, size_t datalen,
+				off_t stride, size_t lines,
+				Event event, bool make_copy = false);
+
+    extern void do_remote_write(Memory mem, off_t offset,
 				const SpanList& spans, size_t datalen,
 				Event event, bool make_copy = false);
 
@@ -676,6 +681,20 @@ namespace LegionRuntime {
     public:
       virtual void copy_field(int src_index, int dst_index, int elem_count,
                               unsigned offset_index) = 0;
+
+      virtual void copy_all_fields(int src_index, int dst_index, int elem_count) = 0;
+
+      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
+				   int src_stride, int dst_stride, int lines)
+      {
+	// default implementation is just to iterate over lines
+	for(int i = 0; i < lines; i++) {
+	  copy_all_fields(src_index, dst_index, count_per_line);
+	  src_index += src_stride;
+	  dst_index += dst_stride;
+	}
+      }
+
       virtual void flush(void) = 0;
     };
 
@@ -731,12 +750,19 @@ namespace LegionRuntime {
         dst_start.resize(oas_vec.size());
         src_size.resize(oas_vec.size());
         dst_size.resize(oas_vec.size());
+	partial_field.resize(oas_vec.size());
         for (unsigned idx = 0; idx < oas_vec.size(); idx++)
         {
           find_field_start(src_idata->field_sizes, oas_vec[idx].src_offset,
                             oas_vec[idx].size, src_start[idx], src_size[idx]);
           find_field_start(dst_idata->field_sizes, oas_vec[idx].dst_offset,
                             oas_vec[idx].size, dst_start[idx], dst_size[idx]);
+
+	  // mark an OASVec entry as being "partial" if src and/or dst don't fill the whole instance field
+	  partial_field[idx] = ((src_start[idx] != oas_vec[idx].src_offset) ||
+				(src_size[idx] != oas_vec[idx].size) ||
+				(dst_start[idx] != oas_vec[idx].dst_offset) ||
+				(dst_size[idx] != oas_vec[idx].size));
         }
       }
 
@@ -788,6 +814,9 @@ namespace LegionRuntime {
 				dst_idata->block_size, dst_index + done + todo - 1) == 
 		   (dst_start + (todo - 1) * bytes));
 
+#ifdef NEW2D_DEBUG
+	    printf("ZZZ: %zd %zd %d\n", src_start, dst_start, bytes * todo);
+#endif
 	    span_copier->copy_span(src_start, dst_start, bytes * todo);
 	    //src_mem->get_bytes(src_start, buffer, bytes * todo);
 	    //dst_mem->put_bytes(dst_start, buffer, bytes * todo);
@@ -804,10 +833,280 @@ namespace LegionRuntime {
 					   dst_field_start, dst_field_size, dst_idata->elmt_size,
 					   dst_idata->block_size, dst_index + i);
 
+#ifdef NEW2D_DEBUG
+	    printf("ZZZ: %zd %zd %d\n", src_start, dst_start, bytes);
+#endif
 	    span_copier->copy_span(src_start, dst_start, bytes);
 	    //src_mem->get_bytes(src_start, buffer, bytes);
 	    //dst_mem->put_bytes(dst_start, buffer, bytes);
 	  }
+	}
+      }
+
+      virtual void copy_all_fields(int src_index, int dst_index, int elem_count)
+      {
+	// first check - if the span we're copying straddles a block boundary
+	//  go back to old way - block size of 1 is ok only if both are
+	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
+	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
+
+	size_t src_bsize = src_idata->block_size;
+	size_t dst_bsize = dst_idata->block_size;
+
+	if(((src_bsize == 1) != (dst_bsize == 1)) ||
+	   ((src_bsize > 1) && ((src_index / src_bsize) != ((src_index + elem_count - 1) / src_bsize))) ||
+	   ((dst_bsize > 1) && ((dst_index / dst_bsize) != ((dst_index + elem_count - 1) / dst_bsize)))) {
+	  printf("copy straddles block boundaries - falling back\n");
+	  for(unsigned i = 0; i < oas_vec.size(); i++)
+	    copy_field(src_index, dst_index, elem_count, i);
+	  return;
+	}
+
+	// start with the first field, grabbing as many at a time as we can
+
+	unsigned field_idx = 0;
+
+	while(field_idx < oas_vec.size()) {
+	  // get information about the first field
+	  unsigned src_offset = oas_vec[field_idx].src_offset;
+	  unsigned dst_offset = oas_vec[field_idx].dst_offset;
+	  unsigned bytes = oas_vec[field_idx].size;
+
+	  // if src and/or dst aren't a full field, fall back to the old way for this field
+	  int src_field_start = src_start[field_idx];
+	  int src_field_size = src_size[field_idx];
+	  int dst_field_start = dst_start[field_idx];
+	  int dst_field_size = dst_size[field_idx];
+
+	  if(partial_field[field_idx]) {
+	    printf("not a full field - falling back\n");
+	    copy_field(src_index, dst_index, elem_count, field_idx);
+	    field_idx++;
+	    continue;
+	  }
+
+	  // see if we can tack on more fields
+	  unsigned field_idx2 = field_idx + 1;
+	  int src_fstride = 0;
+	  int dst_fstride = 0;
+	  unsigned total_bytes = bytes;
+	  unsigned total_lines = 1;
+	  while(field_idx2 < oas_vec.size()) {
+	    // TODO: for now, don't merge fields here because it can result in too-large copies
+	    break;
+
+	    // is this a partial field?  if so, stop
+	    if(partial_field[field_idx2])
+	      break;
+
+	    unsigned src_offset2 = oas_vec[field_idx2].src_offset;
+	    unsigned dst_offset2 = oas_vec[field_idx2].dst_offset;
+
+	    // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
+	    if(src_bsize == 1) {
+	      // for AOS, we need this field's offset to be the next byte
+	      if((src_offset2 != (src_offset + total_bytes)) ||
+		 (dst_offset2 != (dst_offset + total_bytes)))
+		break;
+
+	      // if tests pass, add this field's size to our total and keep going
+	      total_bytes += oas_vec[field_idx2].size;
+	    } else {
+	      // in SOA, we need the field's strides to match, but non-contiguous is ok
+	      // first stride will be ok by construction
+	      int src_fstride2 = src_offset2 - src_offset;
+	      int dst_fstride2 = dst_offset2 - dst_offset;
+	      if(src_fstride == 0) src_fstride = src_fstride2;
+	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
+	      if((src_fstride2 != (field_idx2 - field_idx) * src_fstride) ||
+		 (dst_fstride2 != (field_idx2 - field_idx) * dst_fstride))
+		break;
+
+	      // if tests pass, we have another line
+	      total_lines++;
+	    }
+
+	    field_idx2++;
+	  }
+
+	  // now we can copy something
+	  off_t src_start = calc_mem_loc(src_idata->alloc_offset + (src_offset - src_field_start),
+					 src_field_start, src_field_size, src_idata->elmt_size,
+					 src_idata->block_size, src_index);
+	  off_t dst_start = calc_mem_loc(dst_idata->alloc_offset + (dst_offset - dst_field_start),
+					 dst_field_start, dst_field_size, dst_idata->elmt_size,
+					 dst_idata->block_size, dst_index);
+
+	  // AOS merging doesn't work if we don't end up with the full element
+	  if((src_bsize == 1) && 
+	     ((total_bytes < src_idata->elmt_size) || (total_bytes < dst_idata->elmt_size)) &&
+	     (elem_count > 1)) {
+	    printf("help: AOS tried to merge subset of fields with multiple elements - not contiguous!\n");
+	    assert(0);
+	  }
+
+#ifdef NEW2D_DEBUG
+	  printf("AAA: %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
+		 src_index, dst_index, elem_count, field_idx, field_idx2-1,
+		 src_start, dst_start, elem_count * total_bytes,
+		 src_fstride * src_bsize,
+		 dst_fstride * dst_bsize,
+		 total_lines);
+#endif
+	  span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
+				 src_fstride * src_bsize,
+				 dst_fstride * dst_bsize,
+				 total_lines);
+
+	  // continue with the first field we couldn't take for this pass
+	  field_idx = field_idx2;
+	}
+      }
+
+      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
+				   int src_stride, int dst_stride, int lines)
+      {
+	// first check - if the span we're copying straddles a block boundary
+	//  go back to old way - block size of 1 is ok only if both are
+	StaticAccess<RegionInstance::Impl> src_idata(src_inst);
+	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst);
+
+	size_t src_bsize = src_idata->block_size;
+	size_t dst_bsize = dst_idata->block_size;
+
+	int src_last = src_index + (count_per_line - 1) + (lines - 1) * src_stride;
+	int dst_last = dst_index + (count_per_line - 1) + (lines - 1) * dst_stride;
+
+	if(((src_bsize == 1) != (dst_bsize == 1)) ||
+	   ((src_bsize > 1) && ((src_index / src_bsize) != (src_last / src_bsize))) ||
+	   ((dst_bsize > 1) && ((dst_index / dst_bsize) != (dst_last / dst_bsize)))) {
+	  printf("copy straddles block boundaries - falling back\n");
+	  for(unsigned i = 0; i < oas_vec.size(); i++)
+	    for(int l = 0; l < lines; l++)
+	      copy_field(src_index + l * src_stride, 
+			 dst_index + l * dst_stride, count_per_line, i);
+	  return;
+	}
+
+	// start with the first field, grabbing as many at a time as we can
+
+	unsigned field_idx = 0;
+
+	while(field_idx < oas_vec.size()) {
+	  // get information about the first field
+	  unsigned src_offset = oas_vec[field_idx].src_offset;
+	  unsigned dst_offset = oas_vec[field_idx].dst_offset;
+	  unsigned bytes = oas_vec[field_idx].size;
+
+	  // if src and/or dst aren't a full field, fall back to the old way for this field
+	  int src_field_start = src_start[field_idx];
+	  int src_field_size = src_size[field_idx];
+	  int dst_field_start = dst_start[field_idx];
+	  int dst_field_size = dst_size[field_idx];
+
+	  if(partial_field[field_idx]) {
+	    printf("not a full field - falling back\n");
+	    copy_field(src_index, dst_index, count_per_line, field_idx);
+	    field_idx++;
+	    continue;
+	  }
+
+	  // see if we can tack on more fields
+	  unsigned field_idx2 = field_idx + 1;
+	  int src_fstride = 0;
+	  int dst_fstride = 0;
+	  unsigned total_bytes = bytes;
+	  unsigned total_lines = 1;
+	  while(field_idx2 < oas_vec.size()) {
+	    // is this a partial field?  if so, stop
+	    if(partial_field[field_idx2])
+	      break;
+
+	    unsigned src_offset2 = oas_vec[field_idx2].src_offset;
+	    unsigned dst_offset2 = oas_vec[field_idx2].dst_offset;
+
+	    // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
+	    if(src_bsize == 1) {
+	      // for AOS, we need this field's offset to be the next byte
+	      if((src_offset2 != (src_offset + total_bytes)) ||
+		 (dst_offset2 != (dst_offset + total_bytes)))
+		break;
+
+	      // if tests pass, add this field's size to our total and keep going
+	      total_bytes += oas_vec[field_idx2].size;
+	    } else {
+	      // in SOA, we need the field's strides to match, but non-contiguous is ok
+	      // first stride will be ok by construction
+	      int src_fstride2 = src_offset2 - src_offset;
+	      int dst_fstride2 = dst_offset2 - dst_offset;
+	      if(src_fstride == 0) src_fstride = src_fstride2;
+	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
+	      if((src_fstride2 != (field_idx2 - field_idx) * src_fstride) ||
+		 (dst_fstride2 != (field_idx2 - field_idx) * dst_fstride))
+		break;
+
+	      // if tests pass, we have another line
+	      total_lines++;
+	    }
+
+	    field_idx2++;
+	  }
+
+	  // now we can copy something
+	  off_t src_start = calc_mem_loc(src_idata->alloc_offset + (src_offset - src_field_start),
+					 src_field_start, src_field_size, src_idata->elmt_size,
+					 src_idata->block_size, src_index);
+	  off_t dst_start = calc_mem_loc(dst_idata->alloc_offset + (dst_offset - dst_field_start),
+					 dst_field_start, dst_field_size, dst_idata->elmt_size,
+					 dst_idata->block_size, dst_index);
+
+	  // AOS merging doesn't work if we don't end up with the full element
+	  if((src_bsize == 1) && 
+	     ((total_bytes < src_idata->elmt_size) || (total_bytes < dst_idata->elmt_size)) &&
+	     (count_per_line > 1)) {
+	    printf("help: AOS tried to merge subset of fields with multiple elements - not contiguous!\n");
+	    assert(0);
+	  }
+
+#ifdef NEW2D_DEBUG
+	  printf("BBB: %d %d %d, %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
+		 src_index, dst_index, count_per_line,
+		 src_stride, dst_stride, lines,
+		 field_idx, field_idx2-1,
+		 src_start, dst_start, count_per_line * total_bytes,
+		 src_fstride * src_bsize,
+		 dst_fstride * dst_bsize,
+		 lines * total_lines);
+#endif
+
+	  // since we're already 2D, we need line strides to match up
+	  if(total_lines > 1) {
+	    if(0) {
+	    } else {
+	      // no?  punt on the field merging
+	      total_lines = 1;
+	      //printf("CCC: eliminating field merging\n");
+	      field_idx2 = field_idx + 1;
+	    }
+	  }
+
+#ifdef NEW2D_DEBUG
+	  printf("DDD: %d %d %d, %d %d %d, %d-%d -> %zd %zd %d, %zd %zd %d\n",
+		 src_index, dst_index, count_per_line,
+		 src_stride, dst_stride, lines,
+		 field_idx, field_idx2-1,
+		 src_start, dst_start, count_per_line * total_bytes,
+		 src_stride * bytes,
+		 dst_stride * bytes,
+		 lines);
+#endif
+	  span_copier->copy_span(src_start, dst_start, count_per_line * total_bytes,
+				 src_stride * bytes,
+				 dst_stride * bytes,
+				 lines);
+
+	  // continue with the first field we couldn't take for this pass
+	  field_idx = field_idx2;
 	}
       }
 
@@ -822,6 +1121,7 @@ namespace LegionRuntime {
       std::vector<off_t> dst_start;
       std::vector<int> src_size;
       std::vector<int> dst_size;
+      std::vector<bool> partial_field;
     };
 
     class RemoteWriteInstPairCopier : public InstPairCopier {
@@ -914,6 +1214,17 @@ namespace LegionRuntime {
 	}
       }
 
+      // default behavior of 2D copy is to unroll to 1D copies
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
+	  src_offset += src_stride;
+	  dst_offset += dst_stride;
+	}
+      }
+
     protected:
       size_t buffer_size;
       Memory::Impl *src_mem, *dst_mem;
@@ -946,13 +1257,14 @@ namespace LegionRuntime {
 	memcpy(dst_base + dst_offset, src_base + src_offset, bytes);
       }
 
+      // default behavior of 2D copy is to unroll to 1D copies
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     size_t lines, off_t src_stride, off_t dst_stride)
+		     off_t src_stride, off_t dst_stride, size_t lines)
       {
-	for(size_t i = 0; i < lines; i++) {
-	  memcpy(dst_base + dst_offset, src_base + src_offset, bytes);
-	  dst_offset += dst_stride;
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
 	  src_offset += src_stride;
+	  dst_offset += dst_stride;
 	}
       }
 
@@ -1024,13 +1336,13 @@ namespace LegionRuntime {
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     size_t lines, off_t src_stride, off_t dst_stride)
+		     off_t src_stride, off_t dst_stride, size_t lines)
       {
-	for(size_t i = 0; i < lines; i++) {
-	  copy_span(dst_offset, src_offset, bytes);
-	  dst_offset += dst_stride;
-	  src_offset += src_stride;
-	}
+        Event e = Event::Impl::create_event();
+        gpu->copy_to_fb_2d(dst_offset, src_base + src_offset,
+                           dst_stride, src_stride, bytes, lines,
+                           Event::NO_EVENT, e);
+        events.insert(e);
       }
 
     protected:
@@ -1065,13 +1377,13 @@ namespace LegionRuntime {
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     size_t lines, off_t src_stride, off_t dst_stride)
+		     off_t src_stride, off_t dst_stride, size_t lines)
       {
-	for(size_t i = 0; i < lines; i++) {
-	  copy_span(dst_offset, src_offset, bytes);
-	  dst_offset += dst_stride;
-	  src_offset += src_stride;
-	}
+        Event e = Event::Impl::create_event();
+        gpu->copy_from_fb_2d(dst_base + dst_offset, src_offset,
+                             dst_stride, src_stride, bytes, lines,
+                             Event::NO_EVENT, e);
+        events.insert(e);
       }
 
     protected:
@@ -1103,13 +1415,13 @@ namespace LegionRuntime {
       }
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
-		     size_t lines, off_t src_stride, off_t dst_stride)
+		     off_t src_stride, off_t dst_stride, size_t lines)
       {
-	for(size_t i = 0; i < lines; i++) {
-	  copy_span(dst_offset, src_offset, bytes);
-	  dst_offset += dst_stride;
-	  src_offset += src_stride;
-	}
+        Event e = Event::Impl::create_event();
+        gpu->copy_within_fb_2d(dst_offset, src_offset,
+                               dst_stride, src_stride, bytes, lines,
+                               Event::NO_EVENT, e);
+        events.insert(e);
       }
 
     protected:
@@ -1209,6 +1521,43 @@ namespace LegionRuntime {
         unsigned long long stop = TimeStamp::get_current_time_in_micros();
         span_time += (stop - start);
 #endif
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+	// case 1: although described as 2D, both src and dst coalesce
+	if((src_stride == bytes) && (dst_stride == bytes)) {
+	  copy_span(src_offset, dst_offset, bytes * lines);
+	  return;
+	}
+
+	// case 2: if dst coalesces, we'll let the RDMA code do the gather for us -
+	//  this won't merge with any other copies though
+	if(dst_stride == bytes) {
+#ifdef NEW2D_DEBUG
+	  printf("GATHER copy\n");
+#endif
+	  do_remote_write(dst_mem->me, dst_offset,
+			  src_base + src_offset, bytes, src_stride, lines,
+			  Event::NO_EVENT, false /* no copy */);
+          size_t limit = 0;
+          if(lines > limit) lines = limit;
+          while(lines-- > 0) {
+            copy_span(src_offset, dst_offset, bytes);
+            src_offset += src_stride;
+            dst_offset += dst_stride;
+          }
+	  return;
+	}
+	
+	// default is to unroll the lines here, and let the PendingGather code try to
+	//  put things back in bigger pieces
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
+	  src_offset += src_stride;
+	  dst_offset += dst_stride;
+	}
       }
 
       void copy_gather(const PendingGather *g, Event trigger = Event::NO_EVENT)
@@ -1366,6 +1715,51 @@ namespace LegionRuntime {
     }
 
     template <unsigned DIM>
+    static unsigned compress_strides(const Rect<DIM> &r,
+				     const Point<1> in1[DIM], const Point<1> in2[DIM],
+				     Point<DIM>& extents,
+				     Point<1> out1[DIM], Point<1> out2[DIM])
+    {
+      // sort the dimensions by the first set of strides for maximum gathering goodness
+      unsigned stride_order[DIM];
+      for(unsigned i = 0; i < DIM; i++) stride_order[i] = i;
+      // yay, bubble sort!
+      for(unsigned i = 0; i < DIM; i++)
+	for(unsigned j = 0; j < i; j++)
+	  if(in1[stride_order[j]] > in1[stride_order[j+1]]) {
+	    int t = stride_order[j];
+	    stride_order[j] = stride_order[j+1];
+	    stride_order[j+1] = t;
+	  }
+
+      int curdim = -1;
+      unsigned exp1, exp2;
+
+      // now go through dimensions, collapsing each if it matches the expected stride for
+      //  both sets (can't collapse for first)
+      for(unsigned i = 0; i < DIM; i++) {
+	unsigned d = stride_order[i];
+	unsigned e = r.dim_size(d);
+	if(i && (exp1 == in1[d][0]) && (exp2 == in2[d][0])) {
+	  // collapse and grow extent
+	  extents.x[curdim] *= e;
+	  exp1 *= e;
+	  exp2 *= e;
+	} else {
+	  // no match - create a new dimension
+	  curdim++;
+	  extents.x[curdim] = e;
+	  exp1 = in1[d][0] * e;
+	  exp2 = in2[d][0] * e;
+	  out1[curdim] = in1[d];
+	  out2[curdim] = in2[d];
+	}
+      }
+
+      return curdim+1;
+    }
+
+    template <unsigned DIM>
     void DmaRequest::perform_dma_rect(MemPairCopier *mpc)
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
@@ -1381,23 +1775,70 @@ namespace LegionRuntime {
 	Arrays::Mapping<DIM, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<DIM>();
 	Arrays::Mapping<DIM, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<DIM>();
 
-	// iterate by output rectangle first - this gives us a chance to gather data when linearizations
-	//  don't match up
-	for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(orig_rect, *dst_linearization); dso; dso++) {
-	  // dense subrect in dst might not be dense in src
-	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
-	    Rect<1> irect = dsi.image;
-	    // rectangle in output must be recalculated
-	    Rect<DIM> subrect_check;
-	    Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
-	    assert(dsi.subrect == subrect_check);
+	// see what linear subrects we can get - again, iterate over destination first for gathering
+	for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(orig_rect, *dst_linearization); lso; lso++) {
+	  for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(lso.subrect, *src_linearization); lsi; lsi++) {
+	    // see if we can compress the strides for a more efficient copy
+	    Point<1> src_cstrides[DIM], dst_cstrides[DIM];
+	    Point<DIM> extents;
+	    int cdim = compress_strides(lsi.subrect, lso.strides, lsi.strides,
+					extents, dst_cstrides, src_cstrides);
 
-	    //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
-            for (unsigned idx = 0; idx < oasvec.size(); idx++)
-	      ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
-			      //it2->src_offset, it2->dst_offset, it2->size);
+#ifdef NEW2D_DEBUG
+	    printf("ORIG: (%d,%d,%d)->(%d,%d,%d)\n",
+		   orig_rect.lo[0], orig_rect.lo[1], orig_rect.lo[2],
+		   orig_rect.hi[0], orig_rect.hi[1], orig_rect.hi[2]);
+	    printf("DST:  (%d,%d,%d)->(%d,%d,%d)  %d+(%d,%d,%d)\n",
+		   lso.subrect.lo[0], lso.subrect.lo[1], lso.subrect.lo[2],
+		   lso.subrect.hi[0], lso.subrect.hi[1], lso.subrect.hi[2],
+		   lso.image_lo[0],
+		   lso.strides[0][0], lso.strides[1][0], lso.strides[2][0]);
+	    printf("SRC:  (%d,%d,%d)->(%d,%d,%d)  %d+(%d,%d,%d)\n",
+		   lsi.subrect.lo[0], lsi.subrect.lo[1], lsi.subrect.lo[2],
+		   lsi.subrect.hi[0], lsi.subrect.hi[1], lsi.subrect.hi[2],
+		   lsi.image_lo[0],
+		   lsi.strides[0][0], lsi.strides[1][0], lsi.strides[2][0]);
+	    printf("CMP:  %d (%d,%d,%d) +(%d,%d,%d) +(%d,%d,%d)\n",
+		   cdim,
+		   extents[0], extents[1], extents[2],
+		   dst_cstrides[0][0], dst_cstrides[1][0], dst_cstrides[2][0],
+		   src_cstrides[0][0], src_cstrides[1][0], src_cstrides[2][0]);
+#endif
+	    if((cdim == 1) && (dst_cstrides[0][0] == 1) && (src_cstrides[0][0] == 1)) {
+	      // all the dimension(s) collapse to a 1-D extent in both source and dest, so one big copy
+	      ipc->copy_all_fields(lsi.image_lo[0], lso.image_lo[0], extents[0]);
+	      continue;
+	    }
+
+	    if((cdim == 2) && (dst_cstrides[0][0] == 1) && (src_cstrides[0][0] == 1)) {
+	      // source and/or destination need a 2-D description
+	      ipc->copy_all_fields(lsi.image_lo[0], lso.image_lo[0], extents[0],
+				   src_cstrides[1][0], dst_cstrides[1][0], extents[1]);
+	      continue;
+	    }
+
+	    // fall through - just identify dense (sub)subrects and copy them
+
+	    // iterate by output rectangle first - this gives us a chance to gather data when linearizations
+	    //  don't match up
+	    for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(lsi.subrect, *dst_linearization); dso; dso++) {
+	      // dense subrect in dst might not be dense in src
+	      for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
+		Rect<1> irect = dsi.image;
+		// rectangle in output must be recalculated
+		Rect<DIM> subrect_check;
+		Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
+		assert(dsi.subrect == subrect_check);
+
+		//for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
+		for (unsigned idx = 0; idx < oasvec.size(); idx++)
+		  ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+		//it2->src_offset, it2->dst_offset, it2->size);
+	      }
+	    }
 	  }
 	}
+
         // Dammit Sean stop leaking things!
         delete ipc;
       }

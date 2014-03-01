@@ -73,6 +73,7 @@ namespace LegionRuntime {
       CLEAR_TIMER_MSGID,
       DESTROY_INST_MSGID,
       REMOTE_WRITE_MSGID,
+      REMOTE_WRITE_FENCE_MSGID,
       DESTROY_LOCK_MSGID,
       REMOTE_REDLIST_MSGID,
       MACHINE_SHUTDOWN_MSGID,
@@ -2854,6 +2855,24 @@ namespace LegionRuntime {
 				       RemoteWriteArgs,
 				       handle_remote_write> RemoteWriteMessage;
 
+    struct RemoteWriteFenceArgs {
+      Memory mem;
+      Event event;
+    };
+
+    void handle_remote_write_fence(RemoteWriteFenceArgs args)
+    {
+      // printf("%d: remote write fence (mem = %08x, event = %08x/%d)\n",
+      // 	     gasnet_mynode(), args.mem.id, args.event.id, args.event.gen);
+      if(args.event.exists())
+	args.event.impl()->trigger(args.event.gen,
+				   gasnet_mynode());
+    }
+
+    typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_MSGID,
+				      RemoteWriteFenceArgs,
+				      handle_remote_write_fence> RemoteWriteFenceMessage;
+
     void do_remote_write(Memory mem, off_t offset,
 			 const void *data, size_t datalen,
 			 Event event, bool make_copy = false)
@@ -2869,7 +2888,13 @@ namespace LegionRuntime {
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
-      if(datalen > MAX_SEND_SIZE) {
+      if(datalen == 0) {
+	// not a write, but a fence for previous writes before triggering the end-of-copy event
+	RemoteWriteFenceArgs args;
+	args.mem = mem;
+	args.event = event;
+	RemoteWriteFenceMessage::request(ID(mem).node(), args);
+      } else if(datalen > MAX_SEND_SIZE) {
 	// as written, this assumes in-order delivery of messages, which isn't guaranteed
 	assert(0);
 	log_copy.info("breaking large send into pieces");
@@ -2898,9 +2923,40 @@ namespace LegionRuntime {
 	args.event = event;
 	RemoteWriteMessage::request(ID(mem).node(), args,
 				    data, datalen,
-				    ((datalen == 0) ? PAYLOAD_NONE :
-                                       (make_copy ? PAYLOAD_COPY :
-                                                    PAYLOAD_KEEP)),
+				    (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP),
+				    dstptr);
+      }
+    }
+
+    void do_remote_write(Memory mem, off_t offset,
+			 const void *data, size_t datalen,
+			 off_t stride, size_t lines,
+			 Event event, bool make_copy = false)
+    {
+      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+		     mem.id, offset, datalen,
+		     event.id, event.gen);
+      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+      Memory::Impl *m_impl = mem.impl();
+      char *dstptr;
+      if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
+	dstptr = ((char *)(((RemoteMemory *)m_impl)->regbase)) + offset;
+	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
+      } else
+	dstptr = 0;
+      if(datalen*lines > MAX_SEND_SIZE) {
+	// as written, this assumes in-order delivery of messages, which isn't guaranteed
+	assert(0);
+	// doing this with spans is even more complicated...
+      } else {
+	RemoteWriteArgs args;
+	args.mem = mem;
+	args.offset = offset;
+	args.event = event;
+
+	RemoteWriteMessage::request(ID(mem).node(), args,
+				    data, datalen, stride, lines,
+				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
 				    dstptr);
       }
     }
@@ -5245,7 +5301,7 @@ namespace LegionRuntime {
 	num_elements = data->last_elmt + 1;
 	if(data->first_elmt > 0)
 	  printf("WARNING: Creating an instance where first_elmt=%zd\n", data->first_elmt);
-	DomainLinearization().serialize(linearization_bits);
+	DomainLinearization::from_index_space(data->first_elmt).serialize(linearization_bits);
       }
 
       // HACK: force full SOA by setting block_size == num_elements
@@ -5555,7 +5611,7 @@ namespace LegionRuntime {
 
     int ElementMask::find_disabled(int count /*= 1 */, int start /*= 0*/) const
     {
-      if(start == 0)
+      if((start == 0) && (first_enabled_elmt > 0))
 	start = first_enabled_elmt;
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
@@ -7290,6 +7346,7 @@ namespace LegionRuntime {
       hcount += ClearTimerRequestMessage::add_handler_entries(&handlers[hcount]);
       hcount += DestroyInstanceMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteWriteMessage::add_handler_entries(&handlers[hcount]);
+      hcount += RemoteWriteFenceMessage::add_handler_entries(&handlers[hcount]);
       hcount += DestroyLockMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount]);
       hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount]);

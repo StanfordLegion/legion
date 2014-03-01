@@ -78,6 +78,19 @@ namespace LegionRuntime {
 			  size_t bytes,
 			  Event start_event, Event finish_event);
 
+      void copy_to_fb_2d(off_t dst_offset, const void *src,
+                         off_t dst_stride, off_t src_stride,
+                         size_t bytes, size_t lines,
+                         Event start_event, Event finish_event);
+      void copy_from_fb_2d(void *dst, off_t src_offset,
+                           off_t dst_stride, off_t src_stride,
+                           size_t bytes, size_t lines,
+                           Event start_event, Event finish_event);
+      void copy_within_fb_2d(off_t dst_offset, off_t src_offset,
+                             off_t dst_stride, off_t src_stride,
+                             size_t bytes, size_t lines,
+                             Event start_event, Event finish_event);
+
       //void copy_to_fb_generic(off_t dst_offset, 
       //			      Memory::Impl *src_mem, off_t src_offset,
       //			      size_t bytes,

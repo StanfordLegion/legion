@@ -22,7 +22,6 @@
 namespace LegionRuntime {
   namespace LowLevel {
     struct RemoteCopyArgs : public BaseMedium {
-      int num_srcs, num_dsts;
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy, after_copy;

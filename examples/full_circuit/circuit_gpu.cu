@@ -149,7 +149,7 @@ void calc_new_currents_kernel(ptr_t first,
       #pragma unroll
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = ((temp_v[i+1] - temp_v[i]) -
+        temp_i[i] = ((temp_v[i] - temp_v[i+1]) -
                      (inductance * (temp_i[i] - old_i[i]) * recip_dt)) * recip_resistance;
       }
       #pragma unroll

@@ -75,6 +75,12 @@ extern void enqueue_message(gasnet_node_t target, int msgid,
 
 extern void enqueue_message(gasnet_node_t target, int msgid,
 			    const void *args, size_t arg_size,
+			    const void *payload, size_t line_size,
+			    off_t line_stride, size_t line_count,
+			    int payload_mode, void *dstptr = 0);
+
+extern void enqueue_message(gasnet_node_t target, int msgid,
+			    const void *args, size_t arg_size,
 			    const SpanList& spans, size_t payload_size,
 			    int payload_mode, void *dstptr = 0);
 
@@ -430,31 +436,15 @@ class ActiveMessageMediumNoReply {
   {
     enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
 		    data, datalen, payload_mode, dstptr);
-#ifdef OLD_AM_STUFF
-    void *dstptr = 0;
-    if(datalen > gasnet_AMMaxMedium()) {
-      //fprintf(stderr, "DATALEN = %zd (max=%zd)\n", datalen,
-	//      gasnet_AMMaxMedium());
-      dstptr = get_remote_msgptr(dest, datalen);
-    }
-#ifdef CHECK_REENTRANT_MESSAGES
-    if(gasnett_threadkey_get(in_handler)) {
-      printf("Help!  Message send inside handler!\n");
-    } else {
-#else
-    {
-#endif
-      union {
-        MessageRawArgsType raw;
-        MSGTYPE typed;
-      } u;
-      u.typed = args;
-      if(dstptr)
-	u.raw.request_long(dest, data, datalen, dstptr);
-      else
-	u.raw.request_medium(dest, data, datalen);
-    }
-#endif
+  }
+
+  static void request(gasnet_node_t dest, const MSGTYPE &args, 
+                      const void *data, size_t line_len,
+		      off_t line_stride, size_t line_count,
+		      int payload_mode, void *dstptr = 0)
+  {
+    enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
+		    data, line_len, line_stride, line_count, payload_mode, dstptr);
   }
 
   static void request(gasnet_node_t dest, const MSGTYPE &args, 

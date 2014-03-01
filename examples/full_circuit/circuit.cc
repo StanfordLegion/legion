@@ -451,8 +451,8 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 
         float resistance = drand48() * 10.0 + 1.0;
         fa_wire_resistance.write(wire_ptr, resistance);
-        // Keep inductance on the order of dt to avoid stability problems
-        float inductance = (drand48() + 0.1) * DELTAT;
+        // Keep inductance on the order of 1e-3 * dt to avoid resonance problems
+        float inductance = (drand48() + 0.1) * DELTAT * 1e-3;
         fa_wire_inductance.write(wire_ptr, inductance);
         float capacitance = drand48() * 0.1;
         fa_wire_cap.write(wire_ptr, capacitance);

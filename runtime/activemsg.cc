@@ -25,6 +25,8 @@
 
 #include "lowlevel_impl.h"
 
+#define NO_DEBUG_AMREQUESTS
+
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -299,6 +301,8 @@ struct OutgoingMessage {
   }
 
   void set_payload(void *_payload, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
+  void set_payload(void *_payload, size_t _line_size, off_t _line_stride, size_t _line_count,
+		   int _payload_mode, void *_dstptr = 0);
   void set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
 
   unsigned msgid;
@@ -700,6 +704,19 @@ protected:
   void send_short(OutgoingMessage *hdr)
   {
     LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+#ifdef DEBUG_AMREQUESTS
+    printf("%d->%d: %s %d %d %p %zd / %x %x %x %x / %x %x %x %x / %x %x %x %x / %x %x %x %x\n",
+	   gasnet_mynode(), peer, 
+	   ((hdr->payload_mode == PAYLOAD_NONE) ? "SHORT" : "MEDIUM"),
+	   hdr->num_args, hdr->msgid,
+	   hdr->payload, hdr->payload_size,
+	   hdr->args[0], hdr->args[1], hdr->args[2],
+	   hdr->args[3], hdr->args[4], hdr->args[5],
+	   hdr->args[6], hdr->args[7], hdr->args[8],
+	   hdr->args[9], hdr->args[10], hdr->args[11],
+	   hdr->args[12], hdr->args[13], hdr->args[14], hdr->args[15]);
+    fflush(stdout);
+#endif
     switch(hdr->num_args) {
     case 1:
       if(hdr->payload_mode != PAYLOAD_NONE)
@@ -880,6 +897,18 @@ protected:
       size_t size = ((i < (chunks - 1)) ?
                        max_long_req :
                        (hdr->payload_size - (chunks - 1) * max_long_req));
+#ifdef DEBUG_AMREQUESTS
+      printf("%d->%d: LONG %d %d %p %zd %p / %x %x %x %x / %x %x %x %x / %x %x %x %x / %x %x %x %x\n",
+	     gasnet_mynode(), peer, hdr->num_args, hdr->msgid,
+	     ((char*)hdr->payload)+(i*max_long_req), size, 
+	     ((char*)dest_ptr)+(i*max_long_req),
+	     hdr->args[0], hdr->args[1], hdr->args[2],
+	     hdr->args[3], hdr->args[4], hdr->args[5],
+	     hdr->args[6], hdr->args[7], hdr->args[8],
+	     hdr->args[9], hdr->args[10], hdr->args[11],
+	     hdr->args[12], hdr->args[13], hdr->args[14], hdr->args[15]);
+      fflush(stdout);
+#endif
       switch(hdr->num_args) {
       case 1:
         // should never get this case since we
@@ -1122,6 +1151,18 @@ void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _pay
     payload = _payload;
 }
 
+static void gather_2d(void *dst, const void *src, size_t line_size, off_t line_stride, size_t line_count)
+{
+  char *dst_c = (char *)dst;
+  const char *src_c = (const char *)src;
+
+  while(line_count-- > 0) {
+    memcpy(dst_c, src_c, line_size);
+    dst_c += line_size;
+    src_c += line_stride;
+  }
+}
+
 static void gather_spans(const SpanList& spans, void *dst, size_t expected_size)
 {
   char *dst_c = (char *)dst;
@@ -1133,6 +1174,45 @@ static void gather_spans(const SpanList& spans, void *dst, size_t expected_size)
     bytes_left -= it->second;
   }
   assert(bytes_left == 0);
+}
+
+void OutgoingMessage::set_payload(void *_payload, size_t _line_size, off_t _line_stride, size_t _line_count,
+				  int _payload_mode, void *_dstptr )
+{
+  // die if a payload has already been attached
+  assert(payload_mode == PAYLOAD_NONE);
+
+  // no payload?  easy case
+  if(_payload_mode == PAYLOAD_NONE)
+    return;
+
+  // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
+  payload_size = _line_size * _line_count;
+  assert(payload_size > 0);
+  assert((_dstptr != 0) || (payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+
+  // copy the destination pointer through
+  dstptr = _dstptr;
+
+  // we always need to allocate some memory to gather the data for sending - prefer to get this
+  //  from srcdata pool
+  if(srcdatapool) {
+    payload = srcdatapool->alloc_srcptr(payload_size);
+    if(payload) {
+      payload_mode = PAYLOAD_SRCPTR;
+    } else {
+      assert(0);
+    }
+  }
+  if(!payload) {
+    payload = malloc(payload_size);
+    assert(payload != 0);
+    payload_mode = PAYLOAD_COPY;
+  }
+
+  gather_2d(payload, _payload, _line_size, _line_stride, _line_count);
+  // doesn't really make sense to call this one with PAYLOAD_FREE
+  assert(_payload_mode != PAYLOAD_FREE);
 }
 
 void OutgoingMessage::set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode,
@@ -1346,6 +1426,24 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     args);
 
   hdr->set_payload((void *)payload, payload_size, payload_mode, dstptr);
+
+  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
+}
+
+void enqueue_message(gasnet_node_t target, int msgid,
+		     const void *args, size_t arg_size,
+		     const void *payload, size_t line_size,
+		     off_t line_stride, size_t line_count,
+		     int payload_mode, void *dstptr)
+{
+  assert(target != gasnet_mynode());
+
+  OutgoingMessage *hdr = new OutgoingMessage(msgid, 
+					     (arg_size + sizeof(int) - 1) / sizeof(int),
+					     args);
+
+  hdr->set_payload((void *)payload, line_size, line_stride, line_count,
+		   payload_mode, dstptr);
 
   endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
 }

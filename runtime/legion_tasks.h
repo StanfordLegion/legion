@@ -67,6 +67,7 @@ namespace LegionRuntime {
                                 const Predicate &p, 
                                 Processor::TaskFuncID tid);
       void initialize_physical_contexts(void);
+      void check_empty_field_requirements(void);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;

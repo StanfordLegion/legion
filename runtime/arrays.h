@@ -526,13 +526,13 @@ namespace LegionRuntime {
       GenericLinearSubrectIterator(const Rect<T::IDIM> r, const T& m)
 	: orig_rect(r), mapping(m)
       {
-	image = m.image_linear_subrect(r, subrect, strides);
+	image_lo = m.image_linear_subrect(r, subrect, strides);
 	any_left = true;
       }
 
       Rect<T::IDIM> orig_rect;
       const T& mapping;
-      Rect<T::ODIM> image;
+      Point<T::ODIM> image_lo;
       Rect<T::IDIM> subrect;
       Point<T::ODIM> strides[T::IDIM];
       bool any_left;

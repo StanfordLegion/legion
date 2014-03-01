@@ -581,6 +581,13 @@ namespace LegionRuntime {
 	return *this;
       }
 
+      static DomainLinearization from_index_space(int first_elmt)
+      {
+        DomainLinearization l;
+        l.dim = 0;
+        return l;
+      }
+
       template <int DIM>
       static DomainLinearization from_mapping(typename Arrays::Mapping<DIM, 1> *mapping)
       {

@@ -336,7 +336,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       // dV = R*I + L*I' ==> I = (dV - L*I')/R
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = ((temp_v[i+1] - temp_v[i]) - 
+        temp_i[i] = ((temp_v[i] - temp_v[i+1]) - 
                      (inductance * (temp_i[i] - old_i[i]) * recip_dt)) * recip_resistance; 
       }
       // Now update the inter-node voltages
@@ -442,7 +442,7 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
       // dV = R*I + L*I' ==> I = (dV - L*I')/R
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = ((temp_v[i+1] - temp_v[i]) - 
+        temp_i[i] = ((temp_v[i] - temp_v[i+1]) - 
                      (inductance * (temp_i[i] - old_i[i]) / dt)) / resistance; 
       }
       // Now update the inter-node voltages
