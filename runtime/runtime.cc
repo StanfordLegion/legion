@@ -9832,7 +9832,9 @@ namespace LegionRuntime {
       unsigned needed_count = 0;
       {
         std::set<Processor> utility_procs;
+#ifndef SHARED_LOWLEVEL
         const unsigned local_space = 0xffff0000 & p.id;
+#endif
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {

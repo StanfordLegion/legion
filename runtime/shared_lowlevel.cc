@@ -3964,8 +3964,8 @@ namespace LegionRuntime {
           size_t offset = dsts[0].offset;
           size_t size = dsts[0].size;
           size_t field_start, field_size, within_field;
-          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
-                                    field_start, field_size, within_field);
+          (void)find_field(dst_inst->get_field_sizes(), offset, size,
+                           field_start, field_size, within_field);
           for (int index = start; index < (start+count); index++)
           {
             void *src_ptr = src_inst->get_address(index, 0, redop->sizeof_rhs, 0);  
@@ -3980,8 +3980,8 @@ namespace LegionRuntime {
           size_t offset = dsts[0].offset;
           size_t size = dsts[0].size;
           size_t field_start, field_size, within_field;
-          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
-                                    field_start, field_size, within_field);
+          (void)find_field(dst_inst->get_field_sizes(), offset, size,
+                           field_start, field_size, within_field);
           for (Domain::DomainPointIterator dpi(domain); dpi; dpi++) {
             DomainPoint dp = dpi.p;
             void *src_ptr = src_inst->get_address(src_inst->get_linearization().get_image(dp), 0, redop->sizeof_rhs, 0);
