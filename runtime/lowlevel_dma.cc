@@ -35,6 +35,8 @@ using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::HighLevel::LegionLogging;
 #endif
 
+#include "atomics.h"
+
 namespace LegionRuntime {
   namespace LowLevel {
 
@@ -293,22 +295,29 @@ namespace LegionRuntime {
     }
 
     // defined in lowlevel.cc
-    extern void do_remote_write(Memory mem, off_t offset,
-				const void *data, size_t datalen,
-				Event event, bool make_copy = false);
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const void *data, size_t datalen,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
 
-    extern void do_remote_write(Memory mem, off_t offset,
-				const void *data, size_t datalen,
-				off_t stride, size_t lines,
-				Event event, bool make_copy = false);
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const void *data, size_t datalen,
+				    off_t stride, size_t lines,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
+    
+    extern unsigned do_remote_write(Memory mem, off_t offset,
+				    const SpanList& spans, size_t datalen,
+				    unsigned sequence_id,
+				    Event event, bool make_copy = false);
 
-    extern void do_remote_write(Memory mem, off_t offset,
-				const SpanList& spans, size_t datalen,
-				Event event, bool make_copy = false);
+    extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
+					     ReductionOpID redopid,
+					     const void *data, size_t datalen,
+					     unsigned sequence_id,
+					     Event event);
 
-    extern void do_remote_apply_red_list(int node, Memory mem, off_t offset,
-					 ReductionOpID redopid,
-					 const void *data, size_t datalen);
+    extern void do_remote_fence(Memory mem, unsigned sequence_id, unsigned count, Event event);
 
     extern ReductionOpTable reduce_op_table;
 
@@ -489,7 +498,7 @@ namespace LegionRuntime {
 		} else {
 		  do_remote_apply_red_list(i, tgt_mem->me, tgt_offset,
 					   redopid, 
-					   entry_buffer, pos * redop->sizeof_list_entry);
+					   entry_buffer, pos * redop->sizeof_list_entry, 0, Event::NO_EVENT);
 		}
 		pos = 0;
 	      }
@@ -501,7 +510,7 @@ namespace LegionRuntime {
 	      } else {
 		do_remote_apply_red_list(i, tgt_mem->me, tgt_offset,
 					 redopid, 
-					 entry_buffer, pos * redop->sizeof_list_entry);
+					 entry_buffer, pos * redop->sizeof_list_entry, 0, Event::NO_EVENT);
 	      }
 	    }
 	  }
@@ -663,7 +672,7 @@ namespace LegionRuntime {
 	  DetailedTimer::ScopedPush sp(TIME_SYSTEM);
 	  do_remote_write(tgt_mem, tgt_offset + byte_offset,
 			  src_ptr + byte_offset, byte_count,
-			  last ? event : Event::NO_EVENT);
+			  0, last ? event : Event::NO_EVENT);
 	}
 
 	Memory tgt_mem;
@@ -1428,6 +1437,8 @@ namespace LegionRuntime {
       GPUProcessor *gpu;
     };
      
+    static unsigned rdma_sequence_no = 1;
+
     class RemoteWriteMemPairCopier : public MemPairCopier {
     public:
       RemoteWriteMemPairCopier(Memory _src_mem, Memory _dst_mem)
@@ -1441,6 +1452,8 @@ namespace LegionRuntime {
         span_time = 0;
         gather_time = 0;
 #endif
+	sequence_id = __sync_fetch_and_add(&rdma_sequence_no, 1);
+	num_writes = 0;
       }
 
       ~RemoteWriteMemPairCopier(void)
@@ -1474,7 +1487,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_REMOTE_WRITES
 	  printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #endif
-	  do_remote_write(dst_mem->me, dst_offset, src_base + src_offset, bytes, Event::NO_EVENT, false /* no copy */);
+	  num_writes += do_remote_write(dst_mem->me, dst_offset, src_base + src_offset, bytes, 
+					sequence_id, Event::NO_EVENT, false /* no copy */);
 	} else {
 	  // see if this can be added to an existing gather
 	  PendingGather *g;
@@ -1538,16 +1552,9 @@ namespace LegionRuntime {
 #ifdef NEW2D_DEBUG
 	  printf("GATHER copy\n");
 #endif
-	  do_remote_write(dst_mem->me, dst_offset,
-			  src_base + src_offset, bytes, src_stride, lines,
-			  Event::NO_EVENT, false /* no copy */);
-          size_t limit = 0;
-          if(lines > limit) lines = limit;
-          while(lines-- > 0) {
-            copy_span(src_offset, dst_offset, bytes);
-            src_offset += src_stride;
-            dst_offset += dst_stride;
-          }
+	  num_writes += do_remote_write(dst_mem->me, dst_offset,
+					src_base + src_offset, bytes, src_stride, lines,
+					sequence_id, Event::NO_EVENT, false /* no copy */);
 	  return;
 	}
 	
@@ -1578,7 +1585,12 @@ namespace LegionRuntime {
                  ((unsigned *)(span.first))[4], ((unsigned *)(span.first))[5],
                  ((unsigned *)(span.first))[6], ((unsigned *)(span.first))[7]);
 #endif
-	  do_remote_write(dst_mem->me, g->dst_start, span.first, span.second, trigger, false /* no copy */);
+	  // TODO: handle case where single write can include event trigger in message
+	  //num_writes += do_remote_write(dst_mem->me, g->dst_start, span.first, span.second, trigger, false /* no copy */);
+	  num_writes += do_remote_write(dst_mem->me, g->dst_start, span.first, span.second, 
+					sequence_id, Event::NO_EVENT, false /* no copy */);
+	  if(trigger.exists())
+	    do_remote_fence(dst_mem->me, sequence_id, num_writes, trigger);
           return;
         }
 
@@ -1587,9 +1599,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_REMOTE_WRITES
 	printf("remote write of %zd bytes (gather -> %x:%zd), trigger=%x/%d\n", g->dst_size, dst_mem->me.id, g->dst_start, trigger.id, trigger.gen);
 #endif
-	do_remote_write(dst_mem->me, g->dst_start, 
-			g->src_spans, g->dst_size,
-			trigger, false /* no copy - data won't change til copy event triggers */);
+	// TODO: handle case where single write can include event trigger in message
+	num_writes += do_remote_write(dst_mem->me, g->dst_start, 
+				      g->src_spans, g->dst_size,
+				      sequence_id, Event::NO_EVENT, false /* no copy - data won't change til copy event triggers */);
+	if(trigger.exists())
+	  do_remote_fence(dst_mem->me, sequence_id, num_writes, trigger);
 #ifdef TIME_REMOTE_WRITES
         unsigned long long stop = TimeStamp::get_current_time_in_micros();
         gather_time += (stop - start);
@@ -1643,7 +1658,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_REMOTE_WRITES
 	    printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
 #endif
-	    do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
+	    //do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
+	    do_remote_fence(dst_mem->me, sequence_id, num_writes, after_copy);
 	  }
 	}
 #ifdef TIME_REMOTE_WRITES
@@ -1663,6 +1679,7 @@ namespace LegionRuntime {
       unsigned long long span_time;
       unsigned long long gather_time;
 #endif
+      unsigned sequence_id, num_writes;
     };
      
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem)

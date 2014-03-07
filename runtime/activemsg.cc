@@ -170,7 +170,11 @@ void *SrcDataPool::alloc_srcptr(size_t size_needed)
 
   gasnet_hsl_lock(&mutex);
   // walk the free list until we find something big enough
+  // only use the a bigger chunk if we absolutely have to 
+  // in order to avoid segmentation problems.
   std::map<char *, size_t>::iterator it = free_list.begin();
+  char *smallest_upper_bound = 0;
+  size_t smallest_upper_size = 0;
   while(it != free_list.end()) {
     if(it->second == size_needed) {
       // exact match
@@ -189,15 +193,27 @@ void *SrcDataPool::alloc_srcptr(size_t size_needed)
 #ifdef DEBUG_SRCPTRPOOL
       printf("found %p + %zd > %zd\n", it->first, it->second, size_needed);
 #endif
-      char *srcptr = it->first + (it->second - size_needed);
-      it->second -= size_needed;
-      in_use[srcptr] = size_needed;
-      gasnet_hsl_unlock(&mutex);
-      return srcptr;
+      // Check to see if it is smaller
+      // than the largest upper bound
+      if (smallest_upper_bound == 0) {
+        smallest_upper_bound = it->first;
+        smallest_upper_size = it->second;
+      } else if (it->second < smallest_upper_size) {
+        smallest_upper_bound = it->first;
+        smallest_upper_size = it->second;
+      }
     }
 
     // not big enough - keep looking
     it++;
+  }
+  if (smallest_upper_bound != 0) {
+    it = free_list.find(smallest_upper_bound);
+    char *srcptr = it->first + (it->second - size_needed);
+    it->second -= size_needed;
+    in_use[srcptr] = size_needed;
+    gasnet_hsl_unlock(&mutex);
+    return srcptr;
   }
   gasnet_hsl_unlock(&mutex);
   return 0;
@@ -1294,10 +1310,18 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		     ActiveMessageEndpoint::LMB_SIZE);
 
   // add in our internal handlers and space we need for LMBs
-  int attach_size = ((gasnet_mem_size_in_mb << 20) +
-		     (registered_mem_size_in_mb << 20) +
-		     srcdatapool_size +
-		     lmb_size);
+  size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
+                       (((size_t)registered_mem_size_in_mb) << 20) +
+                         srcdatapool_size +
+                         lmb_size);
+  if (attach_size > gasnet_getMaxLocalSegmentSize())
+  {
+    fprintf(stderr,"ERROR: Legion exceeded maximum GASNet segment size. "
+                   "Requested %ld bytes but maximum set by GASNET "
+                   "configuration is %ld bytes.  Legion will now exit...",
+                   attach_size, gasnet_getMaxLocalSegmentSize());
+    assert(false);
+  }
 
 #if 0
   handlers[hcount].index = MSGID_LONG_EXTENSION;
@@ -1325,7 +1349,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   char *reg_mem_base = my_segment;  my_segment += (registered_mem_size_in_mb << 20);
   char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
   char *lmb_base = my_segment;  my_segment += lmb_size;
-  assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size));
+  assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 
 
 #ifndef NO_SRCDATAPOOL
   srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);

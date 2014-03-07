@@ -72,6 +72,9 @@ namespace LegionRuntime {
       bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(IndexSpace handle);
       Color get_index_partition_color(IndexPartition handle);
+      IndexSpace get_parent_index_space(IndexPartition handle);
+      bool has_parent_index_partition(IndexSpace handle);
+      IndexPartition get_parent_index_partition(IndexSpace handle);
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
     public:
       void create_field_space(FieldSpace handle);
@@ -117,6 +120,9 @@ namespace LegionRuntime {
             IndexSpace handle, FieldSpace space, RegionTreeID tid);
       Color get_logical_region_color(LogicalRegion handle);
       Color get_logical_partition_color(LogicalPartition handle);
+      LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      bool has_parent_logical_partition(LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
       // Logical analysis methods
       void perform_dependence_analysis(RegionTreeContext ctx, 

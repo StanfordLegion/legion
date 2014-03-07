@@ -257,6 +257,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::get_parent_index_space(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = get_node(handle);
+      return node->parent->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_parent_index_partition(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      return (node->parent != NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition RegionTreeForest::get_parent_index_partition(
+                                                              IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      if (node->parent == NULL)
+      {
+        log_run(LEVEL_ERROR,"Parent index partition requested for "
+                            "index space %x with no parent. Use "
+                            "has_parent_index_partition to check "
+                            "before requesting a parent.", handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PARENT_REQUEST);
+      }
+      return node->parent->handle;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceAllocator* RegionTreeForest::get_index_space_allocator(
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
@@ -490,6 +526,46 @@ namespace LegionRuntime {
       AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       PartitionNode *node = get_node(handle);
       return node->row_source->color;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion RegionTreeForest::get_parent_logical_region(
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      PartitionNode *node = get_node(handle);
+      return node->parent->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      return (node->parent != NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition RegionTreeForest::get_parent_logical_partition(
+                                                           LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      if (node->parent == NULL)
+      {
+        log_run(LEVEL_ERROR,"Parent logical partition requested for "
+                            "logical region (%x,%x,%d) with no parent. Use "
+                            "has_parent_logical_partition to check "
+                            "before requesting a parent.", 
+                            handle.index_space.id,
+                            handle.field_space.id,
+                            handle.tree_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PARENT_REQUEST);
+      }
+      return node->parent->handle;
     }
 
     //--------------------------------------------------------------------------
@@ -6309,7 +6385,8 @@ namespace LegionRuntime {
       logical_states.append(num_contexts);
       physical_states.append(num_contexts);
 #ifdef DEBUG_HIGH_LEVEL
-      for (unsigned idx = physical_state_size; idx < num_contexts; idx++)
+      for (unsigned idx = physical_state_size; 
+            idx < (physical_state_size+num_contexts); idx++)
         physical_states[idx] = PhysicalState(idx, this);
 #else
       for (unsigned idx = physical_states.size()-num_contexts; 
@@ -6350,12 +6427,12 @@ namespace LegionRuntime {
                                                  bool exclusive)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
-#endif
       Event wait_event = Event::NO_EVENT;
       {
         AutoLock n_lock(node_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(state.node == this);
+#endif
         // Check to see if it has already been acquired
         if (state.acquired_count > 0)
         {

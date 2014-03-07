@@ -4587,6 +4587,59 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_parent_index_space(Context ctx,   
+                                               IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get parent index space performed "
+                             "in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_parent_index_partition(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal has parent index partition performed "
+                             "in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->has_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_parent_index_partition(Context ctx,
+                                                       IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get parent index partition performed "
+                             "in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
     ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
@@ -4973,6 +5026,60 @@ namespace LegionRuntime {
       }
 #endif
       return forest->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_parent_logical_region(Context ctx, 
+                                                     LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get parent logical region in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_parent_logical_region(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_parent_logical_partition(Context ctx, 
+                                               LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal has parent logical partition in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
+                                                           LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get parent logical partition in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------

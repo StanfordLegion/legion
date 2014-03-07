@@ -2793,9 +2793,31 @@ namespace LegionRuntime {
       void *regbase;
     };
 
+    struct PartialWriteKey {
+      unsigned sender;
+      unsigned sequence_id;
+      bool operator<(const PartialWriteKey& rhs) const
+      {
+	if(sender < rhs.sender) return true;
+	if(sender > rhs.sender) return false;
+	return sequence_id < rhs.sequence_id;
+      }
+    };
+
+    struct PartialWriteEntry {
+      Event event;
+      int remaining_count;
+    };
+
+    typedef std::map<PartialWriteKey, PartialWriteEntry> PartialWriteMap;
+    static PartialWriteMap partial_remote_writes;
+    static gasnet_hsl_t partial_remote_writes_lock = GASNET_HSL_INITIALIZER;
+
     struct RemoteWriteArgs : public BaseMedium {
       Memory mem;
       off_t offset;
+      unsigned sender;
+      unsigned sequence_id;
       Event event;
     };
 
@@ -2808,9 +2830,9 @@ namespace LegionRuntime {
 		     args.mem.id, args.offset, datalen,
 		     args.event.id, args.event.gen);
 #ifdef DEBUG_REMOTE_WRITES
-      printf("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d\n",
+      printf("received remote write request: mem=%x, offset=%zd, size=%zd, seq=%d/%d, event=%x/%d\n",
 		     args.mem.id, args.offset, datalen,
-		     args.event.id, args.event.gen);
+	             args.sender, args.sequence_id, args.event.id, args.event.gen);
       printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
              data,
              ((unsigned *)(data))[0], ((unsigned *)(data))[1],
@@ -2826,18 +2848,15 @@ namespace LegionRuntime {
 	  if(cpumem->registered) {
 	    if(data == (cpumem->base + args.offset)) {
 	      // copy is in right spot - yay!
-	      if(args.event.exists())
-		args.event.impl()->trigger(args.event.gen,
-					   gasnet_mynode());
-	      return;
 	    } else {
 	      printf("%d: received remote write to registered memory in wrong spot: %p != %p+%zd = %p\n",
 		     gasnet_mynode(), data, cpumem->base, args.offset, cpumem->base + args.offset);
-	      // fall through
+	      impl->put_bytes(args.offset, data, datalen);
 	    }
-	  }
+	  } else {
+	    impl->put_bytes(args.offset, data, datalen);
+          }
 	    
-	  impl->put_bytes(args.offset, data, datalen);
 	  if(args.event.exists())
 	    args.event.impl()->trigger(args.event.gen,
 				       gasnet_mynode());
@@ -2849,6 +2868,48 @@ namespace LegionRuntime {
       default:
 	assert(0);
       }
+
+      // track the sequence ID to know when the full RDMA is done
+      if(args.sequence_id > 0) {
+        PartialWriteKey key;
+        key.sender = args.sender;
+        key.sequence_id = args.sequence_id;
+        gasnet_hsl_lock(&partial_remote_writes_lock);
+	PartialWriteMap::iterator it = partial_remote_writes.find(key);
+	if(it == partial_remote_writes.end()) {
+	  // first reference to this one
+	  PartialWriteEntry entry;
+	  entry.event = Event::NO_EVENT;
+          entry.remaining_count = -1;
+	  partial_remote_writes[key] = entry;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, entry.remaining_count);
+#endif
+	} else {
+	  // have an existing entry (either another write or the fence)
+	  PartialWriteEntry& entry = it->second;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: have entry for %d/%d: %x/%d, %d -> %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, 
+		 entry.remaining_count, entry.remaining_count - 1);
+#endif
+	  entry.remaining_count--;
+	  if(entry.remaining_count == 0) {
+	    // we're the last write, and we've already got the fence, so 
+	    //  trigger
+	    Event e = entry.event;
+	    partial_remote_writes.erase(it);
+	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    if(e.exists())
+	      e.impl()->trigger(e.gen, gasnet_mynode());
+	    return;
+	  }
+	}
+      }
+      gasnet_hsl_unlock(&partial_remote_writes_lock);
     }
 
     typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
@@ -2857,25 +2918,69 @@ namespace LegionRuntime {
 
     struct RemoteWriteFenceArgs {
       Memory mem;
+      unsigned sender;
+      unsigned sequence_id;
+      unsigned num_writes;
       Event event;
     };
 
     void handle_remote_write_fence(RemoteWriteFenceArgs args)
     {
-      // printf("%d: remote write fence (mem = %08x, event = %08x/%d)\n",
-      // 	     gasnet_mynode(), args.mem.id, args.event.id, args.event.gen);
-      if(args.event.exists())
-	args.event.impl()->trigger(args.event.gen,
-				   gasnet_mynode());
+      // printf("%d: remote write fence (mem = %08x, seq = %d/%d, count = %d, event = %08x/%d)\n",
+      // 	     gasnet_mynode(), args.mem.id, args.sender, args.sequence_id, args.num_writes, args.event.id, args.event.gen);
+
+      assert(args.sequence_id != 0);
+      // track the sequence ID to know when the full RDMA is done
+      if(args.sequence_id > 0) {
+        PartialWriteKey key;
+        key.sender = args.sender;
+        key.sequence_id = args.sequence_id;
+        gasnet_hsl_lock(&partial_remote_writes_lock);
+	PartialWriteMap::iterator it = partial_remote_writes.find(key);
+	if(it == partial_remote_writes.end()) {
+	  // first reference to this one
+	  PartialWriteEntry entry;
+	  entry.event = args.event;
+          entry.remaining_count = args.num_writes;
+	  partial_remote_writes[key] = entry;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, entry.remaining_count);
+#endif
+	} else {
+	  // have an existing entry (previous writes)
+	  PartialWriteEntry& entry = it->second;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: have entry for %d/%d: %x/%d -> %x/%d, %d -> %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, 
+		 args.event.id, args.event.gen,
+		 entry.remaining_count, entry.remaining_count + args.num_writes);
+#endif
+	  entry.event = args.event;
+	  entry.remaining_count += args.num_writes;
+	  if(entry.remaining_count == 0) {
+	    // this fence came after all the writes, so trigger
+	    Event e = entry.event;
+	    partial_remote_writes.erase(it);
+	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    if(e.exists())
+	      e.impl()->trigger(e.gen, gasnet_mynode());
+	    return;
+	  }
+	}
+      }
+      gasnet_hsl_unlock(&partial_remote_writes_lock);
     }
 
     typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_MSGID,
 				      RemoteWriteFenceArgs,
 				      handle_remote_write_fence> RemoteWriteFenceMessage;
 
-    void do_remote_write(Memory mem, off_t offset,
-			 const void *data, size_t datalen,
-			 Event event, bool make_copy = false)
+    unsigned do_remote_write(Memory mem, off_t offset,
+			     const void *data, size_t datalen,
+			     unsigned sequence_id, Event event, bool make_copy = false)
     {
       log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
 		     mem.id, offset, datalen,
@@ -2888,13 +2993,8 @@ namespace LegionRuntime {
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
-      if(datalen == 0) {
-	// not a write, but a fence for previous writes before triggering the end-of-copy event
-	RemoteWriteFenceArgs args;
-	args.mem = mem;
-	args.event = event;
-	RemoteWriteFenceMessage::request(ID(mem).node(), args);
-      } else if(datalen > MAX_SEND_SIZE) {
+      assert(datalen > 0);
+      if(datalen > MAX_SEND_SIZE) {
 	// as written, this assumes in-order delivery of messages, which isn't guaranteed
 	assert(0);
 	log_copy.info("breaking large send into pieces");
@@ -2916,22 +3016,26 @@ namespace LegionRuntime {
 	RemoteWriteMessage::request(ID(mem).node(), args,
 				    pos, datalen, 
 				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	return 1;
       } else {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
 	args.event = event;
+        args.sender = gasnet_mynode();
+	args.sequence_id = sequence_id;
 	RemoteWriteMessage::request(ID(mem).node(), args,
 				    data, datalen,
 				    (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP),
 				    dstptr);
+	return 1;
       }
     }
 
-    void do_remote_write(Memory mem, off_t offset,
-			 const void *data, size_t datalen,
-			 off_t stride, size_t lines,
-			 Event event, bool make_copy = false)
+    unsigned do_remote_write(Memory mem, off_t offset,
+			     const void *data, size_t datalen,
+			     off_t stride, size_t lines,
+			     unsigned sequence_id, Event event, bool make_copy = false)
     {
       log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
 		     mem.id, offset, datalen,
@@ -2948,22 +3052,27 @@ namespace LegionRuntime {
 	// as written, this assumes in-order delivery of messages, which isn't guaranteed
 	assert(0);
 	// doing this with spans is even more complicated...
+	return 0;
       } else {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
 	args.event = event;
+        args.sender = gasnet_mynode();
+	args.sequence_id = sequence_id;
 
 	RemoteWriteMessage::request(ID(mem).node(), args,
 				    data, datalen, stride, lines,
 				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
 				    dstptr);
+
+	return 1;
       }
     }
 
-    void do_remote_write(Memory mem, off_t offset,
-			 const SpanList &spans, size_t datalen,
-			 Event event, bool make_copy = false)
+    unsigned do_remote_write(Memory mem, off_t offset,
+			     const SpanList &spans, size_t datalen,
+			     unsigned sequence_id, Event event, bool make_copy = false)
     {
       log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
 		     mem.id, offset, datalen,
@@ -2980,16 +3089,34 @@ namespace LegionRuntime {
 	// as written, this assumes in-order delivery of messages, which isn't guaranteed
 	assert(0);
 	// doing this with spans is even more complicated...
+	return 0;
       } else {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
 	args.event = event;
+        args.sender = gasnet_mynode();
+	args.sequence_id = sequence_id;
+
 	RemoteWriteMessage::request(ID(mem).node(), args,
 				    spans, datalen,
 				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
 				    dstptr);
+	
+	return 1;
       }
+    }
+
+    void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes, Event event)
+    {
+      RemoteWriteFenceArgs args;
+      args.mem = mem;
+      args.sender = gasnet_mynode();
+      args.sequence_id = sequence_id;
+      args.num_writes = num_writes;
+      args.event = event;
+
+      RemoteWriteFenceMessage::request(ID(mem).node(), args);
     }
 
     void RemoteMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -2997,7 +3124,7 @@ namespace LegionRuntime {
       // can't read/write a remote memory
 #define ALLOW_REMOTE_MEMORY_WRITES
 #ifdef ALLOW_REMOTE_MEMORY_WRITES
-      do_remote_write(me, offset, src, size, Event::NO_EVENT, true /* make copy! */);
+      do_remote_write(me, offset, src, size, 0, Event::NO_EVENT, true /* make copy! */);
 #else
       assert(0);
 #endif
@@ -7320,8 +7447,6 @@ namespace LegionRuntime {
       }
       CHECK_GASNET( gasnet_init(argc, argv) );
 
-      gasnet_set_waitmode(GASNET_WAIT_BLOCK);
-
       // initialize barrier timestamp
       barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
@@ -7355,6 +7480,10 @@ namespace LegionRuntime {
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount]);
 
       init_endpoints(handlers, hcount, gasnet_mem_size_in_mb, reg_mem_size_in_mb);
+
+      // Put this here so that it complies with the GASNet specification and
+      // doesn't make any calls between gasnet_init and gasnet_attach
+      gasnet_set_waitmode(GASNET_WAIT_BLOCK);
 
       init_dma_handler();
 

@@ -742,6 +742,9 @@ namespace LegionRuntime {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
+      IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
+      bool has_parent_index_partition(Context ctx, IndexSpace handle);
+      IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
     public:
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       DomainPoint safe_cast(Context ctx, DomainPoint point, 
@@ -783,6 +786,11 @@ namespace LegionRuntime {
                                                   RegionTreeID tid);
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
+      LogicalRegion get_parent_logical_region(Context ctx, 
+                                              LogicalPartition handle);
+      bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(Context ctx, 
+                                                    LogicalRegion handle);
     public:
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);

@@ -2487,6 +2487,31 @@ namespace LegionRuntime {
        * @return the color for the index partition
        */
       Color get_index_partition_color(Context ctx, IndexPartition handle);
+
+      /**
+       * Return the index space parent for the given index partition.
+       * @param ctx enclosing task context
+       * @param handle for the index partition
+       * @return index space for the parent
+       */
+      IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
+
+      /**
+       * Returns true if the given index space has a parent partition.
+       * @param ctx enclosing task context
+       * @param handle for the index space
+       * @return true if there is a parent index partition
+       */
+      bool has_parent_index_partition(Context ctx, IndexSpace handle);
+
+      /**
+       * Returns the parent partition for the given index space.
+       * Use the previous call to check to see if a parent actually exists.
+       * @param ctx enclosing task context
+       * @param handle for the index space
+       * @return the parent index partition
+       */
+      IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations
@@ -2656,6 +2681,32 @@ namespace LegionRuntime {
        * @return the color for the logical partition
        */
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
+
+      /**
+       * Return the parent logical region for a given logical partition.
+       * @param ctx enclosing task context
+       * @param handle the logical partition handle for which to find a parent
+       * @return the parent logical region
+       */
+      LogicalRegion get_parent_logical_region(Context ctx, 
+                                              LogicalPartition handle);
+
+      /**
+       * Return true if the logical region has a parent logical partition.
+       * @param ctx enclosing task context
+       * @param handle for the logical region for which to check for a parent
+       * @return true if a parent exists
+       */
+      bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
+
+      /**
+       * Return the parent logical partition for a logical region.
+       * @param ctx enclosing task context
+       * @param handle for the logical region for which to find a parent
+       * @return the parent logical partition
+       */
+      LogicalPartition get_parent_logical_partition(Context ctx, 
+                                                    LogicalRegion handle);
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 

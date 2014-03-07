@@ -2107,6 +2107,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::get_parent_index_space(Context ctx,
+                                                        IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_space(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_parent_index_partition(Context ctx,
+                                                      IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_index_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::get_parent_index_partition(Context ctx,
+                                                              IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     ptr_t HighLevelRuntime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
@@ -2223,6 +2247,30 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_partition_color(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion HighLevelRuntime::get_parent_logical_region(Context ctx,
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_region(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_parent_logical_partition(Context ctx,
+                                                        LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_logical_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition HighLevelRuntime::get_parent_logical_partition(Context ctx,
+                                                           LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_partition(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
