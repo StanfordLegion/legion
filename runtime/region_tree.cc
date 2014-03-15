@@ -419,6 +419,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t RegionTreeForest::get_field_size(FieldSpace handle, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      if (!node->has_field(fid))
+      {
+        log_run(LEVEL_ERROR,"FieldSpace %x has no field %d", handle.id, fid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_FIELD_ID);
+      }
+      return node->get_field_size(fid);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_logical_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -8052,12 +8068,7 @@ namespace LegionRuntime {
         if (!select_close_targets(closer, closer.info->traversal_mask, 
                                   complete, space_views, update_views))
         {
-          // Release any valid references that we have
-          for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            it->first->remove_valid_reference();
-          }
+          // We failed to close, time to return
           return false;
         }
         else
@@ -11096,6 +11107,17 @@ namespace LegionRuntime {
         context->runtime->free_physical_instance(this);
         instance = PhysicalInstance::NO_INST;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceManager::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need to do anything
+#ifdef DEBUG_HIGH_LEVEL
+      assert(instance.exists());
+      assert(!recycled);
+#endif
     }
 
     //--------------------------------------------------------------------------

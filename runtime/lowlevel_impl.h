@@ -16,6 +16,14 @@
 #ifndef LOWLEVEL_IMPL_H
 #define LOWLEVEL_IMPL_H
 
+// For doing bit masks for maximum number of nodes
+#include "legion_types.h"
+#include "legion_utilities.h"
+
+#define NODE_MASK_TYPE uint64_t
+#define NODE_MASK_SHIFT 6
+#define NODE_MASK_MASK 0x3F
+
 #include "lowlevel.h"
 
 #include <assert.h>
@@ -136,6 +144,9 @@ namespace LegionRuntime {
       gasnet_hsl_t *mutexp;
       bool held;
     };
+
+    typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
+                                              NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -316,6 +327,7 @@ namespace LegionRuntime {
       {
 	local_data = data;
 	local_data_size = sizeof(T);
+        own_local = false;
       }
 
       //protected:
@@ -338,6 +350,7 @@ namespace LegionRuntime {
       // local data protected by lock
       void *local_data;
       size_t local_data_size;
+      bool own_local;
 
       static gasnet_hsl_t freelist_mutex;
       static Reservation::Impl *first_free;
@@ -763,7 +776,6 @@ namespace LegionRuntime {
       static const unsigned MAX_LINEARIZATION_LEN = 16;
 
       struct StaticData {
-	bool valid;
 	IndexSpace is;
 	off_t alloc_offset; //, access_offset;
 	size_t size;
@@ -776,6 +788,9 @@ namespace LegionRuntime {
 	int field_sizes[MAX_FIELDS_PER_INST];
 	RegionInstance parent_inst;
 	int linearization_bits[MAX_LINEARIZATION_LEN];
+        // This had better damn well be the last field
+        // in the struct in order to avoid race conditions!
+	bool valid;
       } locked_data;
 
       Reservation::Impl lock;
@@ -830,7 +845,8 @@ namespace LegionRuntime {
 
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
-      uint64_t remote_waiters; // bitmask of which remote nodes are waiting on the event
+      //uint64_t remote_waiters; // bitmask of which remote nodes are waiting on the event
+      NodeMask remote_waiters;
       std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
 
       // for barriers
@@ -864,11 +880,13 @@ namespace LegionRuntime {
       Reservation::Impl lock;
 
       struct StaticData {
-	bool valid;
 	IndexSpace parent;
 	bool frozen;
 	size_t num_elmts;
         size_t first_elmt, last_elmt;
+        // This had better damn well be the last field
+        // in the struct in order to avoid race conditions!
+	bool valid;
       };
       struct CoherentData : public StaticData {
 	unsigned valid_mask_owners;

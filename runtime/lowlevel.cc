@@ -826,7 +826,7 @@ namespace LegionRuntime {
       mutex = new gasnet_hsl_t;
       //printf("[%d] MUTEX INIT %p\n", gasnet_mynode(), mutex);
       gasnet_hsl_init(mutex);
-      remote_waiters = 0;
+      remote_waiters = NodeMask();
       base_arrival_count = current_arrival_count = 0;
     }
 
@@ -901,7 +901,8 @@ namespace LegionRuntime {
 	  //  the mask
 	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=%x/%d (> %d)",
 		    args.node, args.event.id, args.event.gen, impl->generation);
-	  impl->remote_waiters |= (1ULL << args.node);
+	  //impl->remote_waiters |= (1ULL << args.node);
+          impl->remote_waiters.set_bit(args.node);
 	}
       }
     }
@@ -919,9 +920,11 @@ namespace LegionRuntime {
 
 	  if(e->generation >= e->free_generation) continue;
 
-	  printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
-		 e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
-		 e->local_waiters.size());
+          printf("Event %x: gen=%d subscr=%d remote=%lx\n",
+		 e->me.id, e->generation, e->gen_subscribed, e->local_waiters.size());
+	  //printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
+	  //        e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
+	  //        e->local_waiters.size());
 	  for(std::map<Event::gen_t, std::vector<Event::Impl::EventWaiter *> >::iterator it = e->local_waiters.begin();
 	      it != e->local_waiters.end();
 	      it++) {
@@ -1439,14 +1442,19 @@ namespace LegionRuntime {
 	  args.node = trigger_node;
 	  args.event = me;
 	  args.event.gen = gen_triggered;
-	  for(int node = 0; remote_waiters != 0; node++, remote_waiters >>= 1)
-	    if((remote_waiters & 1) && (node != trigger_node))
-	      EventTriggerMessage::request(node, args);
+	  //for(int node = 0; remote_waiters != 0; node++, remote_waiters >>= 1)
+	  //  if((remote_waiters & 1) && (node != trigger_node))
+	  //    EventTriggerMessage::request(node, args);
+          for(int node = 0; node < MAX_NUM_NODES; node++)
+            if (remote_waiters.is_set(node) && (node != trigger_node))
+              EventTriggerMessage::request(node, args);
+          remote_waiters = NodeMask();
 	} else {
 	  if(trigger_node == gasnet_mynode()) {
 	    // if we're not the owner, we just send to the owner and let him
 	    //  do the broadcast (assuming the trigger was local)
-	    assert(remote_waiters == 0);
+	    //assert(remote_waiters == 0);
+            assert(!remote_waiters);
 
 	    EventTriggerArgs args;
 	    args.node = trigger_node;
@@ -1820,9 +1828,11 @@ namespace LegionRuntime {
       if(_data_size) {
 	local_data = malloc(_data_size);
 	local_data_size = _data_size;
+        own_local = true;
       } else {
         local_data = 0;
 	local_data_size = 0;
+        own_local = false;
       }
     }
 
@@ -2410,8 +2420,13 @@ namespace LegionRuntime {
 	assert(local_waiters.size() == 0);
 	assert(remote_waiter_mask == 0);
 	assert(in_use);
-	
-	in_use = false;
+        // Mark that we no longer own our data
+        if (own_local)
+          free(local_data);
+        local_data = NULL;
+        local_data_size = 0;
+        own_local = false;
+      	in_use = false;
       }
       log_reservation.info("releasing reservation: reservation=%x", me.id);
 
@@ -8218,6 +8233,12 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_READ>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       impl->get_bytes(ptr, field_offset + offset, dst, bytes);
     }
@@ -8225,6 +8246,12 @@ namespace LegionRuntime {
     //bool debug_mappings = false;
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_READ>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, dp);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       assert(impl->linearization.valid());
       int index = impl->linearization.get_image(dp);
@@ -8239,12 +8266,24 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS
+      check_privileges<ACCESSOR_WRITE>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       impl->put_bytes(ptr, field_offset + offset, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS
+      check_privileges<ACCESSOR_WRITE>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, dp);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       assert(impl->linearization.valid());
       int index = impl->linearization.get_image(dp);

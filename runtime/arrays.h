@@ -588,7 +588,7 @@ namespace LegionRuntime {
 
       Linearization(const Point<DIM> _strides, int _offset = 0)
         : strides(_strides), offset(_offset) {}
-  
+
       Point<1> image(const Point<IDIM> p) const
       {
         return p.dot(strides) + offset;

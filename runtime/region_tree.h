@@ -99,6 +99,7 @@ namespace LegionRuntime {
                                   AddressSpaceID source);
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
+      size_t get_field_size(FieldSpace handle, FieldID fid);
     public:
       void create_logical_region(LogicalRegion handle);
       bool destroy_logical_region(LogicalRegion handle, 
@@ -1950,6 +1951,7 @@ namespace LegionRuntime {
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const;
       virtual void garbage_collect(void);
+      virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
       inline Event get_use_event(void) const { return use_event; }

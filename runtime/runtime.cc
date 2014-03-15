@@ -27,6 +27,33 @@
 #include "legion_profiling.h"
 
 namespace LegionRuntime {
+
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+  namespace Accessor {
+    namespace AccessorType {
+#ifdef PRIVILEGE_CHECKS
+      const char* find_privilege_task_name(void *impl)
+      {
+        // Have to bounce this off the Runtime because C++ is stupid
+        return HighLevel::Runtime::find_privilege_task_name(impl); 
+      }
+#endif
+#ifdef BOUNDS_CHECKS
+      void check_bounds(void *impl, ptr_t ptr)
+      {
+        // Have to bounce this off the Runtime because C++ is stupid 
+        HighLevel::Runtime::check_bounds(impl, ptr);
+      }
+      void check_bounds(void *impl, const LowLevel::DomainPoint &dp)
+      {
+        // Have to bounce this off the Runtime because C++ is stupid
+        HighLevel::Runtime::check_bounds(impl, dp);
+      }
+#endif
+    };
+  };
+#endif
+ 
   namespace HighLevel {
 
     // Extern declarations for loggers
@@ -979,6 +1006,10 @@ namespace LegionRuntime {
         valid(false), trigger_on_unmap(false)
     //--------------------------------------------------------------------------
     {
+#ifdef BOUNDS_CHECKS
+      bounds = runtime->get_index_space_domain(context, 
+                                               req.region.get_index_space());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1156,7 +1187,17 @@ namespace LegionRuntime {
       }
       // Wait until we are valid before returning the accessor
       wait_until_valid();
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        result = reference.get_accessor();
+      result.set_region_untyped(this);
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(req.get_accessor_privilege()); 
+#endif
+      return result;
+#else // privilege or bounds checks
       return reference.get_accessor();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1186,7 +1227,17 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
 #endif
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+        result = reference.get_field_accessor(fid);
+      result.set_region_untyped(this);
+#ifdef PRIVILEGE_CHECKS
+      result.set_privileges_untyped(req.get_accessor_privilege());
+#endif
+      return result;
+#else // privilege or bounds checks
       return reference.get_field_accessor(fid);
+#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -1260,6 +1311,32 @@ namespace LegionRuntime {
     {
       return reference;
     }
+
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+    //--------------------------------------------------------------------------
+    const char* PhysicalRegion::Impl::get_task_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context->variants->name;
+    }
+#endif
+
+#ifdef BOUNDS_CHECKS 
+    //--------------------------------------------------------------------------
+    bool PhysicalRegion::Impl::contains_ptr(ptr_t ptr) const 
+    //--------------------------------------------------------------------------
+    {
+      DomainPoint dp(ptr.value);
+      return bounds.contains(dp);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool PhysicalRegion::Impl::contains_point(const DomainPoint &dp) const
+    //--------------------------------------------------------------------------
+    {
+      return bounds.contains(dp);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Physical Region Impl 
@@ -4747,6 +4824,23 @@ namespace LegionRuntime {
         post_wait(proc);
       }
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get field size performed in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_field_size(handle, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -9438,7 +9532,11 @@ namespace LegionRuntime {
 #else
                             options.inner, 
 #endif
+#ifdef BOUNDS_CHECKS
+                            false, // no leaf tasks when doing bounds checks
+#else
                             options.leaf, 
+#endif
                             vid);
       }
       else
@@ -9488,7 +9586,11 @@ namespace LegionRuntime {
 #else
                                 options.inner, 
 #endif
+#ifdef BOUNDS_CHECKS
+                                false, // no leaf tasks when doing bounds checks
+#else
                                 options.leaf, 
+#endif
                                 vid);
       }
       return uid;
@@ -9574,6 +9676,62 @@ namespace LegionRuntime {
       }
       return finder->second;
     }
+
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+    //--------------------------------------------------------------------------
+    /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
+      return region->get_task_name();
+    }
+#endif
+
+#ifdef BOUNDS_CHECKS
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::check_bounds(void *impl, ptr_t ptr)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
+      if (!region->contains_ptr(ptr))
+      {
+        fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                       "pointer %d\n", region->get_task_name(), ptr.value);
+        assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::check_bounds(void *impl, const DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalRegion::Impl *region = static_cast<PhysicalRegion::Impl*>(impl);
+      if (!region->contains_point(dp))
+      {
+        switch(dp.get_dim())
+        {
+          case 1:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                           "1D point (%d)\n", region->get_task_name(),
+                            dp.point_data[0]);
+            break;
+          case 2:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                           "2D point (%d,%d)\n", region->get_task_name(),
+                            dp.point_data[0], dp.point_data[1]);
+            break;
+          case 3:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                           "3D point (%d,%d,%d)\n", region->get_task_name(),
+                      dp.point_data[0], dp.point_data[1], dp.point_data[2]);
+            break;
+          default:
+            assert(false);
+        }
+        assert(false);
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ Processor::TaskIDTable& Runtime::get_task_table(

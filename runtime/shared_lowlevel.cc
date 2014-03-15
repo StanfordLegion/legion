@@ -4955,6 +4955,12 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_READ>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       size_t field_start, field_size, within_field;
       size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
@@ -4966,6 +4972,12 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_READ>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, dp);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
       size_t field_start, field_size, within_field;
@@ -4978,6 +4990,12 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_WRITE>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       size_t field_start, field_size, within_field;
       size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
@@ -4989,6 +5007,12 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef PRIVILEGE_CHECKS 
+      check_privileges<ACCESSOR_WRITE>(priv, region);
+#endif
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, dp);
+#endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
       size_t field_start, field_size, within_field;

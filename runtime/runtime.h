@@ -230,6 +230,15 @@ namespace LegionRuntime {
                            UserEvent term_event);
       Event get_ready_event(void) const;
       const InstanceRef& get_reference(void) const;
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+    public:
+      const char* get_task_name(void) const;
+#endif
+#ifdef BOUNDS_CHECKS
+    public:
+      bool contains_ptr(ptr_t ptr) const;
+      bool contains_point(const DomainPoint &dp) const;
+#endif
     public:
       Runtime *const runtime;
       SingleTask *const context;
@@ -248,6 +257,10 @@ namespace LegionRuntime {
       // upon unmap
       bool trigger_on_unmap;
       UserEvent termination_event;
+#ifdef BOUNDS_CHECKS
+    private:
+      Domain bounds;
+#endif
     };
 
     /**
@@ -752,6 +765,7 @@ namespace LegionRuntime {
     public:
       FieldSpace create_field_space(Context ctx);
       void destroy_field_space(Context ctx, FieldSpace handle);
+      size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       // Called from deletion op
       void finalize_field_space_destroy(FieldSpace handle);
       void finalize_field_destroy(FieldSpace handle, FieldID fid);
@@ -1353,6 +1367,15 @@ namespace LegionRuntime {
       static RegionProjectionFnptr
                     find_region_projection_function(ProjectionID pid);
       static InlineFnptr find_inline_function(Processor::TaskFuncID fid);
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+    public:
+      static const char* find_privilege_task_name(void *impl);
+#endif
+#ifdef BOUNDS_CHECKS
+    public:
+      static void check_bounds(void *impl, ptr_t ptr);
+      static void check_bounds(void *impl, const DomainPoint &dp);
+#endif
     private:
       static Processor::TaskIDTable& get_task_table(
                                           bool add_runtime_tasks = true);

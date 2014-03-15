@@ -63,6 +63,10 @@
 
 // Some default values 
 
+// The maximum number of nodes to be run on
+#ifndef MAX_NUM_NODES
+#define MAX_NUM_NODES                   1024
+#endif
 // The maximum number of processors on a node
 #ifndef MAX_NUM_PROCS
 #define MAX_NUM_PROCS                   1024
@@ -247,6 +251,7 @@ namespace LegionRuntime {
       ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK = 101,
       ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK = 102,
       ERROR_INVALID_PARENT_REQUEST = 103,
+      ERROR_INVALID_FIELD_ID = 104,
     };
 
     // enum and namepsaces don't really get along well

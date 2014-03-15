@@ -2553,6 +2553,15 @@ namespace LegionRuntime {
        * @param handle of the field space to be destroyed
        */
       void destroy_field_space(Context ctx, FieldSpace handle);
+
+      /**
+       * Get the size of a specific field within field space.
+       * @param ctx enclosing task context
+       * @param handle field space handle
+       * @param fid field ID for which to find the size
+       * @return the size of the field in bytes
+       */
+      size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations

@@ -1101,6 +1101,29 @@ namespace LegionRuntime {
       }
     }
 
+#ifdef PRIVILEGE_CHECKS
+    //--------------------------------------------------------------------------
+    AccessorPrivilege RegionRequirement::get_accessor_privilege(void) const
+    //--------------------------------------------------------------------------
+    {
+      switch (privilege)
+      {
+        case NO_ACCESS:
+          return ACCESSOR_NONE;
+        case READ_ONLY:
+          return ACCESSOR_READ;
+        case READ_WRITE:
+        case WRITE_DISCARD:
+          return ACCESSOR_ALL;
+        case REDUCE:
+          return ACCESSOR_REDUCE;
+        default:
+          assert(false);
+      }
+      return ACCESSOR_NONE;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     bool RegionRequirement::has_field_privilege(FieldID fid) const
     //--------------------------------------------------------------------------
@@ -2158,6 +2181,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->destroy_field_space(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t HighLevelRuntime::get_field_size(Context ctx, FieldSpace handle,
+                                            FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_field_size(ctx, handle, fid);
     }
 
     //--------------------------------------------------------------------------
