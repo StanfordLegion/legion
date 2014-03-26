@@ -33,6 +33,22 @@ GASNETT_THREADKEY_DECLARE(in_handler);
 
 #include <vector>
 
+#define CHECK_PTHREAD(cmd) do { \
+  int ret = (cmd); \
+  if(ret != 0) { \
+    fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
+#define CHECK_GASNET(cmd) do { \
+  int ret = (cmd); \
+  if(ret != GASNET_OK) { \
+    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
 typedef std::pair<const void *, size_t> SpanListEntry;
 typedef std::vector<SpanListEntry> SpanList;
 
@@ -41,6 +57,7 @@ extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int registered_mem_size_in_mb);
 extern void start_polling_threads(int count);
 extern void start_sending_threads(void);
+extern void report_activemsg_status(FILE *f);
 
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning
@@ -88,6 +105,7 @@ extern void handle_long_msgptr(gasnet_node_t source, void *ptr);
 //extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size);
 extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
                                 const void *args, size_t arglen);
+extern void record_message(gasnet_node_t source, bool sent_reply);
 
 template <class T> struct HandlerReplyFuture {
   gasnet_hsl_t mutex;
@@ -222,13 +240,14 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
   static void handler_short(gasnet_token_t token, HANDLERARG_PARAMS_ ## n ) \
   { \
     gasnet_node_t src; \
-    gasnet_AMGetMsgSource(token, &src); \
+    CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) ); \
     /*printf("handling message from node %d (id=%d)\n", src, MSGID);*/	\
     union { \
       MessageRawArgs<MSGTYPE,MSGID,SHORT_HNDL_PTR,MED_HNDL_PTR,n> raw; \
       MSGTYPE typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    record_message(src, false); \
     (*SHORT_HNDL_PTR)(u.typed); \
   } \
 \
@@ -236,24 +255,27 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
                              HANDLERARG_PARAMS_ ## n ) \
   { \
     gasnet_node_t src; \
-    gasnet_AMGetMsgSource(token, &src); \
+    CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) ); \
     /*printf("handling medium message from node %d (id=%d)\n", src, MSGID);*/ \
     union { \
       MessageRawArgs<MSGTYPE,MSGID,SHORT_HNDL_PTR,MED_HNDL_PTR,n> raw; \
       MSGTYPE typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    record_message(src, true); \
     /*nbytes = adjust_long_msgsize(src, buf, nbytes);*/	\
     bool handle_now = adjust_long_msgsize(src, buf, nbytes, &u, sizeof(u)); \
     if (handle_now) { \
       (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
       if(nbytes > 0/*gasnet_AMMaxMedium()*/) handle_long_msgptr(src, buf); \
-      if(u.typed.srcptr != 0) { \
-        /*printf("sending release of srcptr %p (%d -> %d)\n", u.typed.srcptr, gasnet_mynode(), src);*/ \
-        /* can't use offsetof() here because MSGTYPE is non-POD */ \
-        assert((((char *)&(u.typed.srcptr)) - ((char *)&(u.raw))) == 8); \
-	gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, u.raw.arg2, u.raw.arg3); \
-      } \
+      /* We need to send an reply no matter what since asynchronous active*/ \
+      /* messages require a reply. */ \
+      /*printf("sending release of srcptr %p (%d -> %d)\n", u.typed.srcptr, gasnet_mynode(), src);*/ \
+      /* can't use offsetof() here because MSGTYPE is non-POD */ \
+      assert((((char *)&(u.typed.srcptr)) - ((char *)&(u.raw))) == 8); \
+      CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, u.raw.arg2, u.raw.arg3) ); \
+    } else { \
+      CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, 0, 0) ); \
     } \
   } \
 }; \
@@ -267,13 +289,14 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
   static void handler_short(gasnet_token_t token, HANDLERARG_PARAMS_ ## n ) \
   { \
     gasnet_node_t src; \
-    gasnet_AMGetMsgSource(token, &src); \
+    CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) ); \
     /*printf("handling request from node %d\n", src);*/	\
     union { \
       RequestRawArgs<REQTYPE,REQID,RPLTYPE,RPLID,SHORT_HNDL_PTR,MEDIUM_HNDL_PTR,RPL_N,n> raw; \
       ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    record_message(src, true); \
 \
     union { \
       ShortReplyRawArgs<RPLTYPE,RPLID,RPL_N> raw; \
@@ -289,13 +312,14 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
                              HANDLERARG_PARAMS_ ## n ) \
   { \
     gasnet_node_t src; \
-    gasnet_AMGetMsgSource(token, &src); \
+    CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) ); \
     /*printf("handling request from node %d\n", src);*/	\
     union { \
       RequestRawArgs<REQTYPE,REQID,RPLTYPE,RPLID,SHORT_HNDL_PTR,MEDIUM_HNDL_PTR,RPL_N,n> raw; \
       ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    record_message(src, true); \
 \
     union { \
       MediumReplyRawArgs<RPLTYPE,RPLID,RPL_N> raw; \
@@ -316,7 +340,7 @@ template <class RPLTYPE, int RPLID> struct ShortReplyRawArgs<RPLTYPE, RPLID, n> 
   void reply_short(gasnet_token_t token) \
   { \
     LegionRuntime::DetailedTimer::ScopedPush sp(TIME_SYSTEM); \
-    MACROPROXY(gasnet_AMReplyShort ## n, token, RPLID, HANDLERARG_VALS_ ## n ); \
+    CHECK_GASNET( MACROPROXY(gasnet_AMReplyShort ## n, token, RPLID, HANDLERARG_VALS_ ## n ) ); \
   } \
  \
   static void handler_short(gasnet_token_t token, HANDLERARG_PARAMS_ ## n ) \
@@ -339,7 +363,7 @@ template <class RPLTYPE, int RPLID> struct MediumReplyRawArgs<RPLTYPE, RPLID, n>
   void reply_short(gasnet_token_t token) \
   { \
     LegionRuntime::DetailedTimer::ScopedPush sp(TIME_SYSTEM); \
-    MACROPROXY(gasnet_AMReplyShort ## n, token, RPLID, HANDLERARG_VALS_ ## n ); \
+    CHECK_GASNET( MACROPROXY(gasnet_AMReplyShort ## n, token, RPLID, HANDLERARG_VALS_ ## n ) ); \
   } \
  \
   static void handler_short(gasnet_token_t token, HANDLERARG_PARAMS_ ## n ) \

@@ -25,6 +25,10 @@
 #include "legion_spy.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#ifdef HANG_TRACE
+#include <signal.h>
+#include <execinfo.h>
+#endif
 
 namespace LegionRuntime {
 
@@ -2139,6 +2143,31 @@ namespace LegionRuntime {
       return gc_epoch_event;
     }
 
+#ifdef HANG_TRACE
+    //--------------------------------------------------------------------------
+    void ProcessorManager::dump_state(FILE *target)
+    //--------------------------------------------------------------------------
+    {
+      fprintf(target,"State of Processor: %x (kind=%d)\n", 
+              local_proc.id, proc_kind);
+      fprintf(target,"  Current Pending Task: %d\n", current_pending);
+      fprintf(target,"  Has Executing Task: %d\n", current_executing);
+      fprintf(target,"  Idle Task Enabled: %d\n", idle_task_enabled);
+      fprintf(target,"  Dependence Queue Depth: %ld\n", 
+              dependence_queues.size());
+      for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
+        fprintf(target,"    Queue at depth %d has %ld elements\n",
+                idx, dependence_queues[idx].size());
+      fprintf(target,"  Ready Queue Count: %ld\n", ready_queues.size());
+      for (unsigned idx = 0; idx < ready_queues.size(); idx++)
+        fprintf(target,"    Ready queue %d has %ld elements\n",
+                idx, ready_queues[idx].size());
+      fprintf(target,"  Local Queue has %ld elements\n", 
+              local_ready_queue.size());
+      fflush(target);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     bool ProcessorManager::perform_dependence_checks(void)
     //--------------------------------------------------------------------------
@@ -2493,32 +2522,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::recycle_physical_instance(InstanceManager *instance,
-                                                  Event use_event)
+    void MemoryManager::recycle_physical_instance(InstanceManager *instance)
     //--------------------------------------------------------------------------
     {
+      instance->add_resource_reference();
       AutoLock m_lock(manager_lock); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(available_instances.find(instance) == available_instances.end());
 #endif
-      available_instances[instance] = use_event;
+      available_instances.insert(instance);
     }
 
     //--------------------------------------------------------------------------
     bool MemoryManager::reclaim_physical_instance(InstanceManager *instance)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      std::map<InstanceManager*,Event>::iterator finder = 
-        available_instances.find(instance);
-      // If we didn't find it, then we can't reclaim it because someone
-      // else has started using it.
-      if (finder == available_instances.end())
-        return false;
-      // Otherwise remove it from the set of available instances
-      // and indicate that we can now delete it.
-      available_instances.erase(finder);
-      return true;
+      bool reclaim = false;
+      {
+        AutoLock m_lock(manager_lock);
+        std::set<InstanceManager*>::iterator finder = 
+          available_instances.find(instance);
+        // If we found it, remove it from the set of available resources
+        if (finder != available_instances.end())
+        {
+          reclaim = true;
+          available_instances.erase(finder);
+        }
+      }
+      // If we are reclaiming it, remove our resource reference
+      if (reclaim && instance->remove_resource_reference())
+        delete instance;
+      return reclaim;
     }
 
     //--------------------------------------------------------------------------
@@ -2528,24 +2562,36 @@ namespace LegionRuntime {
                                                            Event &use_event)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      for (std::map<InstanceManager*,Event>::iterator it = 
-            available_instances.begin(); it != available_instances.end(); it++)
+      InstanceManager *to_recycle = NULL;
       {
-        // To avoid deadlock it is imperative that the recycled instance
-        // be used by an operation which is at the same level or higher
-        // in the task graph.
-        if (depth > it->first->depth)
-          continue;
-        if (it->first->match_instance(field_size, dom))
+        AutoLock m_lock(manager_lock);
+        for (std::set<InstanceManager*>::iterator it = 
+              available_instances.begin(); it != 
+              available_instances.end(); it++)
         {
-          // Set the use event, remove it from the set and return the value
-          use_event = it->second;
-          PhysicalInstance result = it->first->get_instance();
-          // This invalidates the iterator, but we're done with it anyway
-          available_instances.erase(it);
-          return result;
+          // To avoid deadlock it is imperative that the recycled instance
+          // be used by an operation which is at the same level or higher
+          // in the task graph.
+          if (depth > (*it)->depth)
+            continue;
+          if ((*it)->match_instance(field_size, dom))
+          {
+            to_recycle = (*it);
+            available_instances.erase(it);
+            break;
+          }
         }
+      }
+      if (to_recycle != NULL)
+      {
+        // If we found one, then compute the recycle event
+        // and then return the 
+        PhysicalInstance result = to_recycle->get_instance();
+        use_event = to_recycle->get_recycle_event();
+        // Remove our resource reference
+        if (to_recycle->remove_resource_reference())
+          delete to_recycle;
+        return result;
       }
       return PhysicalInstance::NO_INST;
     }
@@ -2557,24 +2603,34 @@ namespace LegionRuntime {
                     Event &use_event)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      for (std::map<InstanceManager*,Event>::iterator it = 
-            available_instances.begin(); it != available_instances.end(); it++)
+      InstanceManager *to_recycle = NULL;
       {
-        // To avoid deadlock it is imperative that the recycled instance
-        // be used by an operation which is at the same level or higher
-        // in the task graph.
-        if (depth > it->first->depth)
-          continue;
-        if (it->first->match_instance(field_sizes, dom, blocking_factor))
+        AutoLock m_lock(manager_lock);
+        for (std::set<InstanceManager*>::iterator it = 
+              available_instances.begin(); it != 
+              available_instances.end(); it++)
         {
-          // Set the use event, remove it from the set and return the value
-          use_event = it->second;
-          PhysicalInstance result = it->first->get_instance();
-          // This invalidates the iterator, but we're done with it anyway
-          available_instances.erase(it);
-          return result;
+          // To avoid deadlock it is imperative that the recycled instance
+          // be used by an operation which is at the same level or higher
+          // in the task graph.
+          if (depth > (*it)->depth)
+            continue;
+          if ((*it)->match_instance(field_sizes, dom, blocking_factor))
+          {
+            to_recycle = (*it);
+            available_instances.erase(it);
+            break;
+          }
         }
+      }
+      if (to_recycle != NULL)
+      {
+        PhysicalInstance result = to_recycle->get_instance();
+        use_event = to_recycle->get_recycle_event();
+        // Remove our resource reference
+        if (to_recycle->remove_resource_reference())
+          delete to_recycle;
+        return result;
       }
       return PhysicalInstance::NO_INST;
     } 
@@ -2874,6 +2930,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_USER, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_subscriber(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_SUBSCRIBER, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3298,6 +3361,10 @@ namespace LegionRuntime {
             {
               runtime->handle_send_user(derez, remote_address_space);
               break;
+            }
+          case SEND_SUBSCRIBER:
+            {
+              runtime->handle_send_subscriber(derez, remote_address_space);
             }
           case SEND_INSTANCE_VIEW:
             {
@@ -6654,11 +6721,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::recycle_physical_instance(InstanceManager *inst,
-                                            Event use_event)
+    void Runtime::recycle_physical_instance(InstanceManager *inst)
     //--------------------------------------------------------------------------
     {
-      find_memory(inst->memory)->recycle_physical_instance(inst, use_event);
+      find_memory(inst->memory)->recycle_physical_instance(inst);
     }
 
     //--------------------------------------------------------------------------
@@ -7103,6 +7169,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_subscriber(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_subscriber(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -7481,6 +7554,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_send_subscriber(Deserializer &derez, 
+                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_send_subscriber(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_send_instance_view(Deserializer &derez, 
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -7637,6 +7718,20 @@ namespace LegionRuntime {
       if (message_proc.exists())
         return message_proc;
       return p;
+    }
+#endif
+
+#ifdef HANG_TRACE
+    //--------------------------------------------------------------------------
+    void Runtime::dump_processor_states(FILE *target)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to hold the lock since we are hung when this is called  
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->dump_state(target);
+      }
     }
 #endif
 
@@ -8231,7 +8326,7 @@ namespace LegionRuntime {
       // Couldn't find one so make a new one
       if (result == NULL)
         result = new IndividualTask(this);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
         AutoLock i_lock(individual_task_lock);
@@ -8257,7 +8352,7 @@ namespace LegionRuntime {
       }
       if (result == NULL)
         result = new PointTask(this);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
         AutoLock p_lock(point_task_lock);
@@ -8283,7 +8378,7 @@ namespace LegionRuntime {
       }
       if (result == NULL)
         result = new IndexTask(this);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
         AutoLock i_lock(index_task_lock);
@@ -8309,7 +8404,7 @@ namespace LegionRuntime {
       }
       if (result == NULL)
         result = new SliceTask(this);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
         AutoLock s_lock(slice_task_lock);
@@ -8577,8 +8672,12 @@ namespace LegionRuntime {
       }
       if (result == NULL)
         result = new AcquireOp(this);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
+      {
+        AutoLock a_lock(acquire_op_lock);
+        out_acquire_ops.insert(result);
+      }
 #endif
       result->activate();
       return result;
@@ -8656,7 +8755,7 @@ namespace LegionRuntime {
     {
       AutoLock i_lock(individual_task_lock);
       available_individual_tasks.push_front(task);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_individual_tasks.erase(task);
 #endif
     }
@@ -8667,7 +8766,7 @@ namespace LegionRuntime {
     {
       AutoLock p_lock(point_task_lock);
       available_point_tasks.push_front(task);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_point_tasks.erase(task);
 #endif
     }
@@ -8678,7 +8777,7 @@ namespace LegionRuntime {
     {
       AutoLock i_lock(index_task_lock);
       available_index_tasks.push_front(task);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_index_tasks.erase(task);
 #endif
     }
@@ -8689,7 +8788,7 @@ namespace LegionRuntime {
     {
       AutoLock s_lock(slice_task_lock);
       available_slice_tasks.push_front(task);
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_slice_tasks.erase(task);
 #endif
     }
@@ -8799,6 +8898,9 @@ namespace LegionRuntime {
     {
       AutoLock a_lock(acquire_op_lock);
       available_acquire_ops.push_front(op);
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
+      out_acquire_ops.erase(op);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9015,9 +9117,9 @@ namespace LegionRuntime {
     }
 #endif
 
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
     //--------------------------------------------------------------------------
-    void Runtime::print_out_individual_tasks(int cnt /*= 1*/)
+    void Runtime::print_out_individual_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -9032,19 +9134,22 @@ namespace LegionRuntime {
         out_tasks[(*it)->get_unique_task_id()] = *it;
       }
       for (std::map<UniqueID,IndividualTask*>::const_iterator it = 
-            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+            out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(stdout,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
-        cnt--;
+        if (cnt > 0)
+          cnt--;
+        else if (cnt == 0)
+          break;
       }
-      fflush(stdout);
+      fflush(f);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_index_tasks(int cnt /*= 1*/)
+    void Runtime::print_out_index_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -9059,19 +9164,22 @@ namespace LegionRuntime {
         out_tasks[(*it)->get_unique_task_id()] = *it;
       }
       for (std::map<UniqueID,IndexTask*>::const_iterator it = 
-            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+            out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(stdout,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
-        cnt--;
+        if (cnt > 0)
+          cnt--;
+        else if (cnt == 0)
+          break;
       }
-      fflush(stdout);
+      fflush(f);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_slice_tasks(int cnt /*= 1*/)
+    void Runtime::print_out_slice_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -9086,19 +9194,22 @@ namespace LegionRuntime {
         out_tasks[(*it)->get_unique_task_id()] = *it;
       }
       for (std::map<UniqueID,SliceTask*>::const_iterator it = 
-            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+            out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(stdout,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
-        cnt--;
+        if (cnt > 0)
+          cnt--;
+        else if (cnt == 0)
+          break;
       }
-      fflush(stdout);
+      fflush(f);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::print_out_point_tasks(int cnt /*= 1*/)
+    void Runtime::print_out_point_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
     {
       // Build a map of the tasks based on their task IDs
@@ -9113,15 +9224,125 @@ namespace LegionRuntime {
         out_tasks[(*it)->get_unique_task_id()] = *it;
       }
       for (std::map<UniqueID,PointTask*>::const_iterator it = 
-            out_tasks.begin(); (it != out_tasks.end()) && (cnt >= 0); it++)
+            out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(stdout,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
-        cnt--;
+        if (cnt > 0)
+          cnt--;
+        else if (cnt == 0)
+          break;
       }
-      fflush(stdout);
+      fflush(f);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::print_out_acquire_ops(FILE *f, int cnt /*= -1*/)
+    //--------------------------------------------------------------------------
+    {
+      std::map<UniqueID,AcquireOp*> out_ops;
+      for (std::set<AcquireOp*>::const_iterator it = 
+            out_acquire_ops.begin(); it !=
+            out_acquire_ops.end(); it++)
+      {
+        out_ops[(*it)->get_unique_op_id()] = *it;
+      }
+      for (std::map<UniqueID,AcquireOp*>::const_iterator it = 
+            out_ops.begin(); it != out_ops.end(); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        fprintf(f,"Outstanding Acquire Op: %lld: %p (%x,%d) triggered %d\n",
+                  it->first, it->second, completion.id, completion.gen,
+                  completion.has_triggered());
+        if (!it->second->wait_barriers.empty())
+        {
+          for (std::vector<PhaseBarrier>::const_iterator bit = 
+                it->second->wait_barriers.begin(); bit !=
+                it->second->wait_barriers.end(); bit++)
+          {
+            Event e = bit->get_barrier().get_previous_phase();
+            fprintf(f,"Preceding barrier (%x,%d) has triggered %d\n",
+                    e.id, e.gen, e.has_triggered());
+          }
+        }
+      }
+      fflush(f);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::print_outstanding_tasks(FILE *f, int cnt /*= -1*/)
+    //--------------------------------------------------------------------------
+    {
+      std::map<UniqueID,TaskOp*> out_tasks;
+      for (std::set<IndividualTask*>::const_iterator it = 
+            out_individual_tasks.begin(); it !=
+            out_individual_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::set<IndexTask*>::const_iterator it = 
+            out_index_tasks.begin(); it !=
+            out_index_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::set<SliceTask*>::const_iterator it = 
+            out_slice_tasks.begin(); it !=
+            out_slice_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::set<PointTask*>::const_iterator it = 
+            out_point_tasks.begin(); it !=
+            out_point_tasks.end(); it++)
+      {
+        out_tasks[(*it)->get_unique_task_id()] = *it;
+      }
+      for (std::map<UniqueID,TaskOp*>::const_iterator it = 
+            out_tasks.begin(); it != out_tasks.end(); it++)
+      {
+        Event completion = it->second->get_completion_event();
+        switch (it->second->get_task_kind())
+        {
+          case TaskOp::INDIVIDUAL_TASK_KIND:
+            {
+              fprintf(f,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen);
+              break;
+            }
+          case TaskOp::POINT_TASK_KIND:
+            {
+              fprintf(f,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen);
+              break;
+            }
+          case TaskOp::INDEX_TASK_KIND:
+            {
+              fprintf(f,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen);
+              break;
+            }
+          case TaskOp::SLICE_TASK_KIND:
+            {
+              fprintf(f,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
+                it->first, it->second, it->second->variants->name,
+                completion.id, completion.gen);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        if (cnt > 0)
+          cnt--;
+        else if (cnt == 0)
+          break;
+      }
+      fflush(f);
     }
 #endif
 
@@ -9163,6 +9384,29 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_PROF
     /*static*/ int Runtime::num_profiling_nodes = -1;
+#endif
+
+#ifdef HANG_TRACE
+    //--------------------------------------------------------------------------
+    static void catch_hang(int signal)
+    //--------------------------------------------------------------------------
+    {
+      assert(signal == SIGTERM);
+      static int call_count = 0;
+      int count = __sync_fetch_and_add(&call_count, 0);
+      if (count == 0)
+      {
+        Runtime *rt = Runtime::runtime_map[1];
+        const char *prefix = "";
+        char file_name[1024];
+        sprintf(file_name,"%strace_%d.txt", prefix, rt->address_space);
+        FILE *target = fopen(file_name,"w");
+        //rt->dump_processor_states(target);
+        //rt->print_outstanding_tasks(target);
+        rt->print_out_acquire_ops(target);
+        fclose(target);
+      }
+    }
 #endif
 
     //--------------------------------------------------------------------------
@@ -9291,6 +9535,9 @@ namespace LegionRuntime {
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
+#ifdef HANG_TRACE
+      signal(SIGTERM, catch_hang); 
+#endif
       // Kick off the low-level machine
       m->run(0, Machine::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded

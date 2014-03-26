@@ -64,6 +64,44 @@ namespace LegionRuntime {
       virtual void notify(bool result, int key) = 0;
       virtual void reset(int key) = 0;
     };
+
+    /**
+     * This is a base class for both Distributed and Hierarchical
+     * collectable classes that implements the state machine for
+     * knowing when to invoke the various notify methods indicating
+     * that a change of state has occurred.  It is oblivious to 
+     * the ABA problem and relies on the client to avoid cases
+     * where ABA races could result in errors.
+     */
+    class CollectableState {
+    public:
+      enum State {
+        INACTIVE_STATE,
+        ACTIVE_INVALID_STATE,
+        VALID_STATE,
+        PENDING_ACTIVE_STATE,
+        PENDING_INACTIVE_STATE,
+        PENDING_VALID_STATE,
+        PENDING_INVALID_STATE,
+      };
+    public:
+      CollectableState(void);
+      virtual ~CollectableState(void);
+    protected:
+      bool update_state(bool has_gc_references, 
+                        bool has_remote_references,
+                        bool has_valid_references,
+                        bool has_resource_references,
+                        bool &need_activate, bool &need_validate,
+                        bool &need_invalidate, bool &need_deactivate,
+                        bool &do_delete);
+      bool can_delete(bool has_gc_references,
+                      bool has_remote_references,
+                      bool has_valid_references,
+                      bool has_resource_references);
+    protected:
+      State current_state;
+    };
     
     /**
      * \class DistributedCollectable
@@ -77,7 +115,7 @@ namespace LegionRuntime {
      * is currently used for garbage collecting physical managers
      * and the instances that they own.
      */
-    class DistributedCollectable {
+    class DistributedCollectable : public CollectableState {
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
@@ -104,7 +142,7 @@ namespace LegionRuntime {
       void update_remote_spaces(AddressSpaceID sid);
     protected:
       // Must be called while holding the gc lock
-      void return_held_references(void);
+      void return_held_references(void); 
     public:
       virtual void notify_activate(void) = 0;
       virtual void garbage_collect(void) = 0;
@@ -169,7 +207,7 @@ namespace LegionRuntime {
      *  operation is performed and all three sets of references
      *  are zero.
      */
-    class HierarchicalCollectable {
+    class HierarchicalCollectable : public CollectableState {
     public:
       // Create an owner collectable
       HierarchicalCollectable(Runtime *rt, DistributedID did,

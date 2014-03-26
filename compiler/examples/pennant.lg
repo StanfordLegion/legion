@@ -478,8 +478,8 @@ task sum_point_mass(rz: region<zone>, rpp: region<point>, rpg: region<point>,
 task calc_state_at_half(rz: region<zone>,
                         gamma: double, ssmin: double, dt: double,
                         zstart: int, zend: int, use_foreign: bool)
-  , reads(rz.zvol0, rz.zvolp, rz.zm, rz.zr, rz.ze, rz.zwrate)
-  , writes(rz.zp, rz.zss)
+  , reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate})
+  , writes(rz.{zp, zss})
 {
   if (use_foreign) {
     foreign_calc_state_at_half(gamma, ssmin, dt, zstart, zend, rz);

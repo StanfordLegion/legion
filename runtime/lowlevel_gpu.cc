@@ -30,7 +30,7 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void) = 0;
 
-      virtual void print_info(void) = 0;
+      virtual void print_info(FILE *f) = 0;
 
       virtual void run_or_wait(Event start_event) = 0;
 
@@ -56,7 +56,7 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void);
 
-      virtual void print_info(void);
+      virtual void print_info(FILE *f);
 
       virtual void run_or_wait(Event start_event);
 
@@ -289,6 +289,9 @@ namespace LegionRuntime {
 				      thread_main_wrapper,
 				      (void *)this) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+        Runtime::get_runtime()->add_thread(&gpu_thread);
+#endif
 
 	// now wait until worker thread is ready
 	{
@@ -459,9 +462,9 @@ namespace LegionRuntime {
       return false;
     }
 
-    void GPUTask::print_info(void)
+    void GPUTask::print_info(FILE *f)
     {
-      printf("GPU Task: %p after=%x/%d\n",
+      fprintf(f,"GPU Task: %p after=%x/%d\n",
           this, finish_event.id, finish_event.gen);
     }
 
@@ -526,9 +529,9 @@ namespace LegionRuntime {
         return false;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-        printf("GPU Memcpy: %p after=%x/%d\n",
+        fprintf(f,"GPU Memcpy: %p after=%x/%d\n",
             this, finish_event.id, finish_event.gen);
       }
 
@@ -1089,6 +1092,9 @@ namespace LegionRuntime {
       pthread_t thread;
       CHECK_PTHREAD( pthread_create(&thread, 0, gpu_dma_worker_loop, 0) );
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+      Runtime::get_runtime()->add_thread(&thread);
+#endif
     }
 
 #if 0

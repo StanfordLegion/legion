@@ -27,22 +27,6 @@
 
 #define NO_DEBUG_AMREQUESTS
 
-#define CHECK_PTHREAD(cmd) do { \
-  int ret = (cmd); \
-  if(ret != 0) { \
-    fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
-    exit(1); \
-  } \
-} while(0)
-
-#define CHECK_GASNET(cmd) do { \
-  int ret = (cmd); \
-  if(ret != GASNET_OK) { \
-    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
-    exit(1); \
-  } \
-} while(0)
-
 enum { MSGID_LONG_EXTENSION = 253,
        MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
@@ -113,15 +97,6 @@ protected:
 };
 
 static SrcDataPool *srcdatapool = 0;
-
-/*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
-						    gasnet_handlerarg_t arg0,
-						    gasnet_handlerarg_t arg1)
-{
-  uintptr_t srcptr = (((uintptr_t)(unsigned)arg1) << 32) | ((uintptr_t)(unsigned)arg0);
-  assert(srcdatapool != 0);
-  srcdatapool->release_srcptr((void *)srcptr);
-}
 
 // wrapper so we don't have to expose SrcDataPool implementation
 void release_srcptr(void *srcptr)
@@ -370,6 +345,19 @@ public:
       lmb_r_counts[i] = 0;
       lmb_w_avail[i] = true;
     }
+#ifdef TRACE_MESSAGES
+    sent_messages = 0;
+    received_messages = 0;
+#endif
+  }
+
+void record_message(bool sent_reply) 
+  {
+#ifdef TRACE_MESSAGES
+    __sync_fetch_and_add(&received_messages, 1);
+    if (sent_reply)
+      __sync_fetch_and_add(&sent_messages, 1);
+#endif
   }
 
   int push_messages(int max_to_send = 0, bool wait = false)
@@ -451,8 +439,11 @@ public:
 		 lmb_w_bases[flip_buffer]+LMB_SIZE, flip_count);
 #endif
 
-	  gasnet_AMRequestShort2(peer, MSGID_FLIP_REQ,
-				 flip_buffer, flip_count);
+	  CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_FLIP_REQ,
+                                               flip_buffer, flip_count) );
+#ifdef TRACE_MESSAGES
+          __sync_fetch_and_add(&sent_messages, 1);
+#endif
 
 	  continue;
 	}
@@ -503,7 +494,7 @@ public:
     gasnet_hsl_unlock(&mutex);
   }
 
-  void handle_long_msgptr(void *ptr)
+  bool handle_long_msgptr(void *ptr)
   {
     // can figure out which buffer it is without holding lock
     int r_buffer = -1;
@@ -514,7 +505,7 @@ public:
     }
     if(r_buffer < 0) {
       // probably a medium message?
-      return;
+      return false;
     }
     //assert(r_buffer >= 0);
 
@@ -526,6 +517,7 @@ public:
 
     // now take the lock to increment the r_count and decide if we need
     //  to ack (can't actually send it here, so queue it up)
+    bool message_added = false;
     gasnet_hsl_lock(&mutex);
     lmb_r_counts[r_buffer]++;
     if(lmb_r_counts[r_buffer] == 0) {
@@ -537,10 +529,12 @@ public:
 
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer);
       out_short_hdrs.push(hdr);
+      message_added = true;
       // wake up a sender
       gasnett_cond_signal(&cond);
     }
     gasnet_hsl_unlock(&mutex);
+    return message_added;
   }
 
 #if 0
@@ -673,14 +667,17 @@ public:
   // called when the remote side tells us that there will be no more
   //  messages sent for a given buffer - as soon as we've received them all,
   //  we can ack
-  void handle_flip_request(int buffer, int count)
+  bool handle_flip_request(int buffer, int count)
   {
 #ifdef DEBUG_LMB
     printf("LMB: received flip of buffer %d for %d->%d, [%p,%p), count=%d\n",
 	   buffer, peer, gasnet_mynode(), lmb_r_bases[buffer],
 	   lmb_r_bases[buffer]+LMB_SIZE, count);
 #endif
-
+#ifdef TRACE_MESSAGES
+    __sync_fetch_and_add(&received_messages, 1);
+#endif
+    bool message_added = false;
     gasnet_hsl_lock(&mutex);
     lmb_r_counts[buffer] -= count;
     if(lmb_r_counts[buffer] == 0) {
@@ -692,10 +689,12 @@ public:
 
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer);
       out_short_hdrs.push(hdr);
+      message_added = true;
       // Wake up a sender
       gasnett_cond_signal(&cond);
     }
     gasnet_hsl_unlock(&mutex);
+    return message_added;
   }
 
   // called when the remote side says it has received all the messages in a
@@ -707,6 +706,9 @@ public:
     printf("LMB: received flip ack of buffer %d for %d->%d, [%p,%p)\n",
 	   buffer, gasnet_mynode(), peer, lmb_w_bases[buffer],
 	   lmb_w_bases[buffer]+LMB_SIZE);
+#endif
+#ifdef TRACE_MESSAGES
+    __sync_fetch_and_add(&received_messages, 1);
 #endif
 
     lmb_w_avail[buffer] = true;
@@ -733,125 +735,138 @@ protected:
 	   hdr->args[12], hdr->args[13], hdr->args[14], hdr->args[15]);
     fflush(stdout);
 #endif
+#ifdef TRACE_MESSAGES
+    __sync_fetch_and_add(&sent_messages, 1);
+#endif
     switch(hdr->num_args) {
     case 1:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium1(peer, hdr->msgid, hdr->payload, hdr->payload_size,
-				hdr->args[0]);
-      else
-	gasnet_AMRequestShort1(peer, hdr->msgid, hdr->args[0]);
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium1(peer, hdr->msgid, hdr->payload, 
+                                              hdr->payload_size, hdr->args[0]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort1(peer, hdr->msgid, hdr->args[0]) );
+      }
       break;
 
     case 2:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium2(peer, hdr->msgid, hdr->payload, hdr->payload_size,
-				hdr->args[0], hdr->args[1]);
-      else
-	gasnet_AMRequestShort2(peer, hdr->msgid, hdr->args[0], hdr->args[1]);
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium2(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+                                              hdr->args[0], hdr->args[1]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort2(peer, hdr->msgid, hdr->args[0], hdr->args[1]) );
+      }
       break;
 
     case 3:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium3(peer, hdr->msgid, hdr->payload, hdr->payload_size,
-				hdr->args[0], hdr->args[1], hdr->args[2]);
-      else
-	gasnet_AMRequestShort3(peer, hdr->msgid,
-			       hdr->args[0], hdr->args[1], hdr->args[2]);
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium3(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+				hdr->args[0], hdr->args[1], hdr->args[2]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort3(peer, hdr->msgid,
+			       hdr->args[0], hdr->args[1], hdr->args[2]) );
+      }
       break;
 
     case 4:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium4(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium4(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				hdr->args[0], hdr->args[1], hdr->args[2],
-				hdr->args[3]);
-      else
-	gasnet_AMRequestShort4(peer, hdr->msgid,
+				hdr->args[3]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort4(peer, hdr->msgid,
 			       hdr->args[0], hdr->args[1], hdr->args[2],
-			       hdr->args[3]);
+			       hdr->args[3]) );
+      }
       break;
 
     case 5:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium5(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium5(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				hdr->args[0], hdr->args[1], hdr->args[2],
-				hdr->args[3], hdr->args[4]);
-      else
-	gasnet_AMRequestShort5(peer, hdr->msgid,
+				hdr->args[3], hdr->args[4]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort5(peer, hdr->msgid,
 			       hdr->args[0], hdr->args[1], hdr->args[2],
-			       hdr->args[3], hdr->args[4]);
+			       hdr->args[3], hdr->args[4]) );
+      }
       break;
 
     case 6:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium6(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium6(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				hdr->args[0], hdr->args[1], hdr->args[2],
-				hdr->args[3], hdr->args[4], hdr->args[5]);
-      else
-	gasnet_AMRequestShort6(peer, hdr->msgid,
+				hdr->args[3], hdr->args[4], hdr->args[5]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort6(peer, hdr->msgid,
 			       hdr->args[0], hdr->args[1], hdr->args[2],
-			       hdr->args[3], hdr->args[4], hdr->args[5]);
+			       hdr->args[3], hdr->args[4], hdr->args[5]) );
+      }
       break;
 
     case 8:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium8(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium8(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				hdr->args[0], hdr->args[1], hdr->args[2],
 				hdr->args[3], hdr->args[4], hdr->args[5],
-				hdr->args[6], hdr->args[7]);
-      else
-	gasnet_AMRequestShort8(peer, hdr->msgid,
+				hdr->args[6], hdr->args[7]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort8(peer, hdr->msgid,
 			       hdr->args[0], hdr->args[1], hdr->args[2],
 			       hdr->args[3], hdr->args[4], hdr->args[5],
-			       hdr->args[6], hdr->args[7]);
+			       hdr->args[6], hdr->args[7]) );
+      }
       break;
 
     case 10:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium10(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium10(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				 hdr->args[0], hdr->args[1], hdr->args[2],
 				 hdr->args[3], hdr->args[4], hdr->args[5],
 				 hdr->args[6], hdr->args[7], hdr->args[8],
-				 hdr->args[9]);
-      else
-	gasnet_AMRequestShort10(peer, hdr->msgid,
+				 hdr->args[9]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort10(peer, hdr->msgid,
 				hdr->args[0], hdr->args[1], hdr->args[2],
 				hdr->args[3], hdr->args[4], hdr->args[5],
 				hdr->args[6], hdr->args[7], hdr->args[8],
-				hdr->args[9]);
+				hdr->args[9]) );
+      }
       break;
 
     case 12:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium12(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium12(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				 hdr->args[0], hdr->args[1], hdr->args[2],
 				 hdr->args[3], hdr->args[4], hdr->args[5],
 				 hdr->args[6], hdr->args[7], hdr->args[8],
-				 hdr->args[9], hdr->args[10], hdr->args[11]);
-      else
-	gasnet_AMRequestShort12(peer, hdr->msgid,
+				 hdr->args[9], hdr->args[10], hdr->args[11]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort12(peer, hdr->msgid,
 				hdr->args[0], hdr->args[1], hdr->args[2],
 				hdr->args[3], hdr->args[4], hdr->args[5],
 				hdr->args[6], hdr->args[7], hdr->args[8],
-				hdr->args[9], hdr->args[10], hdr->args[11]);
+				hdr->args[9], hdr->args[10], hdr->args[11]) );
+      }
       break;
 
     case 16:
-      if(hdr->payload_mode != PAYLOAD_NONE)
-	gasnet_AMRequestMedium16(peer, hdr->msgid, hdr->payload, hdr->payload_size,
+      if(hdr->payload_mode != PAYLOAD_NONE) {
+	CHECK_GASNET( gasnet_AMRequestMedium16(peer, hdr->msgid, hdr->payload, hdr->payload_size,
 				 hdr->args[0], hdr->args[1], hdr->args[2],
 				 hdr->args[3], hdr->args[4], hdr->args[5],
 				 hdr->args[6], hdr->args[7], hdr->args[8],
 				 hdr->args[9], hdr->args[10], hdr->args[11],
 				 hdr->args[12], hdr->args[13], hdr->args[14],
-				 hdr->args[15]);
-      else
-	gasnet_AMRequestShort16(peer, hdr->msgid,
+				 hdr->args[15]) );
+      } else {
+	CHECK_GASNET( gasnet_AMRequestShort16(peer, hdr->msgid,
 				hdr->args[0], hdr->args[1], hdr->args[2],
 				hdr->args[3], hdr->args[4], hdr->args[5],
 				hdr->args[6], hdr->args[7], hdr->args[8],
 				hdr->args[9], hdr->args[10], hdr->args[11],
 				hdr->args[12], hdr->args[13], hdr->args[14],
-				hdr->args[15]);
+				hdr->args[15]) );
+      }
       break;
 
     default:
@@ -925,6 +940,9 @@ protected:
 	     hdr->args[12], hdr->args[13], hdr->args[14], hdr->args[15]);
       fflush(stdout);
 #endif
+#ifdef TRACE_MESSAGES
+      __sync_fetch_and_add(&sent_messages, 1);
+#endif
       switch(hdr->num_args) {
       case 1:
         // should never get this case since we
@@ -936,123 +954,123 @@ protected:
         break;
 
       case 2:
-        gasnet_AMRequestLongAsync2(peer, hdr->msgid, 
+        CHECK_GASNET( gasnet_AMRequestLongAsync2(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
-                              hdr->args[0], hdr->args[1]);
+                              hdr->args[0], hdr->args[1]) );
         break;
 
       case 3:
-        gasnet_AMRequestLongAsync3(peer, hdr->msgid, 
+        CHECK_GASNET( gasnet_AMRequestLongAsync3(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
-                              hdr->args[0], hdr->args[1], hdr->args[2]);
+                              hdr->args[0], hdr->args[1], hdr->args[2]) );
         break;
 
       case 4:
-        gasnet_AMRequestLongAsync4(peer, hdr->msgid, 
+        CHECK_GASNET( gasnet_AMRequestLongAsync4(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
-                              hdr->args[3]);
+                              hdr->args[3]) );
         break;
       case 5:
-        gasnet_AMRequestLongAsync5(peer, hdr->msgid,
+        CHECK_GASNET (gasnet_AMRequestLongAsync5(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size,
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
-                              hdr->args[3], hdr->args[4]);
+                              hdr->args[3], hdr->args[4]) );
         break;
       case 6:
-        gasnet_AMRequestLongAsync6(peer, hdr->msgid, 
+        CHECK_GASNET( gasnet_AMRequestLongAsync6(peer, hdr->msgid, 
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
-                              hdr->args[3], hdr->args[4], hdr->args[5]);
+                              hdr->args[3], hdr->args[4], hdr->args[5]) );
         break;
       case 7:
-        gasnet_AMRequestLongAsync7(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync7(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
-                              hdr->args[6]);
+                              hdr->args[6]) );
         break;
       case 8:
-        gasnet_AMRequestLongAsync8(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync8(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
-                              hdr->args[6], hdr->args[7]);
+                              hdr->args[6], hdr->args[7]) );
         break;
       case 9:
-        gasnet_AMRequestLongAsync9(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync9(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
-                              hdr->args[6], hdr->args[7], hdr->args[8]);
+                              hdr->args[6], hdr->args[7], hdr->args[8]) );
         break;
       case 10:
-        gasnet_AMRequestLongAsync10(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync10(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
-                              hdr->args[9]);
+                              hdr->args[9]) );
         break;
       case 11:
-        gasnet_AMRequestLongAsync11(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync11(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
-                              hdr->args[9], hdr->args[10]);
+                              hdr->args[9], hdr->args[10]) );
         break;
       case 12:
-        gasnet_AMRequestLongAsync12(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync12(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
-                              hdr->args[9], hdr->args[10], hdr->args[11]);
+                              hdr->args[9], hdr->args[10], hdr->args[11]) );
         break;
       case 13:
-        gasnet_AMRequestLongAsync13(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync13(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
                               hdr->args[9], hdr->args[10], hdr->args[11],
-                              hdr->args[12]);
+                              hdr->args[12]) );
         break;
       case 14:
-        gasnet_AMRequestLongAsync14(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync14(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
                               hdr->args[9], hdr->args[10], hdr->args[11],
-                              hdr->args[12], hdr->args[13]);
+                              hdr->args[12], hdr->args[13]) );
         break;
       case 15:
-        gasnet_AMRequestLongAsync15(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync15(peer, hdr->msgid,
                               ((char*)hdr->payload)+(i*max_long_req), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
                               hdr->args[3], hdr->args[4], hdr->args[5],
                               hdr->args[6], hdr->args[7], hdr->args[8],
                               hdr->args[9], hdr->args[10], hdr->args[11],
-                              hdr->args[12], hdr->args[13], hdr->args[14]);
+                              hdr->args[12], hdr->args[13], hdr->args[14]) );
         break;
       case 16:
-        gasnet_AMRequestLongAsync16(peer, hdr->msgid,
+        CHECK_GASNET( gasnet_AMRequestLongAsync16(peer, hdr->msgid,
                               ((char*)hdr->payload+(i*max_long_req)), size, 
                               ((char*)dest_ptr)+(i*max_long_req),
                               hdr->args[0], hdr->args[1], hdr->args[2],
@@ -1060,7 +1078,7 @@ protected:
                               hdr->args[6], hdr->args[7], hdr->args[8],
                               hdr->args[9], hdr->args[10], hdr->args[11],
                               hdr->args[12], hdr->args[13], hdr->args[14],
-                              hdr->args[15]);
+                              hdr->args[15]) );
         break;
 
       default:
@@ -1068,12 +1086,13 @@ protected:
         assert(3==4);
       }
     }
-  }
+  } 
 
   gasnet_node_t peer;
   
   gasnet_hsl_t mutex;
   gasnett_cond_t cond;
+public:
   std::queue<OutgoingMessage *> out_short_hdrs;
   std::queue<OutgoingMessage *> out_long_hdrs;
 
@@ -1088,6 +1107,10 @@ protected:
   //size_t cur_long_size;
   std::map<int/*message id*/,ChunkInfo> observed_messages;
   int next_outgoing_message_id;
+#ifdef TRACE_MESSAGES
+  int sent_messages;
+  int received_messages;
+#endif
 };
 
 void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _payload_mode,
@@ -1270,34 +1293,153 @@ void OutgoingMessage::set_payload(const SpanList& spans, size_t _payload_size, i
   assert(_payload_mode != PAYLOAD_FREE);
 }
 
-static ActiveMessageEndpoint **endpoints;
-
-#if 0
-static void handle_long_extension(gasnet_token_t token, void *buf, size_t nbytes,
-				  gasnet_handlerarg_t ptr_lo, gasnet_handlerarg_t ptr_hi, gasnet_handlerarg_t chunk_idx)
-{
-  gasnet_node_t src;
-  gasnet_AMGetMsgSource(token, &src);
-
-  void *dest_ptr = (void *)((((uint64_t)ptr_hi) << 32) | ((uint64_t)(uint32_t)ptr_lo));
-  endpoints[src]->handle_long_extension(dest_ptr, chunk_idx, nbytes);
-}
+class EndpointManager {
+public:
+  EndpointManager(int num_endpoints)
+    : total_endpoints(num_endpoints)
+  {
+    endpoints = new ActiveMessageEndpoint*[num_endpoints];
+    outstanding_messages = (int*)malloc(num_endpoints*sizeof(int));
+    for (int i = 0; i < num_endpoints; i++)
+    {
+      if (i == gasnet_mynode())
+        endpoints[i] = 0;
+      else
+        endpoints[i] = new ActiveMessageEndpoint(i);
+      outstanding_messages[i] = 0;
+    }
+  }
+public:
+  void handle_flip_request(gasnet_node_t src, int flip_buffer, int flip_count)
+  {
+#define TRACK_MESSAGES
+#ifdef TRACK_MESSAGES
+    bool added_message = 
 #endif
+      endpoints[src]->handle_flip_request(flip_buffer, flip_count);
+#ifdef TRACK_MESSAGES
+    if (added_message)
+      __sync_fetch_and_add(outstanding_messages+src,1);
+#endif
+  }
+  void handle_flip_ack(gasnet_node_t src, int ack_buffer)
+  {
+    endpoints[src]->handle_flip_ack(ack_buffer);
+  }
+  void push_messages(int max_to_send = 0, bool wait = false)
+  {
+#ifdef TRACK_MESSAGES
+    if (wait)
+    {
+      // If we have to wait, do the normal thing and iterate
+      // over all the end points, and update message counts
+      for (int i = 0; i < total_endpoints; i++)
+      {
+        int pushed = endpoints[i]->push_messages(max_to_send, true); 
+        __sync_fetch_and_add(outstanding_messages+i, -pushed);
+      }
+    }
+    else
+    {
+      for (int i = 0; i < total_endpoints; i++)
+      {
+        int messages = *((volatile int*)outstanding_messages+i);
+        if (messages == 0) continue;
+        int pushed = endpoints[i]->push_messages(max_to_send, false);
+        __sync_fetch_and_add(outstanding_messages+i, -pushed);
+      }
+    }
+#else
+    for (int i = 0; i < total_endpoints; i++)
+    {
+      if (endpoints[i] == 0) continue;
+      endpoints[i]->push_messages(max_to_send, wait);
+    }
+#endif
+  }
+  void enqueue_message(gasnet_node_t target, OutgoingMessage *hdr, bool in_order)
+  {
+#ifdef TRACK_MESSAGES
+    __sync_fetch_and_add(outstanding_messages+target,1);
+#endif
+    endpoints[target]->enqueue_message(hdr, in_order);
+  }
+  void handle_long_msgptr(gasnet_node_t source, void *ptr)
+  {
+#ifdef TRACK_MESSAGES
+    bool message_added =
+#endif
+      endpoints[source]->handle_long_msgptr(ptr);
+#ifdef TRACK_MESSAGES
+    if (message_added)
+      __sync_fetch_and_add(outstanding_messages+source,1);
+#endif
+  }
+  bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
+                           int message_id, int chunks)
+  {
+    return endpoints[source]->adjust_long_msgsize(ptr, buffer_size, message_id, chunks);
+  }
+  void report_activemsg_status(FILE *f)
+  {
+#ifdef TRACE_MESSAGES
+    int mynode = gasnet_mynode();
+    for (int i = 0; i < total_endpoints; i++) {
+      if (endpoints[i] == 0) continue;
+
+      ActiveMessageEndpoint *e = endpoints[i];
+      fprintf(f, "AMS: %d<->%d: S=%d R=%d\n", 
+              mynode, i, e->sent_messages, e->received_messages);
+    }
+    fflush(f);
+#else
+    // for each node, report depth of outbound queues and LMB state
+    int mynode = gasnet_mynode();
+    for(int i = 0; i < total_endpoints; i++) {
+      if (endpoints[i] == 0) continue;
+
+      ActiveMessageEndpoint *e = endpoints[i];
+
+      fprintf(f, "AMS: %d->%d: S=%zd L=%zd(%zd) W=%d,%d,%zd,%c,%c R=%d,%d\n",
+              mynode, i,
+              e->out_short_hdrs.size(),
+              e->out_long_hdrs.size(), (e->out_long_hdrs.size() ? 
+                                        (e->out_long_hdrs.front())->payload_size : 0),
+              e->cur_write_lmb, e->cur_write_count, e->cur_write_offset,
+              (e->lmb_w_avail[0] ? 'y' : 'n'), (e->lmb_w_avail[1] ? 'y' : 'n'),
+              e->lmb_r_counts[0], e->lmb_r_counts[1]);
+    }
+    fflush(f);
+#endif
+  }
+  void record_message(gasnet_node_t source, bool sent_reply)
+  {
+    endpoints[source]->record_message(sent_reply);
+  }
+private:
+  const int total_endpoints;
+  ActiveMessageEndpoint **endpoints;
+  // This vector of outstanding message counts is accessed
+  // by atomic intrinsics and is not protected by the lock
+  int *outstanding_messages;
+};
+
+static EndpointManager *endpoint_manager;
 
 static void handle_flip_req(gasnet_token_t token,
 		     int flip_buffer, int flip_count)
 {
   gasnet_node_t src;
-  gasnet_AMGetMsgSource(token, &src);
-  endpoints[src]->handle_flip_request(flip_buffer, flip_count);
+  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  endpoint_manager->handle_flip_request(src, flip_buffer, flip_count);
 }
 
 static void handle_flip_ack(gasnet_token_t token,
 			    int ack_buffer)
 {
   gasnet_node_t src;
-  gasnet_AMGetMsgSource(token, &src);
-  endpoints[src]->handle_flip_ack(ack_buffer);
+  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
 void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
@@ -1355,13 +1497,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
 #endif
 
-  endpoints = new ActiveMessageEndpoint *[gasnet_nodes()];
-
-  for(int i = 0; i < gasnet_nodes(); i++)
-    if(i == gasnet_mynode())
-      endpoints[i] = 0;
-    else
-      endpoints[i] = new ActiveMessageEndpoint(i);
+  endpoint_manager = new EndpointManager(gasnet_nodes());
 
   init_deferred_frees();
 }
@@ -1375,13 +1511,9 @@ static pthread_t *sending_threads = 0;
 //  to the caller rather than spinning
 void do_some_polling(void)
 {
-  for(int i = 0; i < gasnet_nodes(); i++) {
-    if(!endpoints[i]) continue; // skip our own node
+  endpoint_manager->push_messages(0);
 
-    endpoints[i]->push_messages(0);
-  }
-
-  gasnet_AMPoll();
+  CHECK_GASNET( gasnet_AMPoll() );
 }
 
 static void *gasnet_poll_thread_loop(void *data)
@@ -1408,6 +1540,9 @@ void start_polling_threads(int count)
     CHECK_PTHREAD( pthread_create(&polling_threads[i], 0, 
 				  gasnet_poll_thread_loop, 0) );
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+    LegionRuntime::LowLevel::Runtime::get_runtime()->add_thread(&polling_threads[i]);
+#endif
   }
 }
 
@@ -1415,7 +1550,7 @@ static void* sender_thread_loop(void *index)
 {
   long idx = (long)index;
   while (1) {
-    endpoints[idx]->push_messages(10000,true);
+    endpoint_manager->push_messages(10000,true);
   }
   return 0;
 }
@@ -1435,6 +1570,9 @@ void start_sending_threads(void)
     CHECK_PTHREAD( pthread_create(&sending_threads[i], 0,
                                   sender_thread_loop, (void*)long(i)));
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+    LegionRuntime::LowLevel::Runtime::get_runtime()->add_thread(&sending_threads[i]);
+#endif
   }
 }
 	
@@ -1451,7 +1589,7 @@ void enqueue_message(gasnet_node_t target, int msgid,
 
   hdr->set_payload((void *)payload, payload_size, payload_mode, dstptr);
 
-  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
+  endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
 void enqueue_message(gasnet_node_t target, int msgid,
@@ -1469,7 +1607,7 @@ void enqueue_message(gasnet_node_t target, int msgid,
   hdr->set_payload((void *)payload, line_size, line_stride, line_count,
 		   payload_mode, dstptr);
 
-  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
+  endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
 void enqueue_message(gasnet_node_t target, int msgid,
@@ -1485,24 +1623,31 @@ void enqueue_message(gasnet_node_t target, int msgid,
 
   hdr->set_payload(spans, payload_size, payload_mode, dstptr);
 
-  endpoints[target]->enqueue_message(hdr, true); // TODO: decide when OOO is ok?
+  endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
 void handle_long_msgptr(gasnet_node_t source, void *ptr)
 {
   assert(source != gasnet_mynode());
 
-  endpoints[source]->handle_long_msgptr(ptr);
+  endpoint_manager->handle_long_msgptr(source, ptr);
 }
 
-#if 0
-extern size_t adjust_long_msgsize(gasnet_node_t source, void *ptr, size_t orig_size)
+/*static*/ void SrcDataPool::release_srcptr_handler(gasnet_token_t token,
+						    gasnet_handlerarg_t arg0,
+						    gasnet_handlerarg_t arg1)
 {
-  assert(source != gasnet_mynode());
-
-  return(endpoints[source]->adjust_long_msgsize(ptr, orig_size));
-}
+  uintptr_t srcptr = (((uintptr_t)(unsigned)arg1) << 32) | ((uintptr_t)(unsigned)arg0);
+  // We may get pointers which are zero because we had to send a reply
+  // Just ignore them
+  if (srcptr != 0)
+    srcdatapool->release_srcptr((void *)srcptr);
+#ifdef TRACE_MESSAGES
+  gasnet_node_t src;
+  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+  endpoint_manager->record_message(src, false/*sent reply*/);
 #endif
+}
 
 extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
                                 const void *args, size_t arglen)
@@ -1511,6 +1656,19 @@ extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer
   assert(arglen >= 2*sizeof(int));
   const int *arg_ptr = (const int*)args;
 
-  return (endpoints[source]->adjust_long_msgsize(ptr, buffer_size,
-                                                 arg_ptr[0], arg_ptr[1]));
+  return endpoint_manager->adjust_long_msgsize(source, ptr, buffer_size,
+                                               arg_ptr[0], arg_ptr[1]);
 }
+
+extern void report_activemsg_status(FILE *f)
+{
+  endpoint_manager->report_activemsg_status(f); 
+}
+
+extern void record_message(gasnet_node_t source, bool sent_reply)
+{
+#ifdef TRACE_MESSAGES
+  endpoint_manager->record_message(source, sent_reply);
+#endif
+}
+

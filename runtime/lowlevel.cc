@@ -40,6 +40,15 @@ GASNETT_THREADKEY_DEFINE(gpu_thread);
 #include <fcntl.h>
 #include <dirent.h>
 
+#ifdef DEADLOCK_TRACE
+#include <signal.h>
+#include <execinfo.h>
+#endif
+
+#ifdef __SSE2__
+#include <emmintrin.h>
+#endif
+
 // Implementation of Detailed Timer
 namespace LegionRuntime {
   namespace LowLevel {
@@ -492,7 +501,6 @@ namespace LegionRuntime {
     struct LockGrantArgs : public BaseMedium {
       Reservation lock;
       unsigned mode;
-      uint64_t remote_waiter_mask;
     };
 
     void handle_lock_grant(LockGrantArgs args, const void *data, size_t datalen);
@@ -826,13 +834,14 @@ namespace LegionRuntime {
       mutex = new gasnet_hsl_t;
       //printf("[%d] MUTEX INIT %p\n", gasnet_mynode(), mutex);
       gasnet_hsl_init(mutex);
-      remote_waiters = NodeMask();
+      remote_waiters.clear();
       base_arrival_count = current_arrival_count = 0;
     }
 
     struct EventSubscribeArgs {
       gasnet_node_t node;
       Event event;
+      Event::gen_t previous_subscribe_gen;
     };
 
     void handle_event_subscribe(EventSubscribeArgs args);
@@ -886,28 +895,38 @@ namespace LegionRuntime {
 
       {
 	AutoHSLLock a(impl->mutex);
-
-	// now that we have the lock, check the needed generation again
-	if(impl->generation >= args.event.gen) {
-	  log_event(LEVEL_DEBUG, "event subscription already done: node=%d event=%x/%d (<= %d)",
+        // first trigger any generations which are below are current generation
+        if(impl->generation > (args.previous_subscribe_gen)) {
+          log_event(LEVEL_DEBUG, "event subscription already done: node=%d event=%x/%d (<= %d)",
 		    args.node, args.event.id, args.event.gen, impl->generation);
 	  EventTriggerArgs trigger_args;
 	  trigger_args.node = gasnet_mynode();
 	  trigger_args.event = args.event;
 	  trigger_args.event.gen = impl->generation;
 	  EventTriggerMessage::request(args.node, trigger_args);
-	} else {
-	  // nope - needed generation hasn't happened yet, so add this node to
+        }
+        NodeMask waiter_mask;
+        waiter_mask.set_bit(args.node);
+        // now register any remote waiters
+        for (Event::gen_t wait_gen = impl->generation+1;
+              wait_gen <= args.event.gen; wait_gen++) {
+          // nope - needed generation hasn't happened yet, so add this node to
 	  //  the mask
 	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=%x/%d (> %d)",
-		    args.node, args.event.id, args.event.gen, impl->generation);
+		    args.node, args.event.id, wait_gen, impl->generation);
 	  //impl->remote_waiters |= (1ULL << args.node);
-          impl->remote_waiters.set_bit(args.node);
-	}
+          std::map<Event::gen_t,NodeMask>::iterator finder =
+            impl->remote_waiters.find(wait_gen);
+          if (finder == impl->remote_waiters.end()) {
+            impl->remote_waiters[wait_gen] = waiter_mask;
+          }
+          else
+            finder->second.set_bit(args.node);
+        }
       }
     }
 
-    void show_event_waiters(void)
+    void show_event_waiters(FILE *f = stdout)
     {
       printf("PRINTING ALL PENDING EVENTS:\n");
       for(int i = 0; i < gasnet_nodes(); i++) {
@@ -920,7 +939,7 @@ namespace LegionRuntime {
 
 	  if(e->generation >= e->free_generation) continue;
 
-          printf("Event %x: gen=%d subscr=%d remote=%lx\n",
+          fprintf(f,"Event %x: gen=%d subscr=%d remote=%lx\n",
 		 e->me.id, e->generation, e->gen_subscribed, e->local_waiters.size());
 	  //printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
 	  //        e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
@@ -932,13 +951,13 @@ namespace LegionRuntime {
 		it2 != it->second.end();
 		it2++) {
 	      printf("  [%d] %p ", it->first, *it2);
-	      (*it2)->print_info();
+	      (*it2)->print_info(f);
 	    }
 	  }
 	}
       }
-      printf("DONE\n");
-      fflush(stdout);
+      fprintf(f,"DONE\n");
+      fflush(f);
     }
 
     void handle_event_trigger(EventTriggerArgs args)
@@ -1044,9 +1063,9 @@ namespace LegionRuntime {
         return last_trigger;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("event merger: %x/%d\n", finish_event.id, finish_event.gen);
+	fprintf(f,"event merger: %x/%d\n", finish_event.id, finish_event.gen);
       }
 
     protected:
@@ -1287,6 +1306,8 @@ namespace LegionRuntime {
 	  if((owner != gasnet_mynode()) && (event.gen > gen_subscribed)) {
 	    args.node = gasnet_mynode();
 	    args.event = event;
+            args.previous_subscribe_gen = 
+              (gen_subscribed > generation ? gen_subscribed : generation);
 	    subscribe_owner = owner;
 	    gen_subscribed = event.gen;
 	  }
@@ -1306,7 +1327,7 @@ namespace LegionRuntime {
       }
     }
 
-    bool Event::Impl::has_triggered(Event::gen_t needed_gen)
+    bool Event::Impl::has_triggered(Event::gen_t needed_gen) volatile
     {
 #ifdef EVENT_TRACING
       {
@@ -1321,26 +1342,34 @@ namespace LegionRuntime {
 
     class PthreadCondWaiter : public Event::Impl::EventWaiter {
     public:
-      PthreadCondWaiter(pthread_cond_t *_condp) : condp(_condp) {}
-      ~PthreadCondWaiter(void) {}
+      PthreadCondWaiter(Event::Impl *i)
+        : impl(i)
+      {
+        CHECK_PTHREAD( pthread_cond_init(&cond, NULL) );
+      }
+      ~PthreadCondWaiter(void) 
+      {
+        CHECK_PTHREAD( pthread_cond_destroy(&cond) );
+      }
 
       virtual bool event_triggered(void)
       {
-        pthread_cond_signal(condp);
+        // Need to hold the lock to avoid the race
+        AutoHSLLock(impl->mutex);
+        pthread_cond_signal(&cond);
         // we're allocated on caller's stack, so deleting would be bad
         return false;
       }
-      virtual void print_info(void) { printf("external waiter\n"); }
+      virtual void print_info(FILE *f) { fprintf(f,"external waiter\n"); }
 
-    protected:
-      pthread_cond_t *condp;
+    public:
+      pthread_cond_t cond;
+      Event::Impl *impl;
     };
 
     void Event::Impl::external_wait(Event::gen_t gen_needed)
     {
-      pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-      PthreadCondWaiter w(&cond);
-
+      PthreadCondWaiter w(this);
       {
 	AutoHSLLock a(mutex);
 
@@ -1353,7 +1382,7 @@ namespace LegionRuntime {
 	  }
 
 	  // now just sleep on the condition variable - hope we wake up
-	  pthread_cond_wait(&cond, &mutex->lock);
+	  pthread_cond_wait(&w.cond, &mutex->lock);
 	}
       }
     }
@@ -1371,9 +1400,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("deferred trigger: after=%x/%d\n",
+	fprintf(f,"deferred trigger: after=%x/%d\n",
 	       after_event.id, after_event.gen);
       }
 
@@ -1442,19 +1471,24 @@ namespace LegionRuntime {
 	  args.node = trigger_node;
 	  args.event = me;
 	  args.event.gen = gen_triggered;
+          NodeMask send_mask;
+          std::map<Event::gen_t,NodeMask>::iterator nit = remote_waiters.begin();
+          while((nit != remote_waiters.end()) && (nit->first <= gen_triggered)) {
+            send_mask |= nit->second;
+            remote_waiters.erase(nit);
+            nit = remote_waiters.begin();
+          }
 	  //for(int node = 0; remote_waiters != 0; node++, remote_waiters >>= 1)
 	  //  if((remote_waiters & 1) && (node != trigger_node))
 	  //    EventTriggerMessage::request(node, args);
           for(int node = 0; node < MAX_NUM_NODES; node++)
-            if (remote_waiters.is_set(node) && (node != trigger_node))
+            if (send_mask.is_set(node) && (node != trigger_node))
               EventTriggerMessage::request(node, args);
-          remote_waiters = NodeMask();
 	} else {
 	  if(trigger_node == gasnet_mynode()) {
 	    // if we're not the owner, we just send to the owner and let him
 	    //  do the broadcast (assuming the trigger was local)
 	    //assert(remote_waiters == 0);
-            assert(!remote_waiters);
 
 	    EventTriggerArgs args;
 	    args.node = trigger_node;
@@ -1550,9 +1584,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("deferred arrival: barrier=%x/%d (%llx), delta=%d\n",
+	fprintf(f,"deferred arrival: barrier=%x/%d (%llx), delta=%d\n",
 	       barrier.id, barrier.gen, barrier.timestamp, delta);
       }
 
@@ -1822,8 +1856,8 @@ namespace LegionRuntime {
       in_use = false;
       mutex = new gasnet_hsl_t;
       gasnet_hsl_init(mutex);
-      remote_waiter_mask = 0;
-      remote_sharer_mask = 0;
+      remote_waiter_mask = NodeMask(); 
+      remote_sharer_mask = NodeMask();
       requested = false;
       if(_data_size) {
 	local_data = malloc(_data_size);
@@ -1849,6 +1883,7 @@ namespace LegionRuntime {
       int req_forward_target = -1;
       int grant_target = -1;
       LockGrantArgs g_args;
+      NodeMask copy_waiters;
 
       do {
 	AutoHSLLock a(impl->mutex);
@@ -1872,16 +1907,16 @@ namespace LegionRuntime {
 	// case 2: we're the owner, and nobody is holding the lock, so grant
 	//  it to the (original) requestor
 	if((impl->count == Reservation::Impl::ZERO_COUNT) && 
-	   (impl->remote_sharer_mask == 0)) {
-	  assert(impl->remote_waiter_mask == 0);
+           (!impl->remote_sharer_mask)) {
+          assert(!impl->remote_waiter_mask);
 
 	  log_reservation(LEVEL_DEBUG, 
               "granting reservation request: reservation=%x, node=%d, mode=%d",
 		   args.lock.id, args.node, args.mode);
 	  g_args.lock = args.lock;
 	  g_args.mode = 0; // always give it exclusively for now
-	  g_args.remote_waiter_mask = impl->remote_waiter_mask;
 	  grant_target = args.node;
+          copy_waiters = impl->remote_waiter_mask;
 
 	  impl->owner = args.node;
 	  break;
@@ -1893,7 +1928,7 @@ namespace LegionRuntime {
 	log_reservation(LEVEL_DEBUG, 
             "deferring reservation request: reservation=%x, node=%d, mode=%d (count=%d cmode=%d)",
 		 args.lock.id, args.node, args.mode, impl->count, impl->mode);
-	impl->remote_waiter_mask |= (1ULL << args.node);
+        impl->remote_waiter_mask.set_bit(args.node);
       } while(0);
 
       if(req_forward_target != -1)
@@ -1911,9 +1946,13 @@ namespace LegionRuntime {
 
       if(grant_target != -1)
       {
+        // Make a buffer for storing our waiter mask and the the local data
+        size_t payload_size = sizeof(copy_waiters) + impl->local_data_size;
+        NodeMask *payload = (NodeMask*)malloc(payload_size);
+        *payload = copy_waiters; 
+        memcpy(payload+1,impl->local_data,impl->local_data_size);
 	LockGrantMessage::request(grant_target, g_args,
-				  impl->local_data, impl->local_data_size,
-				  PAYLOAD_KEEP);
+                                  payload, payload_size, PAYLOAD_FREE);
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -1935,8 +1974,8 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_reservation(LEVEL_DEBUG, 
-          "reservation request granted: reservation=%x mode=%d mask=%lx",
-	       args.lock.id, args.mode, args.remote_waiter_mask);
+          "reservation request granted: reservation=%x mode=%d", // mask=%lx",
+	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
       std::deque<Event> to_wake;
 
@@ -1949,14 +1988,14 @@ namespace LegionRuntime {
 	assert(impl->requested);
 
 	// first, update our copy of the protected data (if any)
-	assert(impl->local_data_size == datalen);
-	if(datalen)
-	  memcpy(impl->local_data, data, datalen);
+	assert((impl->local_data_size+sizeof(impl->remote_waiter_mask)) == datalen);
+        impl->remote_waiter_mask = *((const NodeMask*)data);
+        if (datalen > sizeof(impl->remote_waiter_mask))
+          memcpy(impl->local_data, ((const NodeMask*)data)+1, impl->local_data_size);
 
 	if(args.mode == 0) // take ownership if given exclusive access
 	  impl->owner = gasnet_mynode();
 	impl->mode = args.mode;
-	impl->remote_waiter_mask = args.remote_waiter_mask;
 	impl->requested = false;
 
 	bool any_local = impl->select_local_waiters(to_wake);
@@ -2147,11 +2186,12 @@ namespace LegionRuntime {
 
       int grant_target = -1;
       LockGrantArgs g_args;
+      NodeMask copy_waiters;
 
       do {
 	log_reservation(LEVEL_DEBUG, 
-            "release: reservation=%x count=%d mode=%d share=%lx wait=%lx",
-		 me.id, count, mode, remote_sharer_mask, remote_waiter_mask);
+            "release: reservation=%x count=%d mode=%d", // share=%lx wait=%lx",
+		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
 	assert(count > ZERO_COUNT);
@@ -2161,8 +2201,8 @@ namespace LegionRuntime {
 	count--;
 	log_reservation.spew("count -- [%p]=%d", &count, count);
 	log_reservation(LEVEL_DEBUG, 
-            "post-release: reservation=%x count=%d mode=%d share=%lx wait=%lx",
-		 me.id, count, mode, remote_sharer_mask, remote_waiter_mask);
+            "post-release: reservation=%x count=%d mode=%d", // share=%lx wait=%lx",
+		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
 	if(count > ZERO_COUNT) break;
 
 	// case 1: if we were sharing somebody else's lock, tell them we're
@@ -2182,22 +2222,22 @@ namespace LegionRuntime {
 	bool any_local = select_local_waiters(to_wake);
 	assert(!any_local || (to_wake.size() > 0));
 
-	if(!any_local && (remote_waiter_mask != 0)) {
+	if(!any_local && (!!remote_waiter_mask)) {
 	  // nobody local wants it, but another node does
-	  int new_owner = 0;
-	  while(((remote_waiter_mask >> new_owner) & 1) == 0) new_owner++;
+	  int new_owner = remote_waiter_mask.find_first_set();
+          remote_waiter_mask.unset_bit(new_owner);
 
 	  log_reservation(LEVEL_DEBUG, 
-              "reservation going to remote waiter: new=%d mask=%lx",
-		   new_owner, remote_waiter_mask);
+              "reservation going to remote waiter: new=%d", // mask=%lx",
+		   new_owner); //, remote_waiter_mask);
 
 	  g_args.lock = me;
 	  g_args.mode = 0; // TODO: figure out shared cases
-	  g_args.remote_waiter_mask = remote_waiter_mask & ~(1ULL << new_owner);
 	  grant_target = new_owner;
+          copy_waiters = remote_waiter_mask;
 
 	  owner = new_owner;
-	  remote_waiter_mask = 0;
+          remote_waiter_mask = NodeMask();
 	}
       } while(0);
 
@@ -2216,9 +2256,12 @@ namespace LegionRuntime {
 
       if(grant_target != -1)
       {
+        size_t payload_size = sizeof(copy_waiters) + local_data_size;
+        NodeMask *payload = (NodeMask*)malloc(payload_size);
+        *payload = copy_waiters;
+        memcpy(payload+1,local_data,local_data_size);
 	LockGrantMessage::request(grant_target, g_args,
-				  local_data, local_data_size,
-				  PAYLOAD_KEEP);
+                                  payload, payload_size, PAYLOAD_FREE);
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -2270,9 +2313,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("deferred lock: lock=%x after=%x/%d\n",
+	fprintf(f,"deferred lock: lock=%x after=%x/%d\n",
 	       lock.id, after_lock.id, after_lock.gen);
       }
 
@@ -2313,9 +2356,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("deferred unlock: lock=%x\n",
+	fprintf(f,"deferred unlock: lock=%x\n",
 	       lock.id);
       }
     protected:
@@ -2358,7 +2401,7 @@ namespace LegionRuntime {
 	assert(impl->count == 1 + Impl::ZERO_COUNT);
 	assert(impl->mode == Impl::MODE_EXCL);
 	assert(impl->local_waiters.size() == 0);
-	assert(impl->remote_waiter_mask == 0);
+        assert(!impl->remote_waiter_mask);
 	assert(!impl->in_use);
 
 	impl->in_use = true;
@@ -2418,7 +2461,7 @@ namespace LegionRuntime {
 	assert(count == 1 + ZERO_COUNT);
 	assert(mode == MODE_EXCL);
 	assert(local_waiters.size() == 0);
-	assert(remote_waiter_mask == 0);
+        assert(!remote_waiter_mask);
 	assert(in_use);
         // Mark that we no longer own our data
         if (own_local)
@@ -2448,9 +2491,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("deferred lock destruction: lock=%x\n", lock.id);
+	fprintf(f,"deferred lock destruction: lock=%x\n", lock.id);
       }
 
     protected:
@@ -2923,8 +2966,8 @@ namespace LegionRuntime {
 	    return;
 	  }
 	}
+        gasnet_hsl_unlock(&partial_remote_writes_lock);
       }
-      gasnet_hsl_unlock(&partial_remote_writes_lock);
     }
 
     typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
@@ -2985,8 +3028,8 @@ namespace LegionRuntime {
 	    return;
 	  }
 	}
+        gasnet_hsl_unlock(&partial_remote_writes_lock);
       }
-      gasnet_hsl_unlock(&partial_remote_writes_lock);
     }
 
     typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_MSGID,
@@ -3817,7 +3860,6 @@ namespace LegionRuntime {
 	  {
 	    log_task.info("thread %p notified for event %x/%d",
 			  thread, event.id, event.gen);
-	    triggered = true;
 
 	    // now take the thread's (really the processor's) lock and see if
 	    //  this thread is asleep on this event - if so, make him 
@@ -3838,14 +3880,16 @@ namespace LegionRuntime {
 		thread->proc->start_some_threads();
 	      }
 	    }
-
+            // This has to go last to avoid a race condition
+            // on deleting this object.
+	    triggered = true;
             // don't have caller delete us
             return false;
 	  }
 
-	  virtual void print_info(void)
+	  virtual void print_info(FILE *f)
 	  {
-	    printf("thread %p waiting on %x/%d\n",
+	    fprintf(f,"thread %p waiting on %x/%d\n",
 		   thread, event.id, event.gen);
 	  }
 
@@ -3999,10 +4043,11 @@ namespace LegionRuntime {
 
 	    log_task.info("thread %p (proc %x) done sleeping on event %x/%d",
 			  this, proc->me.id, wait_for.id, wait_for.gen);
+            // Have to do this while holding the lock
+            assert(event_stack == entry);
+            event_stack = entry->next;
 	  }
-
-	  assert(event_stack == entry);
-	  event_stack = entry->next;
+	  
 	  delete entry;
 	}
 
@@ -4226,9 +4271,9 @@ namespace LegionRuntime {
           return true;
 	}
 
-	virtual void print_info(void)
+	virtual void print_info(FILE *f)
 	{
-	  printf("deferred task: func=%d proc=%x finish=%x/%d\n",
+	  fprintf(f,"deferred task: func=%d proc=%x finish=%x/%d\n",
 		 task->func_id, task->proc->me.id, task->finish_event.id, task->finish_event.gen);
 	}
 
@@ -4538,9 +4583,9 @@ namespace LegionRuntime {
         return false;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("utility thread for processor %x: after=%x/%d\n", 
+	fprintf(f,"utility thread for processor %x: after=%x/%d\n", 
             proc->me.id, finish_event.id, finish_event.gen);
       }
 
@@ -4583,6 +4628,9 @@ namespace LegionRuntime {
 	proc_assignment->bind_thread(core_id, &attr, debug_name);
       CHECK_PTHREAD( pthread_create(&thread, &attr, &thread_entry, (void *)this) );
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+      Runtime::get_runtime()->add_thread(&thread);
+#endif
     }
 
     GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
@@ -4688,7 +4736,12 @@ namespace LegionRuntime {
 
       void sleep_on_event(Event wait_for, bool block = false)
       {
-	while(!wait_for.has_triggered()) {
+        Event::Impl *impl = Runtime::get_runtime()->get_event_impl(wait_for);
+        
+        while(!impl->has_triggered(wait_for.gen)) {
+#ifdef __SSE2__
+          _mm_pause();
+#endif
 	  log_util.spew("utility thread polling on event %x/%d",
 			wait_for.id, wait_for.gen);
 	  //usleep(1000);
@@ -5005,7 +5058,13 @@ namespace LegionRuntime {
 	//assert(0);
 	//printf("oh, good - we're a gpu thread - we'll spin for now\n");
 	//printf("waiting for %x/%d\n", id, gen);
-	while(!e->has_triggered(gen)) usleep(1000);
+	while(!e->has_triggered(gen)) {
+#ifdef __SSE2__
+          _mm_pause();
+#else
+          usleep(1000);
+#endif
+        }
 	//printf("done\n");
 	return;
       }
@@ -5131,6 +5190,7 @@ namespace LegionRuntime {
 
 	    unsigned oldsize = n->events.size();
 	    if(index >= oldsize) { // only it's still too small
+              assert((index+1) < MAX_LOCAL_EVENTS);
 	      n->events.resize(index + 1);
 	      for(unsigned i = oldsize; i <= index; i++)
 		n->events[i].init(ID(ID::ID_EVENT, id.node(), i).convert<Event>(),
@@ -5165,6 +5225,7 @@ namespace LegionRuntime {
 	    unsigned oldsize = n->locks.size();
 	    assert(oldsize < MAX_LOCAL_LOCKS);
 	    if(index >= oldsize) { // only it's still too small
+              assert((index+1) < MAX_LOCAL_LOCKS);
 	      n->locks.resize(index + 1);
 	      for(unsigned i = oldsize; i <= index; i++)
 		n->locks[i].init(ID(ID::ID_LOCK, id.node(), i).convert<Reservation>(),
@@ -5270,6 +5331,16 @@ namespace LegionRuntime {
 	  
       return mem->instances[id.index_l()];
     }
+
+#ifdef DEADLOCK_TRACE
+    void Runtime::add_thread(const pthread_t *thread)
+    {
+      unsigned idx = __sync_fetch_and_add(&next_thread,1);
+      assert(idx < MAX_NUM_THREADS);
+      all_threads[idx] = *thread;
+      thread_counts[idx] = 0;
+    }
+#endif
 
     ///////////////////////////////////////////////////
     // RegionMetaData
@@ -5542,9 +5613,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-        printf("deferred instance destruction\n");
+        fprintf(f,"deferred instance destruction\n");
       }
     protected:
       RegionInstance::Impl *impl;
@@ -6824,6 +6895,9 @@ namespace LegionRuntime {
 	  proc_assignment->bind_thread(core_id, &attr, debug_name);
 	CHECK_PTHREAD( pthread_create(&thread, &attr, &thread_main, (void *)this) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+        Runtime::get_runtime()->add_thread(&thread);
+#endif
       }
 
     protected:
@@ -7304,6 +7378,52 @@ namespace LegionRuntime {
       }
     }
 
+#ifdef DEADLOCK_TRACE
+    void sigterm_catch(int signal) {
+      assert(signal == SIGTERM);
+      Runtime *rt = Runtime::get_runtime();
+      // Send sig aborts to all the threads
+      for (unsigned idx = 0; idx < rt->next_thread; idx++)
+        pthread_kill(rt->all_threads[idx], SIGABRT);
+    }
+
+    void sigabrt_catch(int signal) {
+      assert(signal == SIGABRT);
+      // Figure out which index we are, then see if this is
+      // the first time we should dumb ourselves
+      pthread_t self = pthread_self();
+      Runtime *rt = Runtime::get_runtime();
+      int index = -1;
+      for (int i = 0; i < rt->next_thread; i++)
+      {
+        if (rt->all_threads[i] == self)
+        {
+          index = i;
+          break;
+        }
+      }
+      int count = -1;
+      if (index >= 0)
+        count = __sync_fetch_and_add(&rt->thread_counts[index],1);
+      if (count == 0)
+      {
+        void *bt[256];
+        int bt_size = backtrace(bt, 256);
+        char **bt_syms = backtrace_symbols(bt, bt_size);
+        size_t buffer_size = 1;
+        for (int i = 0; i < bt_size; i++)
+          buffer_size += (strlen(bt_syms[i]) + 1);
+        char *buffer = (char*)malloc(buffer_size);
+        int offset = 0;
+        for (int i = 0; i < bt_size; i++)
+          offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+        fprintf(stderr,"BACTRACE on node %d\n----------\n%s\n----------\n", 
+                gasnet_mynode(), buffer);
+        free(buffer);
+      }
+    }
+#endif
+
     ProcessorAssignment *proc_assignment = 0;
 
     Machine::Machine(int *argc, char ***argv,
@@ -7504,6 +7624,11 @@ namespace LegionRuntime {
 
       Runtime *r = Runtime::runtime = new Runtime;
       r->nodes = new Node[gasnet_nodes()];
+#ifdef DEADLOCK_TRACE
+      r->next_thread = 0;
+      signal(SIGTERM, sigterm_catch);
+      signal(SIGABRT, sigabrt_catch);
+#endif
       
       start_polling_threads(active_msg_worker_threads);
 
@@ -8020,6 +8145,10 @@ namespace LegionRuntime {
 	CHECK_PTHREAD( pthread_create(threadp, &attr, &background_run_thread, (void *)margs) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
         background_pthread = threadp;
+#ifdef DEADLOCK_TRACE
+        Runtime *rt = Runtime::get_runtime();
+        rt->add_thread(threadp); 
+#endif
 	return;
       }
 
@@ -8133,7 +8262,13 @@ namespace LegionRuntime {
     fl.l_whence = SEEK_SET;
     fl.l_start = 0;
     fl.l_len = 0;
-    while (fcntl(get_log_file(), F_SETLK, &fl) == -1) { }
+    while (fcntl(get_log_file(), F_SETLK, &fl) == -1) { 
+#ifdef __SSE2__
+      _mm_pause();
+#else
+      usleep(1000);
+#endif
+    }
     // Flush the buffer
     assert(write(get_log_file(), get_logging_buffer(), *get_logging_location()) >= 0);
     //assert(lockf(get_log_file(), F_ULOCK, logging_buffer_size) == 0);
@@ -8184,6 +8319,11 @@ namespace LegionRuntime {
           fl.l_len = 0;
           while (fcntl(get_log_file(), F_SETLK, &fl) == -1) 
           { 
+#ifdef __SSE2__
+            _mm_pause();
+#else
+            usleep(1000);
+#endif
 #if 0
             struct flock owner; 
             owner.l_type = F_WRLCK;

@@ -966,7 +966,7 @@ namespace LegionRuntime {
       // Reductions don't need any update fields
       if (IS_REDUCE(req))
       {
-        return MappingRef(ref.get_handle(), FieldMask());
+        return MappingRef(ref.get_handle().get_view(), FieldMask());
       }
       RegionNode *target_node = get_node(req.region);
       FieldMask user_mask = 
@@ -981,7 +981,7 @@ namespace LegionRuntime {
       InstanceView *view = ref.get_handle().get_view()->as_instance_view();
       FieldMask needed_mask;
       target_node->remap_region(ctx.get_id(), view, user_mask, needed_mask);
-      return MappingRef(ref.get_handle(), needed_mask);
+      return MappingRef(view, needed_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -1014,12 +1014,8 @@ namespace LegionRuntime {
       // Construct the user
       PhysicalUser user(RegionUsage(req), user_mask, term_event);
       PhysicalView *view = ref.get_view();
-      // We also need to hold a valid reference on the view while
-      // we do the registration that we can then release immediately after
-      view->add_valid_reference();
       InstanceRef result = child_node->register_region(&info, user, 
                                                        view, ref.get_mask());
-      view->remove_valid_reference();
 #ifdef DEBUG_HIGH_LEVEL 
       RegionTreeNode *start_node = child_node;
       for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
@@ -2247,14 +2243,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::register_physical_view(PhysicalView *view)
+    void RegionTreeForest::register_physical_view(DistributedID did,
+                                                  PhysicalView *view)
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(distributed_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(views.find(view->did) == views.end()); 
+      assert(views.find(did) == views.end()); 
 #endif
-      views[view->did] = view;
+      views[did] = view;
     }
 
     //--------------------------------------------------------------------------
@@ -3796,6 +3793,120 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    TreeCloseImpl::TreeCloseImpl(int c, const FieldMask &m, bool o, bool a)
+      : Collectable(), target_child(c), leave_open(o), allow_next(a), 
+        remaining_logical(m), remaining_physical(m),
+        tree_reservation(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TreeCloseImpl::TreeCloseImpl(const TreeCloseImpl &rhs)
+      : Collectable(), target_child(-1), leave_open(false), allow_next(false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TreeCloseImpl::~TreeCloseImpl(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(tree_reservation.exists());
+#endif
+      tree_reservation.destroy_reservation();
+      tree_reservation = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    TreeCloseImpl& TreeCloseImpl::operator=(const TreeCloseImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TreeCloseImpl::add_close_op(const FieldMask &close_mask,
+                                     std::deque<CloseInfo> &needed_ops)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(tree_reservation);
+      FieldMask overlap = close_mask & remaining_physical;
+      if (!!overlap)
+      {
+        needed_ops.push_back(CloseInfo(target_child, overlap,
+                                       leave_open, allow_next));
+        remaining_physical -= overlap;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    TreeClose::TreeClose(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TreeClose::TreeClose(TreeCloseImpl *op)
+      : impl(op)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    TreeClose::TreeClose(const TreeClose &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    TreeClose::~TreeClose(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    TreeClose& TreeClose::operator=(const TreeClose &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TreeClose::add_close_op(const FieldMask &close_mask,
+                                 std::deque<CloseInfo> &needed_ops)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      impl->add_close_op(close_mask, needed_ops);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Users and Info 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(void)
       : GenericUser(), op(NULL), idx(0), gen(0), timeout(TIMEOUT)
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
@@ -4514,7 +4625,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Check to see if we have any close operations to perform
-      const std::deque<CloseInfo> &close_ops = path.get_close_operations(depth);
+      std::deque<CloseInfo> close_ops;
+      path.get_close_operations(depth, close_ops);
       if (!close_ops.empty())
       {
         PhysicalCloser closer(info, false/*leave open*/, closing_handle);  
@@ -4808,26 +4920,33 @@ namespace LegionRuntime {
       // instance.  If it did, then re-run the computation to get the list
       // of valid instances with the right set of fields
       std::set<FieldID> new_fields = info->req.privilege_fields;
-      if (!additional_fields.empty())
       {
         PhysicalState &state = 
           node->acquire_physical_state(info->ctx, false/*exclusive*/);
-        new_fields.insert(additional_fields.begin(),
-                             additional_fields.end());
-        FieldMask additional_mask = 
-          node->column_source->get_field_mask(new_fields);
-        node->find_valid_instance_views(state, additional_mask,
-                                        additional_mask, true/*space*/,
-                                        valid_instances);
-        node->release_physical_state(state);
-      }
-      else
-      {
-        PhysicalState &state = 
-          node->acquire_physical_state(info->ctx, false/*exclusive*/);
-        node->find_valid_instance_views(state, user_mask,
-                                        user_mask, true/*space*/,
-                                        valid_instances);
+        if (!additional_fields.empty())
+        {
+          new_fields.insert(additional_fields.begin(),
+                               additional_fields.end());
+          FieldMask additional_mask = 
+            node->column_source->get_field_mask(new_fields);
+          node->find_valid_instance_views(state, additional_mask,
+                                          additional_mask, true/*space*/,
+                                          valid_instances);
+        }
+        else
+        {
+          node->find_valid_instance_views(state, user_mask,
+                                          user_mask, true/*space*/,
+                                          valid_instances);
+        }
+        // Add valid references to all the instances before releasing
+        // the physical state to keep them from being collected while
+        // doing the following analysis
+        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          it->first->add_valid_reference();
+        }
         node->release_physical_state(state);
       }
       // Compute the set of valid memories and filter out instance which
@@ -4855,6 +4974,9 @@ namespace LegionRuntime {
         for (std::vector<InstanceView*>::const_iterator it = to_erase.begin();
               it != to_erase.end(); it++)
         {
+          // Before deleting anything, remove valid references
+          if ((*it)->remove_valid_reference())
+            delete (*it);
           valid_instances.erase(*it);  
         }
         to_erase.clear();
@@ -4961,11 +5083,18 @@ namespace LegionRuntime {
       // Save our chosen instance if it exists in the mapping
       // reference and then return if we have an instance
       if (chosen_inst != NULL)
+        result = MappingRef(chosen_inst, needed_fields);
+      // Remove any valid references we are still holding
+      // This has to go after we create the mapping reference to 
+      // guarantee we hold a valid reference to the chosen instance
+      // at all times
+      for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
       {
-        result = MappingRef(ViewHandle(chosen_inst), needed_fields);
-        return true;
+        if (it->first->remove_valid_reference())
+          delete it->first;
       }
-      return false;
+      return (chosen_inst != NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -5007,6 +5136,13 @@ namespace LegionRuntime {
         PhysicalState &state = 
           node->acquire_physical_state(info->ctx, false/*exclusive*/);
         node->find_valid_reduction_views(state, user_mask, valid_views);
+        // Add valid references on all of these instances to keep
+        // them from being collected
+        for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
+              it != valid_views.end(); it++)
+        {
+          (*it)->add_valid_reference();
+        }
         node->release_physical_state(state);
       }
 
@@ -5057,11 +5193,14 @@ namespace LegionRuntime {
         }
       }
       if (chosen_inst != NULL)
+        result = MappingRef(chosen_inst,FieldMask());
+      // Remove our valid references before we return
+      for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
       {
-        result = MappingRef(ViewHandle(chosen_inst),FieldMask());
-        return true;
+        (*it)->remove_valid_reference();
       }
-      return false;
+      return (chosen_inst != NULL);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7152,10 +7291,9 @@ namespace LegionRuntime {
         RegionTreeNode *child_node = get_tree_child(it->first);
         child_node->close_logical_node(closer, close_mask);
         if (record_close_operations)
-          closer.close_operations.push_back(CloseInfo(it->first,
-                                                      close_mask, 
-                                                      permit_leave_open,
-                                                      allow_next_child));
+          closer.close_operations.push_back(TreeClose(
+                new TreeCloseImpl(it->first, close_mask,
+                                  permit_leave_open, allow_next_child)));
         // Remove the close fields
         it->second -= close_mask;
         if (!it->second)
@@ -7260,14 +7398,14 @@ namespace LegionRuntime {
                                                  unsigned depth)
     //--------------------------------------------------------------------------
     {
-      for (std::map<Color,std::list<CloseInfo> >::const_iterator cit = 
+      for (std::map<Color,std::list<TreeClose> >::const_iterator cit = 
             state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
       {
-        for (std::list<CloseInfo>::const_iterator it = cit->second.begin();
+        for (std::list<TreeClose>::const_iterator it = cit->second.begin();
               it != cit->second.end(); it++)
         {
-          FieldMask close_mask = it->close_mask & field_mask;
+          FieldMask close_mask = it->get_logical_mask() & field_mask;
           if (!!close_mask)
             path.record_close_operation(depth, *it, close_mask);
         }
@@ -7276,43 +7414,42 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::update_close_operations(LogicalState &state,
-                                   const std::deque<CloseInfo> &new_close_infos)
+                                   const std::deque<TreeClose> &new_close_infos)
     //--------------------------------------------------------------------------
     {
-      for (std::deque<CloseInfo>::const_iterator cit = new_close_infos.begin();
+      // Build a mask for each child of close operations that need to pruned
+      std::map<Color,FieldMask> to_prune;
+      for (std::deque<TreeClose>::const_iterator cit = new_close_infos.begin();
             cit != new_close_infos.end(); cit++)
       {
-        // Find the child that this close is targeting 
-        std::list<CloseInfo> &child_list = 
-                                      state.close_operations[cit->target_child];
-        bool added = false;
-        // Iterate over the list and see if we can merge it with anything
-        // If it conflicts, remove any overlapping fields
-        for (std::list<CloseInfo>::iterator it = child_list.begin();
+        Color child = cit->get_child();
+        std::map<Color,FieldMask>::iterator finder = to_prune.find(child);
+        if (finder == to_prune.end())
+          to_prune[child] = cit->get_logical_mask();
+        else
+          finder->second |= cit->get_logical_mask();
+      }
+      // Prune out all the old close operations which are no longer relevant
+      for (std::map<Color,FieldMask>::const_iterator pit = to_prune.begin();
+            pit != to_prune.end(); pit++)
+      {
+        std::list<TreeClose> &child_list = state.close_operations[pit->first];
+        for (std::list<TreeClose>::iterator it = child_list.begin();
               it != child_list.end(); /*nothing*/)
         {
-          if ((it->leave_open == cit->leave_open) && 
-              (it->allow_next == cit->allow_next))
-          {
-            // They agree, merge them and mark that we added it
-            it->close_mask |= cit->close_mask;
-            added = true;
-            it++;
-          }
+          FieldMask &mask = it->get_logical_mask();
+          mask -= pit->second;
+          if (!mask)
+            it = child_list.erase(it);
           else
-          {
-            // Remove any overlapping fields and see if we need
-            // to remove the old version
-            it->close_mask -= cit->close_mask;
-            if (!it->close_mask)
-              it = child_list.erase(it);
-            else
-              it++;
-          }
+            it++;
         }
-        // If we didn't succeed in adding it, do that now
-        if (!added)
-          child_list.push_back(*cit);
+      }
+      // Now add in our child references
+      for (std::deque<TreeClose>::const_iterator cit = new_close_infos.begin();
+            cit != new_close_infos.end(); cit++)
+      {
+        state.close_operations[cit->get_child()].push_back(*cit);
       }
     }
 
@@ -7428,15 +7565,16 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
-      for (std::map<Color,std::list<CloseInfo> >::iterator cit = 
+      for (std::map<Color,std::list<TreeClose> >::iterator cit = 
             state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
       {
-        for (std::list<CloseInfo>::iterator it = cit->second.begin();
+        for (std::list<TreeClose>::iterator it = cit->second.begin();
               it != cit->second.end(); /*nothing*/)
         {
-          it->close_mask -= field_mask;
-          if (!it->close_mask)
+          FieldMask &mask = it->get_logical_mask();
+          mask -= field_mask;
+          if (!mask)
             it = cit->second.erase(it);
           else
             it++;
@@ -10801,7 +10939,7 @@ namespace LegionRuntime {
       path.resize(max_depth+1);
       for (unsigned idx = 0; idx < path.size(); idx++)
         path[idx] = -1;
-      close_operations.resize(max_depth+1);
+      close_ops.resize(max_depth+1);
     }
 
     //--------------------------------------------------------------------------
@@ -10847,7 +10985,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreePath::record_close_operation(unsigned depth,
-                                                const CloseInfo &info,
+                                                const TreeClose &info,
                                                 const FieldMask &close_mask)
     //--------------------------------------------------------------------------
     {
@@ -10855,8 +10993,8 @@ namespace LegionRuntime {
       assert(min_depth <= depth);
       assert(depth <= max_depth);
 #endif     
-      close_operations[depth].push_back(info);
-      close_operations[depth].back().close_mask = close_mask;
+      close_ops[depth].push_back(
+          std::pair<TreeClose,FieldMask>(info, close_mask));
     }
 
     //--------------------------------------------------------------------------
@@ -10884,15 +11022,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::deque<CloseInfo>& RegionTreePath::
-                                      get_close_operations(unsigned depth) const
+    void RegionTreePath::get_close_operations(unsigned depth,
+                                        std::deque<CloseInfo> &needed_ops)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(min_depth <= depth);
       assert(depth <= max_depth);
 #endif     
-      return close_operations[depth];
+      std::deque<std::pair<TreeClose,FieldMask> > &ops = close_ops[depth];
+      for (std::deque<std::pair<TreeClose,FieldMask> >::iterator it = 
+            ops.begin(); it != ops.end(); it++)
+      {
+        it->first.add_close_op(it->second, needed_ops);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -10969,7 +11112,7 @@ namespace LegionRuntime {
       : PhysicalManager(ctx, did, owner_space, local_space, mem, inst), 
         region_node(node), allocated_fields(mask), blocking_factor(bf), 
         use_event(u_event), field_infos(infos), field_indexes(indexes), 
-        recycled(false), depth(dep)
+        depth(dep), recycled(false), reclaimable(true)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -11079,6 +11222,15 @@ namespace LegionRuntime {
     {
       if (owner)
       {
+        // Always call this up front to see if we need to reclaim the
+        // physical instance from the runtime because we recycled it.
+        // Note we can do this here and not worry about a race with
+        // notify_invalid because we are guaranteed they are called
+        // sequentially by the state machine in the distributed
+        // collectable implementation.
+        bool reclaimed = context->runtime->reclaim_physical_instance(this);
+        // Now tell the runtime that this instance will no longer exist
+        context->runtime->free_physical_instance(this);
         AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
@@ -11088,7 +11240,7 @@ namespace LegionRuntime {
         // trying to recycle it, see if someone else has claimed it.
         // If not then take it back and delete it now to reclaim
         // the memory.
-        if (!recycled || context->runtime->reclaim_physical_instance(this))
+        if (!recycled || reclaimed)
         {
           // If either of these conditions were true, then we
           // should actually delete the physical instance.
@@ -11102,9 +11254,7 @@ namespace LegionRuntime {
           instance.destroy(use_event);
 #endif
         }
-
-        // Tell the runtime that this instance no longer exists
-        context->runtime->free_physical_instance(this);
+        // Mark that this instance has been garbage collected
         instance = PhysicalInstance::NO_INST;
       }
     }
@@ -11131,30 +11281,76 @@ namespace LegionRuntime {
       // we're done using this physical instance.
       if (owner)
       {
+        // Tell the runtime this instance is available for recycling
+        // Note that doing this relies on the guarantee that notify_invalid
+        // will always be called before garbage_collect, ensuring that
+        // the instance is still valid.  This property is guaranteed by
+        // the state machine in the distributed collectable implementation.
+        context->runtime->recycle_physical_instance(this);
         AutoLock gc(gc_lock);
-        if (instance.exists() && (remote_references.empty()))
-        {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!recycled);
+        assert(instance.exists());
+        assert(!recycled);
 #endif
-          // Mark that we are recycling this instance
-          recycled = true;
-          // Accumulate the set of events representing people still
-          // using the instance and mark that we can reuse it once
-          // they are all done.
-          std::set<Event> recycle_events;
-          recycle_events.insert(use_event);
-          for (std::set<InstanceView*>::const_iterator it = valid_views.begin();
-                it != valid_views.end(); it++)
-          {
-            (*it)->accumulate_events(recycle_events); 
-          }
-          Event recycle_event = Event::merge_events(recycle_events);
-          // Tell the runtime to recylce this instance and give it the
-          // necessary information to reuse it.
-          context->runtime->recycle_physical_instance(this, recycle_event);
-        }
+        // Mark that we are recycling this instance
+        recycled = true;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    Event InstanceManager::get_recycle_event(void)
+    //--------------------------------------------------------------------------
+    {
+      // It's not possible for us to hold our lock while calling back
+      // into our views without risking deadlock, so make a copy of our
+      // valid views and add a resource reference to prevent them from
+      // being deleted while we are doing this.
+      std::set<InstanceView*> copy_views;
+      {
+        AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(reclaimable);
+#endif
+        // Mark that the valid views are no longer reclaimable 
+        reclaimable = false;
+        copy_views = valid_views;
+      }
+      // Now do our operation, as we finish with each view we
+      // can remove the resource reference that we are holding on it.
+      // We accumulate the set of events representing all the users
+      // still actively using the region from the given level. The
+      // region can be recycled once they are all done using it.
+      std::set<Event> recycle_events;
+      recycle_events.insert(use_event);
+      for (std::set<InstanceView*>::const_iterator it = copy_views.begin();
+            it != copy_views.end(); it++)
+      {
+        (*it)->accumulate_events(recycle_events);
+      }
+      // Now that we are done accessing views, we can mark them
+      // reclaimable again, and then reclaim any that were pending
+      std::vector<InstanceView*> rec_views;
+      {
+        AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!reclaimable);
+#endif
+        rec_views = reclaim_views;
+        // We're promising to do the reclaims here so we can 
+        // clear out the views indicating they will be done
+        reclaim_views.clear();
+        reclaimable = true;
+      }
+      // Remove any references for reclaim views
+      for (std::vector<InstanceView*>::const_iterator it = rec_views.begin();
+            it != rec_views.end(); it++)
+      {
+        if ((*it)->remove_resource_reference())
+          delete (*it);
+      }
+      // Compute the recycle event
+      Event recycle_event = Event::merge_events(recycle_events);
+      return recycle_event;
     }
 
     //--------------------------------------------------------------------------
@@ -11252,7 +11448,7 @@ namespace LegionRuntime {
         // Now send the message
         context->runtime->send_instance_manager(target, rez);
       }
-      // Otherwise there is nothing to since we
+      // Otherwise there is nothing to do since we
       // have already been sent
       return did;
     }
@@ -11358,6 +11554,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->depth == depth);
 #endif
+      // Add a resource reference so it can't be deleted
+      view->add_resource_reference();
       AutoLock gc(gc_lock);
       valid_views.insert(view);
     }
@@ -11369,8 +11567,20 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->depth == depth);
 #endif
-      AutoLock gc(gc_lock);
-      valid_views.erase(view);
+      bool reclaim = false;
+      {
+        AutoLock gc(gc_lock);
+        valid_views.erase(view);
+        // See if we can actually do the reclaim, or we are
+        // going to defer this until later
+        if (reclaimable)
+          reclaim = true;
+        else
+          reclaim_views.push_back(view);
+      }
+      // Then remove our resource reference
+      if (reclaim && view->remove_resource_reference())
+        delete view;
     }
 
     //--------------------------------------------------------------------------
@@ -11476,6 +11686,7 @@ namespace LegionRuntime {
     {
       if (owner)
       {
+        context->runtime->free_physical_instance(this);
         AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
@@ -11489,7 +11700,6 @@ namespace LegionRuntime {
 #ifndef DISABLE_GC
         instance.destroy();
 #endif
-        context->runtime->free_physical_instance(this);
         instance = PhysicalInstance::NO_INST;
       }
     }
@@ -11891,7 +12101,7 @@ namespace LegionRuntime {
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
-      context->register_physical_view(this);
+      context->register_physical_view(did, this);
     }
 
     //--------------------------------------------------------------------------
@@ -12088,9 +12298,13 @@ namespace LegionRuntime {
       if (parent == NULL && (owner_did == did))
         inst_lock.destroy_reservation();
       inst_lock = Reservation::NO_RESERVATION;
-      // Tell our manager that we are no longer valid
-      if (depth == manager->depth)
-        manager->remove_valid_view(this);
+      // Release any aliased distributed IDs we have as well
+      for (std::set<DistributedID>::const_iterator it = aliases.begin();
+            it != aliases.end(); it++)
+      {
+        context->unregister_physical_view(*it);
+        context->runtime->unregister_hierarchical_collectable(*it);
+      }
       // Remove our references to the manager
       if (manager->remove_resource_reference())
         delete manager;
@@ -12134,33 +12348,86 @@ namespace LegionRuntime {
     InstanceView* InstanceView::get_subview(Color c)
     //--------------------------------------------------------------------------
     {
-      AutoLock v_lock(view_lock);
-      std::map<Color,InstanceView*>::const_iterator finder = children.find(c);
-      if (finder != children.end())
-        return finder->second;
+      // This is the common case
+      {
+        AutoLock v_lock(view_lock);
+        std::map<Color,InstanceView*>::const_iterator finder = children.find(c);
+        if (finder != children.end())
+          return finder->second;
+      }
       DistributedID child_did = 
         context->runtime->get_available_distributed_id();
+      DistributedID child_own_did = child_did;
+      // See if the parent is remote, if it is then we need to also
+      // be remote so we can send back information to the corresponding view
+      if (did != owner_did)
+        child_own_did = context->runtime->get_available_distributed_id();
       RegionTreeNode *child_node = logical_node->get_tree_child(c);
       InstanceView *child_view = new InstanceView(context, child_did, 
-                                context->runtime->address_space, child_did, 
+                                context->runtime->address_space, child_own_did, 
                                 child_node, manager, this, depth);
-      // Now add a resource reference on the child
       child_view->add_resource_reference();
-      // Put it in the map and return
-      children[c] = child_view;
+      // Retake the lock and try and add it, see if 
+      // someone else added in the meantime
+      {
+        AutoLock v_lock(view_lock);
+        std::map<Color,InstanceView*>::const_iterator finder = children.find(c);
+        if (finder != children.end())
+        {
+          delete child_view;
+          if (child_own_did != child_did)
+            context->runtime->free_distributed_id(child_own_did);
+          return finder->second;
+        }
+        children[c] = child_view;
+      }
+      // If we are remote add a remote subscriber to the view on the owner node
+      if (child_did != child_own_did)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(owner_did);
+          rez.serialize(c);
+          rez.serialize(child_own_did);
+          rez.serialize(child_did);
+        }
+        // Add a held remote reference
+        child_view->add_held_remote_reference();
+        // Now notify the owner view it has a remote subscriber
+        context->runtime->send_subscriber(owner_addr, rez);
+      }
       return child_view;
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::add_subview(InstanceView *view, Color c)
+    bool InstanceView::add_subview(InstanceView *view, Color c)
     //--------------------------------------------------------------------------
     {
+      bool added = true;
+      {
+        AutoLock v_lock(view_lock);
+        if (children.find(c) == children.end())
+          children[c] = view;
+        else
+          added = false;
+      }
+      if (added)
+        view->add_resource_reference();
+      return added;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::add_alias_did(DistributedID alias)
+    //--------------------------------------------------------------------------
+    {
+      context->runtime->register_hierarchical_collectable(alias, this); 
+      context->register_physical_view(alias, this);
       AutoLock v_lock(view_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(children.find(c) == children.end());
+      assert(aliases.find(alias) == aliases.end());
 #endif
-      view->add_resource_reference();
-      children[c] = view;
+      aliases.insert(alias);
     }
 
     //--------------------------------------------------------------------------
@@ -12395,8 +12662,8 @@ namespace LegionRuntime {
     {
       if (depth == manager->depth)
       {
-        manager->add_valid_view(this);
         manager->add_valid_reference();
+        manager->add_valid_view(this);
       }
     }
 
@@ -12405,7 +12672,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (depth == manager->depth)
-        manager->remove_valid_reference();
+      {
+        manager->remove_valid_view(this);
+        if (manager->remove_valid_reference())
+          delete manager;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13463,7 +13734,13 @@ namespace LegionRuntime {
         RegionTreeNode *node = parent->logical_node->get_tree_child(view_color);
         result = new InstanceView(context, did, owner_addr, owner_did,
                                   node, manager, parent, depth);
-        parent->add_subview(result, view_color);
+        if (!parent->add_subview(result, view_color))
+        {
+          // The view already existed so add an alias
+          delete result;
+          result = parent->get_subview(view_color);
+          result->add_alias_did(did);
+        }
       }
       else
       {
@@ -13522,7 +13799,13 @@ namespace LegionRuntime {
         result = new InstanceView(context, did, 
                                   context->runtime->address_space, did,
                                   node, manager, parent, depth);
-        parent->add_subview(result, view_color);
+        if (!parent->add_subview(result, view_color))
+        {
+          // The view already existed, so create an alias
+          delete result;
+          result = parent->get_subview(view_color);
+          result->add_alias_did(did);
+        }
       }
       else
       {
@@ -13532,10 +13815,43 @@ namespace LegionRuntime {
       }
       // Add the sender as a subscriber
       result->add_subscriber(sender_addr, sender_did);
-      // Add a remote reference held by the person who sent this back
+      // Add a remote reference held by the view that sent this back
       result->add_remote_reference();
       // Unpack the rest of the state
       result->unpack_instance_view(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_send_subscriber(
+                                RegionTreeForest *context, Deserializer &derez,
+                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID parent_did;
+      derez.deserialize(parent_did);
+      Color child_color;
+      derez.deserialize(child_color);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedID remote_did;
+      derez.deserialize(remote_did);
+      // First get the subview on this node
+      InstanceView *parent_view = 
+        context->find_view(parent_did)->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent_view != NULL);
+#endif
+      InstanceView *child_view = parent_view->get_subview(child_color);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(child_view != NULL);
+#endif
+      // Add the alias first for anyone who is coming later
+      child_view->add_alias_did(did);
+      // Then add the remote subscriber
+      child_view->add_subscriber(source, remote_did);
+      // Add a remote reference held by the view that sent this back
+      child_view->add_remote_reference();
     }
 
     /////////////////////////////////////////////////////////////
@@ -14238,16 +14554,49 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappingRef::MappingRef(void)
-      : handle(ViewHandle()), needed_fields(FieldMask())
+      : view(NULL), needed_fields(FieldMask())
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MappingRef::MappingRef(const ViewHandle &h, const FieldMask &needed)
-      : handle(h), needed_fields(needed)
+    MappingRef::MappingRef(PhysicalView *v, const FieldMask &needed)
+      : view(v), needed_fields(needed)
     //--------------------------------------------------------------------------
     {
+      if (view != NULL)
+        view->add_valid_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    MappingRef::MappingRef(const MappingRef &rhs)
+      : view(rhs.view), needed_fields(rhs.needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (view != NULL)
+        view->add_valid_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    MappingRef::~MappingRef(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((view != NULL) && view->remove_valid_reference())
+        delete view;
+      view = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    MappingRef& MappingRef::operator=(const MappingRef &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((view != NULL) && view->remove_valid_reference())
+        delete view;
+      view = rhs.view;
+      needed_fields = rhs.needed_fields;
+      if (view != NULL)
+        view->add_valid_reference();
+      return *this;
     }
 
     /////////////////////////////////////////////////////////////

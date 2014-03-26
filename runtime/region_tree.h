@@ -304,7 +304,7 @@ namespace LegionRuntime {
     public:
       void register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(DistributedID did);
-      void register_physical_view(PhysicalView *view);
+      void register_physical_view(DistributedID did, PhysicalView *view);
       void unregister_physical_view(DistributedID did);
     public:
       bool has_manager(DistributedID did) const;
@@ -678,6 +678,61 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class TreeCloseImpl
+     * The base class for storing information about close
+     * operations that need to be performed.
+     */
+    class TreeCloseImpl : public Collectable {
+    public:
+      TreeCloseImpl(int child, const FieldMask &m, bool open, bool allow);
+      TreeCloseImpl(const TreeCloseImpl &rhs);
+      ~TreeCloseImpl(void);
+    public:
+      TreeCloseImpl& operator=(const TreeCloseImpl &rhs);
+    public:
+      void add_close_op(const FieldMask &close_mask,
+                        std::deque<CloseInfo> &needed_ops);
+    public:
+      const int target_child;
+      const bool leave_open;
+      const bool allow_next;
+      // expose this one publicly since we know that all
+      // accesses to it will be serialized by the dependence
+      // analysis process
+      FieldMask remaining_logical;
+    private:
+      FieldMask remaining_physical;
+      Reservation tree_reservation;
+    };
+
+    /**
+     * \class TreeClose
+     * A handle to a close operation that is supports reference
+     * counting for knowing when it is safe to delete close
+     * operations.
+     */
+    class TreeClose {
+    public:
+      TreeClose(void);
+      TreeClose(TreeCloseImpl *op);
+      TreeClose(const TreeClose &rhs);
+      ~TreeClose(void);
+    public:
+      TreeClose& operator=(const TreeClose &rhs);
+    public:
+      inline int get_child(void) const { return impl->target_child; }
+      inline bool get_leave_open(void) const { return impl->leave_open; }
+      inline bool get_allow_next(void) const { return impl->allow_next; }
+      inline FieldMask& get_logical_mask(void) const 
+      { return impl->remaining_logical; }
+    public:
+      void add_close_op(const FieldMask &close_mask,
+                        std::deque<CloseInfo> &needed_ops);
+    private:
+      TreeCloseImpl *impl;
+    };
+
+    /**
      * \struct MappableInfo
      */
     struct MappableInfo {
@@ -754,7 +809,7 @@ namespace LegionRuntime {
       FieldTree<LogicalUser> *curr_epoch_users;
       FieldTree<LogicalUser> *prev_epoch_users;
 #endif
-      std::map<Color,std::list<CloseInfo> > close_operations;
+      std::map<Color,std::list<TreeClose> > close_operations;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask user_level_coherence;
@@ -857,7 +912,7 @@ namespace LegionRuntime {
       // All the fields that we close for this traversal
       FieldMask closed_mask;
       std::deque<LogicalUser> closed_users;
-      std::deque<CloseInfo> close_operations;
+      std::deque<TreeClose> close_operations;
 #ifdef LOGICAL_FIELD_TREE
     public:
       bool current;
@@ -1181,7 +1236,7 @@ namespace LegionRuntime {
       void record_close_operations(LogicalState &state, RegionTreePath &path,
                                   const FieldMask &field_mask, unsigned depth);
       void update_close_operations(LogicalState &state, 
-                                   const std::deque<CloseInfo> &close_ops);
+                                   const std::deque<TreeClose> &close_ops);
       void advance_field_versions(LogicalState &state, const FieldMask &mask);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
@@ -1547,17 +1602,18 @@ namespace LegionRuntime {
       Color get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
     public:
-      void record_close_operation(unsigned depth, const CloseInfo &info,
+      void record_close_operation(unsigned depth, const TreeClose &info,
                                   const FieldMask &close_mask);
       void record_before_version(unsigned depth, VersionID vid,
                                  const FieldMask &version_mask);
       void record_after_version(unsigned depth, VersionID vid,
                                 const FieldMask &version_mask);
     public:
-      const std::deque<CloseInfo>& get_close_operations(unsigned depth) const;
+      void get_close_operations(unsigned depth,
+                                std::deque<CloseInfo> &needed_ops);
     protected:
       std::vector<int> path;
-      std::vector<std::deque<CloseInfo> > close_operations;
+      std::vector<std::deque<std::pair<TreeClose,FieldMask> > > close_ops;
       unsigned min_depth;
       unsigned max_depth;
     };
@@ -1955,6 +2011,7 @@ namespace LegionRuntime {
       virtual void notify_invalid(void);
     public:
       inline Event get_use_event(void) const { return use_event; }
+      Event get_recycle_event(void);
     public:
       InstanceView* create_top_view(unsigned depth);
       void compute_copy_offsets(const FieldMask &copy_mask,
@@ -1996,8 +2053,13 @@ namespace LegionRuntime {
     protected:
       // Keep track of whether we've recycled this instance or not
       bool recycled;
+      // To avoid deadlock keep track of when the valid views are mutable
+      bool reclaimable;
       // Keep a set of the views we need to see when recycling
       std::set<InstanceView*> valid_views;
+      // A vector of instance views to reclaim when done running
+      // things become reclaimable again
+      std::vector<InstanceView*> reclaim_views;
     };
 
     /**
@@ -2200,7 +2262,8 @@ namespace LegionRuntime {
       Memory get_location(void) const;
       size_t get_blocking_factor(void) const;
       InstanceView* get_subview(Color c);
-      void add_subview(InstanceView *view, Color c);
+      bool add_subview(InstanceView *view, Color c);
+      void add_alias_did(DistributedID did);
       const FieldMask& get_physical_mask(void) const;
     public:
       void copy_to(const FieldMask &copy_mask, 
@@ -2280,6 +2343,9 @@ namespace LegionRuntime {
       static void handle_send_back_instance_view(
                       RegionTreeForest *context, Deserializer &derez,
                       AddressSpaceID source);
+      static void handle_send_subscriber(RegionTreeForest *context,
+                                         Deserializer &derez,
+                                         AddressSpaceID source);
     public:
       InstanceManager *const manager;
       InstanceView *const parent;
@@ -2306,6 +2372,8 @@ namespace LegionRuntime {
       std::set<Event> event_references;
       // Version information for each of the fields
       std::map<VersionID,FieldMask> current_versions;
+      // A list of aliased distributed IDs for this view
+      std::set<DistributedID> aliases;
     };
 
     /**
@@ -2418,7 +2486,7 @@ namespace LegionRuntime {
 
     /**
      * \class MappingRef
-     * This class keeps a reference to a physical instance that has
+     * This class keeps a valid reference to a physical instance that has
      * been allocated and is ready to have dependence analysis performed.
      * Once all the allocations have been performed, then an operation
      * can pass all of the mapping references to the RegionTreeForest
@@ -2428,13 +2496,17 @@ namespace LegionRuntime {
     class MappingRef {
     public:
       MappingRef(void);
-      MappingRef(const ViewHandle &handle, const FieldMask &needed_mask);
+      MappingRef(PhysicalView *view, const FieldMask &needed_mask);
+      MappingRef(const MappingRef &rhs);
+      ~MappingRef(void);
     public:
-      inline bool has_ref(void) const { return handle.has_view(); }
-      inline PhysicalView* get_view(void) const { return handle.get_view(); } 
+      MappingRef& operator=(const MappingRef &rhs);
+    public:
+      inline bool has_ref(void) const { return (view != NULL); }
+      inline PhysicalView* get_view(void) const { return view; } 
       inline const FieldMask& get_mask(void) const { return needed_fields; }
     private:
-      ViewHandle handle;
+      PhysicalView *view;
       FieldMask needed_fields;
     };
 

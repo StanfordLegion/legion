@@ -386,6 +386,10 @@ namespace LegionRuntime {
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
       Event find_gc_epoch_event(void);
+#ifdef HANG_TRACE
+    public:
+      void dump_state(FILE *target);
+#endif
     protected:
       bool perform_dependence_checks(void);
       bool perform_other_operations(void);
@@ -479,7 +483,7 @@ namespace LegionRuntime {
       void allocate_physical_instance(PhysicalManager *manager);
       void free_physical_instance(PhysicalManager *manager);
     public:
-      void recycle_physical_instance(InstanceManager *manager, Event use_event);
+      void recycle_physical_instance(InstanceManager *manager);
       bool reclaim_physical_instance(InstanceManager *manager);
     public:
       PhysicalInstance find_physical_instance(size_t field_size,
@@ -507,7 +511,7 @@ namespace LegionRuntime {
       // Current set of reduction instances and their sizes
       std::map<ReductionManager*,size_t> reduction_instances;
       // Set of physical instances which are currently eligible for recycling
-      std::map<InstanceManager*,Event> available_instances;
+      std::set<InstanceManager*> available_instances;
     };
 
     /**
@@ -558,6 +562,7 @@ namespace LegionRuntime {
         HIERARCHICAL_REMOVE_REMOTE,
         SEND_BACK_USER,
         SEND_USER,
+        SEND_SUBSCRIBER,
         SEND_INSTANCE_VIEW,
         SEND_BACK_INSTANCE_VIEW,
         SEND_REDUCTION_VIEW,
@@ -622,6 +627,7 @@ namespace LegionRuntime {
       void send_remove_hierarchical_remote(Serializer &rez, bool flush);
       void send_back_user(Serializer &rez, bool flush);
       void send_user(Serializer &rez, bool flush);
+      void send_subscriber(Serializer &rez, bool flush);
       void send_instance_view(Serializer &rez, bool flush);
       void send_back_instance_view(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
@@ -913,8 +919,7 @@ namespace LegionRuntime {
       void free_physical_instance(PhysicalManager *instance);
     public:
       // Functions for recycling physical instances
-      void recycle_physical_instance(InstanceManager *instance, 
-                                     Event use_event);
+      void recycle_physical_instance(InstanceManager *instance);
       bool reclaim_physical_instance(InstanceManager *instance);
       PhysicalInstance find_physical_instance(Memory mem, size_t field_size,
                    const Domain &dom, const unsigned depth, Event &use_event);
@@ -972,6 +977,7 @@ namespace LegionRuntime {
                                            Serializer &rez);
       void send_back_user(AddressSpaceID target, Serializer &rez);
       void send_user(AddressSpaceID target, Serializer &rez);
+      void send_subscriber(AddressSpaceID target, Serializer &rez);
       void send_instance_view(AddressSpaceID target, Serializer &rez);
       void send_back_instance_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -1026,6 +1032,7 @@ namespace LegionRuntime {
       void handle_hierarchical_remove_remote(Deserializer &derez);
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_user(Deserializer &derez, AddressSpaceID source);
+      void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
       void handle_send_instance_view(Deserializer &derez, 
                                      AddressSpaceID source);
       void handle_send_back_instance_view(Deserializer &derez,
@@ -1063,6 +1070,10 @@ namespace LegionRuntime {
       Processor get_cleanup_proc(Processor p) const;
       Processor get_gc_proc(Processor p) const;
       Processor get_message_proc(Processor p) const;
+#endif
+#ifdef HANG_TRACE
+    public:
+      void dump_processor_states(FILE *target);
 #endif
     public:
       void increment_pending(Processor p);
@@ -1322,7 +1333,7 @@ namespace LegionRuntime {
       std::deque<ReleaseOp*>       available_release_ops;
       std::deque<TraceCaptureOp*>  available_capture_ops;
       std::deque<TraceCompleteOp*> available_trace_ops;
-#ifdef DEBUG_HIGH_LEVEL
+#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -1330,14 +1341,17 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
+      std::set<AcquireOp*>      out_acquire_ops;
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
       // actual code.
-      void print_out_individual_tasks(int cnt = 1);
-      void print_out_index_tasks(int cnt = 1);
-      void print_out_slice_tasks(int cnt = 1);
-      void print_out_point_tasks(int cnt = 1);
+      void print_out_individual_tasks(FILE *f = stdout, int cnt = -1);
+      void print_out_index_tasks(FILE *f = stdout, int cnt = -1);
+      void print_out_slice_tasks(FILE *f = stdout, int cnt = -1);
+      void print_out_point_tasks(FILE *f = stdout, int cnt = -1);
+      void print_out_acquire_ops(FILE *f = stdout, int cnt = -1);
+      void print_outstanding_tasks(FILE *f = stdout, int cnt = -1);
 #endif
     public:
       // Static methods for start-up and callback phases

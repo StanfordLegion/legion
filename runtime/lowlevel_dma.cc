@@ -74,7 +74,7 @@ namespace LegionRuntime {
       };
 
       virtual bool event_triggered(void);
-      virtual void print_info(void);
+      virtual void print_info(FILE *f);
 
       bool check_readiness(bool just_check);
 
@@ -147,9 +147,9 @@ namespace LegionRuntime {
       return false;
     }
 
-    void DmaRequest::print_info(void)
+    void DmaRequest::print_info(FILE *f)
     {
-      printf("dma request %p: after %x/%d\n", 
+      fprintf(f,"dma request %p: after %x/%d\n", 
           this, after_copy.id, after_copy.gen);
     }
 
@@ -1872,9 +1872,9 @@ namespace LegionRuntime {
 	return true;
       }
 
-      virtual void print_info(void)
+      virtual void print_info(FILE *f)
       {
-	printf("copy completion logger - %x/%d\n", event.id, event.gen);
+	fprintf(f,"copy completion logger - %x/%d\n", event.id, event.gen);
       }
 
     protected:
@@ -2275,6 +2275,9 @@ namespace LegionRuntime {
 	CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, 
 				      dma_worker_thread_loop, 0) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+#ifdef DEADLOCK_TRACE
+        Runtime::get_runtime()->add_thread(&worker_threads[i]);
+#endif
       }
     }
     

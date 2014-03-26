@@ -4305,10 +4305,17 @@ namespace LegionRuntime {
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
+      // Sometimes the low-level runtime likes to play games and 
+      // re-arrange what processor we are running on without telling us.
+      // Check for that case now and update our executing processor.
+      // It is imperative for forward progress that we do this!
+      Processor old_processor = executing_processor;
+      executing_processor = Machine::get_executing_processor();
       // Tell the runtime that this task is now running
       // and is no longer pending
       runtime->start_execution(executing_processor);
-      runtime->decrement_pending(executing_processor);
+      // Do the decrement on the processor we initially incremented
+      runtime->decrement_pending(old_processor);
       // Start the profiling if requested
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 

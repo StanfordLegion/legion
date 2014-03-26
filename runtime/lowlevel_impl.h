@@ -24,6 +24,10 @@
 #define NODE_MASK_SHIFT 6
 #define NODE_MASK_MASK 0x3F
 
+#ifndef MAX_NUM_THREADS
+#define MAX_NUM_THREADS 32
+#endif
+
 #include "lowlevel.h"
 
 #include <assert.h>
@@ -293,6 +297,9 @@ namespace LegionRuntime {
       Processor::Impl *get_processor_impl(ID id);
       IndexSpace::Impl *get_index_space_impl(ID id);
       RegionInstance::Impl *get_instance_impl(ID id);
+#ifdef DEADLOCK_TRACE
+      void add_thread(const pthread_t *thread);
+#endif
 
     protected:
     public:
@@ -300,6 +307,11 @@ namespace LegionRuntime {
 
       Node *nodes;
       Memory::Impl *global_memory;
+#ifdef DEADLOCK_TRACE
+      unsigned next_thread;
+      pthread_t all_threads[MAX_NUM_THREADS];
+      unsigned thread_counts[MAX_NUM_THREADS];
+#endif
     };
 
     struct ElementMaskImpl {
@@ -342,7 +354,7 @@ namespace LegionRuntime {
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible lock)
 
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
-      uint64_t remote_waiter_mask, remote_sharer_mask;
+      NodeMask remote_waiter_mask, remote_sharer_mask;
       //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
       std::map<unsigned, std::deque<Event> > local_waiters;
       bool requested; // do we have a request for the lock in flight?
@@ -805,7 +817,9 @@ namespace LegionRuntime {
       static Event create_event(void);
 
       // test whether an event has triggered without waiting
-      bool has_triggered(Event::gen_t needed_gen);
+      // make this a volatile method so that if we poll it
+      // then it will do the right thing
+      bool has_triggered(Event::gen_t needed_gen) volatile;
 
       // causes calling thread to block until event has occurred
       //void wait(Event::gen_t needed_gen);
@@ -830,7 +844,7 @@ namespace LegionRuntime {
       class EventWaiter {
       public:
 	virtual bool event_triggered(void) = 0;
-	virtual void print_info(void) = 0;
+	virtual void print_info(FILE *f) = 0;
       };
 
       void add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed = false);
@@ -845,8 +859,7 @@ namespace LegionRuntime {
 
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
-      //uint64_t remote_waiters; // bitmask of which remote nodes are waiting on the event
-      NodeMask remote_waiters;
+      std::map<Event::gen_t,NodeMask> remote_waiters;
       std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
 
       // for barriers

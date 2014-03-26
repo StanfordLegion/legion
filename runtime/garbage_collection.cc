@@ -25,6 +25,251 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     /////////////////////////////////////////////////////////////
+    // CollectableState 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectableState::CollectableState(void)
+      : current_state(INACTIVE_STATE)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectableState::~CollectableState(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_state == INACTIVE_STATE);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectableState::update_state(bool has_gc_refs,
+                                        bool has_remote_refs,
+                                        bool has_valid_refs,
+                                        bool has_resource_refs,
+                                        bool &need_activate,
+                                        bool &need_validate,
+                                        bool &need_invalidate,
+                                        bool &need_deactivate,
+                                        bool &do_delete)
+    //--------------------------------------------------------------------------
+    {
+      switch (current_state)
+      {
+        case INACTIVE_STATE:
+          {
+            // See if we have any reason to be active
+            if (has_gc_refs || has_valid_refs || has_remote_refs)
+            {
+              // Move to a pending active state
+              current_state = PENDING_ACTIVE_STATE;
+              need_activate = true;
+            }
+            else
+              need_activate = false;
+            need_validate = false;
+            need_invalidate = false;
+            need_deactivate = false;
+            break;
+          }
+        case ACTIVE_INVALID_STATE:
+          {
+            // See if we have a reason to be valid
+            if (has_valid_refs || has_remote_refs)
+            {
+              // Move to a pending valid state
+              current_state = PENDING_VALID_STATE;
+              need_validate = true;
+              need_deactivate = false;
+            }
+            // See if we have a reason to be deactive
+            else if (!has_gc_refs)
+            {
+              current_state = PENDING_INACTIVE_STATE;
+              need_validate = false;
+              need_deactivate = true;
+            }
+            else
+            {
+              need_validate = false;
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case VALID_STATE:
+          {
+            // Se if we have a reason to be invalid
+            if (!has_valid_refs && !has_remote_refs)
+            {
+              current_state = PENDING_INVALID_STATE;
+              need_invalidate = true;
+            }
+            else
+              need_invalidate = false;
+            need_activate = false;
+            need_validate = false;
+            need_deactivate = false;
+            break;
+          }
+        case PENDING_ACTIVE_STATE:
+          {
+            // See if we were the ones doing the activating
+            if (need_activate)
+            {
+              // see if we are still active
+              if (has_valid_refs || has_remote_refs)
+              {
+                // Now we need a validate
+                current_state = PENDING_VALID_STATE;
+                need_validate = true;
+                need_deactivate = false;
+              }
+              else if (has_gc_refs)
+              {
+                current_state = ACTIVE_INVALID_STATE; 
+                need_validate = false;
+                need_deactivate = false;
+              }
+              else
+              {
+                // Not still valid, go to pending invalid
+                current_state = PENDING_INACTIVE_STATE;
+                need_deactivate = true;
+                need_validate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the activate
+              // so we can't help, just keep going
+              need_validate = false;
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_INACTIVE_STATE:
+          {
+            // See if we were doing the inactivate
+            if (need_deactivate)
+            {
+              // see if we are still inactive
+              if (!has_gc_refs && !has_valid_refs && !has_remote_refs)
+              {
+                current_state = INACTIVE_STATE;
+                need_activate = false;
+              }
+              else
+              {
+                current_state = PENDING_ACTIVE_STATE;
+                need_activate = true;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the deactivate
+              // so we can't help, just keep going
+              need_activate = false;
+            }
+            need_validate = false;
+            need_invalidate = false;
+            need_deactivate = false;
+            break;
+          }
+        case PENDING_VALID_STATE:
+          {
+            // See if we were doing the validate
+            if (need_validate)
+            {
+              // check to see if we are still valid
+              if (has_valid_refs || has_remote_refs)
+              {
+                current_state = VALID_STATE;
+                need_invalidate = false;
+              }
+              else
+              {
+                current_state = PENDING_INVALID_STATE;
+                need_invalidate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the validate
+              // so we can't help, just keep going
+              need_invalidate = false;
+            }
+            need_activate = false;
+            need_validate = false;
+            need_deactivate = false;
+            break;
+          }
+        case PENDING_INVALID_STATE:
+          {
+            // See if we were doing the invalidate
+            if (need_invalidate)
+            {
+              // check to see if we are still invalid
+              if (has_valid_refs || has_remote_refs)
+              {
+                // Now we are valid again
+                current_state = PENDING_VALID_STATE;
+                need_validate = true;
+                need_deactivate = false;
+              }
+              else if (!has_gc_refs)
+              {
+                // No longer should be active either
+                current_state = PENDING_INACTIVE_STATE;
+                need_validate = false;
+                need_deactivate = true;
+              }
+              else
+              {
+                // We're not active, but invalid
+                current_state = ACTIVE_INVALID_STATE;
+                need_validate = false;
+                need_deactivate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the invalidate
+              // so we can't help
+              need_validate = false;
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+      do_delete = can_delete(has_gc_refs, has_remote_refs,
+                             has_valid_refs, has_resource_refs);
+      return !(need_activate || need_validate || 
+               need_invalidate || need_deactivate);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectableState::can_delete(bool has_gc_refs,
+                                      bool has_remote_refs,
+                                      bool has_valid_refs,
+                                      bool has_resource_refs)
+    //--------------------------------------------------------------------------
+    {
+      return (current_state == INACTIVE_STATE) &&
+             (!has_gc_refs) && (!has_remote_refs) &&
+             (!has_valid_refs) && (!has_resource_refs);
+    }
+
+    /////////////////////////////////////////////////////////////
     // DistributedCollectable 
     /////////////////////////////////////////////////////////////
 
@@ -33,8 +278,8 @@ namespace LegionRuntime {
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space)
-      : runtime(rt), did(id), owner_space(own_space), local_space(loc_space),
-        owner(owner_space == local_space), 
+      : CollectableState(), runtime(rt), did(id), owner_space(own_space), 
+        local_space(loc_space), owner(owner_space == local_space), 
         gc_lock(Reservation::create_reservation()), gc_references(0), 
         valid_references(0), resource_references(0), held_remote_references(0)
     //--------------------------------------------------------------------------
@@ -53,6 +298,12 @@ namespace LegionRuntime {
     DistributedCollectable::~DistributedCollectable(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(gc_references == 0);
+      assert(valid_references == 0);
+      assert(remote_references.empty());
+      assert(resource_references == 0);
+#endif
       runtime->unregister_distributed_collectable(did);
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
@@ -83,39 +334,86 @@ namespace LegionRuntime {
     void DistributedCollectable::add_gc_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-      bool need_activate;
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (valid_references == 0) &&
-                        (remote_references.empty());
-        gc_references += cnt;
+        if (first)
+        {
+          gc_references += cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (owner && !remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();  
       }
-      if (need_activate)
-        notify_activate();
+      if (result)
+      {
+        // If we get here it is probably a race in reference counting
+        // scheme above, so mark it is as such
+        assert(false);
+        delete this;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_gc_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
       bool result = false;
-      bool need_gc = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
+        if (first)
+        {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(gc_references >= cnt);
+          assert(gc_references >= cnt);
 #endif
-        gc_references -= cnt;
-        need_gc = (gc_references == 0) && (valid_references == 0) &&
-                  (remote_references.empty());
-        result = need_gc && (resource_references == 0);
-        // If we're garbage collecting and we have held remote
-        // references then send them back to the owner
-        if (need_gc && (held_remote_references > 0))
-          return_held_references();
+          gc_references -= cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (owner && !remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();  
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -125,56 +423,83 @@ namespace LegionRuntime {
     {
       bool need_activate = false;
       bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_validate = (valid_references == 0) && remote_references.empty();
-        need_activate = need_validate && (gc_references == 0);
-        valid_references += cnt;
+        if (first)
+        {
+          valid_references += cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (owner && !remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate, 
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();
       }
-      if (need_activate)
-        notify_activate();
-      if (need_validate)
-        notify_valid();
+      if (result)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_valid_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-      bool result = false;
+      bool need_activate = false;
+      bool need_validate = false;
       bool need_invalidate = false;
-      bool need_gc = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
+        if (first)
+        {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(valid_references >= cnt);
+          assert(valid_references >= cnt);
 #endif
-        valid_references -= cnt;
-        need_invalidate = (valid_references == 0) && remote_references.empty();
-        if (need_invalidate) {
-          // Downgrade to a gc reference so we don't get 
-          // garbage collected while performing the notify invalidate
-          gc_references++;
+          valid_references -= cnt;
+          first = false;
         }
-      }
-      if (need_invalidate)
-      {
-        notify_invalid();
-        // Now retake the lock, remove our gc reference,
-        // and compute whether we need to do a gc or not
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(gc_references > 0);
-#endif
-        gc_references--;
-        need_gc = (valid_references == 0) && (remote_references.empty()) &&
-                  (gc_references == 0);
-        result = need_gc && (resource_references == 0);
-        if (need_gc && (held_remote_references > 0))
+        done = update_state((gc_references > 0),
+                            (owner && !remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
           return_held_references();
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -195,8 +520,10 @@ namespace LegionRuntime {
       assert(resource_references >= cnt);
 #endif
       resource_references -= cnt;
-      return ((gc_references == 0) && (remote_references.empty()) && 
-              (resource_references == 0) && (valid_references == 0));
+      return can_delete((gc_references > 0),
+                        (owner && !remote_references.empty()),
+                        (valid_references > 0),
+                        (resource_references > 0));
     }
 
     //--------------------------------------------------------------------------
@@ -210,59 +537,42 @@ namespace LegionRuntime {
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
-      bool need_gc = false;
+      bool need_deactivate = false;
       bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
-        AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (remote_references.empty());
-        need_validate = (valid_references == 0) && (remote_references.empty());
-        std::map<AddressSpaceID,int>::iterator finder = 
-          remote_references.find(sid);
-        if (finder == remote_references.end())
-          remote_references[sid] = int(cnt);
-        else
-        {
-          finder->second += cnt;
-          if (finder->second == 0)
-            remote_references.erase(finder);
-        }
-        need_invalidate = (valid_references == 0) && 
-                          (remote_references.empty());
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
         if (need_invalidate)
-        {
-          // Add a gc reference temporarily to
-          // make sure we don't get collected while
-          // doing our invalidation
-          gc_references++;
-        }
-        // finally, update the list of nodes we know about
-        if (remote_spaces.find(sid) == remote_spaces.end())
-        {
-          notify_new_remote(sid);
-          remote_spaces.insert(sid);
-        }
-      }
-      if (need_activate)
-        notify_activate();
-      if (need_validate)
-        notify_valid();
-      if (need_invalidate)
-      {
-        notify_invalid();
-        // Now retake the lock, remove our gc reference, and recompute
-        // if we need to do a garbage collection now
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(gc_references > 0);
-#endif
-        gc_references--;
-        need_gc = (valid_references == 0) && (remote_references.empty()) &&
-                  (gc_references == 0);
-        result = need_gc && (resource_references == 0);
-        // No need to send back remote instances since we are the owner
+        if (first)
+        {
+          std::map<AddressSpaceID,int>::iterator finder = 
+            remote_references.find(sid);
+          if (finder == remote_references.end())
+            remote_references[sid] = int(cnt);
+          else
+          {
+            finder->second += cnt;
+            if (finder->second == 0)
+              remote_references.erase(finder);
+          } 
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (!remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -277,54 +587,42 @@ namespace LegionRuntime {
       bool need_activate = false;
       bool need_validate = false;
       bool need_invalidate = false;
-      bool need_gc = false;
+      bool need_deactivate = false;
       bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
-        AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (remote_references.empty());
-        need_validate = (valid_references == 0) && (remote_references.empty());
-        std::map<AddressSpaceID,int>::iterator finder = 
-          remote_references.find(sid);
-        if (finder == remote_references.end())
-          remote_references[sid] = -(int(cnt));
-        else
-        {
-          finder->second -= cnt;
-          if (finder->second == 0)
-            remote_references.erase(finder);
-        } 
-        need_invalidate = (valid_references == 0) && 
-                          (remote_references.empty());
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
         if (need_invalidate)
-        {
-          // Add a gc reference to temporarily make sure we
-          // don't get collected while doing our invalidation
-          gc_references++;
-        }
-        // update the list of nodes we know about
-        if (remote_spaces.find(sid) == remote_spaces.end())
-        {
-          notify_new_remote(sid);
-          remote_spaces.insert(sid);
-        }
-      }
-      if (need_activate)
-        notify_activate();
-      if (need_validate)
-        notify_valid();
-      if (need_invalidate)
-      {
-        notify_invalid();
-        // Now take the lock, remove our gc reference, and 
-        // recompute if we need to do a gc
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_gc = (valid_references == 0) && (remote_references.empty()) &&
-                  (gc_references == 0);
-        result = need_gc && (resource_references == 0);
-        // No need to send back remote references since we are the owner
+        if (first)
+        {
+          std::map<AddressSpaceID,int>::iterator finder = 
+            remote_references.find(sid);
+          if (finder == remote_references.end())
+            remote_references[sid] = -(int(cnt));
+          else
+          {
+            finder->second -= cnt;
+            if (finder->second == 0)
+              remote_references.erase(finder);
+          }
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (!remote_references.empty()),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -397,7 +695,7 @@ namespace LegionRuntime {
       // Set the references back to zero since we sent them back
       held_remote_references = 0;
     }
-
+ 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::process_remove_resource_reference(
                                     Runtime *rt, Deserializer &derez)
@@ -455,7 +753,8 @@ namespace LegionRuntime {
                                                      DistributedID d,
                                                      AddressSpaceID own_addr, 
                                                      DistributedID own_did)
-      : runtime(rt), did(d), gc_lock(Reservation::create_reservation()), 
+      : CollectableState(), runtime(rt), did(d), 
+        gc_lock(Reservation::create_reservation()), 
         gc_references(0), valid_references(0), remote_references(0), 
         resource_references(0), owner_addr(own_addr), 
         owner_did(own_did), held_remote_references(0)
@@ -472,6 +771,12 @@ namespace LegionRuntime {
     HierarchicalCollectable::~HierarchicalCollectable(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(gc_references == 0);
+      assert(valid_references == 0);
+      assert(remote_references == 0);
+      assert(resource_references == 0);
+#endif
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
       // Remove our references from any remote collectables
@@ -498,38 +803,85 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_activate = (gc_references == 0) && (valid_references == 0) &&
-                        (remote_references == 0);
-        gc_references += cnt;
+        if (first)
+        {
+          gc_references += cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();  
       }
-      if (need_activate)
-        notify_activate();
+      if (result)
+      {
+        // If we get here it is probably a race in reference counting
+        // scheme above, so mark it is as such
+        assert(false);
+        delete this;
+      }
     }
     
     //--------------------------------------------------------------------------
     bool HierarchicalCollectable::remove_gc_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
       bool result = false;
-      bool need_gc = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
+        if (first)
+        {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(gc_references >= cnt);
+          assert(gc_references >= cnt);
 #endif
-        gc_references -= cnt;
-        need_gc = (gc_references == 0) && (remote_references == 0) &&
-                  (valid_references == 0);
-        result = need_gc && (resource_references == 0);
-        // If we're garbage collecting and we have held remote
-        // references then send them back to the owner
-        if (need_gc && (held_remote_references > 0))
-          return_held_references();
+          gc_references -= cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();  
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -539,58 +891,83 @@ namespace LegionRuntime {
     {
       bool need_activate = false;
       bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_validate = (valid_references == 0) && (remote_references == 0);
-        need_activate = need_validate && (gc_references == 0);
-        valid_references += cnt;
+        if (first)
+        {
+          valid_references += cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate, 
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();
       }
-      if (need_activate)
-        notify_activate();
-      if (need_validate)
-        notify_valid();
+      if (result)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool HierarchicalCollectable::remove_valid_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-      bool result = false;
+      bool need_activate = false;
+      bool need_validate = false;
       bool need_invalidate = false;
-      bool need_gc = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(valid_references >= cnt);
-#endif
-        valid_references -= cnt;
-        need_invalidate = (valid_references == 0) && (remote_references == 0);
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
         if (need_invalidate)
-        {
-          // Add a gc reference so we don't get collected
-          // while we are doing our notify invalid
-          gc_references++;
-        }
-      }
-      if (need_invalidate)
-      {
-        notify_invalid();
-        // Now retake the lock and see if we still need to do a gc
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
+        if (first)
+        {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(gc_references > 0);
+          assert(valid_references >= cnt);
 #endif
-        gc_references--;
-        need_gc = (valid_references == 0) && (remote_references == 0) &&
-                  (gc_references == 0);
-        result = need_gc && (resource_references == 0);
-        // If we're garbage collecting and we have held remote
-        // references then send them back to the owner
-        if (need_gc && (held_remote_references > 0))
+          valid_references -= cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
           return_held_references();
       }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
@@ -611,8 +988,10 @@ namespace LegionRuntime {
       assert(resource_references >= cnt);
 #endif
       resource_references -= cnt;
-      return ((gc_references == 0) && (remote_references == 0) && 
-              (resource_references == 0) && (valid_references == 0));
+      return can_delete((gc_references > 0),
+                        (remote_references > 0),
+                        (valid_references > 0),
+                        (resource_references > 0));
     }
 
     //--------------------------------------------------------------------------
@@ -621,51 +1000,83 @@ namespace LegionRuntime {
     {
       bool need_activate = false;
       bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
         AutoLock gc(gc_lock);
-        need_validate = (valid_references == 0) && (remote_references == 0);
-        need_activate = need_validate && (gc_references == 0);
-        remote_references += cnt;
+        if (first)
+        {
+          remote_references += cnt;
+          first = false;
+        }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();
       }
-      if (need_activate)
-        notify_activate();
-      if (need_validate)
-        notify_valid();
+      if (result)
+      {
+        // Probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
     }
 
     //--------------------------------------------------------------------------
     bool HierarchicalCollectable::remove_remote_reference(unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-      bool result = false;
-      bool need_gc = false;
+      bool need_activate = false;
+      bool need_validate = false;
       bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool result = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
       {
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(remote_references >= cnt);
-#endif
-        remote_references -= cnt;
-        need_invalidate = (valid_references == 0) && (remote_references == 0);
+        if (need_activate)
+          notify_activate();
+        if (need_validate)
+          notify_valid();
         if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          garbage_collect();
+        AutoLock gc(gc_lock);
+        if (first)
         {
-          // Downgrade to a gc reference so we don't get collected
-          // while trying to do our notify invalidate
-          gc_references++;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(remote_references >= cnt);
+#endif
+          remote_references -= cnt;
+          first = false;
         }
+        done = update_state((gc_references > 0),
+                            (remote_references > 0),
+                            (valid_references > 0),
+                            (resource_references > 0),
+                            need_activate, need_validate,
+                            need_invalidate, need_deactivate, result);
+        if (need_deactivate && (held_remote_references > 0))
+          return_held_references();
       }
-      if (need_invalidate)
-      {
-        notify_invalid();
-        // Now retake the lock, remove our gc reference, and recompute
-        // if we need to do a gc and the result
-        need_gc = (valid_references == 0) && (remote_references == 0) &&
-                  (gc_references == 0);
-        result = need_gc && (resource_references == 0);
-        // No need to send back remote references since we are the owner
-      }
-      if (need_gc)
-        garbage_collect();
       return result;
     }
 
