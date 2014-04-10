@@ -58,9 +58,11 @@ struct zone
   zwrate: double,       // zone work rate
   zp:     double,       // zone pressure
   zss:    double,       // zone sound speed
+  zdu:    double,       // zone delta velocity (???)
 
   // Temporaries for QCS
   zuc:    vec2,         // zone center velocity
+  z0tmp:  double,       // temporary for qcs_vel_diff
 }
 
 struct point
@@ -226,28 +228,6 @@ task init_radial_velocity(rp: region<point>, vel: double)
 ///
 /// Main simulation loop
 ///
-
-// Determine the time step size for this iteration.
-task calc_global_dt(dt: double, dtfac: double, dtinit: double, dtmax: double, dthydro: double,
-                    time: double, tstop: double, cycle: int)
-  : double
-{
-  let dtlast = dt;
-
-  var dt = dtmax;
-
-  if (cycle == 0) {
-    dt = fmin(dt, dtinit);
-  } else {
-    let dtrecover = dtfac * dtlast;
-    dt = fmin(dt, dtrecover);
-  }
-
-  dt = fmin(dt, tstop - time);
-  dt = fmin(dt, dthydro);
-
-  return dt;
-}
 
 // Save off point variable values from previous cycle.
 task init_step_points(rp: region<point>)
@@ -746,19 +726,60 @@ task qcs_force(rz: region<zone>, rpp: region<point>, rpg: region<point>,
   }
 }
 
+task qcs_vel_diff(rz: region<zone>, rpp: region<point>, rpg: region<point>,
+                  rs: region<side<rz, rpp, rpg, rs>>,
+                  q1: double, q2: double,
+                  zstart: int, zend: int, sstart: int, send: int,
+                  use_foreign: bool)
+  , reads(rz.{zss, z0tmp}, rpp.{pxp, pu}, rpg.{pxp, pu},
+          rs.{mapsp1, mapsp2, mapsz, elen})
+  , writes(rz.{zdu, z0tmp})
+{
+  for z in rz {
+    z->z0tmp = 0.0;
+  }
+
+  for s in rs {
+    let p1 = s->mapsp1;
+    let p2 = s->mapsp2;
+    let z = s->mapsz;
+    let e = s;
+
+    let dx = sub(p2->pxp, p1->pxp);
+    let du = sub(p2->pu, p1->pu);
+    let lenx = e->elen;
+    var dux = dot(du, dx);
+    if (lenx > 0.0) {
+      dux = fabs(dux) / lenx;
+    } else {
+      dux = 0.0;
+    }
+    z->z0tmp = fmax(z->z0tmp, dux);
+  }
+
+  for z in rz {
+    z->zdu = q1 * z->zss + 2.0 * q2 * z->z0tmp;
+  }
+}
+
 // Compute QCS forces.
 task calc_force_qcs(rz: region<zone>, rpp: region<point>, rpg: region<point>,
                     rs: region<side<rz, rpp, rpg, rs>>,
                     gamma: double, q1: double, q2: double,
-                    sstart: int, send: int, use_foreign: bool)
-  , reads(rz.{zxp, zrp, znump, zss, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
+                    zstart: int, zend: int,
+                    sstart: int, send: int,
+                    use_foreign: bool)
+  , reads(rz.{zxp, zrp, znump, zss, zuc, zdu, z0tmp},
+          rpp.{pxp, pu}, rpg.{pxp, pu},
           rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4, exp, elen, carea, ccos, cevol, cdiv, cdu, cqe1, cqe2})
-  , writes(rz.zuc, rs.{sfq, carea, cdiv, cevol, ccos, cdu, cqe1, cqe2})
+  , writes(rz.{zuc, zdu, z0tmp},
+           rs.{sfq, carea, cdiv, cevol, ccos, cdu, cqe1, cqe2})
 {
   qcs_zone_center_velocity(rz, rpp, rpg, rs, sstart, send, use_foreign);
   qcs_corner_divergence(rz, rpp, rpg, rs, sstart, send, use_foreign);
   qcs_qcn_force(rz, rpp, rpg, rs, gamma, q1, q2, sstart, send, use_foreign);
   qcs_force(rz, rpp, rpg, rs, sstart, send, use_foreign);
+  qcs_vel_diff(rz, rpp, rpg, rs, q1, q2, zstart, zend, sstart, send, use_foreign);
 }
 
 // Reduce forces into points.
@@ -973,12 +994,12 @@ task calc_rho_full(rz: region<zone>)
 
 task calc_dt_courant(rz: region<zone>, dtmax: double, cfl: double)
   : double
-  , reads(rz.{zdl, zss})
+  , reads(rz.{zdl, zss, zdu})
 {
   let fuzz = 1e-99;
   var dtnew = dtmax;
   for z in rz {
-    let cdu = fmax(z->zss, fuzz);
+    let cdu = fmax(z->zdu, fmax(z->zss, fuzz));
     let zdthyd = z->zdl * cfl / cdu;
 
     dtnew = fmin(dtnew, zdthyd);
@@ -1001,7 +1022,7 @@ task calc_dt_volume(rz: region<zone>, dtlast: double, cflv: double)
 
 task calc_dt_hydro(rz: region<zone>, dtlast: double, dtmax: double, cfl: double, cflv: double)
   : double
-  , reads(rz.{zdl, zvol0, zvol, zss})
+  , reads(rz.{zdl, zvol0, zvol, zss, zdu})
 {
   var dthydro = dtmax;
 
@@ -1179,7 +1200,7 @@ task simulate(rz_all: region<zone>, rp_all: region<point>,
 
     for m in rm_all {
       unpack *m as n: mesh<rz_all, rp_all, rs_all>[rz, rpp, rpg, rps, rs];
-      calc_force_qcs(rz, rpp, rpg, rs, qgamma, q1, q2, n.sstart, n.send, use_foreign);
+      calc_force_qcs(rz, rpp, rpg, rs, qgamma, q1, q2, n.zstart, n.zend, n.sstart, n.send, use_foreign);
     }
 
     for m in rm_all {

@@ -72,6 +72,14 @@ typedef AccessorType::SOA<1> AT_SOA_1;
 typedef AccessorType::SOA<4> AT_SOA_4;
 typedef AccessorType::SOA<8> AT_SOA_8;
 
+typedef AccessorType::ReductionFold<reduction_plus_double> AT_RED_PLUS;
+
+///
+/// Logging
+///
+
+LegionRuntime::Logger::Category log_mapper("mapper");
+
 ///
 /// Command-line defaults
 ///
@@ -171,21 +179,42 @@ static bool get_use_foreign()
   return default_use_foreign;
 }
 
-static void extract_param(const std::map<std::string, std::vector<std::string> > &params,
-                          const std::string &key, int idx, double &var)
+static void extract_param(const std::map<std::string,
+                                         std::vector<std::string> > &params,
+                          const std::string &key, int idx, std::string &var,
+                          bool required)
+{
+  if (params.count(key)) {
+    assert(params.at(key).size() > idx);
+    var = params.at(key)[idx];
+  } else {
+    assert(!required);
+  }
+}
+
+static void extract_param(const std::map<std::string,
+                                         std::vector<std::string> > &params,
+                          const std::string &key, int idx, double &var,
+                          bool required)
 {
   if (params.count(key)) {
     assert(params.at(key).size() > idx);
     var = stod(params.at(key)[idx]);
+  } else {
+    assert(!required);
   }
 }
 
-static void extract_param(const std::map<std::string, std::vector<std::string> > params,
-                          const std::string &key, int idx, intptr_t &var)
+static void extract_param(const std::map<std::string,
+                                         std::vector<std::string> > params,
+                          const std::string &key, int idx, intptr_t &var,
+                          bool required)
 {
   if (params.count(key)) {
     assert(params.at(key).size() > idx);
     var = (intptr_t)stoll(params.at(key)[idx]);
+  } else {
+    assert(!required);
   }
 }
 
@@ -228,93 +257,432 @@ static void read_params(const std::string &pnt_filename,
   }
 }
 
-static void read_mesh(const std::string &gmv_filename,
-                      config &conf,
-                      std::vector<double> &pxx,
-                      std::vector<double> &pxy,
-                      std::vector<std::vector<intptr_t> > &mapzp)
+///
+/// Mesh Generator
+///
+
+static void init_mesh(config &conf)
 {
-  std::ifstream gmv_file(gmv_filename.c_str(), std::ios::in);
+  conf.nzx = conf.meshparams_0;
+  conf.nzy = (conf.meshparams_n >= 2 ? conf.meshparams_1 : conf.nzx);
+  if (conf.meshtype != MESH_PIE) {
+    conf.lenx = (conf.meshparams_n >= 3 ? conf.meshparams_2 : 1.0);
+  } else {
+    // convention:  x = theta, y = r
+    conf.lenx = (conf.meshparams_n >= 3 ? conf.meshparams_2 : 90.0)
+      * M_PI / 180.0;
+  }
+  conf.leny = (conf.meshparams_n >= 4 ? conf.meshparams_3 : 1.0);
 
-  intptr_t np = 0;
-  intptr_t nz = 0;
-  intptr_t ns = 0;
-  intptr_t maxznump = 0;
-
-  // Abort if file not valid.
-  if (!gmv_file) {
-    assert(0 && "input file does not exist");
+  if (conf.nzx <= 0 || conf.nzy <= 0 || conf.lenx <= 0. || conf.leny <= 0. ) {
+    assert(0 && "meshparams values must be positive");
+  }
+  if (conf.meshtype == MESH_PIE && conf.lenx >= 2. * M_PI) {
+    assert(0 && "meshparams theta must be < 360");
   }
 
-  {
-    std::string line;
-    getline(gmv_file, line);
-    assert(line == "gmvinput ascii");
+  // Calculate approximate nz, np, ns for region size upper bound.
+  conf.nz = conf.nzx * conf.nzy;
+  conf.np = (conf.nzx + 1) * (conf.nzy + 1);
+  if (conf.meshtype != MESH_HEX) {
+    conf.maxznump = 4;
+  } else {
+    conf.maxznump = 6;
   }
+  conf.ns = conf.nz * conf.maxznump;
+}
 
-  {
-    std::string token;
-    gmv_file >> token;
-    assert(token == "nodes");
-    gmv_file >> np;
-  }
+const intptr_t MULTICOLOR = -1;
 
-  for (int ip = 0; ip < np; ip++) {
-    double x;
-    gmv_file >> x;
-    pxx.push_back(x);
-  }
+static void generate_mesh_rect(config &conf,
+                               std::vector<double> &pointpos_x,
+                               std::vector<double> &pointpos_y,
+                               std::vector<intptr_t> &pointcolors,
+                               std::map<intptr_t, std::vector<intptr_t> > &pointmcolors,
+                               std::vector<intptr_t> &zonestart,
+                               std::vector<intptr_t> &zonesize,
+                               std::vector<intptr_t> &zonepoints,
+                               std::vector<intptr_t> &zonecolors,
+                               std::vector<intptr_t> &zxbounds,
+                               std::vector<intptr_t> &zybounds)
+{
+  intptr_t &nz = conf.nz;
+  intptr_t &np = conf.np;
 
-  for (int ip = 0; ip < np; ip++) {
-    double y;
-    gmv_file >> y;
-    pxy.push_back(y);
-  }
+  nz = conf.nzx * conf.nzy;
+  const int npx = conf.nzx + 1;
+  const int npy = conf.nzy + 1;
+  np = npx * npy;
 
-  for (int ip = 0; ip < np; ip++) {
-    double z;
-    gmv_file >> z;
-    // Throw away z coordinates.
-  }
-
-  {
-    std::string token;
-    gmv_file >> token;
-    assert(token == "cells");
-    gmv_file >> nz;
-  }
-
-  for (int iz = 0; iz < nz; iz++) {
-    {
-      std::string token;
-      gmv_file >> token;
-      assert(token == "general");
-      double nf;
-      gmv_file >> nf;
-      assert(nf == 1);
+  // generate point coordinates
+  pointpos_x.reserve(np);
+  pointpos_y.reserve(np);
+  double dx = conf.lenx / (double) conf.nzx;
+  double dy = conf.leny / (double) conf.nzy;
+  int pcy = 0;
+  for (int j = 0; j < npy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    double y = dy * (double) j;
+    int pcx = 0;
+    for (int i = 0; i < npx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      double x = dx * (double) i;
+      pointpos_x.push_back(x);
+      pointpos_y.push_back(y);
+      int c = pcy * conf.numpcx + pcx;
+      if (i != zxbounds[pcx] && j != zybounds[pcy])
+        pointcolors.push_back(c);
+      else {
+        int p = pointpos_x.size() - 1;
+        pointcolors.push_back(MULTICOLOR);
+        std::vector<intptr_t> &pmc = pointmcolors[p];
+        if (i == zxbounds[pcx] && j == zybounds[pcy])
+          pmc.push_back(c - conf.numpcx - 1);
+        if (j == zybounds[pcy]) pmc.push_back(c - conf.numpcx);
+        if (i == zxbounds[pcx]) pmc.push_back(c - 1);
+        pmc.push_back(c);
+      }
     }
-
-    double znump;
-    gmv_file >> znump;
-
-    if (znump > maxznump) {
-      maxznump = znump;
-    }
-    ns += znump;
-
-    std::vector<intptr_t> points;
-    for (int zip = 0; zip < znump; zip++) {
-      intptr_t ip;
-      gmv_file >> ip;
-      points.push_back(ip - 1);
-    }
-    mapzp.push_back(points);
   }
 
-  conf.nz = nz;
-  conf.np = np;
-  conf.ns = ns;
-  conf.maxznump = maxznump;
+  // generate zone adjacency lists
+  zonestart.reserve(nz);
+  zonesize.reserve(nz);
+  zonepoints.reserve(4 * nz);
+  zonecolors.reserve(nz);
+  pcy = 0;
+  for (int j = 0; j < conf.nzy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    int pcx = 0;
+    for (int i = 0; i < conf.nzx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      zonestart.push_back(zonepoints.size());
+      zonesize.push_back(4);
+      int p0 = j * npx + i;
+      zonepoints.push_back(p0);
+      zonepoints.push_back(p0 + 1);
+      zonepoints.push_back(p0 + npx + 1);
+      zonepoints.push_back(p0 + npx);
+      zonecolors.push_back(pcy * conf.numpcx + pcx);
+    }
+  }
+}
+
+static void generate_mesh_pie(config &conf,
+                              std::vector<double> &pointpos_x,
+                              std::vector<double> &pointpos_y,
+                              std::vector<intptr_t> &pointcolors,
+                              std::map<intptr_t, std::vector<intptr_t> > &pointmcolors,
+                              std::vector<intptr_t> &zonestart,
+                              std::vector<intptr_t> &zonesize,
+                              std::vector<intptr_t> &zonepoints,
+                              std::vector<intptr_t> &zonecolors,
+                              std::vector<intptr_t> &zxbounds,
+                              std::vector<intptr_t> &zybounds)
+{
+  intptr_t &nz = conf.nz;
+  intptr_t &np = conf.np;
+
+  nz = conf.nzx * conf.nzy;
+  const int npx = conf.nzx + 1;
+  const int npy = conf.nzy + 1;
+  np = npx * (npy - 1) + 1;
+
+  // generate point coordinates
+  pointpos_x.reserve(np);
+  pointpos_y.reserve(np);
+  double dth = conf.lenx / (double) conf.nzx;
+  double dr  = conf.leny / (double) conf.nzy;
+  int pcy = 0;
+  for (int j = 0; j < npy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    if (j == 0) {
+      // special case:  "row" at origin only contains
+      // one point, shared by all pieces in row
+      pointpos_x.push_back(0.);
+      pointpos_y.push_back(0.);
+      if (conf.numpcx == 1)
+        pointcolors.push_back(0);
+      else {
+        pointcolors.push_back(MULTICOLOR);
+        std::vector<intptr_t> &pmc = pointmcolors[0];
+        for (int c = 0; c < conf.numpcx; ++c)
+          pmc.push_back(c);
+      }
+      continue;
+    }
+    double r = dr * (double) j;
+    int pcx = 0;
+    for (int i = 0; i < npx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      double th = dth * (double) (conf.nzx - i);
+      double x = r * cos(th);
+      double y = r * sin(th);
+      pointpos_x.push_back(x);
+      pointpos_y.push_back(y);
+      int c = pcy * conf.numpcx + pcx;
+      if (i != zxbounds[pcx] && j != zybounds[pcy])
+        pointcolors.push_back(c);
+      else {
+        int p = pointpos_x.size() - 1;
+        pointcolors.push_back(MULTICOLOR);
+        std::vector<intptr_t> &pmc = pointmcolors[p];
+        if (i == zxbounds[pcx] && j == zybounds[pcy])
+          pmc.push_back(c - conf.numpcx - 1);
+        if (j == zybounds[pcy]) pmc.push_back(c - conf.numpcx);
+        if (i == zxbounds[pcx]) pmc.push_back(c - 1);
+        pmc.push_back(c);
+      }
+    }
+  }
+
+  // generate zone adjacency lists
+  zonestart.reserve(nz);
+  zonesize.reserve(nz);
+  zonepoints.reserve(4 * nz);
+  zonecolors.reserve(nz);
+  pcy = 0;
+  for (int j = 0; j < conf.nzy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    int pcx = 0;
+    for (int i = 0; i < conf.nzx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      zonestart.push_back(zonepoints.size());
+      int p0 = j * npx + i - (npx - 1);
+      if (j == 0) {
+        zonesize.push_back(3);
+        zonepoints.push_back(0);
+      }
+      else {
+        zonesize.push_back(4);
+        zonepoints.push_back(p0);
+        zonepoints.push_back(p0 + 1);
+      }
+      zonepoints.push_back(p0 + npx + 1);
+      zonepoints.push_back(p0 + npx);
+      zonecolors.push_back(pcy * conf.numpcx + pcx);
+    }
+  }
+}
+
+static void generate_mesh_hex(config &conf,
+                              std::vector<double> &pointpos_x,
+                              std::vector<double> &pointpos_y,
+                              std::vector<intptr_t> &pointcolors,
+                              std::map<intptr_t, std::vector<intptr_t> > &pointmcolors,
+                              std::vector<intptr_t> &zonestart,
+                              std::vector<intptr_t> &zonesize,
+                              std::vector<intptr_t> &zonepoints,
+                              std::vector<intptr_t> &zonecolors,
+                              std::vector<intptr_t> &zxbounds,
+                              std::vector<intptr_t> &zybounds)
+{
+  intptr_t &nz = conf.nz;
+  intptr_t &np = conf.np;
+
+  nz = conf.nzx * conf.nzy;
+  const int npx = conf.nzx + 1;
+  const int npy = conf.nzy + 1;
+
+  // generate point coordinates
+  pointpos_x.resize(2 * npx * npy);  // upper bound
+  pointpos_y.resize(2 * npx * npy);  // upper bound
+  double dx = conf.lenx / (double) (conf.nzx - 1);
+  double dy = conf.leny / (double) (conf.nzy - 1);
+
+  std::vector<intptr_t> pbase(npy);
+  int p = 0;
+  int pcy = 0;
+  for (int j = 0; j < npy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    pbase[j] = p;
+    double y = dy * ((double) j - 0.5);
+    y = std::max(0., std::min(conf.leny, y));
+    int pcx = 0;
+    for (int i = 0; i < npx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      double x = dx * ((double) i - 0.5);
+      x = std::max(0., std::min(conf.lenx, x));
+      int c = pcy * conf.numpcx + pcx;
+      if (i == 0 || i == conf.nzx || j == 0 || j == conf.nzy) {
+        pointpos_x[p] = x;
+        pointpos_y[p++] = y;
+        if (i != zxbounds[pcx] && j != zybounds[pcy])
+          pointcolors.push_back(c);
+        else {
+          int p1 = p - 1;
+          pointcolors.push_back(MULTICOLOR);
+          std::vector<intptr_t> &pmc = pointmcolors[p1];
+          if (j == zybounds[pcy]) pmc.push_back(c - conf.numpcx);
+          if (i == zxbounds[pcx]) pmc.push_back(c - 1);
+          pmc.push_back(c);
+        }
+      }
+      else {
+        pointpos_x[p] = x - dx / 6.;
+        pointpos_y[p++] = y + dy / 6.;
+        pointpos_x[p] = x + dx / 6.;
+        pointpos_y[p++] = y - dy / 6.;
+        if (i != zxbounds[pcx] && j != zybounds[pcy]) {
+          pointcolors.push_back(c);
+          pointcolors.push_back(c);
+        }
+        else {
+          int p1 = p - 2;
+          int p2 = p - 1;
+          pointcolors.push_back(MULTICOLOR);
+          pointcolors.push_back(MULTICOLOR);
+          std::vector<intptr_t> &pmc1 = pointmcolors[p1];
+          std::vector<intptr_t> &pmc2 = pointmcolors[p2];
+          if (i == zxbounds[pcx] && j == zybounds[pcy]) {
+            pmc1.push_back(c - conf.numpcx - 1);
+            pmc2.push_back(c - conf.numpcx - 1);
+            pmc1.push_back(c - 1);
+            pmc2.push_back(c - conf.numpcx);
+          }
+          else if (j == zybounds[pcy]) {
+            pmc1.push_back(c - conf.numpcx);
+            pmc2.push_back(c - conf.numpcx);
+          }
+          else {  // i == zxbounds[pcx]
+            pmc1.push_back(c - 1);
+            pmc2.push_back(c - 1);
+          }
+          pmc1.push_back(c);
+          pmc2.push_back(c);
+        }
+      }
+    } // for i
+  } // for j
+  np = p;
+  pointpos_x.resize(np);
+  pointpos_y.resize(np);
+
+  // generate zone adjacency lists
+  zonestart.resize(nz);
+  zonesize.resize(nz);
+  zonepoints.reserve(6 * nz);  // upper bound
+  zonecolors.reserve(nz);
+  pcy = 0;
+  for (int j = 0; j < conf.nzy; ++j) {
+    if (j >= zybounds[pcy+1]) pcy += 1;
+    int pbasel = pbase[j];
+    int pbaseh = pbase[j+1];
+    int pcx = 0;
+    for (int i = 0; i < conf.nzx; ++i) {
+      if (i >= zxbounds[pcx+1]) pcx += 1;
+      int z = j * conf.nzx + i;
+      std::vector<intptr_t> v(6);
+      v[1] = pbasel + 2 * i;
+      v[0] = v[1] - 1;
+      v[2] = v[1] + 1;
+      v[5] = pbaseh + 2 * i;
+      v[4] = v[5] + 1;
+      v[3] = v[4] + 1;
+      if (j == 0) {
+        v[0] = pbasel + i;
+        v[2] = v[0] + 1;
+        if (i == conf.nzx - 1) v.erase(v.begin()+3);
+        v.erase(v.begin()+1);
+      } // if j
+      else if (j == conf.nzy - 1) {
+        v[5] = pbaseh + i;
+        v[3] = v[5] + 1;
+        v.erase(v.begin()+4);
+        if (i == 0) v.erase(v.begin()+0);
+      } // else if j
+      else if (i == 0)
+        v.erase(v.begin()+0);
+      else if (i == conf.nzx - 1)
+        v.erase(v.begin()+3);
+      zonestart[z] = zonepoints.size();
+      zonesize[z] = v.size();
+      zonepoints.insert(zonepoints.end(), v.begin(), v.end());
+      zonecolors.push_back(pcy * conf.numpcx + pcx);
+    } // for i
+  } // for j
+}
+
+static void calc_mesh_num_pieces(config &conf)
+{
+    // pick numpcx, numpcy such that pieces are as close to square
+    // as possible
+    // we would like:  nzx / numpcx == nzy / numpcy,
+    // where numpcx * numpcy = npieces (total number of pieces)
+    // this solves to:  numpcx = sqrt(npieces * nzx / nzy)
+    // we compute this, assuming nzx <= nzy (swap if necessary)
+    double nx = static_cast<double>(conf.nzx);
+    double ny = static_cast<double>(conf.nzy);
+    bool swapflag = (nx > ny);
+    if (swapflag) std::swap(nx, ny);
+    double n = sqrt(conf.npieces * nx / ny);
+    // need to constrain n to be an integer with npieces % n == 0
+    // try rounding n both up and down
+    int n1 = floor(n + 1.e-12);
+    n1 = std::max(n1, 1);
+    while (conf.npieces % n1 != 0) --n1;
+    int n2 = ceil(n - 1.e-12);
+    while (conf.npieces % n2 != 0) ++n2;
+    // pick whichever of n1 and n2 gives blocks closest to square,
+    // i.e. gives the shortest long side
+    double longside1 = std::max(nx / n1, ny / (conf.npieces/n1));
+    double longside2 = std::max(nx / n2, ny / (conf.npieces/n2));
+    conf.numpcx = (longside1 <= longside2 ? n1 : n2);
+    conf.numpcy = conf.npieces / conf.numpcx;
+    if (swapflag) std::swap(conf.numpcx, conf.numpcy);
+}
+
+static void generate_mesh(config &conf,
+                          std::vector<double> &pointpos_x,
+                          std::vector<double> &pointpos_y,
+                          std::vector<intptr_t> &pointcolors,
+                          std::map<intptr_t, std::vector<intptr_t> > &pointmcolors,
+                          std::vector<std::vector<intptr_t> > &mapzp,
+                          // std::vector<intptr_t> &zonestart,
+                          // std::vector<intptr_t> &zonesize,
+                          // std::vector<intptr_t> &zonepoints,
+                          std::vector<intptr_t> &zonecolors)
+{
+  // Do calculations common to all mesh types:
+  std::vector<intptr_t> zxbounds;
+  std::vector<intptr_t> zybounds;
+  calc_mesh_num_pieces(conf);
+  zxbounds.push_back(-1);
+  for (int pcx = 1; pcx < conf.numpcx; ++pcx)
+    zxbounds.push_back(pcx * conf.nzx / conf.numpcx);
+  zxbounds.push_back(conf.nzx + 1);
+  zybounds.push_back(-1);
+  for (int pcy = 1; pcy < conf.numpcy; ++pcy)
+    zybounds.push_back(pcy * conf.nzy / conf.numpcy);
+  zybounds.push_back(0x7FFFFFFF);
+
+  // Mesh type-specific calculations:
+  std::vector<intptr_t> zonestart;
+  std::vector<intptr_t> zonesize;
+  std::vector<intptr_t> zonepoints;
+  if (conf.meshtype == MESH_PIE) {
+    generate_mesh_pie(conf, pointpos_x, pointpos_y, pointcolors, pointmcolors,
+                      zonestart, zonesize, zonepoints, zonecolors,
+                      zxbounds, zybounds);
+  } else if (conf.meshtype == MESH_RECT) {
+    generate_mesh_rect(conf, pointpos_x, pointpos_y, pointcolors, pointmcolors,
+                       zonestart, zonesize, zonepoints, zonecolors,
+                       zxbounds, zybounds);
+  } else if (conf.meshtype == MESH_HEX) {
+    generate_mesh_hex(conf, pointpos_x, pointpos_y, pointcolors, pointmcolors,
+                      zonestart, zonesize, zonepoints, zonecolors,
+                      zxbounds, zybounds);
+  }
+
+  // Convert zone ajancency lists to mapzp format.
+  mapzp.resize(conf.nz);
+  for (intptr_t z = 0; z < conf.nz; z++) {
+    intptr_t p0 = zonestart[z];
+    intptr_t znump = zonesize[z];
+    for (intptr_t p = p0; p < p0 + znump; p++) {
+      mapzp[z].push_back(zonepoints[p]);
+    }
+  }
 }
 
 ///
@@ -328,23 +696,35 @@ config read_config()
 
   printf("Reading %s\n", pnt_filename.c_str());
 
-  // Hack: Read inputs twice (including mesh) because there is no
-  // (safe) way to save data between task calls.
   std::map<std::string, std::vector<std::string> > params;
   read_params(pnt_filename, params);
 
   config conf;
   {
-    std::vector<double> pxx;
-    std::vector<double> pxy;
-    std::vector<std::vector<intptr_t> > mapzp;
+    std::string meshtype;
+    extract_param(params, "meshtype", 0, meshtype, true);
+    if (meshtype == "pie") {
+      conf.meshtype = MESH_PIE;
+    } else if (meshtype == "rect") {
+      conf.meshtype = MESH_RECT;
+    } else if (meshtype == "hex") {
+      conf.meshtype = MESH_HEX;
+    } else {
+      assert(0 && "invalid meshtype");
+    }
 
-    std::string meshfile("meshfile");
-    assert(params.count(meshfile));
-    assert(params[meshfile].size() == 1);
-    std::string gmv_filename = dir + params[meshfile][0];
+    std::vector<double> meshparams;
+    for (int i = 0; i < params["meshparams"].size(); i++) {
+      meshparams.push_back(stod(params["meshparams"][i]));
+    }
 
-    read_mesh(gmv_filename, conf, pxx, pxy, mapzp);
+    extract_param(params, "meshparams", 0, conf.meshparams_0, true);
+    extract_param(params, "meshparams", 1, conf.meshparams_1, false);
+    extract_param(params, "meshparams", 2, conf.meshparams_2, false);
+    extract_param(params, "meshparams", 3, conf.meshparams_3, false);
+    conf.meshparams_n = params["meshparams"].size();
+
+    init_mesh(conf);
   }
 
   conf.npieces = get_npieces();
@@ -352,31 +732,31 @@ config read_config()
 
   printf("Using npieces %ld\n", conf.npieces);
 
-  extract_param(params, "cstop", 0, conf.cstop);
-  extract_param(params, "tstop", 0, conf.tstop);
-  extract_param(params, "meshscale", 0, conf.meshscale);
-  extract_param(params, "subregion", 0, conf.subregion_0);
-  extract_param(params, "subregion", 1, conf.subregion_1);
-  extract_param(params, "subregion", 2, conf.subregion_2);
-  extract_param(params, "subregion", 3, conf.subregion_3);
-  extract_param(params, "cfl", 0, conf.cfl);
-  extract_param(params, "cflv", 0, conf.cflv);
-  extract_param(params, "rinit", 0, conf.rinit);
-  extract_param(params, "einit", 0, conf.einit);
-  extract_param(params, "rinitsub", 0, conf.rinitsub);
-  extract_param(params, "einitsub", 0, conf.einitsub);
-  extract_param(params, "uinitradial", 0, conf.uinitradial);
-  extract_param(params, "bcx", 0, conf.bcx_0);
-  extract_param(params, "bcx", 1, conf.bcx_1);
-  extract_param(params, "bcy", 0, conf.bcy_0);
-  extract_param(params, "bcy", 1, conf.bcy_1);
+  extract_param(params, "cstop", 0, conf.cstop, false);
+  extract_param(params, "tstop", 0, conf.tstop, false);
+  extract_param(params, "meshscale", 0, conf.meshscale, false);
+  extract_param(params, "subregion", 0, conf.subregion_0, false);
+  extract_param(params, "subregion", 1, conf.subregion_1, false);
+  extract_param(params, "subregion", 2, conf.subregion_2, false);
+  extract_param(params, "subregion", 3, conf.subregion_3, false);
+  extract_param(params, "cfl", 0, conf.cfl, false);
+  extract_param(params, "cflv", 0, conf.cflv, false);
+  extract_param(params, "rinit", 0, conf.rinit, false);
+  extract_param(params, "einit", 0, conf.einit, false);
+  extract_param(params, "rinitsub", 0, conf.rinitsub, false);
+  extract_param(params, "einitsub", 0, conf.einitsub, false);
+  extract_param(params, "uinitradial", 0, conf.uinitradial, false);
+  extract_param(params, "bcx", 0, conf.bcx_0, false);
+  extract_param(params, "bcx", 1, conf.bcx_1, false);
+  extract_param(params, "bcy", 0, conf.bcy_0, false);
+  extract_param(params, "bcy", 1, conf.bcy_1, false);
   conf.bcx_n = params["bcx"].size();
   conf.bcy_n = params["bcy"].size();
-  extract_param(params, "ssmin", 0, conf.ssmin);
-  extract_param(params, "q1", 0, conf.q1);
-  extract_param(params, "q2", 0, conf.q2);
-  extract_param(params, "dtinit", 0, conf.dtinit);
-  extract_param(params, "chunksize", 0, conf.chunksize);
+  extract_param(params, "ssmin", 0, conf.ssmin, false);
+  extract_param(params, "q1", 0, conf.q1, false);
+  extract_param(params, "q2", 0, conf.q2, false);
+  extract_param(params, "dtinit", 0, conf.dtinit, false);
+  extract_param(params, "chunksize", 0, conf.chunksize, false);
 
   return conf;
 }
@@ -396,27 +776,16 @@ void foreign_read_input(HighLevelRuntime *runtime,
                         PhysicalRegion pcolors_a[1],
                         PhysicalRegion pcolor_shared_a[1])
 {
-  std::string pnt_filename = get_input_filename();
-  std::string dir = get_directory(pnt_filename);
-
   // Read mesh.
   std::vector<double> px_x;
   std::vector<double> px_y;
   std::vector<std::vector<intptr_t> > mapzp;
   {
-    // Hack: Read inputs twice (including mesh) because there is no
-    // (safe) way to save data between task calls.
-    std::map<std::string, std::vector<std::string> > params;
-    read_params(pnt_filename, params);
-
-    std::string meshfile("meshfile");
-    assert(params.count(meshfile));
-    assert(params[meshfile].size() == 1);
-    std::string gmv_filename = dir + params[meshfile][0];
-
-    config conf;
-
-    read_mesh(gmv_filename, conf, px_x, px_y, mapzp);
+    // Toss colorings and regenerate them.
+    std::vector<intptr_t> pcs;
+    std::map<intptr_t, std::vector<intptr_t> > pcm;
+    std::vector<intptr_t> zc;
+    generate_mesh(conf, px_x, px_y, pcs, pcm, mapzp, zc);
   }
 
   // Allocate mesh.
@@ -993,11 +1362,30 @@ Coloring foreign_all_sides_coloring(HighLevelRuntime *runtime,
 /// Kernels
 ///
 
-void foreign_init_step_zones(HighLevelRuntime *runtime,
-                        Context ctx,
-                        intptr_t zstart,
-                        intptr_t zend,
-                        PhysicalRegion rz[2])
+double calc_global_dt(double dt, double dtfac, double dtinit,
+                      double dtmax, double dthydro,
+                      double time, double tstop, intptr_t cycle)
+{
+  double dtlast = dt;
+
+  dt = dtmax;
+
+  if (cycle == 0) {
+    dt = fmin(dt, dtinit);
+  } else {
+    double dtrecover = dtfac * dtlast;
+    dt = fmin(dt, dtrecover);
+  }
+
+  dt = fmin(dt, tstop - time);
+  dt = fmin(dt, dthydro);
+
+  return dt;
+}
+
+void foreign_init_step_zones(intptr_t zstart,
+                             intptr_t zend,
+                             PhysicalRegion rz[2])
 {
   RegionAccessor<AT_SOA_8, double> accessor_zvol =
     rz[0].get_field_accessor(FIELD_ZVOL).typeify<double>().convert<AT_SOA_8>();
@@ -1043,9 +1431,7 @@ void foreign_init_step_zones(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_centers(HighLevelRuntime *runtime,
-                          Context ctx,
-                          intptr_t sstart,
+void foreign_calc_centers(intptr_t sstart,
                           intptr_t send,
                           PhysicalRegion rz[2],
                           PhysicalRegion rpp[1],
@@ -1125,9 +1511,7 @@ void foreign_calc_centers(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_volumes(HighLevelRuntime *runtime,
-                          Context ctx,
-                          intptr_t sstart,
+void foreign_calc_volumes(intptr_t sstart,
                           intptr_t send,
                           PhysicalRegion rz[2],
                           PhysicalRegion rpp[1],
@@ -1214,9 +1598,7 @@ void foreign_calc_volumes(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_surface_vecs(HighLevelRuntime *runtime,
-                               Context ctx,
-                               intptr_t sstart,
+void foreign_calc_surface_vecs(intptr_t sstart,
                                intptr_t send,
                                PhysicalRegion rz[1],
                                PhysicalRegion rs[2])
@@ -1254,9 +1636,7 @@ void foreign_calc_surface_vecs(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_edge_len(HighLevelRuntime *runtime,
-                           Context ctx,
-                           intptr_t sstart,
+void foreign_calc_edge_len(intptr_t sstart,
                            intptr_t send,
                            PhysicalRegion rpp[1],
                            PhysicalRegion rpg[1],
@@ -1319,9 +1699,7 @@ void foreign_calc_edge_len(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_char_len(HighLevelRuntime *runtime,
-                           Context ctx,
-                           intptr_t sstart,
+void foreign_calc_char_len(intptr_t sstart,
                            intptr_t send,
                            PhysicalRegion rz[2],
                            PhysicalRegion rs[1])
@@ -1356,9 +1734,7 @@ void foreign_calc_char_len(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_rho_half(HighLevelRuntime *runtime,
-                           Context ctx,
-                           intptr_t zstart,
+void foreign_calc_rho_half(intptr_t zstart,
                            intptr_t zend,
                            PhysicalRegion rz[2])
 {
@@ -1374,9 +1750,7 @@ void foreign_calc_rho_half(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_sum_point_mass(HighLevelRuntime *runtime,
-                            Context ctx,
-                            intptr_t sstart,
+void foreign_sum_point_mass(intptr_t sstart,
                             intptr_t send,
                             PhysicalRegion rz[1],
                             PhysicalRegion rpp[1],
@@ -1425,9 +1799,7 @@ void foreign_sum_point_mass(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_state_at_half(HighLevelRuntime *runtime,
-                                Context ctx,
-                                double gamma,
+void foreign_calc_state_at_half(double gamma,
                                 double ssmin,
                                 double dt,
                                 intptr_t zstart,
@@ -1482,9 +1854,7 @@ void foreign_calc_state_at_half(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_force_pgas(HighLevelRuntime *runtime,
-                             Context ctx,
-                             intptr_t sstart,
+void foreign_calc_force_pgas(intptr_t sstart,
                              intptr_t send,
                              PhysicalRegion rz[1],
                              PhysicalRegion rs[2])
@@ -1517,9 +1887,7 @@ void foreign_calc_force_pgas(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_force_tts(HighLevelRuntime *runtime,
-                            Context ctx,
-                            double alfa,
+void foreign_calc_force_tts(double alfa,
                             double ssmin,
                             intptr_t sstart,
                             intptr_t send,
@@ -1571,9 +1939,7 @@ void foreign_calc_force_tts(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_qcs_zone_center_velocity(HighLevelRuntime *runtime,
-                                      Context ctx,
-                                      intptr_t sstart,
+void foreign_qcs_zone_center_velocity(intptr_t sstart,
                                       intptr_t send,
                                       PhysicalRegion rz[2],
                                       PhysicalRegion rpp[1],
@@ -1629,9 +1995,7 @@ void foreign_qcs_zone_center_velocity(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_qcs_corner_divergence(HighLevelRuntime *runtime,
-                                   Context ctx,
-                                   intptr_t sstart,
+void foreign_qcs_corner_divergence(intptr_t sstart,
                                    intptr_t send,
                                    PhysicalRegion rz[1],
                                    PhysicalRegion rpp[1],
@@ -1826,9 +2190,7 @@ void foreign_qcs_corner_divergence(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_qcs_qcn_force(HighLevelRuntime *runtime,
-                           Context ctx,
-                           double gamma,
+void foreign_qcs_qcn_force(double gamma,
                            double q1,
                            double q2,
                            intptr_t sstart,
@@ -1959,9 +2321,7 @@ void foreign_qcs_qcn_force(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_qcs_force(HighLevelRuntime *runtime,
-                       Context ctx,
-                       intptr_t sstart,
+void foreign_qcs_force(intptr_t sstart,
                        intptr_t send,
                        PhysicalRegion rs[2])
 {
@@ -2037,9 +2397,7 @@ void foreign_qcs_force(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_sum_point_force(HighLevelRuntime *runtime,
-                             Context ctx,
-                             intptr_t sstart,
+void foreign_sum_point_force(intptr_t sstart,
                              intptr_t send,
                              PhysicalRegion rpp[2],
                              PhysicalRegion rpg[2],
@@ -2122,9 +2480,7 @@ void foreign_sum_point_force(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_centers_full(HighLevelRuntime *runtime,
-                               Context ctx,
-                               intptr_t sstart,
+void foreign_calc_centers_full(intptr_t sstart,
                                intptr_t send,
                                PhysicalRegion rz[2],
                                PhysicalRegion rpp[1],
@@ -2204,9 +2560,7 @@ void foreign_calc_centers_full(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_volumes_full(HighLevelRuntime *runtime,
-                               Context ctx,
-                               intptr_t sstart,
+void foreign_calc_volumes_full(intptr_t sstart,
                                intptr_t send,
                                PhysicalRegion rz[2],
                                PhysicalRegion rpp[1],
@@ -2293,9 +2647,7 @@ void foreign_calc_volumes_full(HighLevelRuntime *runtime,
   }
 }
 
-void foreign_calc_work(HighLevelRuntime *runtime,
-                       Context ctx,
-                       double dt,
+void foreign_calc_work(double dt,
                        intptr_t sstart,
                        intptr_t send,
                        PhysicalRegion rz[1],
@@ -2472,6 +2824,8 @@ private:
   Color get_task_color_by_region(Task *task, LogicalRegion region);
 private:
   std::map<Processor::Kind, std::vector<Processor> > all_processors;
+  Memory local_sysmem;
+  Memory local_regmem;
 };
 
 PennantMapper::PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor local)
@@ -2482,6 +2836,14 @@ PennantMapper::PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor l
        it != procs.end(); it++) {
     Processor::Kind kind = machine->get_processor_kind(*it);
     all_processors[kind].push_back(*it);
+  }
+
+  local_sysmem =
+    machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);
+  local_regmem =
+    machine_interface.find_memory_kind(local_proc, Memory::REGDMA_MEM);
+  if(!local_regmem.exists()) {
+    local_regmem = local_sysmem;
   }
 }
 
@@ -2563,7 +2925,7 @@ void PennantMapper::select_task_variant(Task *task)
 
 bool PennantMapper::map_task(Task *task)
 {
-  Memory global_memory = machine_interface.find_global_memory();
+  assert(task->target_proc == local_proc);
 
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
@@ -2575,8 +2937,8 @@ bool PennantMapper::map_task(Task *task)
     req.enable_WAR_optimization = false;
     req.reduction_list = false;
 
-    // Place all regions in global memory.
-    req.target_ranking.push_back(global_memory);
+    // Place all regions in local system memory.
+    req.target_ranking.push_back(local_sysmem);
   }
 
   return false;
@@ -2584,8 +2946,6 @@ bool PennantMapper::map_task(Task *task)
 
 bool PennantMapper::map_inline(Inline *inline_operation)
 {
-  Memory global_memory = machine_interface.find_global_memory();
-
   RegionRequirement &req = inline_operation->requirement;
 
   // Region options:
@@ -2595,16 +2955,59 @@ bool PennantMapper::map_inline(Inline *inline_operation)
   req.blocking_factor = req.max_blocking_factor;
 
   // Place all regions in global memory.
-  req.target_ranking.push_back(global_memory);
+  req.target_ranking.push_back(local_sysmem);
+
+  log_mapper.debug(
+    "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
+    req.region.get_index_space().id,
+    req.region.get_field_space().get_id(),
+    req.region.get_tree_id(),
+    req.target_ranking[0].id,
+    req.target_ranking.size());
 
   return false;
 }
 
 void PennantMapper::notify_mapping_failed(const Mappable *mappable)
 {
+  switch (mappable->get_mappable_kind()) {
+  case Mappable::TASK_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on task");
+      break;
+    }
+  case Mappable::COPY_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on copy");
+      break;
+    }
+  case Mappable::INLINE_MAPPABLE:
+    {
+      Inline *_inline = mappable->as_mappable_inline();
+      RegionRequirement &req = _inline->requirement;
+      LogicalRegion region = req.region;
+      log_mapper.warning(
+        "mapping %s on inline region (%d,%d,%d) memory %d",
+        (req.mapping_failed ? "failed" : "succeeded"),
+        region.get_index_space().id,
+        region.get_field_space().get_id(),
+        region.get_tree_id(),
+        req.selected_memory.id);
+      break;
+    }
+  case Mappable::ACQUIRE_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on acquire");
+      break;
+    }
+  case Mappable::RELEASE_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on release");
+      break;
+    }
+  }
   assert(0 && "mapping failed");
 }
-
 
 Color PennantMapper::get_task_color_by_region(Task *task, LogicalRegion region)
 {

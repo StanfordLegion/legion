@@ -132,7 +132,8 @@ namespace LegionRuntime {
       bool remove_resource_reference(unsigned cnt = 1);
     public:
       bool add_remote_reference(AddressSpaceID sid, unsigned cnt = 1);
-      bool remove_remote_reference(AddressSpaceID sid, unsigned cnt = 1);
+      bool remove_remote_reference(AddressSpaceID sid, Event dest_event,
+                                   unsigned cnt = 1);
     public:
       void add_held_remote_reference(unsigned cnt = 1);
       // Notify the owner of a remote reference sent somewhere else
@@ -176,9 +177,11 @@ namespace LegionRuntime {
     protected:
       // Only matters on the remote nodes
       unsigned held_remote_references;
+      UserEvent destruction_event;
     protected:
       // These only matter on the owner node
       std::map<AddressSpaceID,int> remote_references;
+      std::set<Event> recycle_events;
     };
 
     /**

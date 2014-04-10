@@ -552,6 +552,7 @@ namespace LegionRuntime {
     class Translation {
     public:
       enum { IDIM = DIM, ODIM = DIM };
+      Translation(void) : offset(0) {}
       Translation(const Point<DIM> _offset) : offset(_offset) {}
   
       Point<ODIM> image(const Point<IDIM> p) const
@@ -564,11 +565,38 @@ namespace LegionRuntime {
         return Rect<ODIM>(r.lo + offset, r.hi + offset);
       }
   
-      bool image_is_rectangular(const Rect<IDIM> r) const
+      bool image_is_dense(const Rect<IDIM> r) const
       {
         return true;
       }
       
+      Rect<ODIM> image_dense_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect) const
+      {
+	subrect = r;
+	return Rect<ODIM>(r.lo + offset, r.hi + offset);
+      }
+
+      Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const
+      {
+	subrect = r;
+	for(unsigned i = 0; i < DIM; i++) {
+	  // strides are unit vectors
+	  strides[i] = 0;
+	  strides[i].x[i] = 1;
+	}
+	return r.lo + offset;
+      }
+
+      Rect<IDIM> preimage(const Point<ODIM> p) const
+      {
+	return Rect<IDIM>(p - offset, p - offset);
+      }
+
+      bool preimage_is_dense(const Point<ODIM> p) const
+      {
+	return true;
+      }
+
     protected:
       Point<DIM> offset;
     };

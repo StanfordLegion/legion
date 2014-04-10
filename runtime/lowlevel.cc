@@ -549,6 +549,7 @@ namespace LegionRuntime {
 		    new ElementMask(*_initial_valid_mask) :
 		    new ElementMask(_num_elmts));
       valid_mask_complete = true;
+      valid_mask_event = Event::NO_EVENT;
       gasnet_hsl_init(&valid_mask_mutex);
       if(_frozen) {
 	avail_mask = 0;
@@ -591,6 +592,7 @@ namespace LegionRuntime {
       lock.set_local_data(&locked_data);
       valid_mask = 0;
       valid_mask_complete = false;
+      valid_mask_event = Event::NO_EVENT;
       gasnet_hsl_init(&valid_mask_mutex);
     }
 
@@ -928,7 +930,7 @@ namespace LegionRuntime {
 
     void show_event_waiters(FILE *f = stdout)
     {
-      printf("PRINTING ALL PENDING EVENTS:\n");
+      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
       for(int i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &Runtime::runtime->nodes[i];
 	AutoHSLLock a1(n->mutex);
@@ -937,22 +939,31 @@ namespace LegionRuntime {
 	  Event::Impl *e = &(n->events[j]);
 	  AutoHSLLock a2(e->mutex);
 
-	  if(e->generation >= e->free_generation) continue;
+	  // print anything with either local or remote waiters
+	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	    continue;
 
-          fprintf(f,"Event %x: gen=%d subscr=%d remote=%lx\n",
-		 e->me.id, e->generation, e->gen_subscribed, e->local_waiters.size());
-	  //printf("Event %x: gen=%d subscr=%d remote=%lx waiters=%zd\n",
-	  //        e->me.id, e->generation, e->gen_subscribed, e->remote_waiters,
-	  //        e->local_waiters.size());
+          fprintf(f,"Event %x: gen=%d subscr=%d local=%zd remote=%zd\n",
+		  e->me.id, e->generation, e->gen_subscribed, 
+		  e->local_waiters.size(), e->remote_waiters.size());
 	  for(std::map<Event::gen_t, std::vector<Event::Impl::EventWaiter *> >::iterator it = e->local_waiters.begin();
 	      it != e->local_waiters.end();
 	      it++) {
 	    for(std::vector<Event::Impl::EventWaiter *>::iterator it2 = it->second.begin();
 		it2 != it->second.end();
 		it2++) {
-	      printf("  [%d] %p ", it->first, *it2);
+	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
 	      (*it2)->print_info(f);
 	    }
+	  }
+	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+	      it != e->remote_waiters.end();
+	      it++) {
+	    fprintf(f, "  [%d] R:", it->first);
+	    for(int k = 0; k < MAX_NUM_NODES; k++)
+	      if(it->second.is_set(k))
+		fprintf(f, " %d", k);
+	    fprintf(f, "\n");
 	  }
 	}
       }
@@ -2884,8 +2895,9 @@ namespace LegionRuntime {
     {
       Memory::Impl *impl = args.mem.impl();
 
-      log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+      log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, seq=%d/%d, event=%x/%d",
 		     args.mem.id, args.offset, datalen,
+		     args.sender, args.sequence_id,
 		     args.event.id, args.event.gen);
 #ifdef DEBUG_REMOTE_WRITES
       printf("received remote write request: mem=%x, offset=%zd, size=%zd, seq=%d/%d, event=%x/%d\n",
@@ -2984,8 +2996,8 @@ namespace LegionRuntime {
 
     void handle_remote_write_fence(RemoteWriteFenceArgs args)
     {
-      // printf("%d: remote write fence (mem = %08x, seq = %d/%d, count = %d, event = %08x/%d)\n",
-      // 	     gasnet_mynode(), args.mem.id, args.sender, args.sequence_id, args.num_writes, args.event.id, args.event.gen);
+      log_copy.debug("remote write fence (mem = %08x, seq = %d/%d, count = %d, event = %08x/%d)\n",
+		     args.mem.id, args.sender, args.sequence_id, args.num_writes, args.event.id, args.event.gen);
 
       assert(args.sequence_id != 0);
       // track the sequence ID to know when the full RDMA is done
@@ -3018,6 +3030,8 @@ namespace LegionRuntime {
 #endif
 	  entry.event = args.event;
 	  entry.remaining_count += args.num_writes;
+	  // a negative remaining count means we got too many writes!
+	  assert(entry.remaining_count >= 0);
 	  if(entry.remaining_count == 0) {
 	    // this fence came after all the writes, so trigger
 	    Event e = entry.event;
@@ -3043,7 +3057,7 @@ namespace LegionRuntime {
       log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
 		     mem.id, offset, datalen,
 		     event.id, event.gen);
-      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+
       Memory::Impl *m_impl = mem.impl();
       char *dstptr;
       if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
@@ -3052,30 +3066,48 @@ namespace LegionRuntime {
       } else
 	dstptr = 0;
       assert(datalen > 0);
-      if(datalen > MAX_SEND_SIZE) {
-	// as written, this assumes in-order delivery of messages, which isn't guaranteed
-	assert(0);
-	log_copy.info("breaking large send into pieces");
-	const char *pos = (const char *)data;
-	RemoteWriteArgs args;
-	args.mem = mem;
-	args.offset = offset;
-	args.event = Event::NO_EVENT;
-	while(datalen > MAX_SEND_SIZE) {
+
+      // if we don't have a destination pointer, we need to use the LMB, which
+      //  may require chopping this request into pieces
+      if(!dstptr) {
+	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+
+	if(datalen > max_xfer_size) {
+	  // can't do this if we've been given a trigger event - no guarantee
+	  //  on ordering of these xfers
+	  assert(!event.exists());
+
+	  log_copy.info("breaking large send into pieces");
+	  const char *pos = (const char *)data;
+	  RemoteWriteArgs args;
+	  args.mem = mem;
+	  args.offset = offset;
+	  args.event = Event::NO_EVENT;
+	  args.sender = gasnet_mynode();
+	  args.sequence_id = sequence_id;
+
+	  int count = 1;
+	  while(datalen > max_xfer_size) {
+	    RemoteWriteMessage::request(ID(mem).node(), args,
+					pos, max_xfer_size,
+					make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	    args.offset += max_xfer_size;
+	    pos += max_xfer_size;
+	    datalen -= max_xfer_size;
+	    count++;
+	  }
+
+	  // last send includes whatever's left
 	  RemoteWriteMessage::request(ID(mem).node(), args,
-				      pos, MAX_SEND_SIZE,
+				      pos, datalen, 
 				      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	  args.offset += MAX_SEND_SIZE;
-	  pos += MAX_SEND_SIZE;
-	  datalen -= MAX_SEND_SIZE;
+	  return count;
 	}
-	// last send includes the trigger event
-	args.event = event;
-	RemoteWriteMessage::request(ID(mem).node(), args,
-				    pos, datalen, 
-				    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	return 1;
-      } else {
+      }
+
+      // we get here with either a valid destination pointer (so no size limit)
+      //  or a write smaller than the LMB
+      {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
@@ -3095,10 +3127,10 @@ namespace LegionRuntime {
 			     off_t stride, size_t lines,
 			     unsigned sequence_id, Event event, bool make_copy = false)
     {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
-		     mem.id, offset, datalen,
+      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zdx%zd, event=%x/%d",
+		     mem.id, offset, datalen, lines,
 		     event.id, event.gen);
-      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+
       Memory::Impl *m_impl = mem.impl();
       char *dstptr;
       if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
@@ -3106,12 +3138,51 @@ namespace LegionRuntime {
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
-      if(datalen*lines > MAX_SEND_SIZE) {
-	// as written, this assumes in-order delivery of messages, which isn't guaranteed
-	assert(0);
-	// doing this with spans is even more complicated...
-	return 0;
-      } else {
+
+      // if we don't have a destination pointer, we need to use the LMB, which
+      //  may require chopping this request into pieces
+      if(!dstptr) {
+	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_lines_per_xfer = max_xfer_size / datalen;
+	assert(max_lines_per_xfer > 0);
+
+	if(lines > max_lines_per_xfer) {
+	  // can't do this if we've been given a trigger event - no guarantee
+	  //  on ordering of these xfers
+	  assert(!event.exists());
+
+	  log_copy.info("breaking large send into pieces");
+	  const char *pos = (const char *)data;
+	  RemoteWriteArgs args;
+	  args.mem = mem;
+	  args.offset = offset;
+	  args.event = Event::NO_EVENT;
+	  args.sender = gasnet_mynode();
+	  args.sequence_id = sequence_id;
+
+	  int count = 1;
+	  while(datalen > max_xfer_size) {
+	    RemoteWriteMessage::request(ID(mem).node(), args,
+					pos, datalen,
+					stride, max_lines_per_xfer,
+					make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	    args.offset += datalen * max_lines_per_xfer;
+	    pos += stride * max_lines_per_xfer;
+	    lines -= max_lines_per_xfer;
+	    count++;
+	  }
+
+	  // last send includes whatever's left
+	  RemoteWriteMessage::request(ID(mem).node(), args,
+				      pos, datalen, stride, lines,
+				      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  return count;
+	}
+      }
+
+      // we get here with either a valid destination pointer (so no size limit)
+      //  or a write smaller than the LMB
+      {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
@@ -3132,10 +3203,10 @@ namespace LegionRuntime {
 			     const SpanList &spans, size_t datalen,
 			     unsigned sequence_id, Event event, bool make_copy = false)
     {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
-		     mem.id, offset, datalen,
+      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd(%zd spans), event=%x/%d",
+		     mem.id, offset, datalen, spans.size(),
 		     event.id, event.gen);
-      const size_t MAX_SEND_SIZE = 4 << 20; // should be <= LMB_SIZE
+
       Memory::Impl *m_impl = mem.impl();
       char *dstptr;
       if(m_impl->kind == Memory::Impl::MKIND_RDMA) {
@@ -3143,12 +3214,84 @@ namespace LegionRuntime {
 	//printf("remote mem write to rdma'able memory: dstptr = %p\n", dstptr);
       } else
 	dstptr = 0;
-      if(datalen > MAX_SEND_SIZE) {
-	// as written, this assumes in-order delivery of messages, which isn't guaranteed
-	assert(0);
-	// doing this with spans is even more complicated...
-	return 0;
-      } else {
+
+      // if we don't have a destination pointer, we need to use the LMB, which
+      //  may require chopping this request into pieces
+      if(!dstptr) {
+	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+
+	if(datalen > max_xfer_size) {
+	  // can't do this if we've been given a trigger event - no guarantee
+	  //  on ordering of these xfers
+	  assert(!event.exists());
+
+	  log_copy.info("breaking large send into pieces");
+	  RemoteWriteArgs args;
+	  args.mem = mem;
+	  args.offset = offset;
+	  args.event = Event::NO_EVENT;
+	  args.sender = gasnet_mynode();
+	  args.sequence_id = sequence_id;
+
+	  int count = 0;
+	  // this is trickier because we don't actually know how much will fit
+	  //  in each transfer
+	  SpanList::const_iterator it = spans.begin();
+	  while(datalen > 0) {
+	    // possible special case - if the first span is too big to fit at
+	    //   all, chop it up and send it
+	    assert(it != spans.end());
+	    if(it->second > max_xfer_size) {
+              const char *pos = (const char *)(it->first);
+              size_t left = it->second;
+              while(left > max_xfer_size) {
+		RemoteWriteMessage::request(ID(mem).node(), args,
+					    pos, max_xfer_size,
+					    make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+		args.offset += max_xfer_size;
+		pos += max_xfer_size;
+		left -= max_xfer_size;
+		count++;
+	      }
+	      RemoteWriteMessage::request(ID(mem).node(), args,
+					  pos, left,
+					  make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	      args.offset += left;
+	      count++;
+	      datalen -= it->second;
+	      it++;
+	      continue;
+	    }
+
+	    // take spans in order until we run out of space or spans
+	    SpanList subspans;
+	    size_t xfer_size = 0;
+	    while(it != spans.end()) {
+	      // can we fit the next one?
+	      if((xfer_size + it->second) > max_xfer_size) break;
+
+	      subspans.push_back(*it);
+	      xfer_size += it->second;
+	      it++;
+	    }
+	    // if we didn't get at least one span, we won't make forward progress
+	    assert(!subspans.empty());
+
+	    RemoteWriteMessage::request(ID(mem).node(), args,
+					subspans, xfer_size,
+					make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	    args.offset += xfer_size;
+	    datalen -= xfer_size;
+	    count++;
+	  }
+
+	  return count;
+	}
+      }
+
+      // we get here with either a valid destination pointer (so no size limit)
+      //  or a write smaller than the LMB
+      {
 	RemoteWriteArgs args;
 	args.mem = mem;
 	args.offset = offset;
@@ -3739,10 +3882,10 @@ namespace LegionRuntime {
 	  for(size_t i = 0; (i < arglen) && (i < 40); i++)
 	    sprintf(argstr+2*i, "%02x", ((unsigned char *)args)[i]);
 	  if(arglen > 40) strcpy(argstr+80, "...");
-	  log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_DEBUG), 
+	  log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 		   "task start: %d (%p) (%s)", func_id, fptr, argstr);
 	  (*fptr)(args, arglen, (actual_proc.exists() ? actual_proc : proc->me));
-	  log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_DEBUG), 
+	  log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
 		   "task end: %d (%p) (%s)", func_id, fptr, argstr);
 	  if(finish_event.exists())
 	    finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
@@ -5509,16 +5652,28 @@ namespace LegionRuntime {
 
 	StaticAccess<IndexSpace::Impl> data(r);
 	assert(data->num_elmts > 0);
-	// SJT: FIX THIS - actually create a translation linearization for index spaces
-	// we always start at 0, even if the linearization doesn't use it
+
+#ifdef FULL_SIZE_INSTANCES
 	num_elements = data->last_elmt + 1;
-	if(data->first_elmt > 0)
-	  printf("WARNING: Creating an instance where first_elmt=%zd\n", data->first_elmt);
 	DomainLinearization::from_index_space(data->first_elmt).serialize(linearization_bits);
+#else
+	num_elements = data->last_elmt - data->first_elmt + 1;
+	if(block_size > num_elements)
+	  block_size = num_elements;
+
+	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
+
+	Translation<1> inst_offset(-(int)(data->first_elmt));
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	dl.serialize(linearization_bits);
+#endif
       }
 
-      // HACK: force full SOA by setting block_size == num_elements
-      block_size = num_elements;
+      // for instances with a single element, there's no real difference between AOS and
+      //  SOA - force the block size to indicate "full SOA" as it makes the DMA code
+      //  use a faster path
+      if(field_sizes.size() == 1)
+	block_size = num_elements;
 
       if(block_size > 1) {
 	size_t leftover = num_elements % block_size;
@@ -5725,6 +5880,7 @@ namespace LegionRuntime {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	//printf("ENABLE %p %d %d %d %x\n", raw_data, offset, start, count, impl->bits[0]);
 	int pos = start - first_element;
+        assert(pos < num_elements);
 	for(int i = 0; i < count; i++) {
 	  uint64_t *ptr = &(impl->bits[pos >> 6]);
 	  *ptr |= (1ULL << (pos & 0x3f));
@@ -6106,10 +6262,10 @@ namespace LegionRuntime {
     void RegionInstance::Impl::verify_access(unsigned ptr)
     {
       StaticAccess<RegionInstance::Impl> data(this);
-      const ElementMask &mask = const_cast<IndexSpace*>(&(data->region))->get_valid_mask();
+      const ElementMask &mask = data->is.get_valid_mask();
       if (!mask.is_set(ptr))
       {
-        fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region %x\n",ptr,data->region.id);
+        fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region %x\n",ptr,data->is.id);
         assert(false);
       }
     }
@@ -7381,10 +7537,20 @@ namespace LegionRuntime {
 #ifdef DEADLOCK_TRACE
     void sigterm_catch(int signal) {
       assert(signal == SIGTERM);
+#ifdef NODE_LOGGING
+      static int call_count = 0;
+      int count = __sync_fetch_and_add(&call_count, 1);
+      if (count == 0) {
+        FILE *log_file = Logger::get_log_file();
+        show_event_waiters(log_file);
+        Logger::finalize();
+      }
+#else
       Runtime *rt = Runtime::get_runtime();
       // Send sig aborts to all the threads
       for (unsigned idx = 0; idx < rt->next_thread; idx++)
         pthread_kill(rt->all_threads[idx], SIGABRT);
+#endif
     }
 
     void sigabrt_catch(int signal) {
@@ -7463,6 +7629,7 @@ namespace LegionRuntime {
 	execvp(new_argv[0], (char **)new_argv);
 	// should never get here...
 	perror("execvp");
+	exit(1);
       }
 	  
       for(ReductionOpTable::const_iterator it = redop_table.begin();
@@ -7482,6 +7649,7 @@ namespace LegionRuntime {
       Arrays::Mapping<1,1>::register_mapping<Arrays::FortranArrayLinearization<1> >();
       Arrays::Mapping<2,1>::register_mapping<Arrays::FortranArrayLinearization<2> >();
       Arrays::Mapping<3,1>::register_mapping<Arrays::FortranArrayLinearization<3> >();
+      Arrays::Mapping<1,1>::register_mapping<Translation<1> >();
 
       // low-level runtime parameters
       size_t gasnet_mem_size_in_mb = 256;
@@ -7614,7 +7782,9 @@ namespace LegionRuntime {
       //hcount += TestMessage::add_handler_entries(&handlers[hcount]);
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount]);
 
-      init_endpoints(handlers, hcount, gasnet_mem_size_in_mb, reg_mem_size_in_mb);
+      init_endpoints(handlers, hcount, 
+		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
+		     *argc, (const char **)*argv);
 
       // Put this here so that it complies with the GASNet specification and
       // doesn't make any calls between gasnet_init and gasnet_attach
@@ -8110,10 +8280,13 @@ namespace LegionRuntime {
       size_t arglen;
     };  
 
+    static bool running_as_background_thread = false;
+
     static void *background_run_thread(void *data)
     {
       MachineRunArgs *args = (MachineRunArgs *)data;
       printf("HERE\n");
+      running_as_background_thread = true;
       args->m->run(args->task_id, args->style, args->args, args->arglen,
 		   false /* foreground from this thread's perspective */);
       printf("THERE\n");
@@ -8205,12 +8378,23 @@ namespace LegionRuntime {
 	fflush(stdout);
 	sleep(1);
       }
-#ifdef ORDERED_LOGGING 
+#if defined(ORDERED_LOGGING) || defined(NODE_LOGGING)
       Logger::finalize();
 #endif
       log_machine.info("running proc count is now zero - terminating\n");
+      // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
-      pthread_exit(0);
+      stop_dma_worker_threads();
+      stop_activemsg_threads();
+      
+      // if we are running as a background thread, just terminate this thread
+      // if not, do a full process exit - gasnet may have started some threads we don't have handles for,
+      //   and if they're left running, the app will hang
+      if(running_as_background_thread) {
+	pthread_exit(0);
+      } else {
+	exit(0);
+      }
     }
 
     void Machine::shutdown(bool local_request /*= true*/)
@@ -8278,6 +8462,28 @@ namespace LegionRuntime {
     close(get_log_file());
     // Free the memory
     free(get_logging_buffer());
+  }
+#endif
+
+#ifdef NODE_LOGGING
+  /*static*/ FILE* Logger::get_log_file(void)
+  {
+    static FILE *log_file = NULL;
+    if (log_file == NULL)
+    {
+      const char *prefix = "";
+      char file_name[1024];
+      sprintf(file_name,"%s/node_%d.log", prefix, gasnet_mynode());
+      log_file = fopen(file_name,"w");
+      assert(log_file != NULL);
+    }
+    return log_file;
+  }
+
+  /*static*/ void Logger::finalize(void)
+  {
+    FILE *log_file = get_log_file();
+    fclose(log_file);
   }
 #endif
 
@@ -8360,8 +8566,14 @@ namespace LegionRuntime {
     memcpy(get_logging_buffer()+loc,buffer,len);
     __sync_fetch_and_add(get_written_location(),len);
 #else
+#ifdef NODE_LOGGING
+    FILE *log_file = get_log_file();
+    fputs(buffer, log_file);
+    fflush(log_file);
+#else
     fflush(stdout);
     fputs(buffer, stderr);
+#endif
 #endif
   }
 }; // namespace LegionRuntime
@@ -8462,9 +8674,37 @@ namespace LegionRuntime {
         offset += (field_start * idata->block_size) + (field_offset - field_start);
 	elmt_stride = field_size;
       }
+
       base = mem->get_direct_ptr(offset, 0);
       if (!base) return false;
-      stride = elmt_stride;
+
+      // if the caller wants a particular stride and we differ (and have more
+      //  than one element), fail
+      if(stride != 0) {
+        if((stride != elmt_stride) && (idata->size > idata->elmt_size))
+          return false;
+      } else {
+        stride = elmt_stride;
+      }
+
+      // if there's a per-element offset, apply it after we've agreed with the caller on 
+      //  what we're pretending the stride is
+      const DomainLinearization& dl = impl->linearization;
+      if(dl.get_dim() > 0) {
+	// make sure this instance uses a 1-D linearization
+	assert(dl.get_dim() == 1);
+
+	Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
+	Rect<1> preimage = mapping->preimage(0);
+	assert(preimage.lo == preimage.hi);
+	// double-check that whole range maps densely
+	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
+	assert(mapping->image_is_dense(preimage));
+	int inst_first_elmt = preimage.lo[0];
+	//printf("adjusting base by %d * %zd\n", inst_first_elmt, stride);
+	base = ((char *)base) - inst_first_elmt * stride;
+      }
+
       return true;
     }
 

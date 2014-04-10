@@ -174,6 +174,7 @@ namespace LegionRuntime {
       assert(t != NULL);
 #endif
       trace = t; 
+      tracing = !trace->is_fixed();
     }
 
     //--------------------------------------------------------------------------
@@ -543,23 +544,18 @@ namespace LegionRuntime {
       // No need to hold the lock since we haven't started yet
       outstanding_mapping_deps++;
       outstanding_speculation_deps++;
-      // Ask the parent context about any fence dependences
+      // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
+      // Register ourselves with our trace if there is one
+      // This will also add any necessary dependences
       if (trace != NULL)
-      {
-        // Have to cache this value here to avoid a race condition
-        tracing = trace->is_tracing();
         trace->register_operation(this, gen);
-      }
     }
 
     //--------------------------------------------------------------------------
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // If we've already been traced record our dependences now
-      if ((trace != NULL) && !tracing)
-        trace->register_dependences(this);
       bool need_mapping;
       bool need_resolution;
       {
@@ -587,7 +583,21 @@ namespace LegionRuntime {
       // that the target was recycled and will never register. Return
       // true if the generation is older than our current generation.
       if (target == this)
-        return (target_gen < gen);
+      {
+        // Can't remove this if we are tracing
+        if (tracing)
+        {
+          // Don't forget to record the dependence
+#ifdef DEBUG_HIGH_LEVEL
+          assert(trace != NULL);
+#endif
+          if (target_gen < gen)
+            trace->record_dependence(this, target_gen, this, gen);
+          return false;
+        }
+        else
+          return (target_gen < gen);
+      }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
       bool prune = target->perform_registration(target_gen, this, gen,
@@ -614,7 +624,21 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (target == this)
-        return (target_gen < gen);
+      {
+        // Can't remove this if we are tracing
+        if (tracing)
+        {
+          // Don't forget to record the dependence
+#ifdef DEBUG_HIGH_LEVEL
+          assert(trace != NULL);
+#endif
+          if (target_gen < gen)
+            trace->record_region_dependence(this, target_gen, this, gen, idx);
+          return false;
+        }
+        else
+          return (target_gen < gen);
+      }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
       bool prune = target->perform_registration(target_gen, this, gen,
@@ -2807,6 +2831,10 @@ namespace LegionRuntime {
       LegionLogging::log_fence_operation(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_op_id(),
                                          unique_op_id);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_fence_operation(parent_ctx->get_unique_task_id(),
+                                     unique_op_id);
 #endif
     }
 

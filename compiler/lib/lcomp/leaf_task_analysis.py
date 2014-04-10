@@ -56,15 +56,13 @@ class Context:
 # task. Functions are considered safe if:
 #
 #   * The function is a foreign function.
-#   * The function does not take a ForeignContext parameter, or
-#     aggressive leaf task optimization is enabled.
+#   * The function does not take a ForeignContext parameter.
 def is_function_safe(function_type, cx):
     if not types.is_foreign_function(function_type):
         return False
-    if not cx.opts.leaf_task_optimization:
-        for arg in function_type.foreign_param_types:
-            if types.is_foreign_context(arg):
-                return False
+    for arg in function_type.foreign_param_types:
+        if types.is_foreign_context(arg):
+            return False
     return True
 
 @singledispatch

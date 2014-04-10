@@ -2146,6 +2146,7 @@ namespace LegionRuntime {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	//printf("ENABLE %p %d %d %d %x\n", raw_data, offset, start, count, impl->bits[0]);
 	int pos = start - first_element;
+	assert(pos < num_elements);
 	for(int i = 0; i < count; i++) {
 	  unsigned *ptr = &(impl->bits[pos >> 5]);
 	  *ptr |= (1U << (pos & 0x1f));
@@ -2994,6 +2995,8 @@ namespace LegionRuntime {
           }
 #endif
           // This is a normal copy
+	  // but it assumes AOS!
+	  assert((block_size == 1) && (target->block_size == 1));
           RangeExecutors::Memcpy rexec(tgt_ptr, src_ptr, elmt_size);
           ElementMask::forall_ranges(rexec, dst_mask, src_mask);
         }
@@ -3122,6 +3125,13 @@ namespace LegionRuntime {
     void* RegionInstance::Impl::get_address(int index, size_t field_start, size_t field_size,
 					    size_t within_field)
     {
+      // does instance have a linearization/translation?
+      if(get_linearization().get_dim() > 0) {
+	assert(get_linearization().get_dim() == 1);
+	int new_index = get_linearization().get_mapping<1>()->image(index);
+	index = new_index;
+      }
+
       if(block_size == 1) {
 	// simple AOS case:
 	return (base_ptr + (index * elmt_size) + field_start + within_field);
@@ -3342,6 +3352,7 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       std::vector<size_t> field_sizes(1);
       field_sizes[0] = elmt_size;
+      // for an instance with a single field, block size should be a don't care
       return create_instance(m, field_sizes, 1, redop_id);
     }
 
@@ -3388,13 +3399,31 @@ namespace LegionRuntime {
 	  default: assert(0);
 	  }
 	  IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(get_index_space());
-	  // HACK - override block size to force SOA for now
-	  block_size = inst_extent.volume();
 	  return r->create_instance(memory, field_sizes, block_size, dl, int(inst_extent.hi) + 1, redop_id);
 	} else {
 	  IndexSpace::Impl *r = Runtime::get_runtime()->get_metadata_impl(get_index_space());
+
+	  DomainLinearization dl;
+	  int count = r->get_num_elmts();
+#ifndef FULL_SIZE_INSTANCES
+	  // if we know that we just need a subset of the elements, make a smaller instance
+	  {
+	    int first_elmt = r->get_element_mask().first_enabled();
+	    int last_elmt = r->get_element_mask().last_enabled();
+
+	    if((first_elmt >= 0) && (last_elmt >= first_elmt) &&
+	       ((first_elmt > 0) || (last_elmt < count-1))) {
+	      // reduce instance size, and block size if necessary
+	      count = last_elmt - first_elmt + 1;
+	      if(block_size > count)
+		block_size = count;
+	      Translation<1> inst_offset(-first_elmt);
+	      dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	    }
+	  }
+#endif
 	  return r->create_instance(memory, field_sizes, block_size, 
-				    DomainLinearization(), r->get_num_elmts(),
+				    dl, count,
 				    redop_id);
 	}
     }
@@ -3663,8 +3692,9 @@ namespace LegionRuntime {
 	}
 
 	// if a redop was provided, fill the new memory with the op's identity
+	const ReductionOpUntyped *redop = 0;
 	if(redop_id) {
-	  const ReductionOpUntyped *redop = Runtime::get_runtime()->get_reduction_op(redop_id);
+	  redop = Runtime::get_runtime()->get_reduction_op(redop_id);
 	  assert(redop->has_identity);
 	  assert(elmt_size == redop->sizeof_rhs);
 	  redop->init(ptr, rounded_num_elmts);
@@ -3674,11 +3704,13 @@ namespace LegionRuntime {
 	IndexSpace r = { static_cast<id_t>(index) };
 	RegionInstance::Impl* impl = Runtime::get_runtime()->get_free_instance(r, m,
 									       num_elements, 
-                                                                 rounded_num_elmts*elmt_size,
+									       rounded_num_elmts*elmt_size,
 									       field_sizes,
 									       elmt_size, 
 									       block_size, dl,
-									       ptr, NULL/*redop*/, NULL/*parent instance*/);
+									       ptr, 
+									       redop,
+									       NULL/*parent instance*/);
 	RegionInstance inst = impl->get_instance();
 	instances.insert(inst);
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
@@ -5068,21 +5100,59 @@ namespace LegionRuntime {
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
 
-#ifdef DEBUG_LOW_LEVEL
-      assert(impl->get_block_size() == impl->get_num_elmts() || impl->get_field_sizes().size());
-#endif
+      int inst_first_elmt = 0;
+      const DomainLinearization& dl = impl->get_linearization();
+      if(dl.get_dim() > 0) {
+	// make sure this instance uses a 1-D linearization
+	assert(dl.get_dim() == 1);
+
+	Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
+	Rect<1> image(0, impl->get_num_elmts()-1);
+	Rect<1> preimage = mapping->preimage(image.lo);
+	assert(preimage.lo == preimage.hi);
+	// double-check that whole range maps densely
+	preimage.hi.x[0] += impl->get_num_elmts() - 1;
+	assert(mapping->image_is_dense(preimage));
+	inst_first_elmt = preimage.lo[0];
+      }
+
+      // don't handle fixed base addresses yet
+      if (base != 0) return false;
 
       size_t field_start, field_size, within_field;
       find_field(impl->get_field_sizes(), field_offset, 1,
                  field_start, field_size, within_field);
 
-      if (base != 0) return false;
-      base = (((char *)(impl->get_base_ptr())) +
-              (field_start * impl->get_block_size()) +
-              (field_offset - field_start));
+      size_t block_size = impl->get_block_size();
 
-      if ((stride != 0) && (stride != field_size)) return false;
-      stride = field_size;
+      if(block_size == 1) {
+	// AOS, which might be ok if there's only a single field or strides match
+	if((impl->get_num_elmts() > 1) &&
+	   (stride != 0) && (stride != impl->get_elmt_size()))
+	  return false;
+
+	base = (((char *)(impl->get_base_ptr()))
+		+ field_offset
+		- (impl->get_elmt_size() * inst_first_elmt) // adjust for the first element not being #0
+		);
+
+	if(stride == 0)
+	  stride = impl->get_elmt_size();
+      } else
+	if(block_size == impl->get_num_elmts()) {
+	  // SOA
+	  base = (((char *)(impl->get_base_ptr()))
+		  + (field_start * impl->get_block_size())
+		  + (field_offset - field_start)
+		  - (field_size * inst_first_elmt)  // adjust for the first element not being #0
+		  );
+	    
+	  if ((stride != 0) && (stride != field_size)) return false;
+	  stride = field_size;
+	} else {
+	  // hybrid SOA, we lose
+	  return false;
+	}
 
       return true;
     }
@@ -5096,11 +5166,30 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_redfold_parameters(void *& base) const
     {
-      // TODO: actually check that we're a reduction?
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // make sure this is a reduction fold instance
+      if(!impl->is_reduction() || impl->is_list_reduction()) return false;
 
       if(base != 0) return false;
       base = impl->get_base_ptr();
+
+      int inst_first_elmt = 0;
+      const DomainLinearization& dl = impl->get_linearization();
+      if(dl.get_dim() > 0) {
+	// make sure this instance uses a 1-D linearization
+	assert(dl.get_dim() == 1);
+
+	Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
+	Rect<1> image(0, impl->get_num_elmts()-1);
+	Rect<1> preimage = mapping->preimage(image.lo);
+	assert(preimage.lo == preimage.hi);
+	// double-check that whole range maps densely
+	preimage.hi.x[0] += impl->get_num_elmts() - 1;
+	assert(mapping->image_is_dense(preimage));
+	inst_first_elmt = preimage.lo[0];
+	base = ((char *)base) - inst_first_elmt * impl->get_elmt_size();
+      }
 
       return true;
     }

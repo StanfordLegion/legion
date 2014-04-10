@@ -42,7 +42,6 @@ namespace LegionRuntime {
       void fix_trace(void);
     public:
       // Called by analysis thread
-      inline bool is_tracing(void) const { return tracing; }
       void end_trace_capture(void);
       void end_trace_execution(Operation *op);
     public:
@@ -53,7 +52,6 @@ namespace LegionRuntime {
       void record_region_dependence(Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned idx);
-      void register_dependences(Operation *op); 
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences

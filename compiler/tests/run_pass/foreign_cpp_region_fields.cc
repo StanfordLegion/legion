@@ -22,20 +22,20 @@ void foreign_initialize(HighLevelRuntime *runtime, Context ctx,
                         PhysicalRegion regions[2],
                         ptr_t pointer)
 {
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor_y =
-    regions[1].get_field_accessor(FIELD_Y).typeify<intptr_t>().convert<AccessorType::AOS<0> >();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor_y =
+    regions[1].get_field_accessor(FIELD_Y).typeify<intptr_t>();
   accessor_y.write(pointer, (intptr_t)2);
 }
 
 void foreign_iterate(HighLevelRuntime *runtime, Context ctx,
                      PhysicalRegion regions[3])
 {
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor_x =
-    regions[1].get_field_accessor(FIELD_X).typeify<intptr_t>().convert<AccessorType::AOS<0> >();
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor_y =
-    regions[0].get_accessor().typeify<intptr_t>().convert<AccessorType::AOS<0> >();
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor_z =
-    regions[2].get_field_accessor(FIELD_Z).typeify<intptr_t>().convert<AccessorType::AOS<0> >();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor_x =
+    regions[1].get_field_accessor(FIELD_X).typeify<intptr_t>();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor_y =
+    regions[0].get_accessor().typeify<intptr_t>();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor_z =
+    regions[2].get_field_accessor(FIELD_Z).typeify<intptr_t>();
 
   IndexSpace ispace = regions[0].get_logical_region().get_index_space();
   Domain domain = runtime->get_index_space_domain(ctx, ispace);

@@ -654,28 +654,7 @@ namespace LegionRuntime {
     public:
       Event term_event;
       int child;
-    };
-
-    /**
-     * \struct CloseInfo
-     * A struct containing information about how to close
-     * a child node including the close mask and whether
-     * the child can be kept open in read mode.
-     */
-    struct CloseInfo {
-    public:
-      CloseInfo(void)
-        : target_child(-1), close_mask(FieldMask()), 
-          leave_open(false), allow_next(false) { }
-      CloseInfo(int child, const FieldMask &m, bool open, bool allow)
-        : target_child(child), close_mask(m), 
-          leave_open(open), allow_next(allow) { }
-    public:
-      int target_child;
-      FieldMask close_mask;
-      bool leave_open;
-      bool allow_next;
-    };
+    }; 
 
     /**
      * \class TreeCloseImpl
@@ -684,7 +663,7 @@ namespace LegionRuntime {
      */
     class TreeCloseImpl : public Collectable {
     public:
-      TreeCloseImpl(int child, const FieldMask &m, bool open, bool allow);
+      TreeCloseImpl(int child, const FieldMask &m, bool open);
       TreeCloseImpl(const TreeCloseImpl &rhs);
       ~TreeCloseImpl(void);
     public:
@@ -692,10 +671,10 @@ namespace LegionRuntime {
     public:
       void add_close_op(const FieldMask &close_mask,
                         std::deque<CloseInfo> &needed_ops);
+      void return_close_op(const FieldMask &close_mask);
     public:
       const int target_child;
       const bool leave_open;
-      const bool allow_next;
       // expose this one publicly since we know that all
       // accesses to it will be serialized by the dependence
       // analysis process
@@ -722,14 +701,36 @@ namespace LegionRuntime {
     public:
       inline int get_child(void) const { return impl->target_child; }
       inline bool get_leave_open(void) const { return impl->leave_open; }
-      inline bool get_allow_next(void) const { return impl->allow_next; }
       inline FieldMask& get_logical_mask(void) const 
       { return impl->remaining_logical; }
     public:
       void add_close_op(const FieldMask &close_mask,
                         std::deque<CloseInfo> &needed_ops);
+      void return_close_op(const FieldMask &close_mask);
     private:
       TreeCloseImpl *impl;
+    };
+
+    /**
+     * \struct CloseInfo
+     * A struct containing information about how to close
+     * a child node including the close mask and whether
+     * the child can be kept open in read mode.
+     */
+    struct CloseInfo {
+    public:
+      CloseInfo(void) { }
+      CloseInfo(const FieldMask &m, TreeCloseImpl *impl)
+        : close_mask(m), close_handle(impl) { }
+    public:
+      inline int get_child(void) const { return close_handle.get_child(); }
+      inline bool get_leave_open(void) const 
+        { return close_handle.get_leave_open(); }
+      inline void return_close_op(void)
+        { close_handle.return_close_op(close_mask); }
+    public:
+      FieldMask close_mask;
+      TreeClose close_handle;
     };
 
     /**
@@ -915,10 +916,7 @@ namespace LegionRuntime {
       std::deque<TreeClose> close_operations;
 #ifdef LOGICAL_FIELD_TREE
     public:
-      bool current;
-      bool has_non_dominator;
       FieldMask local_closing_mask;
-      FieldMask local_non_dominator_mask;
       std::deque<LogicalUser> reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
@@ -1211,7 +1209,8 @@ namespace LegionRuntime {
                              RegionTreePath &path,
                              const bool already_traced);
       void close_logical_node(LogicalCloser &closer,
-                              const FieldMask &closing_mask);
+                              const FieldMask &closing_mask,
+                              bool permit_leave_open);
       bool siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &closing_mask,
@@ -1265,14 +1264,12 @@ namespace LegionRuntime {
       bool siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState &state,
                                     const FieldMask &closing_mask,
-                                    int next_child, 
-                                    bool allow_next);
+                                    int next_child); 
       bool close_physical_child(PhysicalCloser &closer,
                                 PhysicalState &state,
                                 const FieldMask &closing_mask,
                                 Color target_child,
-                                int next_child,
-                                bool allow_next);
+                                int next_child);
       void find_valid_instance_views(PhysicalState &state,
                                      const FieldMask &valid_mask,
                                      const FieldMask &space_mask, 
@@ -1368,10 +1365,14 @@ namespace LegionRuntime {
       static FieldMask perform_dependence_checks(const LogicalUser &user, 
             std::list<LogicalUser> &users, const FieldMask &check_mask, 
             bool validates_regions);
+      static void perform_closing_checks(LogicalCloser &closer,
+            std::list<LogicalUser> &users, const FieldMask &check_mask);
 #else
       static FieldMask perform_dependence_checks(const LogicalUser &user,
             FieldTree<LogicalUser> *users, const FieldMask &check_mask,
             bool validates_regions);
+      static void perform_closing_checks(LogicalCloser &closer,
+            FieldTree<LogicalUser> *users, const FieldMask &check_mask);
 #endif
     public:
       RegionTreeForest *const context;

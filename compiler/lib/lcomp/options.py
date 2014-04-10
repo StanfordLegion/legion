@@ -34,8 +34,8 @@ def with_ext(filename, ext):
 
 class Options:
     def __init__(self, input_filenames, output_filename, target, debug,
-                 pointer_checks, leaf_task_optimization, thread_count,
-                 clean_first, save_temps,
+                 pointer_checks, leaf_task_optimization, gcc_atomics,
+                 thread_count, clean_first, save_temps,
                  search_path, legion_runtime_dir, log_level):
         self.input_filenames = input_filenames
         self.output_filename = output_filename
@@ -43,6 +43,7 @@ class Options:
         self.debug = debug
         self.pointer_checks = pointer_checks
         self.leaf_task_optimization = leaf_task_optimization
+        self.gcc_atomics = gcc_atomics
         self.thread_count = thread_count
         self.clean_first = clean_first
         self.save_temps = save_temps
@@ -93,6 +94,10 @@ def parse_options(argv = None):
                         action = 'store_true',
                         help = 'aggressive leaf task optimization (potentially unsafe)',
                         dest = 'leaf_task_optimization')
+    parser.add_argument('--gcc-atomics',
+                        action = 'store_true',
+                        help = 'use GCC atomics (rather than C++11)',
+                        dest = 'gcc_atomics')
     parser.add_argument('-j',
                         nargs = '?',
                         type = int,
@@ -170,6 +175,7 @@ def parse_options(argv = None):
         debug = args.debug,
         pointer_checks = args.pointer_checks,
         leaf_task_optimization = args.leaf_task_optimization,
+        gcc_atomics = args.gcc_atomics,
         thread_count = args.thread_count,
         clean_first = args.clean_first,
         save_temps = args.save_temps,
@@ -197,6 +203,7 @@ def build_fake_options(filename, verbose):
         debug = True,
         pointer_checks = False,
         leaf_task_optimization = False,
+        gcc_atomics = False,
         thread_count = 1,
         clean_first = False,
         save_temps = False,

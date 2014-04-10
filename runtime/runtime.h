@@ -416,6 +416,7 @@ namespace LegionRuntime {
       unsigned current_pending;
       bool current_executing;
       bool idle_task_enabled;
+      bool pending_dependence_analysis;
     protected:
       // Since dependence analysis is usually on the critical path,
       // we allow the processor managers to create garbage collection
@@ -1123,6 +1124,7 @@ namespace LegionRuntime {
     public:
       DistributedID get_available_distributed_id(void);
       void free_distributed_id(DistributedID did);
+      void recycle_distributed_id(DistributedID did, Event recycle_event);
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc);
@@ -1225,7 +1227,7 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void trigger_task_task(
                           const void *args, size_t arglen, Processor p);
-      static void legion_logging_task(
+      static void deferred_recycle_task(
                           const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods

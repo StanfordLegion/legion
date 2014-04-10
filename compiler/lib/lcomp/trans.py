@@ -48,6 +48,8 @@ reduction_op_table = {
 
 AOS = 'AOS'
 SOA = 'SOA'
+
+# Note: First variant in variant_table is called by default.
 variant_table = [
     AOS,
     SOA,
@@ -476,13 +478,14 @@ def trans_source_prologue(cx):
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <atomic>
+%s
 
 #include "%s"
 
 LegionRuntime::Logger::Category log_app("app");
 ''' % (
-        header_name)
+    ('' if cx.opts.gcc_atomics else '#include <atomic>'),
+    header_name)
 
 def trans_task_list(task_list, cx):
     return 'enum {\n%s\n};' % (
@@ -725,11 +728,45 @@ def trans_reduction_op_impl(op, element_type, cx):
         op = op,
         element_type = element_type)
 
-def trans_reduction_op_atomic(op, element_type, ll_lhs_type, ll_rhs_type, ll_lhs, ll_rhs, ll_op, cx): 
-    # Atomic reduction ops are implemented using C++11 atomics. Not
-    # all C++11 compilers support atomic ops on floating point types,
-    # so integers must be used instead for compatibility with those
+def trans_reduction_op_atomic(op, element_type, ll_lhs_type, ll_rhs_type, ll_lhs, ll_rhs, ll_op, cx):
+    # Atomics can be implemented with either with the GCC functions,
+    # or with C++11 version.
+
+    # Not all compilers support atomic ops on floating point types, so
+    # integers must be used instead for compatibility with those
     # compilers.
+
+    # GCC atomics:
+    if cx.opts.gcc_atomics:
+        if types.is_floating_point(element_type):
+            if types.is_float(element_type):
+                ll_int_type = 'uint32_t'
+            elif types.is_double(element_type):
+                ll_int_type = 'uint64_t'
+            else:
+                assert False
+
+            actions = [
+                '%s *target = reinterpret_cast<%s *>(&%s);' % (
+                    ll_int_type, ll_int_type, ll_lhs),
+                'union { %s as_int; %s as_float; } oldval, newval;' % (
+                    ll_int_type, ll_lhs_type),
+                'do {',
+                Block(['oldval.as_int = *target;',
+                       'newval.as_float = oldval.as_float %s %s;' % (
+                           ll_op, ll_rhs)]),
+                '} while (!__sync_bool_compare_and_swap(target, oldval.as_int, newval.as_int));']
+        else:
+            actions = [
+                '%s *target = &%s;' % (
+                    ll_lhs_type, ll_lhs),
+                'do {',
+                Block(['val = *target;']),
+                '} while (!__sync_bool_compare_and_swap(target, val, val %s %s));' % (
+                    ll_op, ll_rhs)]
+        return actions
+
+    # C++11 atomics:
     if types.is_floating_point(element_type):
         if types.is_float(element_type):
             ll_int_type = 'uint32_t'
@@ -2410,12 +2447,13 @@ def trans_privilege_mode(region, requested_privileges, cx):
 def trans_accessor_type(t, cx):
     assert cx.task_variant is not None
 
+    if cx.task_variant == AOS:
+        return 'AccessorType::%s<0>' % cx.task_variant
     if cx.task_variant == SOA:
         return 'AccessorType::%s<sizeof(%s)>' % (
             cx.task_variant,
             trans_type(t, cx))
-
-    return 'AccessorType::%s<0>' % cx.task_variant
+    raise Exception('Unknown variant %s' % cx.task_variant)
 
 # A method combination around wrapper a la Common Lisp.
 class DispatchAround:

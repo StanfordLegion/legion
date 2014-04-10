@@ -147,6 +147,13 @@ namespace LegionRuntime {
             context, unique_id);
       }
 
+      static inline void log_fence_operation(UniqueID context,
+                                             UniqueID unique_id)
+      {
+        log_spy(LEVEL_INFO,"Fence Operation %llu %llu",
+            context, unique_id);
+      }
+
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id)
       {

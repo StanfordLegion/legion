@@ -54,10 +54,16 @@ typedef std::vector<SpanListEntry> SpanList;
 
 extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
-			   int registered_mem_size_in_mb);
+			   int registered_mem_size_in_mb,
+			   int argc, const char *argv[]);
 extern void start_polling_threads(int count);
 extern void start_sending_threads(void);
+extern void stop_activemsg_threads(void);
 extern void report_activemsg_status(FILE *f);
+
+// returns the largest payload that can be sent to a node (to a non-pinned
+//   address)
+extern size_t get_lmb_size(int target_node);
 
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning

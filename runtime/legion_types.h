@@ -322,7 +322,7 @@ namespace LegionRuntime {
       DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
       TRIGGER_OP_ID        = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
       TRIGGER_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      LEGION_LOGGING_ID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
+      DEFERRED_RECYCLE_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
       TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
     };
 
@@ -468,6 +468,9 @@ namespace LegionRuntime {
     class LogicalCloser;
     class PhysicalCloser;
     class ReductionCloser;
+    class TreeCloseImpl;
+    class TreeClose;
+    class CloseInfo;
 
     // legion_utilities.h
     class Serializer;

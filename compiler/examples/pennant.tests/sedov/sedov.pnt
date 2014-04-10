@@ -1,7 +1,7 @@
 cstop   10
 tstop   1.0
-meshfile  square45x45.gmv
-meshscale 1.125
+meshtype rect
+meshparams 45 45 1.125 1.125
 subregion 0.0 0.025  0.0 0.025
 rinitsub 1.0
 einitsub 5027.7

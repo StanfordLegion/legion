@@ -710,7 +710,8 @@ namespace LegionRuntime {
        * @param fid field ID to add
        * @param instance indicate whether to add to instance fields
        */
-      inline void add_field(FieldID fid, bool instance = true);
+      inline RegionRequirement& add_field(FieldID fid, bool instance = true);
+      inline RegionRequirement& add_fields(const std::vector<FieldID>& fids, bool instance = true);
     public:
 #ifdef PRIVILEGE_CHECKS
       AccessorPrivilege get_accessor_privilege(void) const;
@@ -4091,13 +4092,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void RegionRequirement::add_field(FieldID fid, 
+    inline RegionRequirement& RegionRequirement::add_field(FieldID fid, 
                                              bool instance/*= true*/)
     //--------------------------------------------------------------------------
     {
       privilege_fields.insert(fid);
       if (instance)
         instance_fields.push_back(fid);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionRequirement& RegionRequirement::add_fields(const std::vector<FieldID>& fids, 
+                                             bool instance/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      privilege_fields.insert(fids.begin(), fids.end());
+      if (instance)
+        instance_fields.insert(instance_fields.end(), fids.begin(), fids.end());
+      return *this;
     }
 
     //--------------------------------------------------------------------------

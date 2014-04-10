@@ -43,6 +43,7 @@ single_task_pat         = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P
 index_task_pat          = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
 mapping_pat             = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat               = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+fence_pat               = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat             = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 deletion_pat            = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 index_slice_pat         = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
@@ -153,6 +154,11 @@ def parse_log_file(file_name, state):
         m = close_pat.match(line)
         if m <> None:
             if not state.add_close(int(m.group('ctx')), int(m.group('uid'))):
+                replay_lines.append(line)
+            continue
+        m = fence_pat.match(line)
+        if m <> None:
+            if not state.add_fence(int(m.group('ctx')), int(m.group('uid'))):
                 replay_lines.append(line)
             continue
         m = copy_op_pat.match(line)
@@ -293,6 +299,11 @@ def parse_log_file(file_name, state):
             m = close_pat.match(line)
             if m <> None:
                 if state.add_close(int(m.group('ctx')), int(m.group('uid'))):
+                    to_delete.add(line)
+                continue
+            m = fence_pat.match(line)
+            if m <> None:
+                if state.add_fence(int(m.group('ctx')), int(m.group('uid'))):
                     to_delete.add(line)
                 continue
             m = copy_op_pat.match(line)

@@ -342,7 +342,13 @@ namespace LegionRuntime {
                             task->variants->name, 
                             task->get_unique_task_id(), local_proc.id);
 
-      const std::set<Processor> &all_procs = machine->get_all_processors();
+      Processor::Kind best_kind;
+      if (profiler.profiling_complete(task))
+        best_kind = profiler.best_processor_kind(task);
+      else
+        best_kind = profiler.next_processor_kind(task);
+      std::set<Processor> all_procs = machine->get_all_processors();
+      machine_interface.filter_processors(machine, best_kind, all_procs);
       std::vector<Processor> procs(all_procs.begin(),all_procs.end());
 
       DefaultMapper::decompose_index_space(domain, procs, 

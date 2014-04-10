@@ -129,7 +129,7 @@ namespace LegionRuntime {
         Const(void) : value(0) {}
         CUDAPREFIX
         Const(T _value) : value(_value) {}
-	const T value;
+	/*const*/ T value;
       };
 
       template <size_t STRIDE> struct AOS;
@@ -644,6 +644,13 @@ namespace LegionRuntime {
 	  Typed() : Untyped() {}
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
+	  CUDAPREFIX
+	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {}
+	  CUDAPREFIX
+	  Typed &operator=(const Typed& rhs) {
+	    *static_cast<Untyped *>(this) = *static_cast<const Untyped *>(&rhs);
+	    return *this;
+	  }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
           inline void set_region(void *r) { this->region = r; }

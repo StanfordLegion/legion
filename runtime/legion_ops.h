@@ -254,7 +254,7 @@ namespace LegionRuntime {
       UserEvent completion_event;
       // The trace for this operation if any
       LegionTrace *trace;
-      // Whether we are tracing or already traced
+      // Track whether we are tracing this operation
       bool tracing;
     };
 

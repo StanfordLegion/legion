@@ -103,10 +103,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
+      const unsigned index = operations.size();
+      operations.push_back(key);
       // Only need to save this in the map if we are not done tracing
       if (tracing)
       {
-        unsigned index = operations.size(); 
         op_map[key] = index;
         // Add a new vector for storing dependences onto the back
         dependences.push_back(std::set<std::pair<unsigned,int> >());
@@ -115,8 +116,28 @@ namespace LegionRuntime {
       {
         // Add a mapping reference since people will be registering dependences
         op->add_mapping_reference(gen);  
+        // Then compute all the dependences on this operation from
+        // our previous recording of the trace
+        const std::set<std::pair<unsigned,int> > &deps = dependences[index];
+        for (std::set<std::pair<unsigned,int> >::const_iterator it = 
+              deps.begin(); it != deps.end(); it++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(it->first < operations.size());
+#endif
+          const std::pair<Operation*,GenerationID> &target = 
+                                                      operations[it->first];
+          if (it->second < 0)
+          {
+            op->register_dependence(target.first, target.second);
+          }
+          else
+          {
+            op->register_region_dependence(target.first, target.second,
+                                           unsigned(it->second));
+          }
+        }
       }
-      operations.push_back(key);
     }
 
     //--------------------------------------------------------------------------
@@ -163,36 +184,6 @@ namespace LegionRuntime {
             std::pair<unsigned,int>(finder->second,int(idx)));
       }
     }
-
-    //--------------------------------------------------------------------------
-    void LegionTrace::register_dependences(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!tracing);
-      assert(operations.back().first == op);
-#endif
-      const unsigned index = operations.size()-1;
-      const std::set<std::pair<unsigned,int> > &deps = dependences[index];
-      for (std::set<std::pair<unsigned,int> >::const_iterator it = 
-            deps.begin(); it != deps.end(); it++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(it->first < operations.size());
-#endif
-        const std::pair<Operation*,GenerationID> &target = 
-                                                    operations[it->first];
-        if (it->second < 0)
-        {
-          op->register_dependence(target.first, target.second);
-        }
-        else
-        {
-          op->register_region_dependence(target.first, target.second,
-                                         unsigned(it->second));
-        }
-      }
-    } 
 
     /////////////////////////////////////////////////////////////
     // TraceCaptureOp 

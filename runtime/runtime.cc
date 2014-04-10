@@ -1463,7 +1463,8 @@ namespace LegionRuntime {
         explicit_utility_proc(local_proc != utility_proc),
         superscalar_width(width), min_outstanding(min_out), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
-        current_pending(0), current_executing(false), idle_task_enabled(true),
+        current_pending(0), current_executing(false), 
+        idle_task_enabled(true), pending_dependence_analysis(false),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
@@ -2176,38 +2177,61 @@ namespace LegionRuntime {
       bool remaining_ops = false;
       UserEvent trigger_event;
       bool needs_trigger = false;
+      bool return_analysis_hold = false;
+      // Quick check without holding the lock
+      if (!pending_dependence_analysis)
       {
         AutoLock d_lock(dependence_lock);
-        // An important optimization here is that we always pull
-        // elements off the deeper queues first which optimizes
-        // for a depth-first traversal of the task/operation tree.
-        unsigned handled_ops = 0;
-        for (int idx = int(dependence_queues.size())-1;
-              idx >= 0; idx--)
+        // Recheck after taking the lock
+        // to avoid losing the race
+        if (!pending_dependence_analysis)
         {
-          std::deque<Operation*> &current_queue = dependence_queues[idx];
-          while ((handled_ops < superscalar_width) &&
-                  !current_queue.empty())
+          // Very important to mark that no one else can
+          // do dependence analysis while we are have
+          // things that still need dependence analysis
+          pending_dependence_analysis = true;
+          return_analysis_hold = true;
+          // An important optimization here is that we always pull
+          // elements off the deeper queues first which optimizes
+          // for a depth-first traversal of the task/operation tree.
+          unsigned handled_ops = 0;
+          for (int idx = int(dependence_queues.size())-1;
+                idx >= 0; idx--)
           {
-            ops.push_back(current_queue.front());
-            current_queue.pop_front();
-            handled_ops++;
+            std::deque<Operation*> &current_queue = dependence_queues[idx];
+            while ((handled_ops < superscalar_width) &&
+                    !current_queue.empty())
+            {
+              ops.push_back(current_queue.front());
+              current_queue.pop_front();
+              handled_ops++;
+            }
+            remaining_ops = remaining_ops || !current_queue.empty();
+            // If we know we have remaining ops and we've
+            // got all the ops we need, then we can break
+            if ((handled_ops == superscalar_width) && remaining_ops)
+              break;
           }
-          remaining_ops = remaining_ops || !current_queue.empty();
-          // If we know we have remaining ops and we've
-          // got all the ops we need, then we can break
-          if ((handled_ops == superscalar_width) && remaining_ops)
-            break;
+          // If we no longer have any remaining dependence analyses
+          // to do, then see if we have a garbage collection
+          // epoch that we can trigger.
+          if (!remaining_ops && gc_epoch_event.exists())
+          {
+            trigger_event = gc_epoch_trigger;
+            needs_trigger = true;
+            gc_epoch_event = Event::NO_EVENT;
+          }
         }
-        // If we no longer have any remaining dependence analyses
-        // to do, then see if we have a garbage collection
-        // epoch that we can trigger.
-        if (!remaining_ops && gc_epoch_event.exists())
+      }
+      else
+      {
+        AutoLock d_lock(dependence_lock,1,false);
+        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
         {
-          trigger_event = gc_epoch_trigger;
-          needs_trigger = true;
-          gc_epoch_event = Event::NO_EVENT;
+          if (!dependence_queues[idx].empty())
+            return true;
         }
+        return false;
       }
       // Don't trigger the event while holding the lock
       // You never know what the low-level runtime might decide to do
@@ -2219,6 +2243,14 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < ops.size(); idx++)
       {
         ops[idx]->trigger_dependence_analysis();
+      }
+      if (return_analysis_hold)
+      {
+        AutoLock d_lock(dependence_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(pending_dependence_analysis);
+#endif
+        pending_dependence_analysis = false;
       }
       return remaining_ops;
     }
@@ -8184,6 +8216,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::recycle_distributed_id(DistributedID did, Event recycle_event)
+    //--------------------------------------------------------------------------
+    {
+      if (recycle_event.exists())
+      {
+        Processor proc = Machine::get_executing_processor(); 
+        proc.spawn(DEFERRED_RECYCLE_ID,&did,sizeof(did),recycle_event);
+      }
+      else
+        free_distributed_id(did);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_distributed_collectable(DistributedID did,
                                                    DistributedCollectable *dc)
     //--------------------------------------------------------------------------
@@ -10058,7 +10103,7 @@ namespace LegionRuntime {
       table[DEFERRED_COLLECT_ID]  = Runtime::deferred_collect_task;
       table[TRIGGER_OP_ID]        = Runtime::trigger_op_task;
       table[TRIGGER_TASK_ID]      = Runtime::trigger_task_task;
-      table[LEGION_LOGGING_ID]    = Runtime::legion_logging_task;
+      table[DEFERRED_RECYCLE_ID]  = Runtime::deferred_recycle_task;
     }
 
     //--------------------------------------------------------------------------
@@ -10480,11 +10525,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::legion_logging_task(
+    /*static*/ void Runtime::deferred_recycle_task(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-
+      DistributedID did = *((const DistributedID*)args);
+      Runtime::get_runtime(p)->free_distributed_id(did);
     }
 
   }; // namespace HighLevel

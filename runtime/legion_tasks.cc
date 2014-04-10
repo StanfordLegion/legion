@@ -2059,9 +2059,9 @@ namespace LegionRuntime {
     {
       UserEvent result = UserEvent::create_user_event();
       Event wait_on = Event::NO_EVENT;
+      std::set<Event> wait_on_events;
       {
         AutoLock o_lock(op_lock);
-        std::set<Event> wait_on_events;
         std::map<RegionTreeID,std::map<Event,FieldMask> >::iterator finder = 
           premapping_events.find(tid);
         if (finder == premapping_events.end())
@@ -2086,15 +2086,15 @@ namespace LegionRuntime {
           }
           // Put ourselves in the map
           pre_events[result] = mask;
-          // Merge any events we need to wait on
-          if (!wait_on_events.empty())
-            wait_on = Event::merge_events(wait_on_events);
         }
       }
+      // Merge any events we need to wait on
+      if (!wait_on_events.empty())
+        wait_on = Event::merge_events(wait_on_events);
       // Since we shouldn't be holding any locks here, it should be safe
       // to wait withinout blocking the processor.
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.wait(true/*block*/);
       return result;
     }
 
@@ -2424,6 +2424,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::register_fence_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      if (current_fence != NULL)
+        op->register_dependence(current_fence, fence_gen);
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::update_current_fence(FenceOp *op)
     //--------------------------------------------------------------------------
     {
@@ -2432,14 +2440,6 @@ namespace LegionRuntime {
       current_fence = op;
       fence_gen = op->get_generation();
       current_fence->add_mapping_reference(fence_gen);
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::register_fence_dependence(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      if (current_fence != NULL)
-        op->register_dependence(current_fence, fence_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -4305,17 +4305,11 @@ namespace LegionRuntime {
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
-      // Sometimes the low-level runtime likes to play games and 
-      // re-arrange what processor we are running on without telling us.
-      // Check for that case now and update our executing processor.
-      // It is imperative for forward progress that we do this!
-      Processor old_processor = executing_processor;
-      executing_processor = Machine::get_executing_processor();
       // Tell the runtime that this task is now running
       // and is no longer pending
       runtime->start_execution(executing_processor);
       // Do the decrement on the processor we initially incremented
-      runtime->decrement_pending(old_processor);
+      runtime->decrement_pending(executing_processor);
       // Start the profiling if requested
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 
@@ -6750,17 +6744,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void InlineTask::register_fence_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_fence_dependence(op);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineTask::update_current_fence(FenceOp *op)
     //--------------------------------------------------------------------------
     {
       enclosing->update_current_fence(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::register_fence_dependence(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_fence_dependence(op);  
     }
 
     /////////////////////////////////////////////////////////////

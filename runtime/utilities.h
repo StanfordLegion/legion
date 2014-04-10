@@ -77,6 +77,10 @@ namespace LegionRuntime {
    */
   class Logger {
   public:
+#ifdef NODE_LOGGING
+    static FILE* get_log_file(void); 
+    static void finalize(void);
+#endif
     // Use the -DORDERED_LOGGING flag whenever you need to have ordered
     // output.  The posix standard guarantees that all writes to files
     // open for appending will be atomic, which is necessary for safely
@@ -131,6 +135,9 @@ namespace LegionRuntime {
       get_logging_buffer(); // Initialize the buffer
       get_logging_location(); // Initialize the current location
       get_written_location(); // Initialize the written location
+#endif
+#ifdef NODE_LOGGING
+      get_log_file(); // Initialize the log file
 #endif
       for(std::vector<bool>::iterator it = Logger::get_log_cats_enabled().begin();
           it != Logger::get_log_cats_enabled().end();

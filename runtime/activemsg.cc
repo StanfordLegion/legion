@@ -308,6 +308,19 @@ struct OutgoingMessage {
 #endif
 };
     
+// these values can be overridden by command-line parameters
+static int num_lmbs = 2;
+static size_t lmb_size = 1 << 20; // 1 MB
+static bool force_long_messages = true;
+
+// returns the largest payload that can be sent to a node (to a non-pinned
+//   address)
+size_t get_lmb_size(int target_node)
+{
+  // not node specific right yet
+  return lmb_size;
+}
+
 class ActiveMessageEndpoint {
 public:
   struct ChunkInfo {
@@ -321,9 +334,6 @@ public:
     size_t total_size;
   };
 public:
-  static const int NUM_LMBS = 2;
-  static const size_t LMB_SIZE = (4 << 20);
-
   ActiveMessageEndpoint(gasnet_node_t _peer)
     : peer(_peer)
   {
@@ -339,9 +349,14 @@ public:
     //cur_long_size = 0;
     next_outgoing_message_id = 0;
 
-    for(int i = 0; i < NUM_LMBS; i++) {
-      lmb_w_bases[i] = ((char *)(segment_info[peer].addr)) + (segment_info[peer].size - LMB_SIZE * (gasnet_mynode() * NUM_LMBS + i + 1));
-      lmb_r_bases[i] = ((char *)(segment_info[gasnet_mynode()].addr)) + (segment_info[peer].size - LMB_SIZE * (peer * NUM_LMBS + i + 1));
+    lmb_w_bases = new char *[lmb_size];
+    lmb_r_bases = new char *[lmb_size];
+    lmb_r_counts = new int[lmb_size];
+    lmb_w_avail = new bool[lmb_size];
+
+    for(int i = 0; i < num_lmbs; i++) {
+      lmb_w_bases[i] = ((char *)(segment_info[peer].addr)) + (segment_info[peer].size - lmb_size * (gasnet_mynode() * num_lmbs + i + 1));
+      lmb_r_bases[i] = ((char *)(segment_info[gasnet_mynode()].addr)) + (segment_info[peer].size - lmb_size * (peer * num_lmbs + i + 1));
       lmb_r_counts[i] = 0;
       lmb_w_avail[i] = true;
     }
@@ -349,6 +364,14 @@ public:
     sent_messages = 0;
     received_messages = 0;
 #endif
+  }
+
+  ~ActiveMessageEndpoint(void)
+  {
+    delete[] lmb_w_bases;
+    delete[] lmb_r_bases;
+    delete[] lmb_r_counts;
+    delete[] lmb_w_avail;
   }
 
 void record_message(bool sent_reply) 
@@ -398,8 +421,8 @@ void record_message(bool sent_reply)
 	}
 
 	// do we have enough room in the current LMB?
-	assert(hdr->payload_size <= LMB_SIZE);
-	if((cur_write_offset + hdr->payload_size) <= LMB_SIZE) {
+	assert(hdr->payload_size <= lmb_size);
+	if((cur_write_offset + hdr->payload_size) <= lmb_size) {
 	  // we can send the message - update lmb pointers and remove the
 	  //  packet from the queue, and then drop them mutex before
 	  //  sending the message
@@ -426,7 +449,7 @@ void record_message(bool sent_reply)
 	  int flip_buffer = cur_write_lmb;
 	  int flip_count = cur_write_count;
 	  lmb_w_avail[cur_write_lmb] = false;
-	  cur_write_lmb = (cur_write_lmb + 1) % NUM_LMBS;
+	  cur_write_lmb = (cur_write_lmb + 1) % num_lmbs;
 	  cur_write_offset = 0;
 	  cur_write_count = 0;
 
@@ -436,7 +459,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
 	  printf("LMB: flipping buffer %d for %d->%d, [%p,%p), count=%d\n",
 		 flip_buffer, gasnet_mynode(), peer, lmb_w_bases[flip_buffer],
-		 lmb_w_bases[flip_buffer]+LMB_SIZE, flip_count);
+		 lmb_w_bases[flip_buffer]+lmb_size, flip_count);
 #endif
 
 	  CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_FLIP_REQ,
@@ -498,8 +521,8 @@ void record_message(bool sent_reply)
   {
     // can figure out which buffer it is without holding lock
     int r_buffer = -1;
-    for(int i = 0; i < NUM_LMBS; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
+    for(int i = 0; i < num_lmbs; i++)
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
       r_buffer = i;
       break;
     }
@@ -512,7 +535,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
     printf("LMB: received %p for %d->%d in buffer %d, [%p, %p)\n",
 	   ptr, peer, gasnet_mynode(), r_buffer, lmb_r_bases[r_buffer],
-	   lmb_r_bases[r_buffer] + LMB_SIZE);
+	   lmb_r_bases[r_buffer] + lmb_size);
 #endif
 
     // now take the lock to increment the r_count and decide if we need
@@ -524,7 +547,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
       printf("LMB: acking flip of buffer %d for %d->%d, [%p,%p)\n",
 	     r_buffer, peer, gasnet_mynode(), lmb_r_bases[r_buffer],
-	     lmb_r_bases[r_buffer]+LMB_SIZE);
+	     lmb_r_bases[r_buffer]+lmb_size);
 #endif
 
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer);
@@ -542,8 +565,8 @@ void record_message(bool sent_reply)
   {
     // can figure out which buffer it is without holding lock
     int r_buffer = -1;
-    for(int i = 0; i < NUM_LMBS; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
+    for(int i = 0; i < num_lmbs; i++)
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
       r_buffer = i;
       break;
     }
@@ -579,18 +602,6 @@ void record_message(bool sent_reply)
   bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, 
                            int message_id, int chunks)
   {
-    // can figure out which buffer it is without holding lock
-    int r_buffer = -1;
-    for(int i = 0; i < NUM_LMBS; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
-      r_buffer = i;
-      break;
-    }
-    if(r_buffer < 0) {
-      // probably a medium message?
-      return true;
-    }
-
     // Quick out, if there was only one chunk, then we are good to go
     if (chunks == 1)
       return true;
@@ -635,8 +646,8 @@ void record_message(bool sent_reply)
   {
     // can figure out which buffer it is without holding lock
     int r_buffer = -1;
-    for(int i = 0; i < NUM_LMBS; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + LMB_SIZE))) {
+    for(int i = 0; i < num_lmbs; i++)
+      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
       r_buffer = i;
       break;
     }
@@ -672,7 +683,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
     printf("LMB: received flip of buffer %d for %d->%d, [%p,%p), count=%d\n",
 	   buffer, peer, gasnet_mynode(), lmb_r_bases[buffer],
-	   lmb_r_bases[buffer]+LMB_SIZE, count);
+	   lmb_r_bases[buffer]+lmb_size, count);
 #endif
 #ifdef TRACE_MESSAGES
     __sync_fetch_and_add(&received_messages, 1);
@@ -684,7 +695,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
       printf("LMB: acking flip of buffer %d for %d->%d, [%p,%p)\n",
 	     buffer, peer, gasnet_mynode(), lmb_r_bases[buffer],
-	     lmb_r_bases[buffer]+LMB_SIZE);
+	     lmb_r_bases[buffer]+lmb_size);
 #endif
 
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer);
@@ -705,7 +716,7 @@ void record_message(bool sent_reply)
 #ifdef DEBUG_LMB
     printf("LMB: received flip ack of buffer %d for %d->%d, [%p,%p)\n",
 	   buffer, gasnet_mynode(), peer, lmb_w_bases[buffer],
-	   lmb_w_bases[buffer]+LMB_SIZE);
+	   lmb_w_bases[buffer]+lmb_size);
 #endif
 #ifdef TRACE_MESSAGES
     __sync_fetch_and_add(&received_messages, 1);
@@ -1098,10 +1109,10 @@ public:
 
   int cur_write_lmb, cur_write_count;
   size_t cur_write_offset;
-  char *lmb_w_bases[NUM_LMBS];
-  char *lmb_r_bases[NUM_LMBS];
-  int lmb_r_counts[NUM_LMBS];
-  bool lmb_w_avail[NUM_LMBS];
+  char **lmb_w_bases; // [lmb_size]
+  char **lmb_r_bases; // [lmb_size]
+  int *lmb_r_counts; // [lmb_size]
+  bool *lmb_w_avail; // [lmb_size]
   //void *cur_long_ptr;
   //int cur_long_chunk_idx;
   //size_t cur_long_size;
@@ -1125,7 +1136,7 @@ void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _pay
 
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
   assert(_payload_size > 0);
-  assert((_dstptr != 0) || (_payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+  assert((_dstptr != 0) || (_payload_size <= lmb_size));
 
   // copy the destination pointer through
   dstptr = _dstptr;
@@ -1228,7 +1239,7 @@ void OutgoingMessage::set_payload(void *_payload, size_t _line_size, off_t _line
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
   payload_size = _line_size * _line_count;
   assert(payload_size > 0);
-  assert((_dstptr != 0) || (payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+  assert((_dstptr != 0) || (payload_size <= lmb_size));
 
   // copy the destination pointer through
   dstptr = _dstptr;
@@ -1266,7 +1277,7 @@ void OutgoingMessage::set_payload(const SpanList& spans, size_t _payload_size, i
 
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
   assert(_payload_size > 0);
-  assert((_dstptr != 0) || (_payload_size <= ActiveMessageEndpoint::LMB_SIZE));
+  assert((_dstptr != 0) || (_payload_size <= lmb_size));
 
   // copy the destination pointer through
   dstptr = _dstptr;
@@ -1444,18 +1455,49 @@ static void handle_flip_ack(gasnet_token_t token,
 
 void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		    int gasnet_mem_size_in_mb,
-		    int registered_mem_size_in_mb)
+		    int registered_mem_size_in_mb,
+		    int argc, const char *argv[])
 {
   size_t srcdatapool_size = 64 << 20;
-  size_t lmb_size = (gasnet_nodes() * 
-		     ActiveMessageEndpoint::NUM_LMBS *
-		     ActiveMessageEndpoint::LMB_SIZE);
+
+  for(int i = 1; i < argc; i++) {
+    if(!strcmp(argv[i], "-ll:numlmbs")) {
+      num_lmbs = atoi(argv[++i]);
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:lmbsize")) {
+      lmb_size = atoi(argv[++i]) << 10; // convert KB to bytes
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:forcelong")) {
+      force_long_messages = atoi(argv[++i]) != 0;
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:sdpsize")) {
+      srcdatapool_size = atoi(argv[++i]) << 20; // convert MB to bytes
+      continue;
+    }
+  }
+
+  size_t total_lmb_size = (gasnet_nodes() * 
+			   num_lmbs *
+			   lmb_size);
 
   // add in our internal handlers and space we need for LMBs
   size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
-                       (((size_t)registered_mem_size_in_mb) << 20) +
-                         srcdatapool_size +
-                         lmb_size);
+			(((size_t)registered_mem_size_in_mb) << 20) +
+			srcdatapool_size +
+			total_lmb_size);
+
+  if(gasnet_mynode() == 0)
+    printf("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
+	   gasnet_mem_size_in_mb, registered_mem_size_in_mb,
+	   total_lmb_size >> 20, srcdatapool_size >> 20,
+	   attach_size >> 20);
+
   if (attach_size > gasnet_getMaxLocalSegmentSize())
   {
     fprintf(stderr,"ERROR: Legion exceeded maximum GASNet segment size. "
@@ -1490,7 +1532,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   char *gasnet_mem_base = my_segment;  my_segment += (gasnet_mem_size_in_mb << 20);
   char *reg_mem_base = my_segment;  my_segment += (registered_mem_size_in_mb << 20);
   char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
-  char *lmb_base = my_segment;  my_segment += lmb_size;
+  char *lmb_base = my_segment;  my_segment += total_lmb_size;
   assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 
 
 #ifndef NO_SRCDATAPOOL
@@ -1506,6 +1548,7 @@ static int num_polling_threads = 0;
 static pthread_t *polling_threads = 0;
 static int num_sending_threads = 0;
 static pthread_t *sending_threads = 0;
+static volatile bool thread_shutdown_flag = false;
 
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning
@@ -1520,7 +1563,7 @@ static void *gasnet_poll_thread_loop(void *data)
 {
   // each polling thread basically does an endless loop of trying to send
   //  outgoing messages and then polling
-  while(1) {
+  while(!thread_shutdown_flag) {
     do_some_polling();
     //usleep(10000);
   }
@@ -1549,7 +1592,7 @@ void start_polling_threads(int count)
 static void* sender_thread_loop(void *index)
 {
   long idx = (long)index;
-  while (1) {
+  while (!thread_shutdown_flag) {
     endpoint_manager->push_messages(10000,true);
   }
   return 0;
@@ -1574,6 +1617,31 @@ void start_sending_threads(void)
     LegionRuntime::LowLevel::Runtime::get_runtime()->add_thread(&sending_threads[i]);
 #endif
   }
+}
+
+void stop_activemsg_threads(void)
+{
+  thread_shutdown_flag = true;
+
+  if(polling_threads) {
+    for(int i = 0; i < num_polling_threads; i++) {
+      void *dummy;
+      CHECK_PTHREAD( pthread_join(polling_threads[i], &dummy) );
+    }
+    num_polling_threads = 0;
+    delete[] polling_threads;
+  }
+	
+  if(sending_threads) {
+    for(int i = 0; i < num_sending_threads; i++) {
+      void *dummy;
+      CHECK_PTHREAD( pthread_join(sending_threads[i], &dummy) );
+    }
+    num_sending_threads = 0;
+    delete[] sending_threads;
+  }
+
+  thread_shutdown_flag = false;
 }
 	
 void enqueue_message(gasnet_node_t target, int msgid,

@@ -273,13 +273,13 @@ namespace LegionRuntime {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual void register_reclaim_operation(Operation *op);
+      virtual void register_fence_dependence(Operation *op);
     public:
       bool has_executing_operation(Operation *op);
       bool has_executed_operation(Operation *op);
       void print_children(void);
     public:
       virtual void update_current_fence(FenceOp *op);
-      virtual void register_fence_dependence(Operation *op);
     public:
       void begin_trace(TraceID tid);
       void end_trace(TraceID tid);
@@ -823,9 +823,9 @@ namespace LegionRuntime {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual void register_reclaim_operation(Operation *op);
+      virtual void register_fence_dependence(Operation *op);
     public:
       virtual void update_current_fence(FenceOp *op);
-      virtual void register_fence_dependence(Operation *op);
     protected:
       SingleTask *enclosing;
     };

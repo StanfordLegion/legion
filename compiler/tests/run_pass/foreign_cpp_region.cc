@@ -19,15 +19,15 @@ using namespace LegionRuntime::Accessor;
 
 void foreign_initialize(HighLevelRuntime *runtime, Context ctx, PhysicalRegion region[1], ptr_t pointer)
 {
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor =
-    region[0].get_accessor().typeify<intptr_t>().convert<AccessorType::AOS<0> >();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor =
+    region[0].get_accessor().typeify<intptr_t>();
   accessor.write(pointer, (intptr_t)5);
 }
 
 void foreign_iterate(HighLevelRuntime *runtime, Context ctx, PhysicalRegion region[1])
 {
-  RegionAccessor<AccessorType::AOS<0>, intptr_t> accessor =
-    region[0].get_accessor().typeify<intptr_t>().convert<AccessorType::AOS<0> >();
+  RegionAccessor<AccessorType::Generic, intptr_t> accessor =
+    region[0].get_accessor().typeify<intptr_t>();
   IndexSpace ispace = region[0].get_logical_region().get_index_space();
   Domain domain = runtime->get_index_space_domain(ctx, ispace);
   for (Domain::DomainPointIterator point(domain); point; point++) {

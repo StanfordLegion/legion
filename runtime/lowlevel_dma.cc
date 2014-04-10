@@ -78,6 +78,8 @@ namespace LegionRuntime {
 
       bool check_readiness(bool just_check);
 
+      void perform_dma_mask(MemPairCopier *mpc);
+
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
 
@@ -179,6 +181,17 @@ namespace LegionRuntime {
 	      return false;
 	    }
 	  }
+
+          // we need more than just the metadata - we also need the valid mask
+          {
+            Event e = is_impl->request_valid_mask();
+            if(!e.has_triggered()) {
+              log_dma.info("request %p - valid mask needed for index space %x - sleeping on event %x/%d", this, domain.get_index_space().id, e.id, e.gen);
+              current_lock = Reservation::NO_RESERVATION;
+              e.impl()->add_waiter(e, this);
+              return false;
+            }
+          }
 	}
 
 	// now go through all instance pairs
@@ -1473,7 +1486,9 @@ namespace LegionRuntime {
 	SpanList src_spans;
       };
 
-      static const size_t TARGET_XFER_SIZE = 512 << 10; //1 << 20;
+      // this is no longer limited by LMB size, so try for large blocks when
+      //  possible
+      static const size_t TARGET_XFER_SIZE = 4 << 20;
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
@@ -1776,6 +1791,42 @@ namespace LegionRuntime {
       return curdim+1;
     }
 
+    void DmaRequest::perform_dma_mask(MemPairCopier *mpc)
+    {
+      IndexSpace::Impl *ispace = domain.get_index_space().impl();
+      assert(ispace->valid_mask_complete);
+
+      // this is the SOA-friendly loop nesting
+      for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+	RegionInstance src_inst = it->first.first;
+	RegionInstance dst_inst = it->first.second;
+	OASVec& oasvec = it->second;
+
+	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
+
+	// index space instances use 1D linearizations for translation
+	Arrays::Mapping<1, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<1>();
+	Arrays::Mapping<1, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<1>();
+	
+	ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
+	int rstart, rlen;
+	while(e->get_next(rstart, rlen)) {
+	  int sstart = src_linearization->image(rstart);
+	  int dstart = dst_linearization->image(rstart);
+#ifdef DEBUG_LOW_LEVEL
+	  assert(src_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
+	  assert(dst_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
+#endif
+	  //printf("X: %d+%d %d %d\n", rstart, rlen, sstart, dstart);
+
+	  for (unsigned idx = 0; idx < oasvec.size(); idx++)
+	    ipc->copy_field(sstart, dstart, rlen, idx);
+	}
+
+	delete ipc;
+      }
+    }
+
     template <unsigned DIM>
     void DmaRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -1906,7 +1957,7 @@ namespace LegionRuntime {
       case 0:
 	{
 	  // iterate over valid ranges of an index space
-	  assert(0);
+	  perform_dma_mask(mpc);
 	  break;
 	}
 
@@ -2219,7 +2270,7 @@ namespace LegionRuntime {
 #endif
     }
     
-    bool terminate_flag = false;
+    volatile bool terminate_flag = false;
     int num_threads = 0;
     pthread_t *worker_threads = 0;
     
@@ -2252,7 +2303,10 @@ namespace LegionRuntime {
 	} else {
 	  // sleep until we get a signal, or until everybody is woken up
 	  //  via broadcast for termination
-	  gasnett_cond_wait(&queue_condvar, &queue_mutex.lock);
+	  //
+	  // recheck flag while holding lock
+	  if(!terminate_flag)
+	    gasnett_cond_wait(&queue_condvar, &queue_mutex.lock);
 	}
       }
       gasnet_hsl_unlock(&queue_mutex);
@@ -2279,6 +2333,27 @@ namespace LegionRuntime {
         Runtime::get_runtime()->add_thread(&worker_threads[i]);
 #endif
       }
+    }
+
+    void stop_dma_worker_threads(void)
+    {
+      terminate_flag = true;
+
+      // wake up any threads that are asleep
+      gasnet_hsl_lock(&queue_mutex);
+      gasnett_cond_broadcast(&queue_condvar);
+      gasnet_hsl_unlock(&queue_mutex);
+
+      if(worker_threads) {
+	for(int i = 0; i < num_threads; i++) {
+	  void *dummy;
+	  CHECK_PTHREAD( pthread_join(worker_threads[i], &dummy) );
+	}
+	num_threads = 0;
+	delete[] worker_threads;
+      }
+
+      terminate_flag = false;
     }
     
     Event enqueue_dma(const Domain& domain,

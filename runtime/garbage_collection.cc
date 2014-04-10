@@ -291,7 +291,14 @@ namespace LegionRuntime {
       // count to one reflecting the fact that we can be collected
       // only once the manager on the owner node is collected.
       if (!owner)
+      {
         resource_references = 1;
+        // Make a user event for telling our owner node when we
+        // have been deleted
+        destruction_event = UserEvent::create_user_event();
+      }
+      else
+        destruction_event.id = 0; // make a no-user event
     }
 
     //--------------------------------------------------------------------------
@@ -324,9 +331,24 @@ namespace LegionRuntime {
           runtime->send_remove_distributed_resource(*it, rez);
         }
         remote_spaces.clear();
-        // Can only do this on the owner node since it
-        // is the same across all the nodes
-        runtime->free_distributed_id(did);
+        // We can only recycle the distributed ID on the owner
+        // node since the ID is the same across all the nodes.
+        // We have to defer the collection of the ID until
+        // after all of the remote nodes notify us that they
+        // have finished collecting it.
+        Event recycle_event = Event::merge_events(recycle_events);
+        runtime->recycle_distributed_id(did, recycle_event);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!destruction_event.exists());
+#endif
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(destruction_event.exists());
+#endif
+        // Trigger our destruction event marking that this has been collected
+        destruction_event.trigger();
       }
     }
 
@@ -578,6 +600,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_remote_reference(AddressSpaceID sid,
+                                                         Event dest_event,
                                                          unsigned cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
@@ -604,6 +627,8 @@ namespace LegionRuntime {
         AutoLock gc(gc_lock);
         if (first)
         {
+          // Add the destruction event to the set of recycle events
+          recycle_events.insert(dest_event);
           std::map<AddressSpaceID,int>::iterator finder = 
             remote_references.find(sid);
           if (finder == remote_references.end())
@@ -689,6 +714,8 @@ namespace LegionRuntime {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        // Always send back the destruction event
+        rez.serialize(destruction_event);
         rez.serialize(held_remote_references);
       }
       runtime->send_remove_distributed_remote(owner_space, rez);
@@ -718,11 +745,13 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      Event destruction_event;
+      derez.deserialize(destruction_event);
       unsigned cnt;
       derez.deserialize(cnt);
 
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-      if (target->remove_remote_reference(source, cnt))
+      if (target->remove_remote_reference(source, destruction_event, cnt))
         delete target;
     }
 
