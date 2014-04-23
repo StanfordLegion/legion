@@ -1407,6 +1407,9 @@ namespace LegionRuntime {
           }
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
+          // Update the blocking factor as well
+          regions[idx].max_blocking_factor = 
+            runtime->forest->get_domain_volume(regions[idx].region);
         }
         else
         {
@@ -1426,6 +1429,9 @@ namespace LegionRuntime {
           // case we don't need to do anything
           // Update the region requirement kind
           regions[idx].handle_type = SINGULAR;
+          // Update the blocking factor as well
+          regions[idx].max_blocking_factor = 
+            runtime->forest->get_domain_volume(regions[idx].region);
         }
       }
     }
@@ -5011,6 +5017,9 @@ namespace LegionRuntime {
       remote_contexts = enclosing_physical_contexts;
       remote_outermost_context = 
         find_outermost_physical_context()->get_context();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_outermost_context.exists());
+#endif
       initialize_paths(); 
       // Get a future from the parent context to use as the result
       result = Future(new Future::Impl(runtime, 
@@ -5079,6 +5088,9 @@ namespace LegionRuntime {
       remote_contexts = enclosing_physical_contexts;
       remote_outermost_context = 
         find_outermost_physical_context()->get_context();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_outermost_context.exists());
+#endif
       initialize_paths();
       result = Future(new Future::Impl(runtime,
             runtime->get_available_distributed_id(), runtime->address_space,
@@ -7510,6 +7522,9 @@ namespace LegionRuntime {
       result->remote_contexts = this->enclosing_physical_contexts;
       result->remote_outermost_context = 
         parent_ctx->find_outermost_physical_context()->get_context();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result->remote_outermost_context.exists());
+#endif
       result->index_complete = this->completion_event;
       result->denominator = scale_denominator;
       result->index_owner = this;
@@ -8116,6 +8131,7 @@ namespace LegionRuntime {
       rez.serialize(index_owner);
       rez.serialize(index_complete);
       rez.serialize(remote_unique_id);
+      rez.serialize(remote_outermost_context);
       rez.serialize(locally_mapped);
 #ifdef DEBUG_HIGH_LEVEL
       assert(remote_contexts.size() == regions.size());
@@ -8149,6 +8165,7 @@ namespace LegionRuntime {
       derez.deserialize(index_owner);
       derez.deserialize(index_complete);
       derez.deserialize(remote_unique_id); 
+      derez.deserialize(remote_outermost_context);
       derez.deserialize(locally_mapped);
       remote_contexts.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)

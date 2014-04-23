@@ -302,6 +302,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t RegionTreeForest::get_domain_volume(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      return node->domain.get_volume();
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -582,6 +590,14 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_PARENT_REQUEST);
       }
       return node->parent->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RegionTreeForest::get_domain_volume(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      return node->get_domain().get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -4981,8 +4997,10 @@ namespace LegionRuntime {
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
               valid_instances.begin(); it != valid_instances.end(); it++)
         {
+          // For right now allow blocking factors that are greater
+          // than or equal to the requested blocking factor
           size_t bf = it->first->get_blocking_factor();
-          if (bf == blocking_factor)
+          if (bf >= blocking_factor)
           {
             Memory m = it->first->get_location();
             if (valid_memories.find(m) == valid_memories.end())
@@ -5796,6 +5814,7 @@ namespace LegionRuntime {
       }
       valid_fields = m;
       open_children[c] = m;
+      rebuild_timeout = 1;
     }
 
     //--------------------------------------------------------------------------
@@ -5957,7 +5976,8 @@ namespace LegionRuntime {
       closed_users.push_back(prev_user);
       // Update the field mask and privilege
       closed_users.back().field_mask = overlap;
-      closed_users.back().usage.privilege = READ_WRITE;
+      closed_users.back().usage.privilege = 
+        (PrivilegeMode)((int)closed_users.back().privilege | PROMOTED);
       // Remove the close set of fields from this user
       prev_user.field_mask -= overlap;
       // If it's empty, remove it from the list and let
@@ -7205,74 +7225,148 @@ namespace LegionRuntime {
                                             FieldMask &already_open)
     //--------------------------------------------------------------------------
     {
-      std::vector<Color> to_delete;
-      // Go through and close all the children which we overlap with
-      // and aren't the next child that we're going to use
-      for (std::map<Color,FieldMask>::iterator it = state.open_children.begin(); 
-            it != state.open_children.end(); it++)
+      // First, if we have a next child and we know all pairs of children
+      // are disjoint, then we can skip a lot of this
+      bool removed_fields = false;
+      if ((next_child > -1) && are_all_children_disjoint())
       {
-        FieldMask close_mask = it->second & closing_mask;
-        // check for field disjointness
-        if (!close_mask)
-          continue;
-        // Check for same child, only allow upgrades in some cases
-        // such as read-only -> exclusive.  This is calling context
-        // sensitive hence the parameter.
-        if (allow_next_child && (next_child > -1) && 
-            (next_child == int(it->first)))
+        // Check to see if we have anything to close
+        std::map<Color,FieldMask>::iterator finder = 
+            state.open_children.find(next_child);
+        if (finder != state.open_children.end())
         {
-          FieldMask open_fields = close_mask;
-          already_open |= open_fields;
-          if (upgrade_next_child)
+          FieldMask close_mask = finder->second & closing_mask;
+          if (!!close_mask)
           {
-            it->second -= open_fields;
-            if (!it->second)
-              to_delete.push_back(it->first);
-            // The upgraded field state gets added by the caller
-          }
-          continue;
-        }
-        // Check for child disjointness
-        if ((next_child > -1) && 
-            are_children_disjoint(it->first, unsigned(next_child)))
-          continue;
-        // Perform the close operation
-        RegionTreeNode *child_node = get_tree_child(it->first);
-        child_node->close_logical_node(closer, close_mask, permit_leave_open);
-        if (record_close_operations)
-          closer.close_operations.push_back(TreeClose(
-                new TreeCloseImpl(it->first, close_mask, permit_leave_open)));
-        // Remove the close fields
-        it->second -= close_mask;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        // Record any fields that we closed
-        if (record_close_operations)
-          closer.closed_mask |= close_mask;
-        // If we're allowed to leave this open, add a new
-        // state for the current user
-        if (permit_leave_open)
-        {
+            if (allow_next_child)
+            {
+              already_open |= close_mask;
+              if (upgrade_next_child)
+              {
+                finder->second -= close_mask;
+                removed_fields = true;
+                if (!finder->second)
+                  state.open_children.erase(finder);
+              }
+            }
+            else
+            {
+              // Otherwise we actually need to do the close
+              RegionTreeNode *child_node = get_tree_child(finder->first);
+              child_node->close_logical_node(closer, close_mask, 
+                                             permit_leave_open);
+              if (record_close_operations)
+                closer.close_operations.push_back(TreeClose(
+                      new TreeCloseImpl(finder->first, close_mask, 
+                                        permit_leave_open)));
+              // Remove the closed fields
+              finder->second -= close_mask;
+              removed_fields = true;
+              // Record any fields that we closed
+              if (record_close_operations)
+                closer.closed_mask |= close_mask;
+              if (permit_leave_open)
+              {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(IS_READ_ONLY(closer.user.usage));
+                assert(IS_READ_ONLY(closer.user.usage));
 #endif
-          new_states.push_back(FieldState(closer.user, close_mask, it->first));
+                new_states.push_back(FieldState(closer.user,
+                                  close_mask, finder->first));
+              }
+              if (!finder->second)
+                state.open_children.erase(finder);
+            }
+          }
+          // Otherwise disjoint fields, nothing to do
+        }
+        // Otherwise it's closed so it doesn't matter
+      }
+      else
+      {
+        std::vector<Color> to_delete;
+        // Go through and close all the children which we overlap with
+        // and aren't the next child that we're going to use
+        for (std::map<Color,FieldMask>::iterator it = 
+              state.open_children.begin(); it != 
+              state.open_children.end(); it++)
+        {
+          FieldMask close_mask = it->second & closing_mask;
+          // check for field disjointness
+          if (!close_mask)
+            continue;
+          // Check for same child, only allow upgrades in some cases
+          // such as read-only -> exclusive.  This is calling context
+          // sensitive hence the parameter.
+          if (allow_next_child && (next_child > -1) && 
+              (next_child == int(it->first)))
+          {
+            FieldMask open_fields = close_mask;
+            already_open |= open_fields;
+            if (upgrade_next_child)
+            {
+              it->second -= open_fields;
+              removed_fields = true;
+              if (!it->second)
+                to_delete.push_back(it->first);
+              // The upgraded field state gets added by the caller
+            }
+            continue;
+          }
+          // Check for child disjointness
+          if ((next_child > -1) && 
+              are_children_disjoint(it->first, unsigned(next_child)))
+            continue;
+          // Perform the close operation
+          RegionTreeNode *child_node = get_tree_child(it->first);
+          child_node->close_logical_node(closer, close_mask, permit_leave_open);
+          if (record_close_operations)
+            closer.close_operations.push_back(TreeClose(
+                  new TreeCloseImpl(it->first, close_mask, permit_leave_open)));
+          // Remove the close fields
+          it->second -= close_mask;
+          removed_fields = true;
+          if (!it->second)
+            to_delete.push_back(it->first);
+          // Record any fields that we closed
+          if (record_close_operations)
+            closer.closed_mask |= close_mask;
+          // If we're allowed to leave this open, add a new
+          // state for the current user
+          if (permit_leave_open)
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(IS_READ_ONLY(closer.user.usage));
+#endif
+            new_states.push_back(FieldState(closer.user,close_mask,it->first));
+          }
+        }
+        // Remove the children that can be deleted
+        for (std::vector<Color>::const_iterator it = to_delete.begin();
+              it != to_delete.end(); it++)
+        {
+          state.open_children.erase(*it);
         }
       }
-      // Remove the children that can be deleted
-      for (std::vector<Color>::const_iterator it = to_delete.begin();
-            it != to_delete.end(); it++)
+      // See if it is time to rebuild the valid mask 
+      if (removed_fields)
       {
-        state.open_children.erase(*it);
+        if (state.rebuild_timeout == 0)
+        {
+          // Rebuild the valid fields mask
+          FieldMask new_valid_mask;
+          for (std::map<Color,FieldMask>::const_iterator it = 
+                state.open_children.begin(); it != 
+                state.open_children.end(); it++)
+          {
+            new_valid_mask |= it->second;
+          }
+          state.valid_fields = new_valid_mask;    
+          // Reset the timeout to the order of the number of open children
+          state.rebuild_timeout = state.open_children.size();
+        }
+        else
+          state.rebuild_timeout--;
       }
-      // Rebuild the valid fields mask
-      FieldMask new_valid_mask;
-      for (std::map<Color,FieldMask>::const_iterator it = 
-            state.open_children.begin(); it != state.open_children.end(); it++)
-      {
-        new_valid_mask |= it->second;
-      }
-      state.valid_fields = new_valid_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -7557,8 +7651,8 @@ namespace LegionRuntime {
             previous |= it->second;
           }
         }
-        // Valid fields should line up
-        assert(actually_valid == fit->valid_fields);
+        // Actually valid should be greater than or equal
+        assert(!(actually_valid - fit->valid_fields));
       }
       // Also check that for each field it is either only open in one mode
       // or two children in different modes are disjoint
@@ -7939,7 +8033,7 @@ namespace LegionRuntime {
       std::vector<Memory> to_create;
       size_t blocking_factor = 1;
       size_t max_blocking_factor = 
-        closer.handle.index_space.get_valid_mask().get_num_elmts();
+        context->get_domain_volume(closer.handle.index_space); 
       bool composite = context->runtime->invoke_mapper_rank_copy_targets(
                                                closer.info->local_proc, 
                                                closer.info->mappable,
@@ -8265,16 +8359,16 @@ namespace LegionRuntime {
       if (state.dirty_mask * valid_mask)
       {
         RegionTreeNode *parent = get_parent();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(parent != NULL);
-#endif
-        // Acquire the parent state in non-exclusive mode
-        PhysicalState &parent_state = 
-          parent->acquire_physical_state(state.ctx, false/*exclusive*/);
-        parent->find_valid_reduction_views(parent_state, 
-                                           valid_mask, valid_views);
-        // Release the parent state
-        parent->release_physical_state(parent_state);
+        if (parent != NULL)
+        {
+          // Acquire the parent state in non-exclusive mode
+          PhysicalState &parent_state = 
+            parent->acquire_physical_state(state.ctx, false/*exclusive*/);
+          parent->find_valid_reduction_views(parent_state, 
+                                             valid_mask, valid_views);
+          // Release the parent state
+          parent->release_physical_state(parent_state);
+        }
       }
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
             state.reduction_views.begin(); it != 
@@ -8332,8 +8426,8 @@ namespace LegionRuntime {
       // issue the copy when we're done and update the destination instance.
       std::set<Event> preconditions;
       std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<std::pair<InstanceView*,FieldMask> > src_instances;
       std::vector<Domain::CopySrcDstField> dst_fields;
+      std::map<InstanceView*,FieldMask> src_instances;
 
       // No need to call the mapper if there is only one valid instance
       if (valid_instances.size() == 1)
@@ -8356,8 +8450,7 @@ namespace LegionRuntime {
 #endif
             src->copy_from(op_mask, preconditions, src_fields);
             dst->copy_to(  op_mask, preconditions, dst_fields);
-            src_instances.push_back(
-                std::pair<InstanceView*,FieldMask>(src,op_mask));
+            src_instances[src] = op_mask;
           }
         }
       }
@@ -8407,8 +8500,12 @@ namespace LegionRuntime {
 #endif
                 it->first->copy_from(op_mask, preconditions, src_fields);
                 dst->copy_to(op_mask, preconditions, dst_fields);
-                src_instances.push_back(
-                    std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+                std::map<InstanceView*,FieldMask>::iterator finder = 
+                  src_instances.find(it->first);
+                if (finder == src_instances.end())
+                  src_instances[it->first] = op_mask;
+                else
+                  finder->second |= op_mask;
               }
               // Update the copy mask
               copy_mask -= op_mask;
@@ -8446,8 +8543,12 @@ namespace LegionRuntime {
               {
                 it->first->copy_from(op_mask, preconditions, src_fields);
                 dst->copy_to(op_mask, preconditions, dst_fields);
-                src_instances.push_back(
-                    std::pair<InstanceView*,FieldMask>(it->first, op_mask));
+                std::map<InstanceView*,FieldMask>::iterator finder = 
+                  src_instances.find(it->first);
+                if (finder == src_instances.end())
+                  src_instances[it->first] = op_mask;
+                else
+                  finder->second |= op_mask;
               }
               // Update the copy mask
               copy_mask -= op_mask;
@@ -8503,9 +8604,8 @@ namespace LegionRuntime {
 #endif
         // Update the source and destination instances with their info
         FieldMask update_mask;
-        for (std::vector<std::pair<InstanceView*,FieldMask> >::
-              const_iterator it = src_instances.begin(); it !=
-              src_instances.end(); it++)
+        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+              src_instances.begin(); it != src_instances.end(); it++)
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!!it->second);
@@ -9177,6 +9277,7 @@ namespace LegionRuntime {
             case ANTI_DEPENDENCE:
             case ATOMIC_DEPENDENCE:
             case SIMULTANEOUS_DEPENDENCE:
+            case PROMOTED_DEPENDENCE:
               {
                 // Mark that these kinds of dependences are not allowed
                 // to validate region inputs
@@ -9187,15 +9288,17 @@ namespace LegionRuntime {
             case TRUE_DEPENDENCE:
               {
 #ifdef LEGION_LOGGING
-                LegionLogging::log_mapping_dependence(
-                    Machine::get_executing_processor(),
-                    user.op->get_parent()->get_unique_task_id(),
-                    it->uid, it->idx, user.uid, user.idx, dtype);
+                if (dtype != PROMOTED_DEPENDENCE)
+                  LegionLogging::log_mapping_dependence(
+                      Machine::get_executing_processor(),
+                      user.op->get_parent()->get_unique_task_id(),
+                      it->uid, it->idx, user.uid, user.idx, dtype);
 #endif
 #ifdef LEGION_SPY
-                LegionSpy::log_mapping_dependence(
-                    user.op->get_parent()->get_unique_task_id(),
-                    it->uid, it->idx, user.uid, user.idx, dtype);
+                if (dtype != PROMOTED_DEPENDENCE)
+                  LegionSpy::log_mapping_dependence(
+                      user.op->get_parent()->get_unique_task_id(),
+                      it->uid, it->idx, user.uid, user.idx, dtype);
 #endif
                 // Do this after the logging since we might 
                 // update the iterator.
@@ -9322,18 +9425,20 @@ namespace LegionRuntime {
                                                      closer.user.usage);
         // Make what are normally no-dependences look like control dependences
         if (dtype == NO_DEPENDENCE)
-          dtype = ANTI_DEPENDENCE;
+          dtype = PROMOTED_DEPENDENCE;
 #endif
 #ifdef LEGION_LOGGING
-        LegionLogging::log_mapping_dependence(
-            Machine::get_executing_processor(),
-            closer.user.op->get_parent()->get_unique_task_id(),
-            it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+        if (dtype != PROMOTED_DEPENDENCE)
+          LegionLogging::log_mapping_dependence(
+              Machine::get_executing_processor(),
+              closer.user.op->get_parent()->get_unique_task_id(),
+              it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
 #ifdef LEGION_SPY
-        LegionSpy::log_mapping_dependence(
-            closer.user.op->get_parent()->get_unique_task_id(),
-            it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
+        if (dtype != PROMOTED_DEPENDENCE)
+          LegionSpy::log_mapping_dependence(
+              closer.user.op->get_parent()->get_unique_task_id(),
+              it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
         // Register the dependence 
         if (closer.validates)
@@ -9372,7 +9477,8 @@ namespace LegionRuntime {
         closer.closed_users.push_back(*it);
         LogicalUser &closed_user = closer.closed_users.back();
         closed_user.field_mask = overlap;
-        closed_user.usage.privilege = READ_WRITE;
+        closed_user.usage.privilege = 
+          (PrivilegeMode)((int)closed_user.usage.privilege | PROMOTED);
         // Remove the closed set of fields from this user
         it->field_mask -= overlap;
         // If it's empty, remove it from the list and let
@@ -9560,6 +9666,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return row_source->are_disjoint(c1, c2);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionNode::are_all_children_disjoint(void)
+    //--------------------------------------------------------------------------
+    {
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10470,6 +10583,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PartitionNode::are_all_children_disjoint(void)
+    //--------------------------------------------------------------------------
+    {
+      return row_source->disjoint;
+    }
+
+    //--------------------------------------------------------------------------
     bool PartitionNode::is_region(void) const
     //--------------------------------------------------------------------------
     {
@@ -10754,7 +10874,6 @@ namespace LegionRuntime {
       logger->log("");
       if (!to_traverse.empty())
       {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
         for (std::map<Color,FieldMask>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
@@ -11163,7 +11282,7 @@ namespace LegionRuntime {
       : PhysicalManager(ctx, did, owner_space, local_space, mem, inst), 
         region_node(node), allocated_fields(mask), blocking_factor(bf), 
         use_event(u_event), field_infos(infos), field_indexes(indexes), 
-        depth(dep), recycled(false), reclaimable(true)
+        depth(dep), recycled(false)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -11271,6 +11390,7 @@ namespace LegionRuntime {
     void InstanceManager::garbage_collect(void)
     //--------------------------------------------------------------------------
     {
+      bool release_valid_views = true;
       if (owner)
       {
         // Always call this up front to see if we need to reclaim the
@@ -11305,8 +11425,20 @@ namespace LegionRuntime {
           instance.destroy(use_event);
 #endif
         }
+        else // Otherwise it has been recycled, so don't release valid views
+          release_valid_views = false;
         // Mark that this instance has been garbage collected
         instance = PhysicalInstance::NO_INST;
+      }
+      if (release_valid_views)
+      {
+        for (std::set<InstanceView*>::const_iterator it = valid_views.begin();
+              it != valid_views.end(); it++)
+        {
+          if ((*it)->remove_resource_reference())
+            delete (*it);
+        }
+        valid_views.clear();
       }
     }
 
@@ -11352,53 +11484,25 @@ namespace LegionRuntime {
     Event InstanceManager::get_recycle_event(void)
     //--------------------------------------------------------------------------
     {
-      // It's not possible for us to hold our lock while calling back
-      // into our views without risking deadlock, so make a copy of our
-      // valid views and add a resource reference to prevent them from
-      // being deleted while we are doing this.
-      std::set<InstanceView*> copy_views;
-      {
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(reclaimable);
-#endif
-        // Mark that the valid views are no longer reclaimable 
-        reclaimable = false;
-        copy_views = valid_views;
-      }
       // Now do our operation, as we finish with each view we
       // can remove the resource reference that we are holding on it.
       // We accumulate the set of events representing all the users
       // still actively using the region from the given level. The
       // region can be recycled once they are all done using it.
+      // Note we can do this without holding the lock because if we
+      // get here, then we are ready to be reclaimed and no more
+      // valid views will be added because we've already been 
+      // garbage collected.
       std::set<Event> recycle_events;
       recycle_events.insert(use_event);
-      for (std::set<InstanceView*>::const_iterator it = copy_views.begin();
-            it != copy_views.end(); it++)
+      for (std::set<InstanceView*>::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
       {
         (*it)->accumulate_events(recycle_events);
-      }
-      // Now that we are done accessing views, we can mark them
-      // reclaimable again, and then reclaim any that were pending
-      std::vector<InstanceView*> rec_views;
-      {
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!reclaimable);
-#endif
-        rec_views = reclaim_views;
-        // We're promising to do the reclaims here so we can 
-        // clear out the views indicating they will be done
-        reclaim_views.clear();
-        reclaimable = true;
-      }
-      // Remove any references for reclaim views
-      for (std::vector<InstanceView*>::const_iterator it = rec_views.begin();
-            it != rec_views.end(); it++)
-      {
         if ((*it)->remove_resource_reference())
           delete (*it);
       }
+      valid_views.clear();
       // Compute the recycle event
       Event recycle_event = Event::merge_events(recycle_events);
       return recycle_event;
@@ -11439,7 +11543,6 @@ namespace LegionRuntime {
           assert(finder != field_infos.end());
           pop_count++;
 #endif
-
           fields.push_back(finder->second);
         }
       }
@@ -11607,8 +11710,16 @@ namespace LegionRuntime {
 #endif
       // Add a resource reference so it can't be deleted
       view->add_resource_reference();
-      AutoLock gc(gc_lock);
-      valid_views.insert(view);
+      bool remove_extra_reference = false;
+      {
+        AutoLock gc(gc_lock);
+        if (valid_views.find(view) == valid_views.end())
+          valid_views.insert(view);
+        else
+          remove_extra_reference = true;
+      }
+      if (remove_extra_reference && view->remove_resource_reference())
+        delete view;
     }
 
     //--------------------------------------------------------------------------
@@ -11618,20 +11729,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->depth == depth);
 #endif
-      bool reclaim = false;
-      {
-        AutoLock gc(gc_lock);
-        valid_views.erase(view);
-        // See if we can actually do the reclaim, or we are
-        // going to defer this until later
-        if (reclaimable)
-          reclaim = true;
-        else
-          reclaim_views.push_back(view);
-      }
-      // Then remove our resource reference
-      if (reclaim && view->remove_resource_reference())
-        delete view;
+      // Do nothing for right now
     }
 
     //--------------------------------------------------------------------------
@@ -12415,7 +12513,7 @@ namespace LegionRuntime {
         child_own_did = context->runtime->get_available_distributed_id();
       RegionTreeNode *child_node = logical_node->get_tree_child(c);
       InstanceView *child_view = new InstanceView(context, child_did, 
-                                context->runtime->address_space, child_own_did, 
+                                owner_addr, child_own_did, 
                                 child_node, manager, this, depth);
       child_view->add_resource_reference();
       // Retake the lock and try and add it, see if 
@@ -12626,11 +12724,13 @@ namespace LegionRuntime {
       // Launch the garbage collection task
       defer_collect_user(user.term_event, copy_mask, 
                          exec_proc, true/*gc epoch*/);
+      // Have to do this part holding the view lock
+      std::set<AddressSpaceID> notified;
+      AutoLock v_lock(view_lock,1,false/*exclusive*/);
       // If we're remote, send back the user to the owner 
       if (owner_did != did)
         send_back_user(user);
       // Notify any subscribers
-      std::set<AddressSpaceID> notified;
       notify_subscribers(notified, user);
     }
 
@@ -12639,6 +12739,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       std::set<Event> wait_on_events;
+      Event start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+        wait_on_events.insert(start_use_event);
       if (parent != NULL)
       {
         // Set our color
@@ -12651,16 +12754,21 @@ namespace LegionRuntime {
       // Launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask,
                          exec_proc, true/*gc epoch*/);
-      // If we're remote, send back the user to the owner
-      if (owner_did != did)
-        send_back_user(user);
-      // Notify all our subscribers and then have
-      // our parent's do the same thing
-      std::set<AddressSpaceID> notified;
-      notify_subscribers(notified, user);
+      // Have to do this part holding the view lock
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // If we're remote, send back the user to the owner
+        if (owner_did != did)
+          send_back_user(user);
+        // Notify all our subscribers and then have
+        // our parent's do the same thing
+        std::set<AddressSpaceID> notified;
+        notify_subscribers(notified, user);
+      }
       // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_HIGH_LEVEL
-      assert(wait_on_events.find(user.term_event) == wait_on_events.end());
+      if (user.term_event.exists())
+        assert(wait_on_events.find(user.term_event) == wait_on_events.end());
 #endif
       // Make the instance ref
       Event ready_event = Event::merge_events(wait_on_events);
@@ -12766,15 +12874,19 @@ namespace LegionRuntime {
 #endif
       // Notify any subscribers except the source that
       // sent us the user in the first place
-      std::set<AddressSpaceID> notified;
-      notified.insert(source);
-      notify_subscribers(notified, user);
-      // If we have an owner keep sending it back
-      if (owner_did != did)
-        send_back_user(user);
+      {
+        std::set<AddressSpaceID> notified;
+        notified.insert(source);
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        notify_subscribers(notified, user);
+        // If we have an owner keep sending it back
+        if (owner_did != did)
+          send_back_user(user);
+      }
       std::set<Event> dummy_wait_on;
-      // This will go up and also add the user locally
-      add_user_above(dummy_wait_on, user);
+      // Only need to add this user locally, if there is a 
+      // parent it will have sent the user back independently
+      add_local_user<true>(dummy_wait_on, user);
       // The launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask, 
                          Machine::get_executing_processor(), false/*gc epoch*/);
@@ -12792,11 +12904,15 @@ namespace LegionRuntime {
       assert(owner_did != did);
 #endif
       // Send the user to any subscribers that we have
-      std::set<AddressSpaceID> notified;
-      notify_subscribers(notified, user);
+      {
+        std::set<AddressSpaceID> notified;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        notify_subscribers(notified, user);
+      }
       std::set<Event> dummy_wait_on;
-      // This will go up and also add the user locally
-      add_user_above(dummy_wait_on, user);
+      // Only need to add this user locally, if there is a
+      // parent it will have sent the user back independently
+      add_local_user<true>(dummy_wait_on, user);
       // Then launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask,
                          Machine::get_executing_processor(), false/*gc epoch*/);
@@ -12817,6 +12933,11 @@ namespace LegionRuntime {
         user.child = local_child;
       }
       add_local_user<true>(wait_on, user);
+      std::set<AddressSpaceID> notified;
+      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      if (owner_did != did)
+        send_back_user(user);
+      notify_subscribers(notified, user);
     }
  
     //--------------------------------------------------------------------------
@@ -13339,21 +13460,18 @@ namespace LegionRuntime {
                                           const PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      for (std::map<AddressSpaceID,DistributedID>::const_iterator it = 
+            subscribers.begin(); it != subscribers.end(); it++)
       {
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
-        for (std::map<AddressSpaceID,DistributedID>::const_iterator it = 
-              subscribers.begin(); it != subscribers.end(); it++)
+        // Only notify processors that haven't already been notified
+        if (notified.find(it->first) == notified.end())
         {
-          // Only notify processors that haven't already been notified
-          if (notified.find(it->first) == notified.end())
-          {
-            send_user(it->first, it->second, user);
-            notified.insert(it->first);
-          }
+          send_user(it->first, it->second, user);
+          notified.insert(it->first);
         }
       }
-      if (parent != NULL)
-        parent->notify_subscribers(notified, user);
+      // Don't need to go up because parent is sent back independently
     }
 
     //--------------------------------------------------------------------------
@@ -13553,7 +13671,12 @@ namespace LegionRuntime {
         // task that there is no parent
         if (parent == NULL)
           parent_did = result;
-        // Now pack up all the data
+        // Now pack up all the data, this has to be done
+        // atomically to make sure that no one can add any
+        // users while we are doing it, or tries to send
+        // users to subscribers before we've actually sent
+        // the subscriber.
+        AutoLock v_lock(view_lock);
         {
           RezCheck z(rez);
           rez.serialize(result);
@@ -13606,6 +13729,9 @@ namespace LegionRuntime {
           context->runtime->get_available_distributed_id();
         if (parent == NULL)
           parent_did = new_owner_did;
+        // Need to hold the view lock when doing this so we
+        // ensure that everything gets sent back properly
+        AutoLock v_lock(view_lock);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -13646,6 +13772,7 @@ namespace LegionRuntime {
     void InstanceView::pack_instance_view(Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // view_lock held from callers
       RezCheck z(rez);
       rez.serialize(inst_lock);
 #ifndef PHYSICAL_FIELD_TREE
@@ -13855,6 +13982,8 @@ namespace LegionRuntime {
         if (!parent->add_subview(result, view_color))
         {
           // The view already existed, so create an alias
+          // Mark that we cannot reclaim the distributed ID on deletion
+          result->set_no_free_did();
           delete result;
           result = parent->get_subview(view_color);
           result->add_alias_did(did);
@@ -14173,6 +14302,7 @@ namespace LegionRuntime {
                                            int skip /*= -1*/)
     //--------------------------------------------------------------------------
     {
+      // view_lock held by callers
       // Send it out to any subscribers that aren't the source
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       for (std::map<AddressSpaceID,DistributedID>::const_iterator it = 
@@ -14255,6 +14385,7 @@ namespace LegionRuntime {
       manager->region_node->column_source->transform_field_mask(
                                                       user.field_mask, source);
       // Notify our subscribers and our owner if necessary
+      AutoLock v_lock(view_lock);
       notify_subscribers(user, source); 
       if (owner_did != did)
         send_back_user(user);
@@ -14285,6 +14416,7 @@ namespace LegionRuntime {
       manager->region_node->column_source->transform_field_mask(
                                                       user.field_mask, source);
       // Notify any of our subscribers
+      AutoLock v_lock(view_lock);
       notify_subscribers(user);
       if (IS_REDUCE(user.usage))
       {
@@ -14329,6 +14461,7 @@ namespace LegionRuntime {
         // Otherwise we need to send a copy remotely
         Serializer rez;
         DistributedID result = context->runtime->get_available_distributed_id();
+        AutoLock v_lock(view_lock);
         {
           RezCheck z(rez);
           rez.serialize(result);
@@ -14374,6 +14507,7 @@ namespace LegionRuntime {
         DistributedID new_owner_did = 
           context->runtime->get_available_distributed_id();
         Serializer rez;
+        AutoLock v_lock(view_lock);
         {
           RezCheck z(rez);
           rez.serialize(new_owner_did);
@@ -14408,6 +14542,7 @@ namespace LegionRuntime {
     void ReductionView::pack_reduction_view(Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // view lock held from callers
       RezCheck z(rez);
       rez.serialize(reduction_users.size());
       for (std::list<PhysicalUser>::const_iterator it = 

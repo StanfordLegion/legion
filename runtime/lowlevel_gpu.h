@@ -47,7 +47,8 @@ namespace LegionRuntime {
 
     class GPUProcessor : public Processor::Impl {
     public:
-      GPUProcessor(Processor _me, int _gpu_index, Processor _util,
+      GPUProcessor(Processor _me, int _gpu_index, 
+                   int num_local_gpus, Processor _util,
 		   size_t _zcmem_size, size_t _fbmem_size, 
                    size_t _stack_size, bool gpu_dma_thread);
 
@@ -124,18 +125,23 @@ namespace LegionRuntime {
       //				Event start_event, Event finish_event);
     public:
       void register_host_memory(void *base, size_t size);
+      void enable_peer_access(GPUProcessor *peer);
+      bool can_access_peer(GPUProcessor *peer) const;
       void handle_copies(void);
     public:
       // Helper method for getting a thread's processor value
       static Processor get_processor(void);
       static void* gpu_dma_worker_loop(void *args);
+
       static void start_gpu_dma_thread(const std::vector<GPUProcessor*> &local_gpus);
+      static void stop_gpu_dma_threads(void);
     private:
       static std::vector<GPUProcessor*> local_gpus;
     public:
       class Internal;
 
       GPUProcessor::Internal *internal;
+      std::set<GPUProcessor*> peer_gpus;
     };
 
     class GPUFBMemory : public Memory::Impl {
@@ -175,17 +181,9 @@ namespace LegionRuntime {
 	free_bytes_local(offset, size);
       }
 
-      virtual void get_bytes(off_t offset, void *dst, size_t size)
-      {
-	assert(0);
-	//memcpy(dst, base+offset, size);
-      }
-
-      virtual void put_bytes(off_t offset, const void *src, size_t size)
-      {
-	assert(0);
-	//memcpy(base+offset, src, size);
-      }
+      // these work, but they are SLOW
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
 
       virtual void *get_direct_ptr(off_t offset, size_t size)
       {

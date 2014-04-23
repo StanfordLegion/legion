@@ -2130,8 +2130,8 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef LEGION_PROF
-      LegionProf::register_close(unique_op_id,
-                                 parent_ctx->get_unique_task_id());
+      LegionProf::register_copy(unique_op_id,
+                                parent_ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_copy_operation(parent_ctx->get_unique_task_id(),

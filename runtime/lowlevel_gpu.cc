@@ -108,6 +108,7 @@ namespace LegionRuntime {
       std::deque<GPUJob*> device_device_copies;
 
       Internal(GPUProcessor *_gpu, int _gpu_index, 
+               int num_local_gpus,
                size_t _zcmem_size, size_t _fbmem_size,
                size_t _zcmem_res, size_t _fbmem_res,
                bool enabled, bool gpu_dma)
@@ -128,7 +129,7 @@ namespace LegionRuntime {
 
         CHECK_CU( cuCtxCreate(&proc_ctx, CU_CTX_MAP_HOST |
                               CU_CTX_SCHED_BLOCKING_SYNC, cuDevice) );
-
+        
         CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
       }
 
@@ -406,6 +407,19 @@ namespace LegionRuntime {
           CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
         }
       }
+
+      void enable_peer_access(GPUProcessor::Internal *neighbor)
+      {
+        neighbor->handle_peer_access(proc_ctx);
+      }
+
+      void handle_peer_access(CUcontext peer_ctx)
+      {
+        CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+        CHECK_CU( cuCtxEnablePeerAccess(peer_ctx, 0) );
+        CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+      }
+
       void handle_copies(void)
       {
         if (!shutdown_requested)
@@ -648,7 +662,8 @@ namespace LegionRuntime {
                   size_t _bytes, size_t _lines,
                   cudaMemcpyKind _kind)
         : GPUMemcpy(_gpu, _finish_event, _kind), dst(_dst), src(_src),
-          dst_stride(_dst_stride), src_stride(_src_stride),
+          dst_stride((_dst_stride < _bytes) ? _bytes : _dst_stride), 
+          src_stride((_src_stride < _bytes) ? _bytes : _src_stride),
           bytes(_bytes), lines(_lines)
       {}
     public:
@@ -855,12 +870,13 @@ namespace LegionRuntime {
       char *current_buffer;
     };
 
-    GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, Processor _util,
+    GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
+             int num_local_gpus, Processor _util,
 	     size_t _zcmem_size, size_t _fbmem_size, 
              size_t _stack_size, bool gpu_dma_thread)
       : Processor::Impl(_me, Processor::TOC_PROC, _util)
     {
-      internal = new GPUProcessor::Internal(this, _gpu_index,
+      internal = new GPUProcessor::Internal(this, _gpu_index, num_local_gpus,
                                             _zcmem_size, _fbmem_size,
                                             (16 << 20), (32 << 20),
                                             !_util.exists(), gpu_dma_thread);
@@ -1059,6 +1075,17 @@ namespace LegionRuntime {
       internal->register_host_memory(base, size);
     }
 
+    void GPUProcessor::enable_peer_access(GPUProcessor *peer)
+    {
+      internal->enable_peer_access(peer->internal);
+      peer_gpus.insert(peer);
+    }
+
+    bool GPUProcessor::can_access_peer(GPUProcessor *peer) const
+    {
+      return (peer_gpus.find(peer) != peer_gpus.end());
+    }
+
     void GPUProcessor::handle_copies(void)
     {
       internal->handle_copies();
@@ -1066,10 +1093,13 @@ namespace LegionRuntime {
 
     /*static*/ std::vector<GPUProcessor*> GPUProcessor::local_gpus;
 
+    static volatile bool dma_shutdown_requested = false;
+    static std::vector<pthread_t> dma_threads;
+
     /*static*/
     void* GPUProcessor::gpu_dma_worker_loop(void *args)
     {
-      while (true)
+      while (!dma_shutdown_requested)
       {
         // Iterate over all the GPU processors and perform the copies
         for (std::vector<GPUProcessor*>::const_iterator it = local_gpus.begin();
@@ -1092,9 +1122,27 @@ namespace LegionRuntime {
       pthread_t thread;
       CHECK_PTHREAD( pthread_create(&thread, 0, gpu_dma_worker_loop, 0) );
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
+      dma_threads.push_back(thread);
 #ifdef DEADLOCK_TRACE
       Runtime::get_runtime()->add_thread(&thread);
 #endif
+    }
+
+    /*static*/
+    void GPUProcessor::stop_gpu_dma_threads(void)
+    {
+      dma_shutdown_requested = true;
+
+      // no need to signal right now - they're all spinning
+      while(!dma_threads.empty()) {
+	pthread_t t = dma_threads.back();
+	dma_threads.pop_back();
+	
+	void *dummy;
+	CHECK_PTHREAD( pthread_join(t, &dummy) );
+      }
+
+      dma_shutdown_requested = false;
     }
 
 #if 0
@@ -1159,6 +1207,23 @@ namespace LegionRuntime {
     }
 
     GPUFBMemory::~GPUFBMemory(void) {}
+
+    // these work, but they are SLOW
+    void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
+    {
+      // create an async copy and then wait for it to finish...
+      Event e = Event::Impl::create_event();
+      gpu->copy_from_fb(dst, offset, size, Event::NO_EVENT, e);
+      e.wait(true /*blocking*/);
+    }
+
+    void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
+    {
+      // create an async copy and then wait for it to finish...
+      Event e = Event::Impl::create_event();
+      gpu->copy_to_fb(offset, src, size, Event::NO_EVENT, e);
+      e.wait(true /*blocking*/);
+    }
 
     // zerocopy memory
 

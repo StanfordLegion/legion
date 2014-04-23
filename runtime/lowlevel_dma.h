@@ -25,6 +25,7 @@ namespace LegionRuntime {
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy, after_copy;
+      int priority;
     };
 
     extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);

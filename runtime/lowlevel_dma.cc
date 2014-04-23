@@ -53,66 +53,239 @@ namespace LegionRuntime {
 
     class MemPairCopier;
 
-    class DmaRequest : public Event::Impl::EventWaiter {
-    public:
-      DmaRequest(const Domain& _domain,
-		 OASByInst *_oas_by_inst,
-		 ReductionOpID _redop_id, bool _red_fold,
-		 Event _before_copy,
-		 Event _after_copy,
-                 int priority);
+    class DmaRequest;
 
-      ~DmaRequest(void);
+    class DmaRequestQueue {
+    public:
+      DmaRequestQueue(void);
+
+      void enqueue_request(DmaRequest *r);
+
+      DmaRequest *dequeue_request(bool sleep = true);
+
+      void shutdown_queue(void);
+
+    protected:
+      gasnet_hsl_t queue_mutex;
+      gasnett_cond_t queue_condvar;
+      std::map<int, std::list<DmaRequest *> *> queues;
+      int queue_sleepers;
+      bool shutdown_flag;
+    };
+
+    class DmaRequest {
+    public:
+      DmaRequest(int _priority, Event _after_copy) 
+	: state(STATE_INIT), priority(_priority), after_copy(_after_copy) {}
+
+      virtual ~DmaRequest(void) {}
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
+
+      virtual bool handler_safe(void) = 0;
+
+      virtual void perform_dma(void) = 0;
 
       enum State {
 	STATE_INIT,
 	STATE_METADATA_FETCH,
 	STATE_BEFORE_EVENT,
+	STATE_INST_LOCK,
 	STATE_READY,
 	STATE_QUEUED,
 	STATE_DONE
       };
 
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
+      State state;
+      int priority;
+      Event after_copy;
 
-      bool check_readiness(bool just_check);
+      class Waiter : public Event::Impl::EventWaiter {
+      public:
+	Reservation current_lock;
+	DmaRequestQueue *queue;
+	DmaRequest *req;
+
+	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+
+	virtual bool event_triggered(void);
+	virtual void print_info(FILE *f);
+      };
+    };
+
+    // dma requests come in two flavors:
+    // 1) CopyRequests, which are per memory pair, and
+    // 2) ReduceRequests, which have to be handled monolithically
+
+    class CopyRequest : public DmaRequest {
+    public:
+      CopyRequest(const Domain& _domain,
+		  OASByInst *_oas_by_inst,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority);
+
+      CopyRequest(const void *data, size_t datalen,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority);
+
+      ~CopyRequest(void);
+
+      size_t serialize(void *buffer, size_t maxlen);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
       void perform_dma_mask(MemPairCopier *mpc);
 
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
 
-      void perform_dma(void);
+      virtual void perform_dma(void);
 
-      bool handler_safe(void) { return(true); }
+      virtual bool handler_safe(void) { return(false); }
 
       Domain domain;
       OASByInst *oas_by_inst;
+      Event before_copy;
+      Waiter waiter; // if we need to wait on events
+    };
+
+    class ReduceRequest : public DmaRequest {
+    public:
+      ReduceRequest(const Domain& _domain,
+		    const std::vector<Domain::CopySrcDstField>& _srcs,
+		    const Domain::CopySrcDstField& _dst,
+		    bool _inst_lock_needed,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority);
+
+      ReduceRequest(const void *data, size_t datalen,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority);
+
+      ~ReduceRequest(void);
+
+      size_t serialize(void *buffer, size_t maxlen);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      void perform_dma_mask(MemPairCopier *mpc);
+
+      template <unsigned DIM>
+      void perform_dma_rect(MemPairCopier *mpc);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      Domain domain;
+      std::vector<Domain::CopySrcDstField> srcs;
+      Domain::CopySrcDstField dst;
+      bool inst_lock_needed;
+      Event inst_lock_event;
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy;
-      Event after_copy;
-      State state;
-      Reservation current_lock;
-      int priority;
+      Waiter waiter; // if we need to wait on events
     };
 
-    gasnet_hsl_t queue_mutex;
-    gasnett_cond_t queue_condvar;
-    std::list<DmaRequest *> dma_queue;
-    
-    DmaRequest::DmaRequest(const Domain& _domain,
-			   OASByInst *_oas_by_inst,
-			   ReductionOpID _redop_id, bool _red_fold,
-			   Event _before_copy,
-			   Event _after_copy,
-                           int _priority)
-      : domain(_domain), oas_by_inst(_oas_by_inst),
-	redop_id(_redop_id), red_fold(_red_fold),
-	before_copy(_before_copy), after_copy(_after_copy),
-	state(STATE_INIT), 
-        current_lock(Reservation::NO_RESERVATION), priority(_priority)
+    DmaRequestQueue::DmaRequestQueue(void)
+    {
+      gasnet_hsl_init(&queue_mutex);
+      gasnett_cond_init(&queue_condvar);
+      queue_sleepers = 0;
+      shutdown_flag = false;
+    }
+
+    void DmaRequestQueue::shutdown_queue(void)
+    {
+      gasnet_hsl_lock(&queue_mutex);
+
+      assert(queues.empty());
+
+      // set the shutdown flag and wake up any sleepers
+      shutdown_flag = true;
+
+      gasnett_cond_broadcast(&queue_condvar);
+
+      gasnet_hsl_unlock(&queue_mutex);
+    }
+
+    void DmaRequestQueue::enqueue_request(DmaRequest *r)
+    {
+      gasnet_hsl_lock(&queue_mutex);
+
+      // there's a queue per priority level
+      // priorities are negated so that the highest logical priority comes first
+      int p = -r->priority;
+      std::map<int, std::list<DmaRequest *> *>::iterator it = queues.find(p);
+      if(it == queues.end()) {
+	// nothing at this priority level - make a new list
+	std::list<DmaRequest *> *l = new std::list<DmaRequest *>;
+	l->push_back(r);
+	queues[p] = l;
+      } else {
+	// push ourselves onto the back of the existing queue
+	it->second->push_back(r);
+      }
+
+      // if anybody was sleeping, wake them up
+      if(queue_sleepers > 0) {
+	queue_sleepers = 0;
+	gasnett_cond_broadcast(&queue_condvar);
+      }
+
+      gasnet_hsl_unlock(&queue_mutex);
+    }
+
+    DmaRequest *DmaRequestQueue::dequeue_request(bool sleep /*= true*/)
+    {
+      gasnet_hsl_lock(&queue_mutex);
+
+      // quick check - are there any requests at all?
+      while(queues.empty()) {
+	if(!sleep || shutdown_flag) {
+	  gasnet_hsl_unlock(&queue_mutex);
+	  return 0;
+	}
+
+	// sleep until there are, or until shutdown
+	queue_sleepers++;
+	gasnett_cond_wait(&queue_condvar, &queue_mutex.lock);
+      }
+
+      // grab the first request from the highest-priority queue there is
+      // priorities are negated so that the highest logical priority comes first
+      std::map<int, std::list<DmaRequest *> *>::iterator it = queues.begin();
+      assert(!it->second->empty());
+      DmaRequest *r = it->second->front();
+      it->second->pop_front();
+      // if queue is empty, delete from list
+      if(it->second->empty()) {
+	delete it->second;
+	queues.erase(it);
+      }
+
+      gasnet_hsl_unlock(&queue_mutex);
+      
+      return r;
+    }
+
+    CopyRequest::CopyRequest(const Domain& _domain,
+			     OASByInst *_oas_by_inst,
+			     Event _before_copy,
+			     Event _after_copy,
+			     int _priority)
+      : DmaRequest(_priority, _after_copy),
+	domain(_domain), oas_by_inst(_oas_by_inst),
+	before_copy(_before_copy)
     {
       log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
 		   this,
@@ -125,16 +298,118 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
+#endif
     }
 
-    DmaRequest::~DmaRequest(void)
+    CopyRequest::CopyRequest(const void *data, size_t datalen,
+			     Event _before_copy,
+			     Event _after_copy,
+			     int _priority)
+      : DmaRequest(_priority, _after_copy),
+	oas_by_inst(0),
+	before_copy(_before_copy)
+    {
+      const int *idata = (const int *)data;
+
+      idata = domain.deserialize(idata);
+
+      oas_by_inst = new OASByInst;
+
+      int priority = 0;
+
+      while(((idata - ((const int *)data))*sizeof(int)) < datalen) {
+	RegionInstance src_inst = ID((unsigned)*idata++).convert<RegionInstance>();
+	RegionInstance dst_inst = ID((unsigned)*idata++).convert<RegionInstance>();
+	InstPair ip(src_inst, dst_inst);
+
+        // If either one of the instances is in GPU memory increase priority
+        if (priority == 0)
+        {
+          Memory::Impl::MemoryKind src_kind = src_inst.impl()->memory.impl()->kind;
+          if (src_kind == Memory::Impl::MKIND_GPUFB)
+            priority = 1;
+          else
+          {
+            Memory::Impl::MemoryKind dst_kind = dst_inst.impl()->memory.impl()->kind;
+            if (dst_kind == Memory::Impl::MKIND_GPUFB)
+              priority = 1;
+          }
+        }
+
+	OASVec& oasvec = (*oas_by_inst)[ip];
+
+	unsigned count = *idata++;
+	for(unsigned i = 0; i < count; i++) {
+	  OffsetsAndSize oas;
+	  oas.src_offset = *idata++;
+	  oas.dst_offset = *idata++;
+	  oas.size = *idata++;
+	  oasvec.push_back(oas);
+	}
+      }
+
+      // better have consumed exactly the right amount of data
+      assert(((idata - ((const int *)data))*sizeof(int)) == datalen);
+
+      log_dma.info("dma request %p deserialized - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
+		   this,
+		   oas_by_inst->begin()->first.first.id, 
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id, 
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->size() - 1,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+    }
+
+    CopyRequest::~CopyRequest(void)
     {
       delete oas_by_inst;
     }
 
-    bool DmaRequest::event_triggered(void)
+    size_t CopyRequest::serialize(void *buffer, size_t maxlen)
     {
-      log_dma.info("request %p triggered in state %d (lock = %x)", this, state, current_lock.id);
+      // domain info goes first
+      int *msgptr = domain.serialize((int *)buffer);
+
+      // now OAS vectors
+      for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
+	RegionInstance src_inst = it2->first.first;
+	RegionInstance dst_inst = it2->first.second;
+	OASVec& oasvec = it2->second;
+
+	*msgptr++ = src_inst.id;
+	*msgptr++ = dst_inst.id;
+	*msgptr++ = oasvec.size();
+	for(OASVec::iterator it3 = oasvec.begin(); it3 != oasvec.end(); it3++) {
+	  *msgptr++ = it3->src_offset;
+	  *msgptr++ = it3->dst_offset;
+	  *msgptr++ = it3->size;
+	}
+      }
+
+      size_t msglen = ((const char *)msgptr) - ((const char *)buffer);
+      assert(msglen <= maxlen); // TODO: maybe detect _before_ overrunning?
+
+      return msglen;
+    }
+
+    void DmaRequest::Waiter::sleep_on_event(Event e, 
+					    Reservation l /*= Reservation::NO_RESERVATION*/)
+    {
+      current_lock = l;
+      e.impl()->add_waiter(e, this);
+    }
+
+    bool DmaRequest::Waiter::event_triggered(void)
+    {
+      log_dma.info("request %p triggered in state %d (lock = %x)",
+		   req, req->state, current_lock.id);
 
       if(current_lock.exists()) {
 	current_lock.release();
@@ -143,22 +418,26 @@ namespace LegionRuntime {
 
       // this'll enqueue the DMA if it can, or wait on another event if it 
       //  can't
-      check_readiness(false);
+      req->check_readiness(false, queue);
 
       // don't delete us!
       return false;
     }
 
-    void DmaRequest::print_info(FILE *f)
+    void DmaRequest::Waiter::print_info(FILE *f)
     {
       fprintf(f,"dma request %p: after %x/%d\n", 
-          this, after_copy.id, after_copy.gen);
+	      req, req->after_copy.id, req->after_copy.gen);
     }
 
-    bool DmaRequest::check_readiness(bool just_check)
+    bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
     {
       if(state == STATE_INIT)
 	state = STATE_METADATA_FETCH;
+
+      // remember which queue we're going to be assigned to if we sleep
+      waiter.req = this;
+      waiter.queue = rq;
 
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
@@ -175,9 +454,8 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      current_lock = is_impl->lock.me;
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, current_lock.id);
-	      e.impl()->add_waiter(e, this);
+	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, is_impl->lock.me.id);
+	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
 	  }
@@ -187,8 +465,7 @@ namespace LegionRuntime {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
               log_dma.info("request %p - valid mask needed for index space %x - sleeping on event %x/%d", this, domain.get_index_space().id, e.id, e.gen);
-              current_lock = Reservation::NO_RESERVATION;
-              e.impl()->add_waiter(e, this);
+	      waiter.sleep_on_event(e);
               return false;
             }
           }
@@ -208,9 +485,8 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
 	      src_impl->lock.release();
 	    } else {
-	      current_lock = src_impl->lock.me;
-	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, current_lock.id);
-	      e.impl()->add_waiter(e, this);
+	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, src_impl->lock.me.id);
+	      waiter.sleep_on_event(e, src_impl->lock.me);
 	      return false;
 	    }
 	  }
@@ -228,9 +504,8 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
 	      dst_impl->lock.release();
 	    } else {
-	      current_lock = dst_impl->lock.me;
-	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, current_lock.id);
-	      e.impl()->add_waiter(e, this);
+	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, dst_impl->lock.me.id);
+	      waiter.sleep_on_event(e, dst_impl->lock.me);
 	      return false;
 	    }
 	  }
@@ -255,7 +530,7 @@ namespace LegionRuntime {
 	  if(just_check) return false;
 
 	  log_dma.info("request %p - sleeping on before event", this);
-	  before_copy.impl()->add_waiter(before_copy, this);
+	  waiter.sleep_on_event(before_copy);
 	  return false;
 	}
       }
@@ -264,41 +539,18 @@ namespace LegionRuntime {
 	log_dma.info("request %p ready", this);
 	if(just_check) return true;
 
-	// enqueue ourselves for execution
-	gasnet_hsl_lock(&queue_mutex);
-        // Find the right place to insert this based on the priority
-        // Common case: if the guy on the back has our priority or higher
-        // then we can just put us on the back
-        if (dma_queue.empty() || (dma_queue.back()->priority >= this->priority))
-          dma_queue.push_back(this);
-        else
-        {
-          // Uncommon case: go through the list until we find someone
-          // who has a priority lower than ours.  We know they
-          // exist since we saw them on the back.
-          bool inserted = false;
-          for (std::list<DmaRequest*>::iterator it = dma_queue.begin();
-                it != dma_queue.end(); it++)
-          {
-            if ((*it)->priority < this->priority)
-            {
-              dma_queue.insert(it, this);
-              inserted = true;
-              break;
-            }
-          }
-          // Technically don't need this, but just to be safe
-          if (!inserted)
-            dma_queue.push_back(this);
-        }
 	state = STATE_QUEUED;
-	gasnett_cond_signal(&queue_condvar);
-	gasnet_hsl_unlock(&queue_mutex);
+	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
 #ifdef LEGION_LOGGING
 	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
 #endif
+
+	// once we're enqueued, we may be deleted at any time, so no more
+	//  references
+	rq->enqueue_request(this);
+	return true;
       }
 
       if(state == STATE_QUEUED)
@@ -323,6 +575,13 @@ namespace LegionRuntime {
 				    const SpanList& spans, size_t datalen,
 				    unsigned sequence_id,
 				    Event event, bool make_copy = false);
+
+    extern unsigned do_remote_reduce(Memory mem, off_t offset,
+				     ReductionOpID redop_id, bool red_fold,
+				     const void *data, size_t count,
+				     off_t src_stride, off_t dst_stride,
+				     unsigned sequence_id,
+				     Event event, bool make_copy = false);				     
 
     extern unsigned do_remote_apply_red_list(int node, Memory mem, off_t offset,
 					     ReductionOpID redopid,
@@ -1670,11 +1929,17 @@ namespace LegionRuntime {
 	  // didn't have any pending copies, but if we have an event to trigger, send that
 	  //  to the remote side as a zero-size copy to push the data in front of it
 	  if(after_copy.exists()) {
+            if(num_writes == 0) {
+              // an empty dma - no need to send a fence - we can trigger the
+              //  completion event here and save a message
+              after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+            } else {
 #ifdef DEBUG_REMOTE_WRITES
-	    printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
+	      printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
 #endif
-	    //do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
-	    do_remote_fence(dst_mem->me, sequence_id, num_writes, after_copy);
+	      //do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
+	      do_remote_fence(dst_mem->me, sequence_id, num_writes, after_copy);
+            }
 	  }
 	}
 #ifdef TIME_REMOTE_WRITES
@@ -1732,7 +1997,14 @@ namespace LegionRuntime {
          (dst_kind == Memory::Impl::MKIND_GPUFB)) {
 	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
 	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	return new GPUinFBMemPairCopier(src_gpu);
+        if ((src_gpu == dst_gpu) || src_gpu->can_access_peer(dst_gpu))
+          return new GPUinFBMemPairCopier(src_gpu);
+        else
+        {
+          fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
+          assert(false);
+          return NULL;
+        }
       }
 
       // try as many things as we can think of
@@ -1791,7 +2063,7 @@ namespace LegionRuntime {
       return curdim+1;
     }
 
-    void DmaRequest::perform_dma_mask(MemPairCopier *mpc)
+    void CopyRequest::perform_dma_mask(MemPairCopier *mpc)
     {
       IndexSpace::Impl *ispace = domain.get_index_space().impl();
       assert(ispace->valid_mask_complete);
@@ -1807,10 +2079,36 @@ namespace LegionRuntime {
 	// index space instances use 1D linearizations for translation
 	Arrays::Mapping<1, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<1>();
 	Arrays::Mapping<1, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<1>();
+
+	// does the destination instance space's index space match what we're copying?  if so,
+	//  it's ok to copy extra elements (to decrease sparsity) because they're unused in
+	//  the destination
+	StaticAccess<RegionInstance::Impl> dst_idata(dst_inst.impl(), true /*must be valid already*/);
+	int rlen_target;
+	if(ispace->me == dst_idata->is) {
+	  rlen_target = 32768 / 4; // aim for ~32KB transfers at least
+	} else {
+	  rlen_target = 1;
+	}
 	
 	ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
 	int rstart, rlen;
 	while(e->get_next(rstart, rlen)) {
+	  // do we want to copy extra elements to fill in some holes?
+	  while(rlen < rlen_target) {
+	    // see where the next valid elements are
+	    int rstart2, rlen2;
+	    // if none, stop
+	    if(!e->peek_next(rstart2, rlen2)) break;
+	    // or if they don't even start until outside the window, stop
+	    if(rstart2 > (rstart + rlen_target)) break;
+	    // ok, include the next valid element(s) and any invalid ones in between
+	    //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
+	    rlen = rstart2 + rlen2 - rstart;
+	    // and actually take the next range from the enumerator
+	    e->get_next(rstart2, rlen2);
+	  }
+
 	  int sstart = src_linearization->image(rstart);
 	  int dstart = dst_linearization->image(rstart);
 #ifdef DEBUG_LOW_LEVEL
@@ -1828,7 +2126,7 @@ namespace LegionRuntime {
     }
 
     template <unsigned DIM>
-    void DmaRequest::perform_dma_rect(MemPairCopier *mpc)
+    void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
@@ -1933,7 +2231,7 @@ namespace LegionRuntime {
     };
 #endif
 
-    void DmaRequest::perform_dma(void)
+    void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
 
@@ -2270,46 +2568,539 @@ namespace LegionRuntime {
 #endif
     }
     
-    volatile bool terminate_flag = false;
-    int num_threads = 0;
-    pthread_t *worker_threads = 0;
-    
-    void init_dma_handler(void)
+    ReduceRequest::ReduceRequest(const Domain& _domain,
+				 const std::vector<Domain::CopySrcDstField>& _srcs,
+				 const Domain::CopySrcDstField& _dst,
+				 bool _inst_lock_needed,
+				 ReductionOpID _redop_id,
+				 bool _red_fold,
+				 Event _before_copy,
+				 Event _after_copy,
+				 int _priority)
+      : DmaRequest(_priority, _after_copy),
+	domain(_domain),
+	dst(_dst), 
+	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
+	redop_id(_redop_id), red_fold(_red_fold),
+	before_copy(_before_copy)
     {
-      gasnet_hsl_init(&queue_mutex);
-      gasnett_cond_init(&queue_condvar);
+      srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
+
+      log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+		   this,
+		   srcs[0].inst.id, srcs[0].offset,
+		   dst.inst.id, dst.offset, dst.size,
+		   srcs.size() - 1,
+		   (red_fold ? "fold" : "apply"),
+		   redop_id,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
+#endif
     }
 
-    static void *dma_worker_thread_loop(void *dummy)
+    ReduceRequest::ReduceRequest(const void *data, size_t datalen,
+				 ReductionOpID _redop_id,
+				 bool _red_fold,
+				 Event _before_copy,
+				 Event _after_copy,
+				 int _priority)
+      : DmaRequest(_priority, _after_copy),
+	inst_lock_event(Event::NO_EVENT),
+	redop_id(_redop_id), red_fold(_red_fold),
+	before_copy(_before_copy)
     {
-      log_dma.info("dma worker thread created");
+      const int *idata = (const int *)data;
 
-      // we spend most of this loop holding the queue mutex - we let go of it
-      //  when we have a real copy to do
-      gasnet_hsl_lock(&queue_mutex);
+      idata = domain.deserialize(idata);
 
-      while(!terminate_flag) {
-	// take the queue lock and try to pull an item off the front
-	if(dma_queue.size() > 0) {
-	  DmaRequest *req = dma_queue.front();
-	  dma_queue.pop_front();
+      priority = 0;
 
-	  gasnet_hsl_unlock(&queue_mutex);
-	  
-	  req->perform_dma();
-	  //delete req;
+      // get sources
+      int n_srcs = *idata++;
+      for(int i = 0; i < n_srcs; i++) {
+	Domain::CopySrcDstField f;
+	f.inst.id = *idata++;
+	f.offset = *idata++;
+	f.size = *idata++;
+	srcs.push_back(f);
+      }
 
-	  gasnet_hsl_lock(&queue_mutex);
+      // single dst field
+      dst.inst.id = *idata++;
+      dst.offset = *idata++;
+      dst.size = *idata++;
+
+      inst_lock_needed = *idata++;
+
+      // better have consumed exactly the right amount of data
+      assert(((idata - ((const int *)data))*sizeof(int)) == datalen);
+
+      log_dma.info("dma request %p deserialized - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+		   this,
+		   srcs[0].inst.id, srcs[0].offset,
+		   dst.inst.id, dst.offset, dst.size,
+		   srcs.size() - 1,
+		   (red_fold ? "fold" : "apply"),
+		   redop_id,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+    }
+
+    ReduceRequest::~ReduceRequest(void)
+    {
+    }
+
+    size_t ReduceRequest::serialize(void *buffer, size_t maxlen)
+    {
+      // domain info goes first
+      int *msgptr = domain.serialize((int *)buffer);
+
+      // now source fields
+      *msgptr++ = srcs.size();
+      for(std::vector<Domain::CopySrcDstField>::const_iterator it = srcs.begin();
+	  it != srcs.end();
+	  it++) {
+	*msgptr++ = it->inst.id;
+	*msgptr++ = it->offset;
+	*msgptr++ = it->size;
+      }
+
+      // and the dest field
+      *msgptr++ = dst.inst.id;
+      *msgptr++ = dst.offset;
+      *msgptr++ = dst.size;
+
+      *msgptr++ = inst_lock_needed;
+
+      size_t msglen = ((const char *)msgptr) - ((const char *)buffer);
+      assert(msglen <= maxlen); // TODO: maybe detect _before_ overrunning?
+
+      return msglen;
+    }
+
+    bool ReduceRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
+    {
+      if(state == STATE_INIT)
+	state = STATE_METADATA_FETCH;
+
+      // remember which queue we're going to be assigned to if we sleep
+      waiter.req = this;
+      waiter.queue = rq;
+
+      // make sure our node has all the meta data it needs, but don't take more than one lock
+      //  at a time
+      if(state == STATE_METADATA_FETCH) {
+	// index space first
+	if(domain.get_dim() == 0) {
+	  IndexSpace::Impl *is_impl = domain.get_index_space().impl();
+	  if(!is_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no index space metadata yet", this);
+	    if(just_check) return false;
+
+	    Event e = is_impl->lock.acquire(1, false);
+	    if(e.has_triggered()) {
+	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
+	      is_impl->lock.release();
+	    } else {
+	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, is_impl->lock.me.id);
+	      waiter.sleep_on_event(e, is_impl->lock.me);
+	      return false;
+	    }
+	  }
+
+          // we need more than just the metadata - we also need the valid mask
+          {
+            Event e = is_impl->request_valid_mask();
+            if(!e.has_triggered()) {
+              log_dma.info("request %p - valid mask needed for index space %x - sleeping on event %x/%d", this, domain.get_index_space().id, e.id, e.gen);
+	      waiter.sleep_on_event(e);
+              return false;
+            }
+          }
+	}
+
+	// now go through all source instance pairs
+	for(std::vector<Domain::CopySrcDstField>::iterator it = srcs.begin();
+	    it != srcs.end();
+	    it++) {
+	  RegionInstance::Impl *src_impl = it->inst.impl();
+
+	  if(!src_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->inst.id);
+	    if(just_check) return false;
+
+	    Event e = src_impl->lock.acquire(1, false);
+	    if(e.has_triggered()) {
+	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
+	      src_impl->lock.release();
+	    } else {
+	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, src_impl->lock.me.id);
+	      waiter.sleep_on_event(e, src_impl->lock.me);
+	      return false;
+	    }
+	  }
+	  if(!src_impl->linearization.valid()) {
+	    //printf("deserializing linearizer\n");
+	    src_impl->linearization.deserialize(src_impl->locked_data.linearization_bits);
+	  }
+	}
+
+	{
+	  RegionInstance::Impl *dst_impl = dst.inst.impl();
+
+	  if(!dst_impl->locked_data.valid) {
+	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, dst.inst.id);
+	    if(just_check) return false;
+
+	    Event e = dst_impl->lock.acquire(1, false);
+	    if(e.has_triggered()) {
+	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
+	      dst_impl->lock.release();
+	    } else {
+	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, dst_impl->lock.me.id);
+	      waiter.sleep_on_event(e, dst_impl->lock.me);
+	      return false;
+	    }
+	  }
+	  if(!dst_impl->linearization.valid()) {
+	    //printf("deserializing linearizer\n");
+	    dst_impl->linearization.deserialize(dst_impl->locked_data.linearization_bits);
+	  }
+	}
+
+	// if we got all the way through, we've got all the metadata we need
+	state = STATE_BEFORE_EVENT;
+      }
+
+      // make sure our functional precondition has occurred
+      if(state == STATE_BEFORE_EVENT) {
+	// has the before event triggered?  if not, wait on it
+	if(before_copy.has_triggered()) {
+	  log_dma.info("request %p - before event triggered", this);
+	  if(inst_lock_needed) {
+	    // request an exclusive lock on the instance to protect reductions
+	    inst_lock_event = dst.inst.impl()->lock.acquire(0, true /*excl*/);
+	    state = STATE_INST_LOCK;
+	    log_dma.info("request %p - instance lock acquire event %x/%d",
+			 this, inst_lock_event.id, inst_lock_event.gen);
+	  } else {
+	    // go straight to ready
+	    state = STATE_READY;
+	  }
 	} else {
-	  // sleep until we get a signal, or until everybody is woken up
-	  //  via broadcast for termination
-	  //
-	  // recheck flag while holding lock
-	  if(!terminate_flag)
-	    gasnett_cond_wait(&queue_condvar, &queue_mutex.lock);
+	  log_dma.info("request %p - before event not triggered", this);
+	  if(just_check) return false;
+
+	  log_dma.info("request %p - sleeping on before event", this);
+	  waiter.sleep_on_event(before_copy);
+	  return false;
 	}
       }
-      gasnet_hsl_unlock(&queue_mutex);
+
+      if(state == STATE_INST_LOCK) {
+	if(inst_lock_event.has_triggered()) {
+	  log_dma.info("request %p - instance lock acquired", this);
+	  state = STATE_READY;
+	} else {
+	  log_dma.info("request %p - instance lock - sleeping on event %x/%d", this, inst_lock_event.id, inst_lock_event.gen);
+	  waiter.sleep_on_event(inst_lock_event);
+	  return false;
+	}
+      }
+
+      if(state == STATE_READY) {
+	log_dma.info("request %p ready", this);
+	if(just_check) return true;
+
+	state = STATE_QUEUED;
+	assert(rq != 0);
+	log_dma.info("request %p enqueued", this);
+
+#ifdef LEGION_LOGGING
+	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
+#endif
+
+	// once we're enqueued, we may be deleted at any time, so no more
+	//  references
+	rq->enqueue_request(this);
+	return true;
+      }
+
+      if(state == STATE_QUEUED)
+	return true;
+
+      assert(0);
+    }
+
+    void ReduceRequest::perform_dma(void)
+    {
+      log_dma.info("request %p executing", this);
+
+#ifdef LEGION_LOGGING
+      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
+
+      // the copy might not actually finish in this thread, so set up an event waiter
+      //  to log the completion
+      after_copy.impl()->add_waiter(after_copy, new CopyCompletionLogger(after_copy));
+#endif
+
+      DetailedTimer::ScopedPush sp(TIME_COPY);
+
+      // code assumes a single source field for now
+      assert(srcs.size() == 1);
+
+      Memory src_mem = srcs[0].inst.impl()->memory;
+      Memory dst_mem = dst.inst.impl()->memory;
+      Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
+      Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
+
+      //printf("kinds: %x=%d %x=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
+
+      // we have the same jumble of memory type and layout permutations here - again we'll
+      //  solve a few of them point-wise and then try to unify later
+      if(domain.get_dim() == 0) {
+	// index space
+	IndexSpace::Impl *ispace = domain.get_index_space().impl();
+	assert(ispace->valid_mask_complete);
+
+	if((src_kind == Memory::Impl::MKIND_SYSMEM) ||
+	   (src_kind == Memory::Impl::MKIND_ZEROCOPY) ||
+	   (src_kind == Memory::Impl::MKIND_RDMA)) {
+	  void *src_base = 0;
+	  size_t src_stride = 0;
+	  bool src_ok = srcs[0].inst.impl()->get_strided_parameters(src_base, src_stride,
+								    srcs[0].offset);
+	  assert(src_ok);
+
+	  switch(dst_kind) {
+	  case Memory::Impl::MKIND_SYSMEM:
+	  case Memory::Impl::MKIND_ZEROCOPY:
+	  case Memory::Impl::MKIND_RDMA:
+	    {
+	      void *dst_base = 0;
+	      size_t dst_stride = 0;
+	      bool dst_ok = dst.inst.impl()->get_strided_parameters(dst_base, dst_stride,
+								    dst.offset);
+	      assert(dst_ok);
+
+	      // if source and dest are ok, we can just walk the index space's spans
+	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
+	      int rstart, rlen;
+	      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+	      while(e->get_next(rstart, rlen)) {
+		if(red_fold)
+		  redop->fold_strided(((char *)dst_base) + (rstart * dst_stride),
+				      ((const char *)src_base) + (rstart * src_stride),
+				      dst_stride, src_stride, rlen,
+				      false /*not exclusive*/);
+		else
+		  redop->apply_strided(((char *)dst_base) + (rstart * dst_stride),
+				       ((const char *)src_base) + (rstart * src_stride),
+				       dst_stride, src_stride, rlen,
+				       false /*not exclusive*/);
+	      }
+
+	      // all done - we can trigger the event locally in this case
+	      after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+	      break;
+	    }
+
+	  case Memory::Impl::MKIND_REMOTE:
+            {
+	      // we need to figure out how to calculate offsets in the destination memory
+	      StaticAccess<RegionInstance::Impl> dst_idata(dst.inst.impl());
+	      assert(dst_idata->valid);
+
+	      off_t dst_field_start;
+	      int dst_field_size;
+	      find_field_start(dst_idata->field_sizes, dst.offset, dst.size, dst_field_start, dst_field_size);
+	      assert(dst.size == dst_field_size);
+
+	      // index space instances use 1D linearizations for translation
+	      Arrays::Mapping<1, 1> *dst_linearization = dst.inst.impl()->linearization.get_mapping<1>();
+
+	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
+	      int rstart, rlen;
+
+	      // get an RDMA sequence number so we can have the far side trigger the event once all reductions have been
+	      //  applied
+	      unsigned sequence_id = __sync_fetch_and_add(&rdma_sequence_no, 1);
+	      unsigned rdma_count = 0;
+
+	      // for a reduction from a fold instance, it's always ok to copy unused elements, since they'll have an
+	      //  identity value stored for them
+	      int rlen_target = 32768 / dst_field_size;
+
+	      while(e->get_next(rstart, rlen)) {
+		// do we want to copy extra elements to fill in some holes?
+		while(rlen < rlen_target) {
+		  // see where the next valid elements are
+		  int rstart2, rlen2;
+		  // if none, stop
+		  if(!e->peek_next(rstart2, rlen2)) break;
+		  // or if they don't even start until outside the window, stop
+		  if(rstart2 > (rstart + rlen_target)) break;
+		  // ok, include the next valid element(s) and any invalid ones in between
+		  //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
+		  rlen = rstart2 + rlen2 - rstart;
+		  // and actually take the next range from the enumerator
+		  e->get_next(rstart2, rlen2);
+		}
+
+		// translate the index space point to the dst instance's linearization
+		int dstart = dst_linearization->image(rstart);
+
+		// now do an offset calculation for the destination
+		off_t dst_offset;
+		off_t dst_stride;
+		if(dst_idata->block_size > 1) {
+		  // straddling a block boundary is complicated
+		  assert((dstart / dst_idata->block_size) == ((dstart + rlen - 1) / dst_idata->block_size));
+		  dst_offset = calc_mem_loc(dst_idata->alloc_offset, dst_field_start, dst_field_size,
+					    dst_idata->elmt_size, dst_idata->block_size, dstart);
+		  dst_stride = dst_field_size;
+		} else {
+		  // easy case
+		  dst_offset = dst_idata->alloc_offset + (dstart * dst_idata->elmt_size) + dst_field_start;
+		  dst_stride = dst_idata->elmt_size;
+		}
+
+		rdma_count += do_remote_reduce(dst_mem, dst_offset, redop_id, red_fold,
+					       ((const char *)src_base) + (rstart * src_stride),
+					       rlen, src_stride, dst_stride,
+					       sequence_id, Event::NO_EVENT);
+	      }
+
+	      // if we did any actual reductions, send a fence, otherwise trigger here
+	      if(rdma_count > 0) {
+		do_remote_fence(dst_mem, sequence_id, rdma_count, after_copy);
+	      } else {
+		after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+	      }
+	      break;
+            }
+
+	  case Memory::Impl::MKIND_GLOBAL:
+	    {
+	      // make sure we've requested a lock on the dst instance
+	      assert(inst_lock_needed);
+
+	      // we need to figure out how to calculate offsets in the destination memory
+	      RegionInstance::Impl *dst_impl = dst.inst.impl();
+	      StaticAccess<RegionInstance::Impl> dst_idata(dst_impl);
+	      assert(dst_idata->valid);
+
+	      off_t dst_field_start;
+	      int dst_field_size;
+	      find_field_start(dst_idata->field_sizes, dst.offset, dst.size, dst_field_start, dst_field_size);
+	      assert(dst.size == dst_field_size);
+
+	      // index space instances use 1D linearizations for translation
+	      Arrays::Mapping<1, 1> *dst_linearization = dst_impl->linearization.get_mapping<1>();
+
+	      // if source and dest are ok, we can just walk the index space's spans
+	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
+	      int rstart, rlen;
+	      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+	      while(e->get_next(rstart, rlen)) {
+		// translate the index space point to the dst instance's linearization
+		int dstart = dst_linearization->image(rstart);
+
+		// now do an offset calculation for the destination
+		off_t dst_offset;
+		off_t dst_stride;
+		if(dst_idata->block_size > 1) {
+		  // straddling a block boundary is complicated
+		  assert((dstart / dst_idata->block_size) == ((dstart + rlen - 1) / dst_idata->block_size));
+		  dst_offset = calc_mem_loc(dst_idata->alloc_offset, dst_field_start, dst_field_size,
+					    dst_idata->elmt_size, dst_idata->block_size, dstart);
+		  dst_stride = dst_field_size;
+		} else {
+		  // easy case
+		  dst_offset = dst_idata->alloc_offset + (dstart * dst_idata->elmt_size) + dst_field_start;
+		  dst_stride = dst_idata->elmt_size;
+		}
+
+		// get a temporary buffer in local memory
+		// this may have extra data if stride > field_size, but that's
+		//  ok - we'll write back whatever we read
+		void *buffer = malloc(dst_stride * rlen);
+
+		dst_mem.impl()->get_bytes(dst_offset, buffer, dst_stride * rlen);
+
+		if(red_fold)
+		  redop->fold_strided(buffer,
+				      ((const char *)src_base) + (rstart * src_stride),
+				      dst_stride, src_stride, rlen,
+				      true /*exclusive*/);
+		else
+		  redop->apply_strided(buffer,
+				       ((const char *)src_base) + (rstart * src_stride),
+				       dst_stride, src_stride, rlen,
+				       true /*exclusive*/);
+
+		dst_mem.impl()->put_bytes(dst_offset, buffer, dst_stride * rlen);
+
+		// release the temp buffer
+		free(buffer);
+	      }
+
+	      // all done - we can trigger the event locally in this case
+	      after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+
+	      // also release the instance lock
+	      dst_impl->lock.release();
+
+	      break;
+	    }
+
+	  default:
+	    assert(0);
+	  }
+	}
+      } else {
+	assert(0);
+      }
+
+      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+		   this,
+		   srcs[0].inst.id, srcs[0].offset,
+		   dst.inst.id, dst.offset, dst.size,
+		   srcs.size() - 1,
+		   (red_fold ? "fold" : "apply"),
+		   redop_id,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+    }
+
+    static volatile bool terminate_flag = false;
+    static int num_threads = 0;
+    static pthread_t *worker_threads = 0;
+
+    // for now we use a single queue for all (local) dmas
+    static DmaRequestQueue *dma_queue = 0;
+    
+    static void *dma_worker_thread_loop(void *arg)
+    {
+      DmaRequestQueue *rq = (DmaRequestQueue *)arg;
+
+      log_dma.info("dma worker thread created");
+
+      while(!terminate_flag) {
+	// get a request, sleeping as necessary
+	DmaRequest *r = rq->dequeue_request(true);
+
+	if(r) {
+	  r->perform_dma();
+	  delete r;
+	}
+      }
 
       log_dma.info("dma worker thread terminating");
 
@@ -2318,6 +3109,7 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count)
     {
+      dma_queue = new DmaRequestQueue;
       num_threads = count;
 
       worker_threads = new pthread_t[count];
@@ -2327,7 +3119,7 @@ namespace LegionRuntime {
 	if(proc_assignment)
 	  proc_assignment->bind_thread(-1, &attr, "DMA worker");
 	CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, 
-				      dma_worker_thread_loop, 0) );
+				      dma_worker_thread_loop, dma_queue) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 #ifdef DEADLOCK_TRACE
         Runtime::get_runtime()->add_thread(&worker_threads[i]);
@@ -2338,11 +3130,7 @@ namespace LegionRuntime {
     void stop_dma_worker_threads(void)
     {
       terminate_flag = true;
-
-      // wake up any threads that are asleep
-      gasnet_hsl_lock(&queue_mutex);
-      gasnett_cond_broadcast(&queue_condvar);
-      gasnet_hsl_unlock(&queue_mutex);
+      dma_queue->shutdown_queue();
 
       if(worker_threads) {
 	for(int i = 0; i < num_threads; i++) {
@@ -2353,46 +3141,9 @@ namespace LegionRuntime {
 	delete[] worker_threads;
       }
 
+      delete dma_queue;
+      dma_queue = 0;
       terminate_flag = false;
-    }
-    
-    Event enqueue_dma(const Domain& domain,
-		      OASByInst *oas_by_inst,
-		      ReductionOpID redop_id, bool red_fold,
-		      Event before_copy,
-		      Event after_copy,
-                      int priority)
-    {
-      // special case - if we have everything we need, we can consider doing the
-      //   copy immediately
-      DetailedTimer::ScopedPush sp(TIME_COPY);
-
-      DmaRequest *r = new DmaRequest(domain, oas_by_inst, redop_id, red_fold,
-				     before_copy, after_copy, priority);
-
-      bool ready = r->check_readiness(true);
-
-      log_dma.info("dma: request %p appears to be immediately ready?", r);
-      
-      // copy is all ready to go and safe to perform in a handler thread
-      if(0 && ready && r->handler_safe()) {
-	r->perform_dma();
-	//delete r;
-	return after_copy;
-      } else {
-	if(!after_copy.exists())
-	  r->after_copy = after_copy = Event::Impl::create_event();
-
-#ifdef LEGION_LOGGING
-	log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
-
-	// calling this with 'just_check'==false means it'll automatically
-	//  enqueue the dma if ready
-	r->check_readiness(false);
-
-	return after_copy;
-      }
     }
     
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
@@ -2438,72 +3189,26 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
-      const int *idata = (const int *)data;
+      // is this a copy or a reduction (they deserialize differently)
+      if(args.redop_id == 0) {
+	// a copy
+	CopyRequest *r = new CopyRequest(data, msglen,
+					 args.before_copy,
+					 args.after_copy,
+					 args.priority);
 
-      Domain domain;
-      idata = domain.deserialize(idata);
-
-      OASByInst *oas_by_inst = new OASByInst;
-
-      int priority = 0;
-
-      while(((idata - ((const int *)data))*sizeof(int)) < msglen) {
-	RegionInstance src_inst = ID((unsigned)*idata++).convert<RegionInstance>();
-	RegionInstance dst_inst = ID((unsigned)*idata++).convert<RegionInstance>();
-	InstPair ip(src_inst, dst_inst);
-
-        // If either one of the instances is in GPU memory increase priority
-        if (priority == 0)
-        {
-          Memory::Impl::MemoryKind src_kind = src_inst.impl()->memory.impl()->kind;
-          if (src_kind == Memory::Impl::MKIND_GPUFB)
-            priority = 1;
-          else
-          {
-            Memory::Impl::MemoryKind dst_kind = dst_inst.impl()->memory.impl()->kind;
-            if (dst_kind == Memory::Impl::MKIND_GPUFB)
-              priority = 1;
-          }
-        }
-
-	OASVec& oasvec = (*oas_by_inst)[ip];
-
-	unsigned count = *idata++;
-	for(unsigned i = 0; i < count; i++) {
-	  OffsetsAndSize oas;
-	  oas.src_offset = *idata++;
-	  oas.dst_offset = *idata++;
-	  oas.size = *idata++;
-	  oasvec.push_back(oas);
-	}
-      }
-
-      // better have consumed exactly the right amount of data
-      assert(((idata - ((const int *)data))*sizeof(int)) == msglen);
-
-      log_dma.info("received remote copy request: instpairs=%zd(%x->%x) before=%x/%d after=%x/%d",
-		   oas_by_inst->size(), oas_by_inst->begin()->first.first.id, oas_by_inst->begin()->first.second.id,
-		   args.before_copy.id, args.before_copy.gen,
-		   args.after_copy.id, args.after_copy.gen);
-
-      enqueue_dma(domain, oas_by_inst, args.redop_id, args.red_fold, args.before_copy, args.after_copy, priority);
-#if 0
-      if(args.before_copy.has_triggered()) {
-	RegionInstance::Impl::copy(args.source, args.target,
-					  args.region,
-					  args.elmt_size,
-					  args.bytes_to_copy,
-					  args.after_copy);
+	r->check_readiness(false, dma_queue);
       } else {
-	args.before_copy.impl()->add_waiter(args.before_copy,
-					    new DeferredCopy(args.source,
-							     args.target,
-							     args.region,
-							     args.elmt_size,
-							     args.bytes_to_copy,
-							     args.after_copy));
+	// a reduction
+	ReduceRequest *r = new ReduceRequest(data, msglen,
+					     args.redop_id,
+					     args.red_fold,
+					     args.before_copy,
+					     args.after_copy,
+					     args.priority);
+
+	r->check_readiness(false, dma_queue);
       }
-#endif
     }
 
     template <typename T> T min(T a, T b) { return (a < b) ? a : b; }
@@ -2513,128 +3218,175 @@ namespace LegionRuntime {
 		       Event wait_on,
 		       ReductionOpID redop_id, bool red_fold) const
     {
-      OASByMem oas_by_mem;
+      if(redop_id == 0) {
+	// not a reduction, so sort fields by src/dst mem pairs
 
-      std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
-      std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
-      unsigned src_suboffset = 0;
-      unsigned dst_suboffset = 0;
-      while((src_it != srcs.end()) && (dst_it != dsts.end())) {
-	InstPair ip(src_it->inst, dst_it->inst);
-	MemPair mp(src_it->inst.impl()->memory, dst_it->inst.impl()->memory);
+	OASByMem oas_by_mem;
 
-	// printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
-	//        ip.first.id, ip.second.id, mp.first.id, mp.second.id,
-	//        src_suboffset, dst_suboffset,
-	//        src_it->offset, src_it->size, 
-	//        dst_it->offset, dst_it->size);
+	std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
+	std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
+	unsigned src_suboffset = 0;
+	unsigned dst_suboffset = 0;
+	while((src_it != srcs.end()) && (dst_it != dsts.end())) {
+	  InstPair ip(src_it->inst, dst_it->inst);
+	  MemPair mp(src_it->inst.impl()->memory, dst_it->inst.impl()->memory);
 
-	OASByInst *oas_by_inst;
-	OASByMem::iterator it = oas_by_mem.find(mp);
-	if(it != oas_by_mem.end()) {
-	  oas_by_inst = it->second;
-	} else {
-	  oas_by_inst = new OASByInst;
-	  oas_by_mem[mp] = oas_by_inst;
+	  // printf("I:(%x/%x) M:(%x/%x) sub:(%d/%d) src=(%d/%d) dst=(%d/%d)\n",
+	  //        ip.first.id, ip.second.id, mp.first.id, mp.second.id,
+	  //        src_suboffset, dst_suboffset,
+	  //        src_it->offset, src_it->size, 
+	  //        dst_it->offset, dst_it->size);
+
+	  OASByInst *oas_by_inst;
+	  OASByMem::iterator it = oas_by_mem.find(mp);
+	  if(it != oas_by_mem.end()) {
+	    oas_by_inst = it->second;
+	  } else {
+	    oas_by_inst = new OASByInst;
+	    oas_by_mem[mp] = oas_by_inst;
+	  }
+	  OASVec& oasvec = (*oas_by_inst)[ip];
+
+	  OffsetsAndSize oas;
+	  oas.src_offset = src_it->offset + src_suboffset;
+	  oas.dst_offset = dst_it->offset + dst_suboffset;
+	  oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
+	  oasvec.push_back(oas);
+
+	  src_suboffset += oas.size;
+	  assert(src_suboffset <= src_it->size);
+	  if(src_suboffset == src_it->size) {
+	    src_it++;
+	    src_suboffset = 0;
+	  }
+	  dst_suboffset += oas.size;
+	  assert(dst_suboffset <= dst_it->size);
+	  if(dst_suboffset == dst_it->size) {
+	    dst_it++;
+	    dst_suboffset = 0;
+	  }
 	}
-	OASVec& oasvec = (*oas_by_inst)[ip];
+	// make sure we used up both
+	assert(src_it == srcs.end());
+	assert(dst_it == dsts.end());
 
-	OffsetsAndSize oas;
-	oas.src_offset = src_it->offset + src_suboffset;
-	oas.dst_offset = dst_it->offset + dst_suboffset;
-	oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
-	oasvec.push_back(oas);
+	// now do a copy for each memory pair
+	std::set<Event> finish_events;
 
-	src_suboffset += oas.size;
-	assert(src_suboffset <= src_it->size);
-	if(src_suboffset == src_it->size) {
-	  src_it++;
-	  src_suboffset = 0;
-	}
-	dst_suboffset += oas.size;
-	assert(dst_suboffset <= dst_it->size);
-	if(dst_suboffset == dst_it->size) {
-	  dst_it++;
-	  dst_suboffset = 0;
-	}
-      }
-      // make sure we used up both
-      assert(src_it == srcs.end());
-      assert(dst_it == dsts.end());
+	log_dma.info("copy: %zd distinct src/dst mem pairs, is=%x", oas_by_mem.size(), is_id);
 
-      // now do a copy for each memory pair
-      std::set<Event> finish_events;
+	for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
+	  Memory src_mem = it->first.first;
+	  Memory dst_mem = it->first.second;
+	  OASByInst *oas_by_inst = it->second;
 
-      log_dma.info("copy: %zd distinct src/dst mem pairs, is=%x", oas_by_mem.size(), is_id);
-      assert(redop_id == 0);
-
-      for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
-	Memory src_mem = it->first.first;
-	Memory dst_mem = it->first.second;
-	OASByInst *oas_by_inst = it->second;
-
-	// ask which node should perform the copy
-	int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
-	log_dma.info("copy: srcmem=%x dstmem=%x node=%d", src_mem.id, dst_mem.id, dma_node);
-
-	if(dma_node == gasnet_mynode()) {
-	  log_dma.info("performing copy on local node");
-
-          // If either one of the instances is in GPU memory increase priority
-          int priority = 0;
-          if (src_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
-            priority = 1;
-          else if (dst_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
-            priority = 1;
-
-	  Event ev = enqueue_dma(*this, oas_by_inst, redop_id, red_fold, wait_on, Event::NO_EVENT, priority);
-	  finish_events.insert(ev);
-	} else {
-	  // need to send dma to remote node for processing, so we need a completion event
 	  Event ev = Event::Impl::create_event();
 
+	  int priority = 0;
+	  if (src_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
+	    priority = 1;
+	  else if (dst_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
+	    priority = 1;
+
+	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
+					   wait_on, ev, priority);
+
+	  // ask which node should perform the copy
+	  int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
+	  log_dma.info("copy: srcmem=%x dstmem=%x node=%d", src_mem.id, dst_mem.id, dma_node);
+	  
+	  if(dma_node == gasnet_mynode()) {
+	    log_dma.info("performing copy on local node");
+	  
+	    r->check_readiness(false, dma_queue);
+
+	    finish_events.insert(ev);
+	  } else {
+	    RemoteCopyArgs args;
+	    args.redop_id = 0;
+	    args.red_fold = false;
+	    args.before_copy = wait_on;
+	    args.after_copy = ev;
+	    args.priority = priority;
+
+	    static const size_t MAX_MESSAGE_SIZE = 2048;
+	    int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
+
+	    size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
+
+	    log_dma.info("performing copy on remote node (%d), event=%x/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
+	  
+	    finish_events.insert(ev);
+
+	    // done with the local copy of the request
+	    delete r;
+	  }
+	}
+
+	// final event is merge of all individual copies' events
+	return Event::Impl::merge_events(finish_events);
+      } else {
+	// we're doing a reduction - the semantics require that all source fields be pulled
+	//  together and applied as a "structure" to the reduction op
+
+	// figure out where the source data is
+	int src_node = -1;
+
+	for(std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
+	    src_it != srcs.end();
+	    src_it++)
+	{
+	  int n = ID(src_it->inst).node();
+	  if((src_node != -1) && (src_node != n)) {
+	    // for now, don't handle case where source data is split across nodes
+	    assert(0);
+	  }
+	  src_node = n;
+	}
+
+	assert(dsts.size() == 1);
+
+	// some destinations (e.g. GASNET) need a lock taken to ensure
+	//  reductions are applied atomically
+	Memory::Impl::MemoryKind dst_kind = dsts[0].inst.impl()->memory.impl()->kind;
+	bool inst_lock_needed = (dst_kind == Memory::Impl::MKIND_GLOBAL);
+
+	Event ev = Event::Impl::create_event();
+
+	ReduceRequest *r = new ReduceRequest(*this, 
+					     srcs, dsts[0],
+					     inst_lock_needed,
+					     redop_id, red_fold,
+					     wait_on, ev,
+					     0 /*priority*/);
+
+	if(src_node == gasnet_mynode()) {
+	  log_dma.info("performing reduction on local node");
+	  
+	  r->check_readiness(false, dma_queue);
+	} else {
 	  RemoteCopyArgs args;
 	  args.redop_id = redop_id;
 	  args.red_fold = red_fold;
 	  args.before_copy = wait_on;
 	  args.after_copy = ev;
+	  args.priority = 0 /*priority*/;
 
 	  static const size_t MAX_MESSAGE_SIZE = 2048;
 	  int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
 
-	  // domain info goes first
-	  int *msgptr = serialize(msgdata);
+	  size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
 
-	  // now OAS vectors
-	  for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
-	    RegionInstance src_inst = it2->first.first;
-	    RegionInstance dst_inst = it2->first.second;
-	    OASVec& oasvec = it2->second;
-
-	    *msgptr++ = src_inst.id;
-	    *msgptr++ = dst_inst.id;
-	    *msgptr++ = oasvec.size();
-	    for(OASVec::iterator it3 = oasvec.begin(); it3 != oasvec.end(); it3++) {
-	      *msgptr++ = it3->src_offset;
-	      *msgptr++ = it3->dst_offset;
-	      *msgptr++ = it3->size;
-	    }
-	  }
-
-	  // we're done with our copy of oas_by_inst now
-	  delete oas_by_inst;
-
-	  size_t msglen = ((const char *)msgptr) - ((const char *)msgdata);
-	  assert(msglen <= MAX_MESSAGE_SIZE);
-	  log_dma.info("performing copy on remote node (%d), event=%x/%d", dma_node, args.after_copy.id, args.after_copy.gen);
-	  RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
-	  
-	  finish_events.insert(ev);
+	  log_dma.info("performing reduction on remote node (%d), event=%x/%d",
+		       src_node, args.after_copy.id, args.after_copy.gen);
+	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_COPY);
+	  // done with the local copy of the request
+	  delete r;
 	}
-      }
 
-      // final event is merge of all individual copies' events
-      return Event::Impl::merge_events(finish_events);
+	return ev;
+      }
     }
 
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,

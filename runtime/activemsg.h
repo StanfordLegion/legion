@@ -78,6 +78,12 @@ enum { PAYLOAD_NONE, // no payload in packet
 
 /* Necessary base structure for all medium and long active messages */
 struct BaseMedium {
+  static const gasnet_handlerarg_t MESSAGE_ID_MAGIC = 0x0bad0bad;
+  static const gasnet_handlerarg_t MESSAGE_CHUNKS_MAGIC = 0x0a550a55;
+  void set_magic(void) {
+    message_id = MESSAGE_ID_MAGIC;
+    message_chunks = MESSAGE_CHUNKS_MAGIC;
+  }
   gasnet_handlerarg_t message_id;
   gasnet_handlerarg_t message_chunks;
   void *srcptr;
@@ -325,6 +331,7 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
       ArgsWithReplyInfo<REQTYPE,RPLTYPE> typed; \
     } u; \
     HANDLERARG_COPY_ ## n ; \
+    /*printf("medium message ID=%d srcptr=%p, fptr=%p\n", REQID, u.typed.args.srcptr, u.typed.fptr);*/ \
     record_message(src, true); \
 \
     union { \
@@ -336,6 +343,7 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
     if(nbytes > 0/*gasnet_AMMaxMedium()*/) handle_long_msgptr(src, buf); \
     rpl_u.typed.fptr = u.typed.fptr; \
     rpl_u.typed.args.srcptr = u.typed.args.srcptr; \
+    /*printf("replying with srcptr=%p\n", u.typed.args.srcptr);*/	\
     rpl_u.raw.reply_short(token); \
   } \
 }; \
@@ -381,11 +389,11 @@ template <class RPLTYPE, int RPLID> struct MediumReplyRawArgs<RPLTYPE, RPLID, n>
       MediumReplyRawArgs<RPLTYPE,RPLID,n> raw; \
       ArgsWithReplyInfo<RPLTYPE,RPLTYPE> typed; \
     } u; \
+    HANDLERARG_COPY_ ## n ; \
     if (u.typed.args.srcptr != 0) { \
-      printf("recevied inline release of srcptr %p (%d -> %d)\n", u.typed.args.srcptr, src, gasnet_mynode()); \
+      /*printf("recevied inline release of srcptr %p (%d -> %d)\n", u.typed.args.srcptr, src, gasnet_mynode());*/ \
       release_srcptr(u.typed.args.srcptr); \
     } \
-    HANDLERARG_COPY_ ## n ; \
     u.typed.fptr->set(u.typed.args); \
   } \
 };
@@ -460,27 +468,30 @@ class ActiveMessageMediumNoReply {
  public:
   typedef MessageRawArgs<MSGTYPE,MSGID,dummy_short_handler,FNPTR,(sizeof(MSGTYPE)+3)/4> MessageRawArgsType;
 
-  static void request(gasnet_node_t dest, const MSGTYPE &args, 
+  static void request(gasnet_node_t dest, /*const*/ MSGTYPE &args, 
                       const void *data, size_t datalen,
 		      int payload_mode, void *dstptr = 0)
   {
+    args.set_magic();
     enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
 		    data, datalen, payload_mode, dstptr);
   }
 
-  static void request(gasnet_node_t dest, const MSGTYPE &args, 
+  static void request(gasnet_node_t dest, /*const*/ MSGTYPE &args, 
                       const void *data, size_t line_len,
 		      off_t line_stride, size_t line_count,
 		      int payload_mode, void *dstptr = 0)
   {
+    args.set_magic();
     enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
 		    data, line_len, line_stride, line_count, payload_mode, dstptr);
   }
 
-  static void request(gasnet_node_t dest, const MSGTYPE &args, 
+  static void request(gasnet_node_t dest, /*const*/ MSGTYPE &args, 
                       const SpanList& spans, size_t datalen,
 		      int payload_mode, void *dstptr = 0)
   {
+    args.set_magic();
     enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
 		    spans, datalen, payload_mode, dstptr);
   }
@@ -519,6 +530,7 @@ class ActiveMessageShortReply {
       
     u.typed.fptr = &future;
     u.typed.args = args;
+    u.typed.args.set_magic();
 
 #ifdef CHECK_REENTRANT_MESSAGES
     if(gasnett_threadkey_get(in_handler)) {
@@ -565,6 +577,7 @@ class ActiveMessageMediumReply {
     ArgsWithReplyInfo<REQTYPE,RPLTYPE> args_with_reply;
     args_with_reply.fptr = &future;
     args_with_reply.args = args;
+    args_with_reply.args.set_magic();
     enqueue_message(dest, REQID, &args_with_reply, sizeof(args_with_reply),
 		    data, datalen, payload_mode, dstptr);
 #ifdef OLD_AM_STUFF
@@ -575,6 +588,7 @@ class ActiveMessageMediumReply {
       
     u.typed.fptr = &future;
     u.typed.args = args;
+    u.typed.args.set_magic();
 
 #ifdef CHECK_REENTRANT_MESSAGES
     if(gasnett_threadkey_get(in_handler)) {
@@ -600,6 +614,7 @@ class ActiveMessageMediumReply {
     ArgsWithReplyInfo<REQTYPE,RPLTYPE> args_with_reply;
     args_with_reply.fptr = &future;
     args_with_reply.args = args;
+    args_with_reply.args.set_magic();
     enqueue_message(dest, REQID, &args_with_reply, sizeof(args_with_reply),
 		    spans, datalen, payload_mode, dstptr);
 #ifdef OLD_AM_STUFF

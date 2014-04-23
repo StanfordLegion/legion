@@ -786,14 +786,19 @@ namespace LegionRuntime {
         gc_lock(Reservation::create_reservation()), 
         gc_references(0), valid_references(0), remote_references(0), 
         resource_references(0), owner_addr(own_addr), 
-        owner_did(own_did), held_remote_references(0)
+        owner_did(own_did), held_remote_references(0), free_distributed_id(true)
     //--------------------------------------------------------------------------
     {
       runtime->register_hierarchical_collectable(did, this);
       // note we set resource references to 1 so a remote collectable
       // can only be deleted once its owner has been deleted
       if (owner_did != did)
+      {
         resource_references = 1;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(owner_addr != runtime->address_space);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -824,7 +829,8 @@ namespace LegionRuntime {
       }
       // Free up our distributed id
       runtime->unregister_hierarchical_collectable(did);
-      runtime->free_distributed_id(did);
+      if (free_distributed_id)
+        runtime->free_distributed_id(did);
     }
 
     //--------------------------------------------------------------------------
@@ -1116,6 +1122,7 @@ namespace LegionRuntime {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
+      assert(target != runtime->address_space);
       if (subscribers.find(target) != subscribers.end())
         assert(subscribers[target] == subscriber);
 #endif
@@ -1142,6 +1149,13 @@ namespace LegionRuntime {
       assert(finder != subscribers.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void HierarchicalCollectable::set_no_free_did(void)
+    //--------------------------------------------------------------------------
+    {
+      free_distributed_id = false;
     }
 
     //--------------------------------------------------------------------------

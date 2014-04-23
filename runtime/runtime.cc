@@ -1464,7 +1464,7 @@ namespace LegionRuntime {
         superscalar_width(width), min_outstanding(min_out), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         current_pending(0), current_executing(false), 
-        idle_task_enabled(true), pending_dependence_analysis(false),
+        idle_task_enabled(true),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
@@ -1813,7 +1813,7 @@ namespace LegionRuntime {
         bool all_empty = true;
         for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
         {
-          if (!dependence_queues[idx].empty())
+          if (!dependence_queues[idx].queue.empty())
           {
             all_empty = false;
             break;
@@ -2057,13 +2057,13 @@ namespace LegionRuntime {
           for (unsigned idx = dependence_queues.size();
                 idx <= depth; idx++)
           {
-            dependence_queues.push_back(std::deque<Operation*>());
+            dependence_queues.push_back(DependenceQueue());
           }
         }
 #ifdef DEBUG_HIGH_LEVEL
         assert(depth < dependence_queues.size());
 #endif
-        dependence_queues[depth].push_back(op);
+        dependence_queues[depth].queue.push_back(op);
         // See if we need to start a new garbage collection epoch
         if (!gc_epoch_event.exists())
         {
@@ -2158,7 +2158,7 @@ namespace LegionRuntime {
               dependence_queues.size());
       for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
         fprintf(target,"    Queue at depth %d has %ld elements\n",
-                idx, dependence_queues[idx].size());
+                idx, dependence_queues[idx].queue.size());
       fprintf(target,"  Ready Queue Count: %ld\n", ready_queues.size());
       for (unsigned idx = 0; idx < ready_queues.size(); idx++)
         fprintf(target,"    Ready queue %d has %ld elements\n",
@@ -2173,85 +2173,51 @@ namespace LegionRuntime {
     bool ProcessorManager::perform_dependence_checks(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<Operation*> ops;
       bool remaining_ops = false;
       UserEvent trigger_event;
       bool needs_trigger = false;
-      bool return_analysis_hold = false;
       // Quick check without holding the lock
-      if (!pending_dependence_analysis)
       {
         AutoLock d_lock(dependence_lock);
-        // Recheck after taking the lock
-        // to avoid losing the race
-        if (!pending_dependence_analysis)
+        // An important optimization here is that we always pull
+        // elements off the deeper queues first which optimizes
+        // for a depth-first traversal of the task/operation tree.
+        unsigned handled_ops = 0;
+        for (int idx = int(dependence_queues.size())-1;
+              idx >= 0; idx--)
         {
-          // Very important to mark that no one else can
-          // do dependence analysis while we are have
-          // things that still need dependence analysis
-          pending_dependence_analysis = true;
-          return_analysis_hold = true;
-          // An important optimization here is that we always pull
-          // elements off the deeper queues first which optimizes
-          // for a depth-first traversal of the task/operation tree.
-          unsigned handled_ops = 0;
-          for (int idx = int(dependence_queues.size())-1;
-                idx >= 0; idx--)
+          Event prev_event = dependence_queues[idx].last_event;
+          std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
+          while ((handled_ops < superscalar_width) &&
+                  !current_queue.empty())
           {
-            std::deque<Operation*> &current_queue = dependence_queues[idx];
-            while ((handled_ops < superscalar_width) &&
-                    !current_queue.empty())
-            {
-              ops.push_back(current_queue.front());
-              current_queue.pop_front();
-              handled_ops++;
-            }
-            remaining_ops = remaining_ops || !current_queue.empty();
-            // If we know we have remaining ops and we've
-            // got all the ops we need, then we can break
-            if ((handled_ops == superscalar_width) && remaining_ops)
-              break;
+            prev_event = utility_proc.spawn(TRIGGER_DEPENDENCE_ID,
+                &current_queue.front(), sizeof(Operation*), prev_event);
+            current_queue.pop_front();
+            handled_ops++;
           }
-          // If we no longer have any remaining dependence analyses
-          // to do, then see if we have a garbage collection
-          // epoch that we can trigger.
-          if (!remaining_ops && gc_epoch_event.exists())
-          {
-            trigger_event = gc_epoch_trigger;
-            needs_trigger = true;
-            gc_epoch_event = Event::NO_EVENT;
-          }
+          dependence_queues[idx].last_event = prev_event;
+          remaining_ops = remaining_ops || !current_queue.empty();
+          // If we know we have remaining ops and we've
+          // got all the ops we need, then we can break
+          if ((handled_ops == superscalar_width) && remaining_ops)
+            break;
         }
-      }
-      else
-      {
-        AutoLock d_lock(dependence_lock,1,false);
-        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
+        // If we no longer have any remaining dependence analyses
+        // to do, then see if we have a garbage collection
+        // epoch that we can trigger.
+        if (!remaining_ops && gc_epoch_event.exists())
         {
-          if (!dependence_queues[idx].empty())
-            return true;
+          trigger_event = gc_epoch_trigger;
+          needs_trigger = true;
+          gc_epoch_event = Event::NO_EVENT;
         }
-        return false;
       }
       // Don't trigger the event while holding the lock
       // You never know what the low-level runtime might decide to do
       if (needs_trigger)
         trigger_event.trigger();
 
-      // Ask each of the operations to issue their mapping task
-      // onto the utility processor
-      for (unsigned idx = 0; idx < ops.size(); idx++)
-      {
-        ops[idx]->trigger_dependence_analysis();
-      }
-      if (return_analysis_hold)
-      {
-        AutoLock d_lock(dependence_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(pending_dependence_analysis);
-#endif
-        pending_dependence_analysis = false;
-      }
       return remaining_ops;
     }
 
@@ -2407,7 +2373,10 @@ namespace LegionRuntime {
             TriggerTaskArgs args;
             args.op = *vis_it;
             args.manager = this;
-            utility_proc.spawn(TRIGGER_TASK_ID, &args, sizeof(args));
+            // Give priority to things which are getting sent remotely
+            int priority = ((*vis_it)->target_proc != local_proc) ? 1 : 0;
+            utility_proc.spawn(TRIGGER_TASK_ID, &args, sizeof(args),
+                               Event::NO_EVENT, priority);
             continue;
 #if 0
             bool executed = (*vis_it)->trigger_execution();
@@ -2697,17 +2666,25 @@ namespace LegionRuntime {
         unsigned idx = 0;
         const unsigned target_idx = local_address_space % 
                                     remote_address_procs.size();
+        // Iterate over all the processors and either choose a 
+        // utility processor to be our target or get the target processor
         target = Processor::NO_PROC;
+        Processor utility = Processor::NO_PROC;
         for (std::set<Processor>::const_iterator it = 
               remote_address_procs.begin(); it !=
               remote_address_procs.end(); it++,idx++)
         {
           if (idx == target_idx)
-          {
-            target = it->get_utility_processor();
+            target = (*it);
+          utility = it->get_utility_processor();
+          // If we found a utility processor then we are done
+          if (utility != (*it))
             break;
-          }
+          utility = Processor::NO_PROC;
         }
+        if (utility.exists())
+          target = utility;
+        // Otherwise we use the default target
 #ifdef DEBUG_HIGH_LEVEL
         assert(target.exists());
 #endif
@@ -3397,6 +3374,7 @@ namespace LegionRuntime {
           case SEND_SUBSCRIBER:
             {
               runtime->handle_send_subscriber(derez, remote_address_space);
+              break;
             }
           case SEND_INSTANCE_VIEW:
             {
@@ -3514,6 +3492,9 @@ namespace LegionRuntime {
         // Keep doubling until it's larger
         while (receiving_buffer_size < (receiving_index+arglen))
           receiving_buffer_size *= 2;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(receiving_buffer_size != 0); // would cause deallocation
+#endif
         // Now realloc the memory
         void *new_ptr = realloc(receiving_buffer,receiving_buffer_size);
 #ifdef DEBUG_HIGH_LEVEL
@@ -7195,9 +7176,9 @@ namespace LegionRuntime {
     void Runtime::send_user(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Important note that this flush must be true in order for the
-      // garbage collector to work correctly.
-      find_messenger(target)->send_user(rez, true/*flush*/);
+      // I don't think flush needs to be true, but if we see trouble
+      // with the garbage collector we might need to revisit it.
+      find_messenger(target)->send_user(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10093,17 +10074,18 @@ namespace LegionRuntime {
           exit(ERROR_RESERVED_TASK_ID);
         }
       }
-      table[INIT_FUNC_ID]         = Runtime::initialize_runtime;
-      table[SHUTDOWN_FUNC_ID]     = Runtime::shutdown_runtime;
-      table[SCHEDULER_ID]         = Runtime::schedule_runtime;
-      table[MESSAGE_TASK_ID]      = Runtime::message_task;
-      table[POST_END_TASK_ID]     = Runtime::post_end_task;
-      table[DEFERRED_COMPLETE_ID] = Runtime::deferred_complete_task;
-      table[RECLAIM_LOCAL_FID]    = Runtime::reclaim_local_field_task;
-      table[DEFERRED_COLLECT_ID]  = Runtime::deferred_collect_task;
-      table[TRIGGER_OP_ID]        = Runtime::trigger_op_task;
-      table[TRIGGER_TASK_ID]      = Runtime::trigger_task_task;
-      table[DEFERRED_RECYCLE_ID]  = Runtime::deferred_recycle_task;
+      table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
+      table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
+      table[SCHEDULER_ID]          = Runtime::schedule_runtime;
+      table[MESSAGE_TASK_ID]       = Runtime::message_task;
+      table[POST_END_TASK_ID]      = Runtime::post_end_task;
+      table[DEFERRED_COMPLETE_ID]  = Runtime::deferred_complete_task;
+      table[RECLAIM_LOCAL_FID]     = Runtime::reclaim_local_field_task;
+      table[DEFERRED_COLLECT_ID]   = Runtime::deferred_collect_task;
+      table[TRIGGER_DEPENDENCE_ID] = Runtime::trigger_dependence_task;
+      table[TRIGGER_OP_ID]         = Runtime::trigger_op_task;
+      table[TRIGGER_TASK_ID]       = Runtime::trigger_task_task;
+      table[DEFERRED_RECYCLE_ID]   = Runtime::deferred_recycle_task;
     }
 
     //--------------------------------------------------------------------------
@@ -10490,6 +10472,16 @@ namespace LegionRuntime {
     {
       Deserializer derez(args, arglen);
       PhysicalView::handle_deferred_collect(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::trigger_dependence_task(
+                                  const void *args, size_t arglen, Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Operation **trigger_args = (Operation**)args;
+      Operation *op = *trigger_args;
+      op->trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------

@@ -235,6 +235,7 @@ namespace LegionRuntime {
       void add_held_remote_reference(unsigned cnt = 1);
     public:
       DistributedID find_distributed_id(AddressSpaceID target) const;
+      void set_no_free_did(void);
     protected:
       // Must be called while holding the gc lock
       void return_held_references(void);
@@ -266,6 +267,9 @@ namespace LegionRuntime {
       AddressSpaceID owner_addr;
       DistributedID owner_did;
       unsigned held_remote_references;
+    protected:
+      // Free distributed ID on destruction
+      bool free_distributed_id;
     };
 
 

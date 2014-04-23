@@ -262,6 +262,7 @@ namespace LegionRuntime {
       WRITE_ONLY      = 0x00000010, // same as WRITE_DISCARD
       WRITE_DISCARD   = 0x00000010, // same as WRITE_ONLY
       REDUCE          = 0x00000100,
+      PROMOTED        = 0x00001000, // Internal use only
     };
 
     enum AllocateMode {
@@ -300,6 +301,7 @@ namespace LegionRuntime {
       ANTI_DEPENDENCE = 2, // Write-After-Read or Write-After-Write with Write-Only privilege
       ATOMIC_DEPENDENCE = 3,
       SIMULTANEOUS_DEPENDENCE = 4,
+      PROMOTED_DEPENDENCE = 5,
     };
 
     enum OpenState {
@@ -312,18 +314,19 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID         = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID     = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      SCHEDULER_ID         = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
-      MESSAGE_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
-      POST_END_TASK_ID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      DEFERRED_COMPLETE_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
-      RECLAIM_LOCAL_FID    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
-      DEFERRED_COLLECT_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
-      TRIGGER_OP_ID        = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
-      TRIGGER_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      DEFERRED_RECYCLE_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
-      TASK_ID_AVAILABLE    = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
+      INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      SCHEDULER_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
+      MESSAGE_TASK_ID       = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
+      POST_END_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
+      DEFERRED_COMPLETE_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
+      RECLAIM_LOCAL_FID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
+      DEFERRED_COLLECT_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
+      TRIGGER_DEPENDENCE_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
+      TRIGGER_OP_ID         = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
+      TRIGGER_TASK_ID       = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
+      DEFERRED_RECYCLE_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
+      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+9),
     };
 
     // Forward declarations for user level objects

@@ -777,6 +777,9 @@ namespace LegionRuntime {
 			Event after_copy = Event::NO_EVENT);
 #endif
 
+      bool get_strided_parameters(void *&base, size_t &stride,
+				  off_t field_offset);
+
     public: //protected:
       friend class RegionInstance;
 

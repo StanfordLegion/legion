@@ -177,6 +177,10 @@ namespace LegionRuntime {
                                       task->regions[idx].target_ranking,
                                       task->regions[idx].additional_fields,
                                     task->regions[idx].enable_WAR_optimization);
+          task->regions[idx].reduction_list = 
+            select_reduction_layout(task, task->target_proc,
+                                    task->regions[idx], idx, 
+                                    Memory::NO_MEMORY);
           notify = notify || note;
         }
       }

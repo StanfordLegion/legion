@@ -897,18 +897,29 @@ protected:
     // BaseMedium class as their base type for sending so the first
     // two fields hdr->args[0] and hdr->args[1] can be used for
     // storing the message ID and the number of chunks
-    hdr->args[0] = next_outgoing_message_id++;
+    int message_id_start;
+    if(hdr->args[0] == BaseMedium::MESSAGE_ID_MAGIC) {
+      assert(hdr->args[1] == BaseMedium::MESSAGE_CHUNKS_MAGIC);
+      message_id_start = 0;
+      //printf("CASE 1\n");
+    } else {
+      assert(hdr->args[2] == BaseMedium::MESSAGE_ID_MAGIC);
+      assert(hdr->args[3] == BaseMedium::MESSAGE_CHUNKS_MAGIC);
+      message_id_start = 2;
+      //printf("CASE 2\n");
+    }
+    hdr->args[message_id_start] = next_outgoing_message_id++;
     int chunks = (hdr->payload_size + max_long_req - 1) / max_long_req;
-    hdr->args[1] = chunks;
+    hdr->args[message_id_start + 1] = chunks;
     if(hdr->payload_mode == PAYLOAD_SRCPTR) {
       //srcdatapool->record_srcptr(hdr->payload);
       gasnet_handlerarg_t srcptr_lo = ((uint64_t)(hdr->payload)) & 0x0FFFFFFFFULL;
       gasnet_handlerarg_t srcptr_hi = ((uint64_t)(hdr->payload)) >> 32;
-      hdr->args[2] = srcptr_lo;
-      hdr->args[3] = srcptr_hi;
+      hdr->args[message_id_start + 2] = srcptr_lo;
+      hdr->args[message_id_start + 3] = srcptr_hi;
     } else {
-      hdr->args[2] = 0;
-      hdr->args[3] = 0;
+      hdr->args[message_id_start + 2] = 0;
+      hdr->args[message_id_start + 3] = 0;
     }
       
 

@@ -612,7 +612,7 @@ namespace LegionRuntime {
       struct SOA {
 	struct Untyped : public Stride<STRIDE> {
           CUDAPREFIX
-	  Untyped() : Stride<STRIDE>(0), base(0) {}
+	  Untyped() : Stride<STRIDE>(STRIDE), base(0) {}
           CUDAPREFIX
 	  Untyped(void *_base, size_t _stride) : Stride<STRIDE>(_stride), base((char *)_base) {}
 	  

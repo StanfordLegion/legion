@@ -59,6 +59,7 @@ namespace LegionRuntime {
     Logger::Category log_region("region");
     Logger::Category log_malloc("malloc");
     Logger::Category log_machine("machine");
+    Logger::Category log_inst("inst");
 
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
@@ -82,6 +83,7 @@ namespace LegionRuntime {
       CLEAR_TIMER_MSGID,
       DESTROY_INST_MSGID,
       REMOTE_WRITE_MSGID,
+      REMOTE_REDUCE_MSGID,
       REMOTE_WRITE_FENCE_MSGID,
       DESTROY_LOCK_MSGID,
       REMOTE_REDLIST_MSGID,
@@ -779,7 +781,7 @@ namespace LegionRuntime {
       //locked_data.access_offset = _offset + _adjust;
       locked_data.size = _size;
       
-      StaticAccess<IndexSpace::Impl> rdata(_is.impl());
+      //StaticAccess<IndexSpace::Impl> rdata(_is.impl());
       //locked_data.first_elmt = rdata->first_elmt;
       //locked_data.last_elmt = rdata->last_elmt;
 
@@ -812,6 +814,78 @@ namespace LegionRuntime {
     }
 
     RegionInstance::Impl::~Impl(void) {}
+
+    // helper function to figure out which field we're in
+    static void find_field_start(const int *field_sizes, off_t byte_offset, size_t size, off_t& field_start, int& field_size)
+    {
+      off_t start = 0;
+      for(unsigned i = 0; i < RegionInstance::Impl::MAX_FIELDS_PER_INST; i++) {
+	assert(field_sizes[i] > 0);
+	if(byte_offset < field_sizes[i]) {
+	  assert((int)(byte_offset + size) <= field_sizes[i]);
+	  field_start = start;
+	  field_size = field_sizes[i];
+	  return;
+	}
+	start += field_sizes[i];
+	byte_offset -= field_sizes[i];
+      }
+      assert(0);
+    }
+
+    bool RegionInstance::Impl::get_strided_parameters(void *&base, size_t &stride,
+						      off_t field_offset)
+    {
+      Memory::Impl *mem = memory.impl();
+      StaticAccess<RegionInstance::Impl> idata(this);
+
+      off_t offset = idata->alloc_offset;
+      off_t elmt_stride;
+      
+      if (idata->block_size == 1) {
+        offset += field_offset;
+        elmt_stride = idata->elmt_size;
+      } else {
+        off_t field_start;
+        int field_size;
+        find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+
+        offset += (field_start * idata->block_size) + (field_offset - field_start);
+	elmt_stride = field_size;
+      }
+
+      base = mem->get_direct_ptr(offset, 0);
+      if (!base) return false;
+
+      // if the caller wants a particular stride and we differ (and have more
+      //  than one element), fail
+      if(stride != 0) {
+        if((stride != elmt_stride) && (idata->size > idata->elmt_size))
+          return false;
+      } else {
+        stride = elmt_stride;
+      }
+
+      // if there's a per-element offset, apply it after we've agreed with the caller on 
+      //  what we're pretending the stride is
+      const DomainLinearization& dl = linearization;
+      if(dl.get_dim() > 0) {
+	// make sure this instance uses a 1-D linearization
+	assert(dl.get_dim() == 1);
+
+	Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
+	Rect<1> preimage = mapping->preimage(0);
+	assert(preimage.lo == preimage.hi);
+	// double-check that whole range maps densely
+	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
+	assert(mapping->image_is_dense(preimage));
+	int inst_first_elmt = preimage.lo[0];
+	//printf("adjusting base by %d * %zd\n", inst_first_elmt, stride);
+	base = ((char *)base) - inst_first_elmt * stride;
+      }
+
+      return true;
+    }
 
     ///////////////////////////////////////////////////
     // Events
@@ -1862,7 +1936,7 @@ namespace LegionRuntime {
       me = _me;
       owner = _init_owner;
       count = ZERO_COUNT;
-      log_reservation.spew("count init [%p]=%d", &count, count);
+      log_reservation.spew("count init %x=[%p]=%d", me.id, &count, count);
       mode = 0;
       in_use = false;
       mutex = new gasnet_hsl_t;
@@ -2201,8 +2275,8 @@ namespace LegionRuntime {
 
       do {
 	log_reservation(LEVEL_DEBUG, 
-            "release: reservation=%x count=%d mode=%d", // share=%lx wait=%lx",
-		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
+            "release: reservation=%x count=%d mode=%d owner=%d", // share=%lx wait=%lx",
+			me.id, count, mode, owner); //, remote_sharer_mask, remote_waiter_mask);
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
 	assert(count > ZERO_COUNT);
@@ -2254,6 +2328,8 @@ namespace LegionRuntime {
 
       if(release_target != -1)
       {
+	log_reservation.debug("releasing reservation %x back to owner %d",
+			      me.id, release_target);
 	LockReleaseMessage::request(release_target, r_args);
 #ifdef LOCK_TRACING
         {
@@ -2564,9 +2640,17 @@ namespace LegionRuntime {
 				    RemoteMemAllocArgs, off_t,
 				    handle_remote_mem_alloc> RemoteMemAllocMessage;
 
+    // make bad offsets really obvious (+1 PB)
+    static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << 50;
+
     off_t Memory::Impl::alloc_bytes_local(size_t size)
     {
       AutoHSLLock al(mutex);
+
+      // for zero-length allocations, return a special "offset"
+      if(size == 0) {
+	return this->size + ZERO_SIZE_INSTANCE_OFFSET;
+      }
 
       if(alignment > 0) {
 	off_t leftover = size % alignment;
@@ -2609,6 +2693,12 @@ namespace LegionRuntime {
     void Memory::Impl::free_bytes_local(off_t offset, size_t size)
     {
       AutoHSLLock al(mutex);
+
+      // frees of zero bytes should have the special offset
+      if(size == 0) {
+	assert(offset == this->size + ZERO_SIZE_INSTANCE_OFFSET);
+	return;
+      }
 
       if(alignment > 0) {
 	off_t leftover = size % alignment;
@@ -2935,6 +3025,15 @@ namespace LegionRuntime {
 
       case Memory::Impl::MKIND_ZEROCOPY:
       case Memory::Impl::MKIND_GPUFB:
+	{
+	  impl->put_bytes(args.offset, data, datalen);
+
+	  if(args.event.exists())
+	    args.event.impl()->trigger(args.event.gen,
+				       gasnet_mynode());
+	  break;
+	}
+
       default:
 	assert(0);
       }
@@ -2985,6 +3084,90 @@ namespace LegionRuntime {
     typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
 				       RemoteWriteArgs,
 				       handle_remote_write> RemoteWriteMessage;
+
+    struct RemoteReduceArgs : public BaseMedium {
+      Memory mem;
+      off_t offset;
+      off_t stride;
+      ReductionOpID redop_id;
+      bool red_fold;
+      unsigned sender;
+      unsigned sequence_id;
+      Event event;
+    };
+
+    void handle_remote_reduce(RemoteReduceArgs args,
+			     const void *data, size_t datalen)
+    {
+      Memory::Impl *impl = args.mem.impl();
+
+      log_copy.debug("received remote reduce request: mem=%x, offset=%zd+%zd, size=%zd, redop=%d(%s), seq=%d/%d, event=%x/%d",
+		     args.mem.id, args.offset, args.stride, datalen,
+		     args.redop_id, (args.red_fold ? "fold" : "apply"),
+		     args.sender, args.sequence_id,
+		     args.event.id, args.event.gen);
+
+      assert(args.redop_id != 0);
+      const ReductionOpUntyped *redop = reduce_op_table[args.redop_id];
+
+      size_t count = datalen / redop->sizeof_rhs;
+
+      void *lhs = args.mem.impl()->get_direct_ptr(args.offset, args.stride * count);
+      assert(lhs);
+
+      if(args.red_fold)
+	redop->fold_strided(lhs, data, count,
+			    args.stride, redop->sizeof_rhs, false /*not exclusive*/);
+      else
+	redop->apply_strided(lhs, data, count,
+			     args.stride, redop->sizeof_rhs, false /*not exclusive*/);
+
+      // track the sequence ID to know when the full RDMA is done
+      if(args.sequence_id > 0) {
+        PartialWriteKey key;
+        key.sender = args.sender;
+        key.sequence_id = args.sequence_id;
+        gasnet_hsl_lock(&partial_remote_writes_lock);
+	PartialWriteMap::iterator it = partial_remote_writes.find(key);
+	if(it == partial_remote_writes.end()) {
+	  // first reference to this one
+	  PartialWriteEntry entry;
+	  entry.event = Event::NO_EVENT;
+          entry.remaining_count = -1;
+	  partial_remote_writes[key] = entry;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, entry.remaining_count);
+#endif
+	} else {
+	  // have an existing entry (either another write or the fence)
+	  PartialWriteEntry& entry = it->second;
+#ifdef DEBUG_PWT
+	  printf("PWT: %d: have entry for %d/%d: %x/%d, %d -> %d\n",
+		 gasnet_mynode(), key.sender, key.sequence_id,
+		 entry.event.id, entry.event.gen, 
+		 entry.remaining_count, entry.remaining_count - 1);
+#endif
+	  entry.remaining_count--;
+	  if(entry.remaining_count == 0) {
+	    // we're the last write, and we've already got the fence, so 
+	    //  trigger
+	    Event e = entry.event;
+	    partial_remote_writes.erase(it);
+	    gasnet_hsl_unlock(&partial_remote_writes_lock);
+	    if(e.exists())
+	      e.impl()->trigger(e.gen, gasnet_mynode());
+	    return;
+	  }
+	}
+        gasnet_hsl_unlock(&partial_remote_writes_lock);
+      }
+    }
+
+    typedef ActiveMessageMediumNoReply<REMOTE_REDUCE_MSGID,
+				       RemoteReduceArgs,
+				       handle_remote_reduce> RemoteReduceMessage;
 
     struct RemoteWriteFenceArgs {
       Memory mem;
@@ -3308,6 +3491,87 @@ namespace LegionRuntime {
       }
     }
 
+    unsigned do_remote_reduce(Memory mem, off_t offset,
+			      ReductionOpID redop_id, bool red_fold,
+			      const void *data, size_t count,
+			      off_t src_stride, off_t dst_stride,
+			      unsigned sequence_id,
+			      Event event, bool make_copy = false)
+    {
+      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+      size_t rhs_size = redop->sizeof_rhs;
+
+      log_copy.debug("sending remote reduction request: mem=%x, offset=%zd+%zd, size=%zdx%zd, redop=%d(%s), event=%x/%d",
+		     mem.id, offset, dst_stride, rhs_size, count,
+		     redop_id, (red_fold ? "fold" : "apply"),
+		     event.id, event.gen);
+
+      Memory::Impl *m_impl = mem.impl();
+
+      // reductions always have to bounce off an intermediate buffer, so are subject to
+      //  LMB limits
+      {
+	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_elmts_per_xfer = max_xfer_size / rhs_size;
+	assert(max_elmts_per_xfer > 0);
+
+	if(count > max_elmts_per_xfer) {
+	  // can't do this if we've been given a trigger event - no guarantee
+	  //  on ordering of these xfers
+	  assert(!event.exists());
+
+	  log_copy.info("breaking large reduction into pieces");
+	  const char *pos = (const char *)data;
+	  RemoteReduceArgs args;
+	  args.mem = mem;
+	  args.offset = offset;
+	  args.stride = dst_stride;
+	  args.redop_id = redop_id;
+	  args.red_fold = red_fold;
+	  args.event = Event::NO_EVENT;
+	  args.sender = gasnet_mynode();
+	  args.sequence_id = sequence_id;
+
+	  int xfers = 1;
+	  while(count > max_elmts_per_xfer) {
+	    RemoteReduceMessage::request(ID(mem).node(), args,
+					 pos, rhs_size,
+					 src_stride, max_elmts_per_xfer,
+					 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	    args.offset += dst_stride * max_elmts_per_xfer;
+	    pos += src_stride * max_elmts_per_xfer;
+	    count -= max_elmts_per_xfer;
+	    xfers++;
+	  }
+
+	  // last send includes whatever's left
+	  RemoteReduceMessage::request(ID(mem).node(), args,
+				       pos, rhs_size, src_stride, count,
+				       make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  return xfers;
+	}
+      }
+
+      // we get here with a write smaller than the LMB
+      {
+	RemoteReduceArgs args;
+	args.mem = mem;
+	args.offset = offset;
+	args.stride = dst_stride;
+	args.redop_id = redop_id;
+	args.red_fold = red_fold;
+	args.event = event;
+	args.sender = gasnet_mynode();
+	args.sequence_id = sequence_id;
+
+	RemoteReduceMessage::request(ID(mem).node(), args,
+				     data, rhs_size, src_stride, count,
+				     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+
+	return 1;
+      }
+    }
+
     void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes, Event event)
     {
       RemoteWriteFenceArgs args;
@@ -3316,6 +3580,10 @@ namespace LegionRuntime {
       args.sequence_id = sequence_id;
       args.num_writes = num_writes;
       args.event = event;
+
+      // technically we could handle a num_writes == 0 case, but since it's
+      //  probably indicative of badness elsewhere, barf on it for now
+      assert(num_writes > 0);
 
       RemoteWriteFenceMessage::request(ID(mem).node(), args);
     }
@@ -3627,11 +3895,13 @@ namespace LegionRuntime {
 
 	i.id |= index;
 	i_impl->me = i;
+	i_impl->lock.me = ID(i.id).convert<Reservation>(); // have to change the lock's ID too!
 	if(index >= size) instances.push_back(i_impl);
       }
 
-      log_copy.debug("local instance %x created in memory %x at offset %zd (redop=%d list_size=%zd parent_inst=%x)",
-		     i.id, me.id, inst_offset, redopid, list_size, parent_inst.id);
+      log_inst.info("local instance %x created in memory %x at offset %zd (redop=%d list_size=%zd parent_inst=%x block_size=%zd)",
+		    i.id, me.id, inst_offset, redopid, list_size,
+                    parent_inst.id, block_size);
 
       return i;
     }
@@ -3688,8 +3958,6 @@ namespace LegionRuntime {
     typedef ActiveMessageMediumReply<CREATE_INST_MSGID, CREATE_INST_RPLID,
 				     CreateInstanceArgs, CreateInstanceResp,
 				     handle_create_instance> CreateInstanceMessage;
-
-    Logger::Category log_inst("inst");
 
     RegionInstance Memory::Impl::create_instance_remote(IndexSpace r,
 							const int *linearization_bits,
@@ -5655,7 +5923,10 @@ namespace LegionRuntime {
 
 #ifdef FULL_SIZE_INSTANCES
 	num_elements = data->last_elmt + 1;
-	DomainLinearization::from_index_space(data->first_elmt).serialize(linearization_bits);
+	// linearization is an identity translation
+	Translation<1> inst_offset(0);
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	dl.serialize(linearization_bits);
 #else
 	num_elements = data->last_elmt - data->first_elmt + 1;
 	if(block_size > num_elements)
@@ -5674,6 +5945,15 @@ namespace LegionRuntime {
       //  use a faster path
       if(field_sizes.size() == 1)
 	block_size = num_elements;
+
+#ifdef FORCE_SOA_INSTANCE_LAYOUT
+      // the big hammer
+      if(block_size != num_elements) {
+        log_inst.info("block size changed from %zd to %zd (SOA)",
+                      block_size, num_elements);
+        block_size = num_elements;
+      }
+#endif
 
       if(block_size > 1) {
 	size_t leftover = num_elements % block_size;
@@ -6180,6 +6460,14 @@ namespace LegionRuntime {
       }
     }
 
+    bool ElementMask::Enumerator::peek_next(int &position, int &length)
+    {
+      int old_pos = pos;
+      bool ret = get_next(position, length);
+      pos = old_pos;
+      return ret;
+    }
+
     ///////////////////////////////////////////////////
     // Region Allocators
 
@@ -6270,24 +6558,6 @@ namespace LegionRuntime {
       }
     }
 #endif
-
-    // helper function to figure out which field we're in
-    static void find_field_start(const int *field_sizes, off_t byte_offset, size_t size, off_t& field_start, int& field_size)
-    {
-      off_t start = 0;
-      for(unsigned i = 0; i < RegionInstance::Impl::MAX_FIELDS_PER_INST; i++) {
-	assert(field_sizes[i] > 0);
-	if(byte_offset < field_sizes[i]) {
-	  assert((int)(byte_offset + size) <= field_sizes[i]);
-	  field_start = start;
-	  field_size = field_sizes[i];
-	  return;
-	}
-	start += field_sizes[i];
-	byte_offset -= field_sizes[i];
-      }
-      assert(0);
-    }
 
     void RegionInstance::Impl::get_bytes(int index, off_t byte_offset, void *dst, size_t size)
     {
@@ -7536,7 +7806,7 @@ namespace LegionRuntime {
 
 #ifdef DEADLOCK_TRACE
     void sigterm_catch(int signal) {
-      assert(signal == SIGTERM);
+      assert((signal == SIGTERM) || (signal == SIGINT));
 #ifdef NODE_LOGGING
       static int call_count = 0;
       int count = __sync_fetch_and_add(&call_count, 1);
@@ -7545,12 +7815,11 @@ namespace LegionRuntime {
         show_event_waiters(log_file);
         Logger::finalize();
       }
-#else
+#endif
       Runtime *rt = Runtime::get_runtime();
       // Send sig aborts to all the threads
       for (unsigned idx = 0; idx < rt->next_thread; idx++)
         pthread_kill(rt->all_threads[idx], SIGABRT);
-#endif
     }
 
     void sigabrt_catch(int signal) {
@@ -7583,7 +7852,7 @@ namespace LegionRuntime {
         int offset = 0;
         for (int i = 0; i < bt_size; i++)
           offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
-        fprintf(stderr,"BACTRACE on node %d\n----------\n%s\n----------\n", 
+        fprintf(stderr,"BACKTRACE on node %d\n----------\n%s\n----------\n", 
                 gasnet_mynode(), buffer);
         free(buffer);
       }
@@ -7662,7 +7931,7 @@ namespace LegionRuntime {
       stack_size_in_mb = 2;
       unsigned num_local_cpus = 1;
       unsigned num_local_gpus = 0;
-      unsigned num_util_procs = 0;
+      unsigned num_util_procs = 1;
       unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -7774,6 +8043,7 @@ namespace LegionRuntime {
       hcount += ClearTimerRequestMessage::add_handler_entries(&handlers[hcount]);
       hcount += DestroyInstanceMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteWriteMessage::add_handler_entries(&handlers[hcount]);
+      hcount += RemoteReduceMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteWriteFenceMessage::add_handler_entries(&handlers[hcount]);
       hcount += DestroyLockMessage::add_handler_entries(&handlers[hcount]);
       hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount]);
@@ -7790,13 +8060,12 @@ namespace LegionRuntime {
       // doesn't make any calls between gasnet_init and gasnet_attach
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
 
-      init_dma_handler();
-
       Runtime *r = Runtime::runtime = new Runtime;
       r->nodes = new Node[gasnet_nodes()];
 #ifdef DEADLOCK_TRACE
       r->next_thread = 0;
       signal(SIGTERM, sigterm_catch);
+      signal(SIGINT, sigterm_catch);
       signal(SIGABRT, sigabrt_catch);
 #endif
       
@@ -7871,6 +8140,39 @@ namespace LegionRuntime {
       // Keep track of the local system memories so we can pin them
       // after we've initialized the GPU
       std::vector<LocalCPUMemory*> local_mems;
+      // Figure out which GPUs support peer access (if any)
+      // and prioritize them so they are used first
+      std::vector<int> peer_gpus;
+      std::vector<int> dumb_gpus;
+      {
+        int num_devices;
+        CHECK_CU( cuDeviceGetCount(&num_devices) );
+        for (int i = 0; i < num_devices; i++)
+        {
+          CUdevice device;
+          CHECK_CU( cuDeviceGet(&device, i) );
+          bool has_peer = false;
+          // Go through all the other devices and see
+          // if we have peer access to them
+          for (int j = 0; j < num_devices; j++)
+          {
+            if (i == j) continue;
+            CUdevice peer;
+            CHECK_CU( cuDeviceGet(&peer, j) );
+            int can_access;
+            CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
+            if (can_access)
+            {
+              has_peer = true;
+              break;
+            }
+          }
+          if (has_peer)
+            peer_gpus.push_back(i);
+          else
+            dumb_gpus.push_back(i);
+        }
+      }
 #endif
       // create local processors
 #ifdef SHARED_TASK_QUEUE
@@ -8033,12 +8335,22 @@ namespace LegionRuntime {
 
 #ifdef USE_GPU
       if(num_local_gpus > 0) {
+        if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
+        {
+          printf("Requested %d GPUs, but only %ld GPUs exist on node %d\n",
+            num_local_gpus, peer_gpus.size()+dumb_gpus.size(), gasnet_mynode());
+          assert(false);
+        }
 	for(unsigned i = 0; i < num_local_gpus; i++) {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
 	  //printf("GPU's ID is %x\n", p.id);
- 	  GPUProcessor *gp = new GPUProcessor(p, i,
+ 	  GPUProcessor *gp = new GPUProcessor(p, 
+                                              (i < peer_gpus.size() ?
+                                                peer_gpus[i] : 
+                                                dumb_gpus[i-peer_gpus.size()]), 
+                                              num_local_gpus,
 #ifdef UTIL_PROCS_FOR_GPU
 					      (num_util_procs ?
 					         local_util_procs[i % num_util_procs]->me :
@@ -8142,6 +8454,29 @@ namespace LegionRuntime {
         if(pin_sysmem_for_gpu)
           for (unsigned idx = 0; idx < local_mems.size(); idx++)
             local_mems[idx]->pin_memory(local_gpus[0]);
+
+        // Register peer access for any GPUs which support it
+        if ((num_local_gpus > 1) && (peer_gpus.size() > 1))
+        {
+          unsigned peer_count = (num_local_gpus < peer_gpus.size()) ? 
+                                  num_local_gpus : peer_gpus.size();
+          // Needs to go both ways so register in all directions
+          for (unsigned i = 0; i < peer_count; i++)
+          {
+            CUdevice device;
+            CHECK_CU( cuDeviceGet(&device, peer_gpus[i]) );
+            for (unsigned j = 0; j < peer_count; j++)
+            {
+              if (i == j) continue;
+              CUdevice peer;
+              CHECK_CU( cuDeviceGet(&device, peer_gpus[j]) );
+              int can_access;
+              CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
+              if (can_access)
+                local_gpus[i]->enable_peer_access(local_gpus[j]);
+            }
+          }
+        }
 
         if (gpu_dma_thread)
           GPUProcessor::start_gpu_dma_thread(local_gpus);
@@ -8385,6 +8720,9 @@ namespace LegionRuntime {
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       stop_dma_worker_threads();
+#ifndef SHARED_LOWLEVEL
+      GPUProcessor::stop_gpu_dma_threads();
+#endif
       stop_activemsg_threads();
       
       // if we are running as a background thread, just terminate this thread
@@ -8471,7 +8809,7 @@ namespace LegionRuntime {
     static FILE *log_file = NULL;
     if (log_file == NULL)
     {
-      const char *prefix = "";
+      const char *prefix = ".";
       char file_name[1024];
       sprintf(file_name,"%s/node_%d.log", prefix, gasnet_mynode());
       log_file = fopen(file_name,"w");
@@ -8592,7 +8930,10 @@ namespace LegionRuntime {
       check_bounds(region, ptr);
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      impl->get_bytes(ptr, field_offset + offset, dst, bytes);
+      assert(impl->linearization.valid());
+      Arrays::Mapping<1, 1> *mapping = impl->linearization.get_mapping<1>();
+      int index = mapping->image(ptr.value);
+      impl->get_bytes(index, field_offset + offset, dst, bytes);
     }
 
     //bool debug_mappings = false;
@@ -8625,7 +8966,10 @@ namespace LegionRuntime {
       check_bounds(region, ptr);
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      impl->put_bytes(ptr, field_offset + offset, src, bytes);
+      assert(impl->linearization.valid());
+      Arrays::Mapping<1, 1> *mapping = impl->linearization.get_mapping<1>();
+      int index = mapping->image(ptr.value);
+      impl->put_bytes(index, field_offset + offset, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
@@ -8657,6 +9001,8 @@ namespace LegionRuntime {
     bool AccessorType::Generic::Untyped::get_soa_parameters(void *&base, size_t &stride) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      return impl->get_strided_parameters(base, stride, field_offset);
+#if 0
       Memory::Impl *mem = impl->memory.impl();
       StaticAccess<RegionInstance::Impl> idata(impl);
 
@@ -8706,6 +9052,7 @@ namespace LegionRuntime {
       }
 
       return true;
+#endif
     }
 
     bool AccessorType::Generic::Untyped::get_hybrid_soa_parameters(void *&base, size_t &stride, 
@@ -8723,6 +9070,10 @@ namespace LegionRuntime {
       if (idata->redopid == 0) return false;
       if (idata->red_list_size > 0) return false;
 
+      // ReductionFold accessors currently assume packed instances
+      size_t stride = idata->elmt_size;
+      return impl->get_strided_parameters(base, stride, field_offset);
+#if 0
       off_t offset = idata->alloc_offset + field_offset;
       off_t elmt_stride;
 
@@ -8740,6 +9091,7 @@ namespace LegionRuntime {
       base = mem->get_direct_ptr(offset, 0);
       if (!base) return false;
       return true;
+#endif
     }
 
     bool AccessorType::Generic::Untyped::get_redlist_parameters(void *&base, ptr_t *&next_ptr) const

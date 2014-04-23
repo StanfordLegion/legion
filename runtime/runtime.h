@@ -331,6 +331,14 @@ namespace LegionRuntime {
         TaskOp *op;
         ProcessorManager *manager;
       };
+      struct DependenceQueue {
+      public:
+        DependenceQueue(void)
+          : last_event(Event::NO_EVENT) { }
+      public:
+        Event last_event;
+        std::deque<Operation*> queue;
+      };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt, unsigned min_out,
@@ -416,7 +424,6 @@ namespace LegionRuntime {
       unsigned current_pending;
       bool current_executing;
       bool idle_task_enabled;
-      bool pending_dependence_analysis;
     protected:
       // Since dependence analysis is usually on the critical path,
       // we allow the processor managers to create garbage collection
@@ -444,7 +451,7 @@ namespace LegionRuntime {
       // from deeper lists first which is a performance optimization
       // to prevent operations from deeper levels of the task tree
       // from having to wait for operations at shallower levels.
-      std::deque<std::deque<Operation*> > dependence_queues;
+      std::deque<DependenceQueue> dependence_queues;
       // For each mapper, a list of tasks that are ready to map
       std::vector<std::list<TaskOp*> > ready_queues;
       // All the local operations that are ready to be performed
@@ -1222,6 +1229,8 @@ namespace LegionRuntime {
       static void reclaim_local_field_task(
                           const void *args, size_t arglen, Processor p);
       static void deferred_collect_task(
+                          const void *args, size_t arglen, Processor p);
+      static void trigger_dependence_task(
                           const void *args, size_t arglen, Processor p);
       static void trigger_op_task(
                           const void *args, size_t arglen, Processor p);

@@ -76,6 +76,7 @@ namespace LegionRuntime {
       bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(IndexSpace handle);
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
+      size_t get_domain_volume(IndexSpace handle);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
@@ -124,6 +125,7 @@ namespace LegionRuntime {
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
       bool has_parent_logical_partition(LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      size_t get_domain_volume(LogicalRegion handle);
     public:
       // Logical analysis methods
       void perform_dependence_analysis(RegionTreeContext ctx, 
@@ -782,6 +784,7 @@ namespace LegionRuntime {
     public:
       OpenState open_state;
       ReductionOpID redop;
+      unsigned rebuild_timeout;
     }; 
 
     /**
@@ -1319,6 +1322,7 @@ namespace LegionRuntime {
       virtual RegionTreeNode* get_parent(void) const = 0;
       virtual RegionTreeNode* get_tree_child(Color c) = 0;
       virtual bool are_children_disjoint(Color c1, Color c2) = 0;
+      virtual bool are_all_children_disjoint(void) = 0;
       virtual bool is_region(void) const = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
@@ -1417,6 +1421,7 @@ namespace LegionRuntime {
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(Color c);
       virtual bool are_children_disjoint(Color c1, Color c2);
+      virtual bool are_all_children_disjoint(void);
       virtual bool is_region(void) const;
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
@@ -1521,6 +1526,7 @@ namespace LegionRuntime {
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(Color c);
       virtual bool are_children_disjoint(Color c1, Color c2);
+      virtual bool are_all_children_disjoint(void);
       virtual bool is_region(void) const;
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
@@ -2054,13 +2060,8 @@ namespace LegionRuntime {
     protected:
       // Keep track of whether we've recycled this instance or not
       bool recycled;
-      // To avoid deadlock keep track of when the valid views are mutable
-      bool reclaimable;
       // Keep a set of the views we need to see when recycling
       std::set<InstanceView*> valid_views;
-      // A vector of instance views to reclaim when done running
-      // things become reclaimable again
-      std::vector<InstanceView*> reclaim_views;
     };
 
     /**

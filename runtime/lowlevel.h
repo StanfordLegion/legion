@@ -257,6 +257,7 @@ namespace LegionRuntime {
 	~Enumerator(void);
 
 	bool get_next(int &position, int &length);
+	bool peek_next(int &position, int &length);
 
       protected:
 	const ElementMask& mask;
@@ -325,8 +326,14 @@ namespace LegionRuntime {
 
       virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
 			 bool exclusive = false) const = 0;
+      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
+				 off_t lhs_stride, off_t rhs_stride, size_t count,
+				 bool exclusive = false) const = 0;
       virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
 			bool exclusive = false) const = 0;
+      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
+				off_t lhs_stride, off_t rhs_stride, size_t count,
+				bool exclusive = false) const = 0;
       virtual void init(void *rhs_ptr, size_t count) const = 0;
 
       virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
@@ -375,6 +382,29 @@ namespace LegionRuntime {
 	}
       }
 
+      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
+				 off_t lhs_stride, off_t rhs_stride, size_t count,
+				 bool exclusive = false) const
+      {
+	char *lhs = (char *)lhs_ptr;
+	const char *rhs = (const char *)rhs_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template apply<true>(*(typename REDOP::LHS *)lhs,
+					*(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	} else {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template apply<false>(*(typename REDOP::LHS *)lhs,
+					 *(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	}
+      }
+
       virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
 			bool exclusive = false) const
       {
@@ -386,6 +416,29 @@ namespace LegionRuntime {
 	} else {
 	  for(size_t i = 0; i < count; i++)
 	    REDOP::template fold<false>(rhs1[i], rhs2[i]);
+	}
+      }
+
+      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
+				off_t lhs_stride, off_t rhs_stride, size_t count,
+				bool exclusive = false) const
+      {
+	char *lhs = (char *)lhs_ptr;
+	const char *rhs = (const char *)rhs_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template fold<true>(*(typename REDOP::RHS *)lhs,
+				       *(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	} else {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template fold<false>(*(typename REDOP::RHS *)lhs,
+					*(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
 	}
       }
 

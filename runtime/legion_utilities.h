@@ -28,17 +28,14 @@ namespace LegionRuntime {
   namespace HighLevel {
 
 // Useful macros
-#define IS_NO_ACCESS(req) ((req).privilege == NO_ACCESS)
-#define IS_READ_ONLY(req) (((req).privilege == NO_ACCESS) \
-    || ((req).privilege == READ_ONLY))
-#define HAS_READ(req) (((req).privilege == READ_ONLY) \
-    || ((req).privilege == READ_WRITE))
-#define HAS_WRITE(req) (((req).privilege == READ_WRITE) \
-    || ((req).privilege == REDUCE) || ((req).privilege == WRITE_DISCARD))
-#define IS_WRITE(req) (((req).privilege == READ_WRITE) \
-    || ((req).privilege == WRITE_DISCARD))
-#define IS_WRITE_ONLY(req) ((req).privilege == WRITE_DISCARD)
-#define IS_REDUCE(req) ((req).privilege == REDUCE)
+#define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
+#define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_ONLY)
+#define HAS_READ(req) ((req).privilege & READ_ONLY)
+#define HAS_WRITE(req) ((req).privilege & (WRITE_DISCARD | REDUCE))
+#define IS_WRITE(req) ((req).privilege & WRITE_DISCARD)
+#define IS_WRITE_ONLY(req) (((req).privilege & READ_WRITE) == WRITE_DISCARD)
+#define IS_REDUCE(req) (((req).privilege & READ_WRITE) == REDUCE)
+#define IS_PROMOTED(req) ((req).privilege & PROMOTED)
 #define IS_EXCLUSIVE(req) ((req).prop == EXCLUSIVE)
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
 #define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
@@ -102,6 +99,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    static inline DependenceType check_for_promotion(const RegionUsage &u1, 
+                                                     DependenceType actual)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_PROMOTED(u1))
+        return PROMOTED_DEPENDENCE;
+      else
+        return actual;
+    }
+
+    //--------------------------------------------------------------------------
     static inline DependenceType check_dependence_type(const RegionUsage &u1,
                                                        const RegionUsage &u2)
     //--------------------------------------------------------------------------
@@ -109,20 +117,16 @@ namespace LegionRuntime {
       // Two readers are never a dependence
       if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
       {
-        return NO_DEPENDENCE;
+        return check_for_promotion(u1, NO_DEPENDENCE);
       }
       else if (IS_REDUCE(u1) && IS_REDUCE(u2))
       {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
-        {
-          return NO_DEPENDENCE;
-        }
+          return check_for_promotion(u1, NO_DEPENDENCE);
         else
-        {
           return TRUE_DEPENDENCE;
-        }
       }
       else
       {
@@ -148,7 +152,7 @@ namespace LegionRuntime {
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return NO_DEPENDENCE;
+            return check_for_promotion(u1, NO_DEPENDENCE);
           }
           // Everything else is a dependence
           return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);
@@ -598,6 +602,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    inline void Serializer::serialize<bool>(const bool &element)
+    //--------------------------------------------------------------------------
+    {
+      while ((index + 4) > total_bytes)
+        resize();
+      *((bool*)buffer+index) = element;
+      index += 4;
+#ifdef DEBUG_HIGH_LEVEL
+      context_bytes += 4;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -643,6 +661,9 @@ namespace LegionRuntime {
     {
       // Double the buffer size
       total_bytes *= 2;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(total_bytes != 0); // this would cause deallocation
+#endif
       char *next = (char*)realloc(buffer,total_bytes);
 #ifdef DEBUG_HIGH_LEVEL
       assert(next != NULL);
@@ -672,6 +693,22 @@ namespace LegionRuntime {
       index += sizeof(T);
 #ifdef DEBUG_HIGH_LEVEL
       context_bytes += sizeof(T);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Deserializer::deserialize<bool>(bool &element)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      // Check to make sure we don't read past the end
+      assert((index+4) <= total_bytes);
+#endif
+      element = *((const bool *)(buffer+index));
+      index += 4;
+#ifdef DEBUG_HIGH_LEVEL
+      context_bytes += 4;
 #endif
     }
       
