@@ -48,6 +48,7 @@ MAPPING_OP = 2
 CLOSE_OP = 3
 DELETION_OP = 4
 COPY_OP = 5
+FENCE_OP = 6
 
 # Instance Kinds
 TASK_INST = 0
@@ -470,10 +471,16 @@ class SingleTask(object):
                       "index "+str(adep.idx1)+" of "+adep.op1.get_name()+\
                       " (ID "+str(adep.op1.uid)+") and index "+str(adep.idx2)+ \
                       " of "+adep.op2.get_name()+" (ID "+str(adep.op2.uid)+")"
-                print "      First Requirement:"
-                adep.op1.get_requirement(adep.idx1).print_requirement()
-                print "      Second Requirement:"
-                adep.op2.get_requirement(adep.idx2).print_requirement()
+                if adep.op1.get_op_kind() == FENCE_OP:
+                    print "      FENCE OPERATION"
+                else:
+                    print "      First Requirement:"
+                    adep.op1.get_requirement(adep.idx1).print_requirement()
+                if adep.op2.get_op_kind() == FENCE_OP:
+                    print "      FENCE OPERATION:"
+                else:
+                    print "      Second Requirement:"
+                    adep.op2.get_requirement(adep.idx2).print_requirement()
                 errors = errors + 1
             for op in self.ops:
                 op.unmark_logical()
@@ -523,7 +530,11 @@ class SingleTask(object):
                 # Handle cross product of instances
                 # in case we have multiple instances for an op
                 for inst1 in dep.op1.op_instances:
+                    if inst1.get_op_kind() == FENCE_OP:
+                        continue
                     for inst2 in dep.op2.op_instances:
+                        if inst2.get_op_kind() == FENCE_OP:
+                            continue
                         # Check to see if they are still aliased
                         req1 = inst1.get_requirement(dep.idx1)
                         req2 = inst2.get_requirement(dep.idx2)
@@ -536,29 +547,56 @@ class SingleTask(object):
                         index1 = self.state.get_index_node(True, req1.ispace)
                         index2 = self.state.get_index_node(True, req2.ispace)
                         if self.state.is_aliased(index1, index2):
+                            def record_visit(node, traverser):
+                                # Get the last instance of the traverser
+                                last_idx = len(traverser.instance_stack) - 1
+                                last_inst = traverser.instance_stack[last_idx]
+                                # See if we have visited this node in this context before  
+                                if node in traverser.visited:
+                                    contexts = traverser.visited[node]
+                                    if last_inst in contexts:
+                                        return True # Already been here
+                                    else:
+                                        contexts.add(last_inst)
+                                        return False
+                                else:
+                                    contexts = set()
+                                    contexts.add(last_inst)
+                                    traverser.visited[node] = contexts
+                                    return False
                             def traverse_event(node, traverser):
+                                if record_visit(node, traverser):
+                                    return False
                                 if traverser.found:
                                     return False
                                 return True
                             def traverse_task(node, traverser):
+                                if record_visit(node, traverser):
+                                    return False
                                 if node == traverser.target:
                                     traverser.found = True
                                 if traverser.found:
                                     return False
                                 return True
                             def traverse_map(node, traverser):
+                                if record_visit(node, traverser):
+                                    return False
                                 if node == traverser.target:
                                     traverser.found = True
                                 if traverser.found:
                                     return False
                                 return True
                             def traverse_close(node, traverser):
+                                if record_visit(node, traverser):
+                                    return False
                                 if node == traverser.target:
                                     traverser.found = True
                                 if traverser.found:
                                     return False
                                 return True
                             def traverse_copy(node, traverser):
+                                if record_visit(node, traverser):
+                                    return False
                                 if traverser.found:
                                     return False
                                 # Check to see if we have the matching
@@ -584,7 +622,7 @@ class SingleTask(object):
                             # Do the traversal for each overlapping field
                             fields = req1.fields & req2.fields
                             for f in fields:
-                                traverser = EventGraphTraverser(False, False, True, 
+                                traverser = EventGraphTraverser(False, False, False, 
                                     self.state.get_next_traverser_gen(), traverse_event,
                                     traverse_task, traverse_map, traverse_close, 
                                     traverse_copy, post_traverse_event, 
@@ -594,6 +632,10 @@ class SingleTask(object):
                                 traverser.target = inst1
                                 traverser.field = f
                                 traverser.instance_stack = list()
+                                # Maintain a list of nodes that we have visited and
+                                # context in which we have visted them.  We may need
+                                # to visit some nodes in more than one context
+                                traverser.visited = dict()
                                 # TODO: support virtual mappings
                                 traverser.instance_stack.append(inst2.get_instance(dep.idx2))
                                 # Traverse and see if we find inst1
@@ -898,6 +940,15 @@ class CopyOp(object):
         self.logical_incoming = set()
         self.logical_outgoing = set()
         self.logical_marked = False
+        self.op_instances = set()
+        self.op_instances.add(self)
+        self.instances = dict()
+        self.generation = 0
+        self.start_event = None
+        self.term_event = None
+        self.physical_marked = False
+        self.node_name = 'copy_across_'+str(self.uid)
+        self.prev_event_deps = set()
 
     def get_name(self):
         return "Copy Op "+str(self.uid)
@@ -953,7 +1004,55 @@ class CopyOp(object):
             dtype = self.state.compute_dependence(other_req, req)
             if is_mapping_dependence(dtype):
                 self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+    
+    def add_instance(self, idx, inst):
+        assert idx not in self.instances
+        self.instances[idx] = inst
+
+    def get_instance(self, idx):
+        assert idx in self.instances
+        return self.instances[idx]
+
+    def event_graph_traverse(self, traverser):
+        traverser.visit_task(self)
         
+    def add_events(self, start, term):
+        assert self.start_event == None
+        assert self.term_event == None
+        self.start_event = start
+        self.term_event = term
+
+    def check_data_flow(self):
+        # No need to do anything
+        pass
+
+    def physical_traverse(self, component):
+        if self.physical_marked:
+            return
+        self.physical_marked = True
+        component.add_copy(self)
+        self.start_event.physical_traverse(component)
+        self.term_event.physical_traverse(component)
+
+    def physical_unmark(self):
+        self.physical_marked = False
+
+    def print_physical_node(self, printer):
+        printer.println(self.node_name+' [style=filled,label="Copy Across'+\
+                '",fillcolor=darkgoldenrod1,fontsize=14,fontcolor=black,'+\
+                'shape=record,penwidth=2];')
+
+    def print_event_dependences(self, printer):
+        self.start_event.print_prev_event_dependences(printer, self.node_name)
+        pass
+
+    def print_prev_event_dependences(self, printer, later_name):
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+
+                ' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+        self.start_event.print_prev_event_dependences(printer, later_name)
+
 
 class Close(object):
     def __init__(self, state, uid, ctx):
@@ -1085,6 +1184,63 @@ class Close(object):
 
     def check_data_flow(self):
         # No need to do anything
+        pass
+
+class Fence(object):
+    def __init__(self, state, uid, ctx):
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.logical_incoming = set()
+        self.logical_outgoing = set()
+        self.logical_marked = False
+        self.op_instances = set()
+        self.op_instances.add(self)
+
+    def get_name(self):
+        return "Fence "+str(self.uid)
+
+    def get_op_kind(self):
+        return FENCE_OP
+
+    def add_logical_incoming(self, op):
+        assert self <> op
+        self.logical_incoming.add(op)
+
+    def add_logical_outgoing(self, op):
+        assert self <> op
+        self.logical_outgoing.add(op)
+
+    def has_logical_path(self, target):
+        if target == self:
+            return True
+        if self.logical_marked:
+            return False
+        # Otherwise check all the outgoing edges
+        for op in self.logical_outgoing:
+            if op.has_logical_path(target):
+                return True
+        self.logical_marked = True
+        return False
+
+    def unmark_logical(self):
+        self.logical_marked = False
+
+    def find_dependences(self, op):
+        # Everybody who comes after us has a dependence on us 
+        #self.ctx.add_adep(self, op, 0, 0, TRUE_DEPENDENCE)
+        pass
+
+    def find_individual_dependences(self, other_op, other_req):
+        # Everybody who comes after us has a dependence on us
+        #self.ctx.add_adep(other_op, self, other_req.index, 0, TRUE_DEPENDENCE)
+        pass
+
+    def compute_dependence_diff(self, verbose):
+        # No need to do anything
+        pass
+
+    def check_data_flow(self):
         pass
 
 class Copy(object):
@@ -1466,9 +1622,11 @@ class EventGraphTraverser(object):
         self.post_copy_fn = post_copy_fn
 
     def visit_event(self, node):
-        if self.use_gen and node.generation == self.generation:
-            return
-        node.generation = self.generation
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
         do_next = True
         if self.event_fn <> None:
             do_next = self.event_fn(node, self)
@@ -1490,9 +1648,11 @@ class EventGraphTraverser(object):
             self.post_event_fn(node, self)
 
     def visit_task(self, node):
-        if self.use_gen and node.generation == self.generation:
-            return
-        node.generation = self.generation
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
         do_next = True
         if self.task_fn <> None:
             do_next = self.task_fn(node, self)
@@ -1506,9 +1666,11 @@ class EventGraphTraverser(object):
             self.post_task_fn(node, self)
 
     def visit_mapping(self, node):
-        if self.use_gen and node.generation == self.generation:
-            return
-        node.generation = self.generation
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
         do_next = True
         if self.map_fn <> None:
             do_next = self.map_fn(node, self)
@@ -1522,9 +1684,11 @@ class EventGraphTraverser(object):
             self.post_map_fn(node, self)
 
     def visit_close(self, node):
-        if self.use_gen and node.generation == self.generation:
-            return
-        node.generation = self.generation
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
         do_next = True
         if self.close_fn <> None:
             do_next = self.close_fn(node, self)
@@ -1538,9 +1702,11 @@ class EventGraphTraverser(object):
             self.post_close_fn(node, self)
 
     def visit_copy(self, node):
-        if self.use_gen and node.generation == self.generation:
-            return
-        node.generation = self.generation
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
         do_next = True
         if self.copy_fn <> None:
             do_next = self.copy_fn(node, self)
@@ -1802,6 +1968,14 @@ class State(object):
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
+    def add_fence(self, ctx, uid):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = Fence(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
     def add_copy_op(self, ctx, uid):
         assert uid not in self.ops
         if ctx not in self.ops:
@@ -1924,7 +2098,8 @@ class State(object):
         return True
 
     def add_physical_instance(self, iid, mem, index, field, tree):
-        assert iid not in self.instances
+        if iid in self.instances:
+            return True
         if mem not in self.memories:
             return False
         if index not in self.index_space_nodes:
