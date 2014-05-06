@@ -33,8 +33,9 @@ namespace LegionRuntime {
     namespace LegionSpy {
 
       extern Logger::Category log_spy;
-
+#if 0
       static int next_point_id = 0;
+#endif
 
       // Logger calls for the machine architecture
       static inline void log_utility_processor(unsigned unique_id)

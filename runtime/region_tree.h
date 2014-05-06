@@ -794,7 +794,7 @@ namespace LegionRuntime {
      * epoch users and any close operations that
      * needed to be performed.
      */
-    struct LogicalState {
+    class LogicalState {
     public:
       LogicalState(void);
       LogicalState(const LogicalState &state);
@@ -898,7 +898,7 @@ namespace LegionRuntime {
      * necessary for performing a close operation
      * on the logical region tree.
      */
-    struct LogicalCloser {
+    class LogicalCloser {
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
                     bool validates);
@@ -963,7 +963,7 @@ namespace LegionRuntime {
      * \struct PhysicalCloser
      * Class for helping with the closing of physical region trees
      */
-    struct PhysicalCloser {
+    class PhysicalCloser {
     public:
       PhysicalCloser(MappableInfo *info,
                      bool leave_open,

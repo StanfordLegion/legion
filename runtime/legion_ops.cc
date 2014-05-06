@@ -2283,7 +2283,9 @@ namespace LegionRuntime {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
+#if 0
         unsigned index = src_requirements.size() + idx;
+#endif
         dst_contexts[idx] = parent_ctx->find_enclosing_physical_context(
                                               dst_requirements[idx].parent);
         if (!dst_requirements[idx].premapped)

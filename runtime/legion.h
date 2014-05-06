@@ -509,7 +509,7 @@ namespace LegionRuntime {
      * should be acquired in, and whether or not they 
      * should be acquired in exclusive mode or not.
      */
-    struct LockRequest {
+    class LockRequest {
     public:
       LockRequest(Lock l, unsigned mode = 0, bool exclusive = true);
     public:
