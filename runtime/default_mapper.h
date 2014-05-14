@@ -61,6 +61,9 @@ namespace LegionRuntime {
       virtual bool map_task(Task *task);
       virtual bool map_copy(Copy *copy);
       virtual bool map_inline(Inline *inline_operation);
+      virtual bool map_must_epoch(const std::vector<Task*> &tasks,
+                            const std::vector<MappingConstraint> &constraints,
+                            MappingTagID tag);
       virtual void notify_mapping_result(const Mappable *mappable);
       virtual void notify_mapping_failed(const Mappable *mappable);
       virtual bool rank_copy_targets(const Mappable *mappable,

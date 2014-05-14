@@ -121,6 +121,11 @@ class TypePointer(ASTNode):
     def __init__(self, points_to_type):
         self.points_to_type = points_to_type
 
+class TypeArray(ASTNode):
+    def __init__(self, element_type, size):
+        self.element_type = element_type
+        self.size = size
+
 class TypeStruct(ASTNode):
     def __init__(self, name, fields):
         self.name = name

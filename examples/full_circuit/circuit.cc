@@ -35,11 +35,12 @@ LegionRuntime::Logger::Category log_circuit("circuit");
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
                       int &nodes_per_piece, int &wires_per_piece,
                       int &pct_wire_in_piece, int &random_seed,
-		      int &sync, bool &perform_checks);
+		      int &steps, int &sync, bool &perform_checks);
 
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
                         HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
-                        int wires_per_piece, int pct_wire_in_piece, int random_seed);
+                        int wires_per_piece, int pct_wire_in_piece, int random_seed,
+			int steps);
 
 void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace node_space);
 void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space);
@@ -55,6 +56,7 @@ void top_level_task(const Task *task,
   int wires_per_piece = 4;
   int pct_wire_in_piece = 95;
   int random_seed = 12345;
+  int steps = STEPS;
   int sync = 0;
   bool perform_checks = false;
   {
@@ -64,7 +66,7 @@ void top_level_task(const Task *task,
 
     parse_input_args(argv, argc, num_loops, num_pieces, nodes_per_piece, 
 		     wires_per_piece, pct_wire_in_piece, random_seed,
-		     sync, perform_checks);
+		     steps, sync, perform_checks);
 
     log_circuit(LEVEL_PRINT,"circuit settings: loops=%d pieces=%d nodes/piece=%d "
                             "wires/piece=%d pct_in_piece=%d seed=%d",
@@ -96,7 +98,7 @@ void top_level_task(const Task *task,
   // Load the circuit
   std::vector<CircuitPiece> pieces(num_pieces);
   Partitions parts = load_circuit(circuit, pieces, ctx, runtime, num_pieces, nodes_per_piece,
-                                  wires_per_piece, pct_wire_in_piece, random_seed);
+                                  wires_per_piece, pct_wire_in_piece, random_seed, steps);
 
   // Arguments for each point
   ArgumentMap local_args;
@@ -147,7 +149,7 @@ void top_level_task(const Task *task,
     long num_circuit_nodes = num_pieces * nodes_per_piece;
     long num_circuit_wires = num_pieces * wires_per_piece;
     // calculate currents
-    long operations = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * STEPS;
+    long operations = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * steps;
     // distribute charge
     operations += (num_circuit_wires * 4);
     // update voltages
@@ -209,13 +211,19 @@ int main(int argc, char **argv)
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
                       int &nodes_per_piece, int &wires_per_piece,
                       int &pct_wire_in_piece, int &random_seed,
-		      int &sync, bool &perform_checks)
+		      int &steps, int &sync, bool &perform_checks)
 {
   for (int i = 1; i < argc; i++) 
   {
     if (!strcmp(argv[i], "-l")) 
     {
       num_loops = atoi(argv[++i]);
+      continue;
+    }
+
+    if (!strcmp(argv[i], "-i")) 
+    {
+      steps = atoi(argv[++i]);
       continue;
     }
 
@@ -323,9 +331,17 @@ static T random_element(const std::set<T> &set)
   return *it;
 }
 
+template<typename T>
+static T random_element(const std::vector<T> &vec)
+{
+  int index = int(drand48() * vec.size());
+  return vec[index];
+}
+
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
                         HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
-                        int wires_per_piece, int pct_wire_in_piece, int random_seed)
+                        int wires_per_piece, int pct_wire_in_piece, int random_seed,
+			int steps)
 {
   log_circuit(LEVEL_PRINT,"Initializing circuit simulation...");
   // inline map physical instances for the nodes and wire regions
@@ -359,6 +375,10 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   Coloring locator_node_map;
 
   Coloring privacy_map;
+
+  // keep a O(1) indexable list of nodes in each piece for connecting wires
+  std::vector<std::vector<ptr_t> > piece_node_ptrs(num_pieces);
+  std::vector<int> piece_shared_nodes(num_pieces, 0);
 
   srand48(random_seed);
 
@@ -402,6 +422,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         private_node_map[n].points.insert(node_ptr);
         privacy_map[0].points.insert(node_ptr);
         locator_node_map[n].points.insert(node_ptr);
+	piece_node_ptrs[n].push_back(node_ptr);
       }
     }
   }
@@ -457,11 +478,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         float capacitance = drand48() * 0.1;
         fa_wire_cap.write(wire_ptr, capacitance);
 
-        fa_wire_in_ptr.write(wire_ptr, random_element(private_node_map[n].points));
+        fa_wire_in_ptr.write(wire_ptr, random_element(piece_node_ptrs[n])); //private_node_map[n].points));
 
         if ((100 * drand48()) < pct_wire_in_piece)
         {
-          fa_wire_out_ptr.write(wire_ptr, random_element(private_node_map[n].points));
+          fa_wire_out_ptr.write(wire_ptr, random_element(piece_node_ptrs[n])); //private_node_map[n].points));
         }
         else
         {
@@ -469,7 +490,13 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
           int nn = int(drand48() * (num_pieces - 1));
           if(nn >= n) nn++;
 
-          ptr_t out_ptr = random_element(private_node_map[nn].points);
+	  // pick an arbitrary node, except that if it's one that didn't used to be shared, make the 
+	  //  sequentially next pointer shared instead so that each node's shared pointers stay compact
+	  int idx = int(drand48() * piece_node_ptrs[nn].size());
+	  if(idx > piece_shared_nodes[nn])
+	    idx = piece_shared_nodes[nn]++;
+	  ptr_t out_ptr = piece_node_ptrs[nn][idx];
+
           fa_wire_out_ptr.write(wire_ptr, out_ptr); 
           // This node is no longer private
           privacy_map[0].points.erase(out_ptr);
@@ -565,6 +592,9 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     pieces[n].first_wire = first_wires[n];
     pieces[n].num_nodes = nodes_per_piece;
     pieces[n].first_node = first_nodes[n];
+
+    pieces[n].dt = DELTAT;
+    pieces[n].steps = steps;
   }
 
   delete [] first_wires;

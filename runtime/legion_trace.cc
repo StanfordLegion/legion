@@ -22,6 +22,9 @@
 namespace LegionRuntime {
   namespace HighLevel {
 
+    // Extern declarations for loggers
+    extern Logger::Category log_run;
+
     /////////////////////////////////////////////////////////////
     // LegionTrace 
     /////////////////////////////////////////////////////////////
@@ -110,7 +113,7 @@ namespace LegionRuntime {
       {
         op_map[key] = index;
         // Add a new vector for storing dependences onto the back
-        dependences.push_back(std::set<std::pair<unsigned,int> >());
+        dependences.push_back(std::vector<DependenceRecord>());
       }
       else
       {
@@ -118,24 +121,25 @@ namespace LegionRuntime {
         op->add_mapping_reference(gen);  
         // Then compute all the dependences on this operation from
         // our previous recording of the trace
-        const std::set<std::pair<unsigned,int> > &deps = dependences[index];
-        for (std::set<std::pair<unsigned,int> >::const_iterator it = 
+        const std::vector<DependenceRecord> &deps = dependences[index];
+        for (std::vector<DependenceRecord>::const_iterator it = 
               deps.begin(); it != deps.end(); it++)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(it->first < operations.size());
+          assert(it->operation_idx < operations.size());
 #endif
           const std::pair<Operation*,GenerationID> &target = 
-                                                      operations[it->first];
-          if (it->second < 0)
-          {
+                                                operations[it->operation_idx];
+          if ((it->prev_idx == -1) || (it->next_idx == -1))
             op->register_dependence(target.first, target.second);
-          }
+          else if (!it->validates)
+            op->register_dependence(it->next_idx, target.first,
+                                    target.second, it->prev_idx,
+                                    it->dtype);
           else
-          {
-            op->register_region_dependence(target.first, target.second,
-                                           unsigned(it->second));
-          }
+            op->register_region_dependence(it->next_idx, target.first,
+                                           target.second, it->prev_idx,
+                                           it->dtype);
         }
       }
     }
@@ -155,18 +159,14 @@ namespace LegionRuntime {
         finder = op_map.find(target_key);
       // We only need to record it if it falls within our trace
       if (finder != op_map.end())
-      {
-        dependences.back().insert(
-          std::pair<unsigned,int>(finder->second,-1/*no region dependence*/));
-      }
+        dependences.back().push_back(DependenceRecord(finder->second));
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_region_dependence(Operation *target, 
-                                               GenerationID tar_gen,
-                                               Operation *source, 
-                                               GenerationID src_gen,
-                                               unsigned idx)
+    void LegionTrace::record_dependence(Operation *target, GenerationID tar_gen,
+                                        Operation *source, GenerationID src_gen,
+                                        unsigned target_idx, unsigned src_idx,
+                                        DependenceType dtype)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -179,10 +179,34 @@ namespace LegionRuntime {
         finder = op_map.find(target_key);
       // We only need to record it if it falls within our trace
       if (finder != op_map.end())
-      {
-        dependences.back().insert(
-            std::pair<unsigned,int>(finder->second,int(idx)));
-      }
+        dependences.back().push_back(
+            DependenceRecord(finder->second, target_idx, src_idx, 
+                             false/*validates*/, dtype));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionTrace::record_region_dependence(Operation *target, 
+                                               GenerationID tar_gen,
+                                               Operation *source, 
+                                               GenerationID src_gen,
+                                               unsigned target_idx, 
+                                               unsigned source_idx,
+                                               DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(tracing);
+      assert(operations.back().first == source);
+      assert(operations.back().second == src_gen);
+#endif
+      std::pair<Operation*,GenerationID> target_key(target, tar_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        finder = op_map.find(target_key);
+      // We only need to record it if it falls within our trace
+      if (finder != op_map.end())
+        dependences.back().push_back(
+            DependenceRecord(finder->second, target_idx, source_idx,
+                             true/*validates*/, dtype));
     }
 
     /////////////////////////////////////////////////////////////
@@ -349,7 +373,7 @@ namespace LegionRuntime {
       parent_ctx->update_current_fence(this);
       end_dependence_analysis();
     }
-
+    
   }; // namespace HighLevel
 }; // namespace LegionRuntime
 

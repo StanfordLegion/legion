@@ -34,10 +34,19 @@ CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor local)
         it != all_procs.end(); it++)
   {
     Processor::Kind kind = m->get_processor_kind(*it);
-    if (kind == Processor::LOC_PROC)
+    switch(kind) {
+    case Processor::LOC_PROC:
       cpu_procs.push_back(*it);
-    else
-      gpu_procs.push_back(*it); // small assumption that there are no other kinds of processors
+      break;
+
+    case Processor::TOC_PROC:
+      gpu_procs.push_back(*it);
+      break;
+
+    default:
+      // just ignore processor kinds we don't understand
+      break;
+    }
   }
   // Make sure we have some CPUs and GPUs
   if (cpu_procs.empty())
@@ -295,10 +304,11 @@ void CircuitMapper::rank_copy_target(const Task *task, Processor target,
   to_reuse.insert(gasnet_mem);
 }
 
-void CircuitMapper::slice_index_space(const Task *task, const IndexSpace &index_space,
-                                  std::vector<Mapper::DomainSplit> &slices)
+void CircuitMapper::slice_domain(const Task *task, const Domain& domain,
+                                 std::vector<Mapper::DomainSplit> &slices)
 {
-  DefaultMapper::decompose_index_space(index_space, gpu_procs, 1/*splitting factor*/, slices);
+  DefaultMapper::decompose_index_space(domain, gpu_procs,
+                                       1/*splitting factor*/, slices);
 }
 
 // EOF

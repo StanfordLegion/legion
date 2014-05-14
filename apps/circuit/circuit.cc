@@ -35,11 +35,12 @@ LegionRuntime::Logger::Category log_circuit("circuit");
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
                       int &nodes_per_piece, int &wires_per_piece,
                       int &pct_wire_in_piece, int &random_seed,
-		      int &sync);
+		      int &num_steps, int &sync);
 
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
                         HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
-                        int wires_per_piece, int pct_wire_in_piece, int random_seed);
+                        int wires_per_piece, int pct_wire_in_piece, int random_seed,
+			int steps);
 
 void registration_func(Machine *machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs);
 
@@ -59,6 +60,7 @@ void region_main(const void *args, size_t arglen,
   int wires_per_piece = 4;
   int pct_wire_in_piece = 95;
   int random_seed = 12345;
+  int steps = STEPS;
   int sync = 0;
   {
     InputArgs *inputs = (InputArgs*)args;
@@ -67,7 +69,7 @@ void region_main(const void *args, size_t arglen,
 
     parse_input_args(argv, argc, num_loops, num_pieces, nodes_per_piece, 
 		     wires_per_piece, pct_wire_in_piece, random_seed,
-		     sync);
+		     steps, sync);
 
     log_circuit(LEVEL_PRINT,"circuit settings: loops=%d pieces=%d nodes/piece=%d wires/piece=%d pct_in_piece=%d seed=%d",
        num_loops, num_pieces, nodes_per_piece, wires_per_piece,
@@ -98,7 +100,7 @@ void region_main(const void *args, size_t arglen,
   // Load the circuit
   std::vector<CircuitPiece> pieces(num_pieces);
   Partitions parts = load_circuit(circuit, pieces, ctx, runtime, num_pieces, nodes_per_piece,
-                                  wires_per_piece, pct_wire_in_piece, random_seed);
+                                  wires_per_piece, pct_wire_in_piece, random_seed, steps);
 
   // Start the simulation
   LegionRuntime::LowLevel::DetailedTimer::clear_timers();
@@ -146,11 +148,8 @@ void region_main(const void *args, size_t arglen,
                         READ_ONLY, EXCLUSIVE, circuit.node_locator));
   upv_regions.back().add_field(circuit.locator_field);
 
-  IndexSpace task_space = runtime->create_index_space(ctx, num_pieces);
-  {
-    IndexAllocator allocator = runtime->create_index_allocator(ctx, task_space);
-    allocator.alloc(num_pieces);
-  }
+  Rect<1> task_rect(Point<1>(0),Point<1>(num_pieces-1));
+  Domain task_space = Domain::from_rect<1>(task_rect);
 
   TaskArgument global_arg;
   std::vector<IndexSpaceRequirement> index_space_reqs;
@@ -158,7 +157,7 @@ void region_main(const void *args, size_t arglen,
   ArgumentMap local_args = runtime->create_argument_map(ctx);
   for (int idx = 0; idx < num_pieces; idx++)
   {
-    DomainPoint point(idx);
+    DomainPoint point = DomainPoint::from_point<1>(Point<1>(idx));
     local_args.set_point(point, TaskArgument(&(pieces[idx]),sizeof(CircuitPiece)));
   }
 
@@ -198,7 +197,7 @@ void region_main(const void *args, size_t arglen,
     long num_circuit_nodes = num_pieces * nodes_per_piece;
     long num_circuit_wires = num_pieces * wires_per_piece;
     // calculate currents
-    long operations = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * STEPS;
+    long operations = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * steps;
     // distribute charge
     operations += (num_circuit_wires * 4);
     // update voltages
@@ -224,7 +223,6 @@ void region_main(const void *args, size_t arglen,
     runtime->destroy_field_space(ctx,circuit.node_locator.get_field_space());
     runtime->destroy_index_space(ctx,circuit.all_nodes.get_index_space());
     runtime->destroy_index_space(ctx,circuit.all_wires.get_index_space());
-    runtime->destroy_index_space(ctx,task_space);
   }
 }
 
@@ -237,7 +235,7 @@ void calculate_currents_task_cpu(const void *global_args, size_t global_arglen,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   calc_new_currents_cpu(p, physical_regions);
 }
@@ -249,7 +247,7 @@ void distribute_charge_task_cpu(const void *global_args, size_t global_arglen,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_cpu(p, physical_regions);
 }
@@ -261,7 +259,7 @@ void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_cpu(p, physical_regions);
 }
@@ -275,7 +273,8 @@ void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d on proc %x",
+	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   // Call the __host__ function in circuit_gpu.cc that launches the kernel
   calc_new_currents_gpu(p, physical_regions);
@@ -288,7 +287,8 @@ void distribute_charge_task_gpu(const void *global_args, size_t global_arglen,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d on proc %x",
+	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_gpu(p, physical_regions);
 }
@@ -300,7 +300,8 @@ void update_voltages_task_gpu(const void *global_args, size_t global_arglen,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU update voltages for point %d",point.get_index());
+  log_circuit(LEVEL_PRINT,"GPU update voltages for point %d on proc %x",
+	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_gpu(p, physical_regions);
 }
@@ -360,13 +361,19 @@ void registration_func(Machine *machine, HighLevelRuntime *runtime, const std::s
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
                       int &nodes_per_piece, int &wires_per_piece,
                       int &pct_wire_in_piece, int &random_seed,
-		      int &sync)
+		      int &steps, int &sync)
 {
   for (int i = 1; i < argc; i++) 
   {
     if (!strcmp(argv[i], "-l")) 
     {
       num_loops = atoi(argv[++i]);
+      continue;
+    }
+
+    if (!strcmp(argv[i], "-i")) 
+    {
+      steps = atoi(argv[++i]);
       continue;
     }
 
@@ -424,6 +431,13 @@ static T random_element(const std::set<T> &set)
   return *it;
 }
 
+template<typename T>
+static T random_element(const std::vector<T> &vec)
+{
+  int index = int(drand48() * vec.size());
+  return vec[index];
+}
+
 PointerLocation find_location(ptr_t ptr, const std::set<ptr_t> &private_nodes,
                               const std::set<ptr_t> &shared_nodes, const std::set<ptr_t> &ghost_nodes)
 {
@@ -446,7 +460,8 @@ PointerLocation find_location(ptr_t ptr, const std::set<ptr_t> &private_nodes,
 
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
                         HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
-                        int wires_per_piece, int pct_wire_in_piece, int random_seed)
+                        int wires_per_piece, int pct_wire_in_piece, int random_seed,
+			int steps)
 {
   log_circuit(LEVEL_PRINT,"Initializing circuit simulation...");
   // inline map physical instances for the nodes and wire regions
@@ -467,6 +482,10 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   Coloring locator_node_map;
 
   Coloring privacy_map;
+
+  // keep a O(1) indexable list of nodes in each piece for connecting wires
+  std::vector<std::vector<ptr_t> > piece_node_ptrs(num_pieces);
+  std::vector<int> piece_shared_nodes(num_pieces, 0);
 
   srand48(random_seed);
 
@@ -503,6 +522,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         private_node_map[n].points.insert(node_ptr);
         privacy_map[0].points.insert(node_ptr);
         locator_node_map[n].points.insert(node_ptr);
+	piece_node_ptrs[n].push_back(node_ptr);
       }
     }
   }
@@ -534,11 +554,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         wire.inductance = drand48() * 0.01 + 0.1;
         wire.capacitance = drand48() * 0.1;
 
-        wire.in_ptr = random_element(private_node_map[n].points);
+        wire.in_ptr = random_element(piece_node_ptrs[n]); //private_node_map[n].points);
 
         if ((100 * drand48()) < pct_wire_in_piece)
         {
-          wire.out_ptr = random_element(private_node_map[n].points);
+          wire.out_ptr = random_element(piece_node_ptrs[n]); //private_node_map[n].points);
         }
         else
         {
@@ -546,7 +566,13 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
           int nn = int(drand48() * (num_pieces - 1));
           if(nn >= n) nn++;
 
-          wire.out_ptr = random_element(private_node_map[nn].points); 
+	  // pick an arbitrary node, except that if it's one that didn't used to be shared, make the 
+	  //  sequentially next pointer shared instead so that each node's shared pointers stay compact
+	  int idx = int(drand48() * piece_node_ptrs[nn].size());
+	  if(idx > piece_shared_nodes[nn])
+	    idx = piece_shared_nodes[nn]++;
+	  wire.out_ptr = piece_node_ptrs[nn][idx];
+
           // This node is no longer private
           privacy_map[0].points.erase(wire.out_ptr);
           privacy_map[1].points.insert(wire.out_ptr);
@@ -643,6 +669,9 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     pieces[n].first_wire = first_wires[n];
     pieces[n].num_nodes = nodes_per_piece;
     pieces[n].first_node = first_nodes[n];
+
+    pieces[n].dt = DELTAT;
+    pieces[n].steps = steps;
   }
 
   delete [] first_wires;

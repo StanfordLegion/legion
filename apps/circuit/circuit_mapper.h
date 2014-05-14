@@ -43,8 +43,8 @@ public:
                                 std::set<Memory> &to_reuse,
                                 std::vector<Memory> &to_create,
                                 bool &create_one);
-  virtual void slice_index_space(const Task *task, const IndexSpace &index_space,
-                                  std::vector<Mapper::DomainSplit> &slices);
+  virtual void slice_domain(const Task *task, const Domain& domain,
+                            std::vector<Mapper::DomainSplit> &slices);
 public:
   std::vector<Processor> cpu_procs;
   std::vector<Processor> gpu_procs;

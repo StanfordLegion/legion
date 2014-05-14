@@ -163,7 +163,9 @@ namespace LegionRuntime {
     class FutureMap::Impl : public Collectable {
     public:
       Impl(SingleTask *ctx, TaskOp *task, 
-           size_t future_size, Runtime *rt);
+           Runtime *rt);
+      Impl(SingleTask *ctx, Event completion_event,
+           Runtime *rt);
       Impl(SingleTask *ctx, Runtime *rt); // empty map
       Impl(const FutureMap::Impl &rhs);
       ~Impl(void);
@@ -179,7 +181,6 @@ namespace LegionRuntime {
       SingleTask *const context;
       TaskOp *const task;
       const GenerationID task_gen;
-      const size_t future_size;
       const bool predicated;
       const bool valid;
       Runtime *const runtime;
@@ -378,6 +379,10 @@ namespace LegionRuntime {
                                            const std::set<Memory> &memories,
                                            Memory destination,
                                            std::vector<Memory> &order);
+      void invoke_mapper_notify_profiling(TaskOp *task);
+      bool invoke_mapper_map_must_epoch(const std::vector<Task*> &tasks,
+          const std::vector<Mapper::MappingConstraint> &constraints,
+          MapperID map_id, MappingTagID tag);
     public:
       void perform_scheduling(void);
       void process_steal_request(Processor thief, 
@@ -424,6 +429,9 @@ namespace LegionRuntime {
       unsigned current_pending;
       bool current_executing;
       bool idle_task_enabled;
+#ifndef DEFERRED_DEPENDENCE_ANALYSIS
+      bool pending_dependence_analysis;
+#endif
     protected:
       // Since dependence analysis is usually on the critical path,
       // we allow the processor managers to create garbage collection
@@ -588,6 +596,7 @@ namespace LegionRuntime {
         SEND_SLICE_RETURN,
         SEND_FUTURE,
         SEND_FUTURE_RESULT,
+        SEND_MAKE_PERSISTENT,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -653,6 +662,7 @@ namespace LegionRuntime {
       void send_slice_return(Serializer &rez, bool flush);
       void send_future(Serializer &rez, bool flush);
       void send_future_result(Serializer &rez, bool flush);
+      void send_make_persistent(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -897,6 +907,8 @@ namespace LegionRuntime {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
+      FutureMap execute_must_epoch(Context ctx, 
+                                   const MustEpochLauncher &launcher);
     public:
       Mapper* get_mapper(Context ctx, MapperID id);
       Processor get_executing_processor(Context ctx);
@@ -1003,6 +1015,7 @@ namespace LegionRuntime {
       void send_slice_return(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
+      void send_make_persistent(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1068,6 +1081,7 @@ namespace LegionRuntime {
       void handle_slice_return(Deserializer &derez);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
+      void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1125,6 +1139,11 @@ namespace LegionRuntime {
                                            const std::set<Memory> &memories,
                                            Memory destination,
                                            std::vector<Memory> &chosen_order);
+      void invoke_mapper_notify_profiling(Processor target, TaskOp *task);
+      bool invoke_mapper_map_must_epoch(Processor target, 
+                                        const std::vector<Task*> &tasks,
+                      const std::vector<Mapper::MappingConstraint> &constraints,
+                                        MapperID map_id, MappingTagID tag);
     public:
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
@@ -1169,6 +1188,7 @@ namespace LegionRuntime {
       ReleaseOp*       get_available_release_op(void);
       TraceCaptureOp*  get_available_capture_op(void);
       TraceCompleteOp* get_available_trace_op(void);
+      MustEpochOp*     get_available_epoch_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1189,6 +1209,7 @@ namespace LegionRuntime {
       void free_release_op(ReleaseOp *op);
       void free_capture_op(TraceCaptureOp *op);
       void free_trace_op(TraceCompleteOp *op);
+      void free_epoch_op(MustEpochOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
@@ -1324,6 +1345,7 @@ namespace LegionRuntime {
       Reservation release_op_lock;
       Reservation capture_op_lock;
       Reservation trace_op_lock;
+      Reservation epoch_op_lock;
     protected:
       std::deque<IndividualTask*>  available_individual_tasks;
       std::deque<PointTask*>       available_point_tasks;
@@ -1344,6 +1366,7 @@ namespace LegionRuntime {
       std::deque<ReleaseOp*>       available_release_ops;
       std::deque<TraceCaptureOp*>  available_capture_ops;
       std::deque<TraceCompleteOp*> available_trace_ops;
+      std::deque<MustEpochOp*>     available_epoch_ops;
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

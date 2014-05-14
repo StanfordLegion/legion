@@ -235,15 +235,15 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
     soa_voltage[i] = fa_voltage[i].convert<AccessorType::SOA<sizeof(float)> >();
 
-  const int steps = STEPS;
+  const int steps = piece.steps;
   unsigned index = 0;
   {
     __m128 temp_v[WIRE_SEGMENTS+1];
     __m128 temp_i[WIRE_SEGMENTS];
     __m128 old_i[WIRE_SEGMENTS];
     __m128 old_v[WIRE_SEGMENTS-1];
-    __m128 dt = _mm_set1_ps(DELTAT);
-    __m128 recip_dt = _mm_set1_ps(1.0/DELTAT);
+    __m128 dt = _mm_set1_ps(piece.dt);
+    __m128 recip_dt = _mm_set1_ps(1.0/piece.dt);
     while ((index+3) < piece.num_wires)
     {
       // We can do pointer math!
@@ -327,7 +327,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     float inductance = fa_inductance.read(wire_ptr);
     float recip_resistance = 1.f/fa_resistance.read(wire_ptr);
     float recip_capacitance = 1.f/fa_wire_cap.read(wire_ptr);
-    float dt = DELTAT;
+    float dt = piece.dt;
     float recip_dt = 1.0/dt;
     for (int j = 0; j < steps; j++)
     {
@@ -407,8 +407,8 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
   while (itr.has_next())
   {
     ptr_t wire_ptr = itr.next();
-    const float dt = DELTAT;
-    const int steps = STEPS;
+    const float dt = p.dt;
+    const int steps = p.steps;
 
     for (int i = 0; i < WIRE_SEGMENTS; i++)
     {
@@ -570,7 +570,15 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   while (itr.has_next())
   {
     ptr_t wire_ptr = itr.next();
-    const float dt = DELTAT;
+#ifdef DEBUG_MATH
+    printf("DC: %d = %f->(%d,%d), %f->(%d,%d)\n",
+           wire_ptr.value,
+           fa_in_current.read(wire_ptr),
+           fa_in_ptr.read(wire_ptr).value, fa_in_loc.read(wire_ptr),
+           fa_out_current.read(wire_ptr),
+           fa_out_ptr.read(wire_ptr).value, fa_out_loc.read(wire_ptr));
+#endif
+    const float dt = p.dt;
     float in_current = -dt * fa_in_current.read(wire_ptr);
     float out_current = dt * fa_out_current.read(wire_ptr);
     ptr_t in_ptr = fa_in_ptr.read(wire_ptr);

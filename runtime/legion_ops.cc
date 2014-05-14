@@ -89,6 +89,8 @@ namespace LegionRuntime {
       completion_event = UserEvent::create_user_event();
       trace = NULL;
       tracing = false;
+      must_epoch = NULL;
+      must_epoch_gen = 0;
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
@@ -171,10 +173,24 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
+      assert(trace == NULL);
       assert(t != NULL);
 #endif
       trace = t; 
       tracing = !trace->is_fixed();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::set_must_epoch(MustEpochOp *epoch)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(must_epoch == NULL);
+      assert(epoch != NULL);
+#endif
+      must_epoch = epoch;
+      must_epoch_gen = epoch->get_generation();
+      must_epoch->register_subop(this);
     }
 
     //--------------------------------------------------------------------------
@@ -438,6 +454,8 @@ namespace LegionRuntime {
       // Tell our parent that we are complete
       if (track_parent)
         parent_ctx->register_child_complete(this); 
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -479,6 +497,8 @@ namespace LegionRuntime {
       // Tell our parent context that we are committed
       if (track_parent)
         parent_ctx->register_child_commit(this);
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       // Finally tell any incoming edges that we've now committed
       for (std::map<Operation*,GenerationID>::const_iterator it = 
             incoming.begin(); it != incoming.end(); it++)
@@ -557,7 +577,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool need_mapping;
-      bool need_resolution;
+      bool need_resolution = false;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -566,10 +586,20 @@ namespace LegionRuntime {
         outstanding_mapping_deps--;
         outstanding_speculation_deps--;
         need_mapping = (outstanding_mapping_deps == 0);
-        need_resolution = (outstanding_speculation_deps == 0);
+        if ((outstanding_speculation_deps == 0) &&
+            !trigger_resolution_invoked)
+        {
+          trigger_resolution_invoked = true;
+          need_resolution = true;
+        }
       }
       if (need_mapping)
-        trigger_mapping();
+      {
+        if (must_epoch == NULL)
+          trigger_mapping();
+        else
+          must_epoch->notify_mapping_dependence(must_epoch_gen);
+      }
       if (need_resolution)
         trigger_resolution();
     }
@@ -579,9 +609,9 @@ namespace LegionRuntime {
                                         GenerationID target_gen)
     //--------------------------------------------------------------------------
     {
-      // Can never register a dependence on ourself since it means
-      // that the target was recycled and will never register. Return
-      // true if the generation is older than our current generation.
+      if (must_epoch != NULL)
+        must_epoch->verify_dependence(this, gen, target, target_gen);
+      // The rest of this method is the same as the one below
       if (target == this)
       {
         // Can't remove this if we are tracing
@@ -619,10 +649,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::register_region_dependence(Operation *target,
-                                          GenerationID target_gen, unsigned idx)
+    bool Operation::register_dependence(unsigned idx, Operation *target, 
+                                        GenerationID target_gen, 
+                                        unsigned target_idx,
+                                        DependenceType dtype)
     //--------------------------------------------------------------------------
     {
+      bool do_registration = true;
+      if (must_epoch != NULL)
+      {
+        do_registration = 
+          must_epoch->record_dependence(this, gen, target, target_gen, 
+                                      idx, target_idx, dtype);
+      }
+      // Can never register a dependence on ourself since it means
+      // that the target was recycled and will never register. Return
+      // true if the generation is older than our current generation.
       if (target == this)
       {
         // Can't remove this if we are tracing
@@ -633,7 +675,8 @@ namespace LegionRuntime {
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
-            trace->record_region_dependence(this, target_gen, this, gen, idx);
+            trace->record_dependence(this, target_gen, this, gen,
+                                     target_idx, idx, dtype);
           return false;
         }
         else
@@ -641,7 +684,63 @@ namespace LegionRuntime {
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
-      bool prune = target->perform_registration(target_gen, this, gen,
+      bool prune = false;
+      if (do_registration)
+        prune = target->perform_registration(target_gen, this, gen,
+                                                registered_dependence,
+                                                outstanding_mapping_deps,
+                                                outstanding_speculation_deps);
+      if (registered_dependence)
+        incoming[target] = target_gen;
+      if (tracing)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(trace != NULL);
+#endif
+        trace->record_dependence(target, target_gen, this, gen,
+                                 target_idx, idx, dtype);
+        // Unsound to prune when tracing
+        prune = false;
+      }
+      return prune;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::register_region_dependence(unsigned idx, Operation *target,
+                                          GenerationID target_gen, 
+                                          unsigned target_idx,
+                                          DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+      bool do_registration = true;
+      if (must_epoch != NULL)
+      {
+        do_registration = 
+          must_epoch->record_dependence(this, gen, target, target_gen, 
+                                        idx, target_idx, dtype);
+      }
+      if (target == this)
+      {
+        // Can't remove this if we are tracing
+        if (tracing)
+        {
+          // Don't forget to record the dependence
+#ifdef DEBUG_HIGH_LEVEL
+          assert(trace != NULL);
+#endif
+          if (target_gen < gen)
+            trace->record_region_dependence(this, target_gen, 
+                                            this, gen, target_idx, idx, dtype);
+          return false;
+        }
+        else
+          return (target_gen < gen);
+      }
+      bool registered_dependence = false;
+      AutoLock o_lock(op_lock);
+      bool prune = false;
+      if (do_registration)
+        prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 outstanding_mapping_deps,
                                                 outstanding_speculation_deps);
@@ -656,7 +755,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(trace != NULL);
 #endif
-        trace->record_region_dependence(target, target_gen, this, gen, idx);
+        trace->record_region_dependence(target, target_gen, 
+                                        this, gen, target_idx, idx, dtype);
         // Unsound to prune when tracing
         prune = false;
       }
@@ -795,7 +895,12 @@ namespace LegionRuntime {
         }
       }
       if (need_trigger)
-        trigger_mapping();
+      {
+        if (must_epoch == NULL)
+          trigger_mapping();
+        else
+          must_epoch->notify_mapping_dependence(must_epoch_gen);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1731,7 +1836,7 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(%x,%d,%d) for inline mapping (ID %lld)",
+                                   "(" IDFMT ",%d,%d) for inline mapping (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
@@ -1780,7 +1885,7 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of inline mapping "
                                    "(ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) as a "
+                                   "requirement for region (" IDFMT ",%x,%x) as a "
                                    "parent of region requirement",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
@@ -1795,8 +1900,8 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
-                                   "parent region (%x,%x,%x) for "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
+                                   "parent region (" IDFMT ",%x,%x) for "
                                    "region requirement of inline mapping "
                                    "(ID %lld)",
                                    requirement.region.index_space.id,
@@ -1824,7 +1929,7 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region(LEVEL_ERROR,"Privileges %x for region (%x,%x,%x) are "
+            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
                                    "not a subset of privileges of parent "
                                    "task's privileges for region requirement "
                                    "of inline mapping (ID %lld)",
@@ -2057,10 +2162,10 @@ namespace LegionRuntime {
                                                               dst_space, path);
           if (!has_path)
           {
-            log_run(LEVEL_ERROR,"Destination index space %x for requirement %d "
+            log_run(LEVEL_ERROR,"Destination index space " IDFMT " for requirement %d "
                                 "of cross-region copy (ID %lld) in task %s "
                                 "(ID %lld) is not a sub-region of the source "
-                                "index space %x.",
+                                "index space " IDFMT ".",
                                 dst_space.id, idx, get_unique_copy_id(),
                                 parent_ctx->variants->name,
                                 parent_ctx->get_unique_task_id(),
@@ -2655,7 +2760,7 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(%x,%d,%d) for index %d of %s "
+                                   "(" IDFMT ",%d,%d) for index %d of %s "
                                    "requirements of copy operation (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
@@ -2714,7 +2819,7 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of copy operation "
                                    "(ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) as a "
+                                   "requirement for region (" IDFMT ",%x,%x) as a "
                                    "parent of index %d of %s region "
                                    "requirements",
                                    parent_ctx->variants->name, 
@@ -2731,8 +2836,8 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
-                                   "parent region (%x,%x,%x) for index %d of "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
+                                   "parent region (" IDFMT ",%x,%x) for index %d of "
                                    "%s region requirements of copy "
                                    "operation (ID %lld)",
                                    requirement.region.index_space.id,
@@ -2763,7 +2868,7 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region(LEVEL_ERROR,"Privileges %x for region (%x,%x,%x) are "
+            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
                                    "not a subset of privileges of parent "
                                    "task's privileges for index %d of %s "
                                    "region requirements for copy "
@@ -3305,6 +3410,9 @@ namespace LegionRuntime {
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;
       localize_region_requirement(requirement);
+      requirement.initialize_mapping_fields();
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(requirement);
 #ifdef DEBUG_HIGH_LEVEL
       assert(reference.has_ref());
       parent_index = idx;
@@ -3843,8 +3951,8 @@ namespace LegionRuntime {
         const RegionRequirement &req = region.impl->get_requirement();
         if (req.region != requirement.region)
         {
-          log_region(LEVEL_ERROR,"Mismatch between logical region (%x,%d,%d) "
-                                 "and logical region (%x,%d,%d) used for "
+          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT ",%d,%d) "
+                                 "and logical region (" IDFMT ",%d,%d) used for "
                                  "mapping physical region for acquire "
                                  "operation (ID %lld)",
                                  requirement.region.index_space.id,
@@ -3873,7 +3981,7 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(%x,%d,%d) of requirement for acquire "
+                                   "(" IDFMT ",%d,%d) of requirement for acquire "
                                    "operation (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
@@ -3903,7 +4011,7 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of acquire "
                                    "operation (ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) as a "
+                                   "requirement for region (" IDFMT ",%x,%x) as a "
                                    "parent",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
@@ -3918,8 +4026,8 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
-                                   "parent region (%x,%x,%x) of requirement "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
+                                   "parent region (" IDFMT ",%x,%x) of requirement "
                                    "for acquire operation (ID %lld)",
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -4263,8 +4371,8 @@ namespace LegionRuntime {
         const RegionRequirement &req = region.impl->get_requirement();
         if (req.region != requirement.region)
         {
-          log_region(LEVEL_ERROR,"Mismatch between logical region (%x,%d,%d) "
-                                 "and logical region (%x,%d,%d) used for "
+          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT ",%d,%d) "
+                                 "and logical region (" IDFMT ",%d,%d) used for "
                                  "mapping physical region for release "
                                  "operation (ID %lld)",
                                  requirement.region.index_space.id,
@@ -4293,7 +4401,7 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(%x,%d,%d) of requirement for release "
+                                   "(" IDFMT ",%d,%d) of requirement for release "
                                    "operation (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
@@ -4323,7 +4431,7 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of release "
                                    "operation (ID %lld) does not have a region "
-                                   "requirement for region (%x,%x,%x) as a "
+                                   "requirement for region (" IDFMT ",%x,%x) as a "
                                    "parent",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
@@ -4338,8 +4446,8 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
-                                   "parent region (%x,%x,%x) of requirement "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
+                                   "parent region (" IDFMT ",%x,%x) of requirement "
                                    "for release operation (ID %lld)",
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -4982,6 +5090,572 @@ namespace LegionRuntime {
         }
       }
       return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochOp::MustEpochOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochOp::MustEpochOp(const MustEpochOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochOp::~MustEpochOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochOp& MustEpochOp::operator=(const MustEpochOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap MustEpochOp::initialize(SingleTask *ctx,
+                                      const MustEpochLauncher &launcher,
+                                      bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize this operation
+      initialize_operation(ctx, true/*track*/);
+      // Initialize operations for everything in the launcher
+      // Note that we do not track these operations as we want them all to
+      // appear as a single operation to the parent context in order to
+      // avoid deadlock with the maximum window size.
+      indiv_tasks.resize(launcher.single_tasks.size());
+      for (unsigned idx = 0; idx < launcher.single_tasks.size(); idx++)
+      {
+        indiv_tasks[idx] = runtime->get_available_individual_task();
+        indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
+                                          check_privileges, false/*track*/);
+        indiv_tasks[idx]->set_must_epoch(this);
+        // If we have a trace, set it for this operation as well
+        if (trace != NULL)
+          indiv_tasks[idx]->set_trace(trace);
+      }
+      for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
+      {
+        index_tasks[idx] = runtime->get_available_index_task();
+        index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
+                                          check_privileges, false/*track*/);
+        index_tasks[idx]->set_must_epoch(this);
+        if (trace != NULL)
+          index_tasks[idx]->set_trace(trace);
+      }
+      mapper_id = launcher.map_id;
+      mapper_tag = launcher.mapping_tag;
+      // Make a new future map for storing our results
+      // We'll fill it in later
+      result_map = new FutureMap::Impl(ctx, get_completion_event(), runtime);
+      return result_map;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::set_task_options(ProcessorManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that all these operations will map locally because we
+      // have to do a single mapping call for all our operations.
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
+        manager->invoke_mapper_set_task_options(indiv_tasks[idx]);
+        indiv_tasks[idx]->map_locally = true;
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        manager->invoke_mapper_set_task_options(index_tasks[idx]);
+        index_tasks[idx]->map_locally = true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::find_conflicted_regions(
+                                         std::vector<PhysicalRegion> &conflicts)
+    //--------------------------------------------------------------------------
+    {
+      // Dump them all into a set when they are done to deduplicate them
+      // This is not the most optimized way to do this, but it will work for now
+      std::set<PhysicalRegion> temp_conflicts;
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
+        std::vector<PhysicalRegion> temp;
+        parent_ctx->find_conflicting_regions(indiv_tasks[idx], temp);
+        temp_conflicts.insert(temp.begin(),temp.end());
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        std::vector<PhysicalRegion> temp;
+        parent_ctx->find_conflicting_regions(index_tasks[idx], temp);
+        temp_conflicts.insert(temp.begin(),temp.end());
+      }
+      conflicts.insert(conflicts.end(),
+                       temp_conflicts.begin(),temp_conflicts.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      mapper_id = 0;
+      mapper_tag = 0;
+      // Set to 1 to include the triggers we get for our operation
+      remaining_subop_completes = 1;
+      remaining_subop_commits = 1;
+      triggering_complete = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      // All the sub-operations we have will deactivate themselves
+      indiv_tasks.clear();
+      index_tasks.clear();
+      slice_tasks.clear();
+      single_tasks.clear();
+      // Remove our reference on the future map
+      result_map = FutureMap();
+      constraints.clear();
+      task_sets.clear();
+      dependences.clear();
+      // Return this operation to the free list
+      runtime->free_epoch_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* MustEpochOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Must Epoch";
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      // For every one of our sub-operations, add an additional mapping 
+      // dependence.  When our sub-operations map, they will trigger these
+      // mapping dependences which guarantees that we will not be able to
+      // map until all of the sub-operations are ready to map.
+      outstanding_mapping_deps += (indiv_tasks.size() + index_tasks.size());
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        indiv_tasks[idx]->trigger_dependence_analysis();
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        index_tasks[idx]->trigger_dependence_analysis();
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    bool MustEpochOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Call trigger execution on each of our sub-operations, since they
+      // each have marked that they have a must_epoch owner, they will
+      // not actually map and launch, but instead will register all the base
+      // operations with us.  Note this step requires that we mark everything
+      // as needing to locally map in the 'initialize' method.  Check for
+      // error codes indicating failed pre-mapping.
+      if (!triggering_complete)
+      {
+        task_sets.resize(indiv_tasks.size()+index_tasks.size());
+        triggering_index = 0;
+        for (unsigned idx = 0; idx < indiv_tasks.size(); 
+              idx++, triggering_index++)
+          if (!indiv_tasks[idx]->trigger_execution())
+            return false;
+        for (unsigned idx = 0; idx < index_tasks.size(); 
+              idx++, triggering_index++)
+          if (!index_tasks[idx]->trigger_execution())
+            return false;
+
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!single_tasks.empty());
+#endif 
+
+        // Next build the set of single tasks and all their constraints.
+        // Iterate over all the recorded dependences
+        for (std::vector<DependenceRecord>::const_iterator it = 
+              dependences.begin(); it != dependences.end(); it++)
+        {
+          // Add constraints for all the different elements
+          const std::set<SingleTask*> &s1 = task_sets[it->op1_idx];
+          const std::set<SingleTask*> &s2 = task_sets[it->op2_idx];
+          for (std::set<SingleTask*>::const_iterator it1 = s1.begin();
+                it1 != s1.end(); it1++)
+          {
+            for (std::set<SingleTask*>::const_iterator it2 = s2.begin();
+                  it2 != s2.end(); it2++)
+            {
+              constraints.push_back(Mapper::MappingConstraint(
+                                                       *it1, it->reg1_idx,
+                                                       *it2, it->reg2_idx,
+                                                       it->dtype));
+            }
+          }
+        }
+        // Mark that we have finished building all the constraints so
+        // we don't have to redo it if we end up failing a mapping.
+        triggering_complete = true;
+      }
+      // Next make the mapper call to perform the mapping for all the tasks
+      std::vector<Task*> copy_single_tasks(single_tasks.begin(),
+                                           single_tasks.end());
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      bool notify = runtime->invoke_mapper_map_must_epoch(
+          mapper_proc, copy_single_tasks, constraints, mapper_id, mapper_tag);
+
+      // Check that all the tasks have been assigned to different processors
+      std::map<Processor,SingleTask*> target_procs;
+      for (std::set<SingleTask*>::const_iterator it = 
+            single_tasks.begin(); it != single_tasks.end(); it++)
+      {
+        if (target_procs.find((*it)->target_proc) != target_procs.end())
+        {
+          SingleTask *other = target_procs[(*it)->target_proc];
+          log_run(LEVEL_ERROR,"MUST EPOCH ERROR: Task %s (ID %lld) and "
+              "task %s (ID %lld) both requested to be run on processor "
+              IDFMT "!",
+              (*it)->variants->name, (*it)->get_unique_task_id(),
+              other->variants->name, other->get_unique_task_id(),
+              other->target_proc.id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
+        target_procs[(*it)->target_proc] = *it;
+      }
+
+      // Then we need to actually perform the mapping
+      for (std::set<SingleTask*>::const_iterator it = 
+            single_tasks.begin(); it != single_tasks.end(); it++)
+      {
+        if (!(*it)->perform_mapping(true/*mapper invoked already*/))
+        {
+          // Failed to map, unmap everyone that came before and restart
+          for (std::set<SingleTask*>::const_iterator it2 = 
+                single_tasks.begin(); it2 != it; it2++)
+          {
+            (*it2)->unmap_all_regions();
+          }
+          return false;
+        }
+      }
+
+      // Everybody successfully mapped so now check that all
+      // of the constraints have been satisfied
+      for (std::vector<Mapper::MappingConstraint>::const_iterator it = 
+            constraints.begin(); it != constraints.end(); it++)
+      {
+        // We know that all these tasks are single tasks
+        // so doing static casts are safe
+        SingleTask *t1 = static_cast<SingleTask*>(const_cast<Task*>(it->t1));
+        SingleTask *t2 = static_cast<SingleTask*>(const_cast<Task*>(it->t2));
+        PhysicalManager *inst1 = t1->get_instance(it->idx1);
+        PhysicalManager *inst2 = t2->get_instance(it->idx2);
+        // Check to make sure they selected the same instance 
+        if (inst1 != inst2)
+        {
+          log_run(LEVEL_ERROR,"MUST EPOCH ERROR: failed constrain! "
+              "Task %s (ID %lld) mapped region %d to instance " IDFMT " in "
+              "memory " IDFMT " , but task %s (ID %lld) mapped region %d to "
+              "instance " IDFMT " in memory " IDFMT ".",
+              t1->variants->name, t1->get_unique_task_id(), it->idx1,
+              inst1->get_instance().id, inst1->memory.id,
+              t2->variants->name, t2->get_unique_task_id(), it->idx2,
+              inst2->get_instance().id, inst2->memory.id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
+      }
+
+      // If the mapper wanted to know on success, then tell it
+      if (notify)
+      {
+        // Notify the mappers that the tasks successfully mapped
+        for (std::set<SingleTask*>::const_iterator it = 
+              single_tasks.begin(); it != single_tasks.end(); it++)
+        {
+          runtime->invoke_mapper_notify_result(mapper_proc, *it);
+        }
+      }
+
+      // If we passed all the constraints, then kick everything off
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        if (!runtime->is_local((*it)->target_proc)) 
+          (*it)->distribute_task();
+        else
+          (*it)->launch_task();
+      }
+      for (std::set<SliceTask*>::const_iterator it = 
+            slice_tasks.begin(); it != slice_tasks.end(); it++)
+      {
+        if (!runtime->is_local((*it)->target_proc))
+          (*it)->distribute_task();
+        else
+          (*it)->launch_task();
+      }
+      // Mark that we are done mapping and executing this operation
+      complete_mapping();
+      complete_execution();
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      bool need_complete;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(remaining_subop_completes > 0);
+#endif
+        remaining_subop_completes--;
+        need_complete = (remaining_subop_completes == 0);
+      }
+      if (need_complete)
+      {
+        result_map.impl->complete_all_futures();
+        complete_operation();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool need_commit;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(remaining_subop_commits > 0);
+#endif
+        remaining_subop_commits--;
+        need_commit = (remaining_subop_commits == 0);
+      }
+      if (need_commit)
+        commit_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::verify_dependence(Operation *src_op, GenerationID src_gen,
+                                        Operation *dst_op, GenerationID dst_gen)
+    //--------------------------------------------------------------------------
+    {
+      // If they are the same, then we can ignore them
+      if ((src_op == dst_op) && (src_gen == dst_gen))
+        return;
+      // Check to see if the source is one of our operations, if it is
+      // then we have an actual dependence which is an error.
+      int src_index = find_operation_index(src_op, src_gen);
+      if (src_index >= 0)
+      {
+        int dst_index = find_operation_index(dst_op, dst_gen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(dst_index >= 0);
+#endif
+        TaskOp *src_task = find_task_by_index(src_index);
+        TaskOp *dst_task = find_task_by_index(dst_index);
+        log_run(LEVEL_ERROR,"MUST EPOCH ERROR: dependence between task "
+            "%s (ID %lld) and task %s (ID %lld)\n",
+            src_task->variants->name, src_task->get_unique_task_id(),
+            dst_task->variants->name, dst_task->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MUST_EPOCH_FAILURE);
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MustEpochOp::record_dependence(Operation *src_op, GenerationID src_gen,
+                                        Operation *dst_op, GenerationID dst_gen,
+                                        unsigned src_idx, unsigned dst_idx,
+                                        DependenceType dtype)
+    //--------------------------------------------------------------------------
+    {
+      // If they are the same we can ignore them 
+      if ((src_op == dst_op) && (src_gen == dst_gen))
+        return true;
+      // Check to see if the source is one of our operations
+      int src_index = find_operation_index(src_op, src_gen);
+      int dst_index = find_operation_index(dst_op, dst_gen);
+      if ((src_index >= 0) && (dst_index >= 0))
+      {
+        // If it is, see what kind of dependence we have
+        if ((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE) ||
+            (dtype == ATOMIC_DEPENDENCE))
+        {
+          TaskOp *src_task = find_task_by_index(src_index);
+          TaskOp *dst_task = find_task_by_index(dst_index);
+          log_run(LEVEL_ERROR,"MUST EPOCH ERROR: dependence between region %d "
+              "of task %s (ID %lld) and region %d of task %s (ID %lld) of "
+              " type %s", src_idx, src_task->variants->name,
+              src_task->get_unique_task_id(), dst_idx, 
+              dst_task->variants->name, dst_task->get_unique_task_id(),
+              (dtype == TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
+                (dtype == ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
+                "ATOMIC DEPENDENCE");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
+        else if (dtype == SIMULTANEOUS_DEPENDENCE)
+        {
+          // Record the dependence kind
+          int dst_index = find_operation_index(dst_op, dst_gen);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(dst_index >= 0);
+#endif
+          dependences.push_back(DependenceRecord(src_index, dst_index,
+                                                 src_idx, dst_idx, dtype)); 
+          return false;
+        }
+        // NO_DEPENDENCE and PROMOTED_DEPENDENCE are not errors
+        // and do not need to be recorded
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::register_single_task(SingleTask *single)
+    //--------------------------------------------------------------------------
+    {
+      single_tasks.insert(single);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(triggering_index < task_sets.size());
+#endif
+      task_sets[triggering_index].insert(single);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::register_slice_task(SliceTask *slice)
+    //--------------------------------------------------------------------------
+    {
+      slice_tasks.insert(slice);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::set_future(const DomainPoint &point, const void *result, 
+                                 size_t result_size, bool owner)
+    //--------------------------------------------------------------------------
+    {
+      Future f = result_map.impl->get_future(point);
+      f.impl->set_result(result, result_size, owner);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::unpack_future(const DomainPoint &point, 
+                                    Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Future f = result_map.impl->get_future(point);
+      f.impl->unpack_future(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::register_subop(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      remaining_subop_completes++;
+      remaining_subop_commits++;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::notify_subop_complete(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      bool need_complete;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(remaining_subop_completes > 0);
+#endif
+        remaining_subop_completes--;
+        need_complete = (remaining_subop_completes == 0);
+      }
+      if (need_complete)
+      {
+        // Complete all our futures
+        result_map.impl->complete_all_futures();
+        complete_operation();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::notify_subop_commit(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      bool need_commit;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(remaining_subop_commits > 0);
+#endif
+        remaining_subop_commits--;
+        need_commit = (remaining_subop_commits == 0);
+      }
+      if (need_commit)
+        commit_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    int MustEpochOp::find_operation_index(Operation *op, GenerationID op_gen)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
+        if ((indiv_tasks[idx] == op) && 
+            (indiv_tasks[idx]->get_generation() == op_gen))
+          return idx;
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        if ((index_tasks[idx] == op) &&
+            (index_tasks[idx]->get_generation() == op_gen))
+          return (idx+indiv_tasks.size());
+      }
+      return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskOp* MustEpochOp::find_task_by_index(int index)
+    //--------------------------------------------------------------------------
+    {
+      if (index < indiv_tasks.size())
+        return indiv_tasks[index];
+      index -= indiv_tasks.size();
+      if (index < index_tasks.size())
+        return index_tasks[index];
+      assert(false);
+      return NULL;
     }
 
   }; // namespace LegionRuntime

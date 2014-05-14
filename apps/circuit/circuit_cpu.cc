@@ -140,8 +140,8 @@ void calc_new_currents_cpu(CircuitPiece *p,
     CircuitNode out_node = get_node(pvt_nodes, shr_nodes, ghost_nodes, wire.out_loc, wire.out_ptr);
 
     // Solve RLC model iteratively
-    float dt = DELTAT;
-    const int steps = STEPS;
+    float dt = p->dt;
+    const int steps = p->steps;
     float new_v[WIRE_SEGMENTS+1];
     float new_i[WIRE_SEGMENTS];
     for (int i = 0; i < WIRE_SEGMENTS; i++)
@@ -200,7 +200,7 @@ void distribute_charge_cpu(CircuitPiece *p,
     ptr_t wire_ptr = itr.next();
     CircuitWire wire = pvt_wires.read(wire_ptr);
 
-    const float dt = DELTAT; 
+    const float dt = p->dt; 
 
     reduce_node<AccumulateCharge>(pvt_nodes,shr_nodes,ghost_nodes,wire.in_loc,wire.in_ptr,-dt * wire.current[0]);
     reduce_node<AccumulateCharge>(pvt_nodes,shr_nodes,ghost_nodes,wire.out_loc,wire.out_ptr,dt* wire.current[WIRE_SEGMENTS-1]);

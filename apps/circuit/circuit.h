@@ -84,6 +84,8 @@ struct CircuitPiece {
   ptr_t first_wire;
   unsigned      num_nodes;
   ptr_t first_node;
+  float dt;
+  int steps;
 };
 
 struct Partitions {

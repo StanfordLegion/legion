@@ -31,6 +31,23 @@ namespace LegionRuntime {
      */
     class LegionTrace {
     public:
+      struct DependenceRecord {
+      public:
+        DependenceRecord(int idx)
+          : operation_idx(idx), prev_idx(-1), next_idx(-1),
+            validates(false), dtype(TRUE_DEPENDENCE) { }
+        DependenceRecord(int op_idx, int pidx, int nidx,
+                         bool val, DependenceType d)
+          : operation_idx(op_idx), prev_idx(pidx), 
+            next_idx(nidx), validates(val), dtype(d) { }
+      public:
+        int operation_idx;
+        int prev_idx;
+        int next_idx;
+        bool validates;
+        DependenceType dtype;
+      };
+    public:
       LegionTrace(TraceID tid, SingleTask *ctx);
       LegionTrace(const LegionTrace &rhs);
       ~LegionTrace(void);
@@ -49,9 +66,14 @@ namespace LegionRuntime {
       void register_operation(Operation *op, GenerationID gen);
       void record_dependence(Operation *target, GenerationID target_gen,
                              Operation *source, GenerationID source_gen);
+      void record_dependence(Operation *target, GenerationID target_gen,
+                             Operation *source, GenerationID source_gen,
+                             unsigned target_idx, unsigned source_idx,
+                             DependenceType dtype);
       void record_region_dependence(Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
-                                    unsigned idx);
+                                    unsigned target_idx, unsigned source_idx,
+                                    DependenceType dtype);
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences
@@ -60,7 +82,7 @@ namespace LegionRuntime {
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
       // it dependens on and whether it is a validates the region
-      std::vector<std::set<std::pair<unsigned,int> > > dependences;
+      std::vector<std::vector<DependenceRecord> > dependences;
     protected:
       const TraceID tid;
       SingleTask *const ctx;

@@ -115,6 +115,12 @@ def foreign_type(node, opts):
         if isinstance(node.points_to_type, ast.TypeLegionRuntime):
             return types.ForeignRuntime()
 
+    # arrays
+    if isinstance(node, ast.TypeArray):
+        # special Legion constructs
+        if isinstance(node.element_type, ast.TypeLegionRegion):
+            return types.ForeignRegion()
+
     # structs
     if isinstance(node, ast.TypeStruct):
         name = node.name

@@ -837,10 +837,9 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMap::Impl::Impl(SingleTask *ctx, TaskOp *t, 
-                          size_t fut_size, Runtime *rt)
+    FutureMap::Impl::Impl(SingleTask *ctx, TaskOp *t, Runtime *rt)
       : Collectable(), context(ctx), task(t), task_gen(t->get_generation()),
-        future_size(fut_size), predicated(t->is_predicated()), valid(true),
+        predicated(t->is_predicated()), valid(true),
         runtime(rt), ready_event(t->get_completion_event()),
         lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -848,20 +847,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FutureMap::Impl::Impl(SingleTask *ctx, Event comp_event, Runtime *rt)
+      : Collectable(), context(ctx), task(NULL), task_gen(0),
+        predicated(false), valid(true), runtime(rt), ready_event(comp_event),
+        lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(SingleTask *ctx, Runtime *rt)
       : Collectable(), context(ctx), task(NULL), task_gen(0),
-        future_size(0), predicated(false), valid(false),
+        predicated(false), valid(false),
         runtime(rt), ready_event(Event::NO_EVENT), 
         lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
-
     }
 
     //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(const FutureMap::Impl &rhs)
       : Collectable(), context(NULL), task(NULL), task_gen(0), 
-        future_size(0), predicated(false), valid(false), runtime(NULL) 
+        predicated(false), valid(false), runtime(NULL) 
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1464,7 +1471,11 @@ namespace LegionRuntime {
         superscalar_width(width), min_outstanding(min_out), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         current_pending(0), current_executing(false), 
+#ifndef DEFERRED_DEPENDENCE_ANALYSIS
+        idle_task_enabled(true), pending_dependence_analysis(false),
+#else
         idle_task_enabled(true),
+#endif
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
@@ -1544,7 +1555,7 @@ namespace LegionRuntime {
     void ProcessorManager::add_mapper(MapperID mid, Mapper *m, bool check)
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_SPEW,"Adding mapper %d on processor %x", 
+      log_run(LEVEL_SPEW,"Adding mapper %d on processor " IDFMT "", 
                           mid, local_proc.id);
 #ifdef DEBUG_HIGH_LEVEL
       if (check && (mid == 0))
@@ -1763,6 +1774,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ProcessorManager::invoke_mapper_notify_profiling(TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(task->map_id < mapper_objects.size());
+      assert(mapper_objects[task->map_id] != NULL);
+#endif
+      AutoLock m_lock(mapper_locks[task->map_id]);
+      mapper_objects[task->map_id]->notify_profiling_info(task);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProcessorManager::invoke_mapper_map_must_epoch(
+        const std::vector<Task*> &tasks,
+        const std::vector<Mapper::MappingConstraint> &constraints,
+        MapperID map_id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(map_id < mapper_objects.size());
+      assert(mapper_objects[map_id] != NULL);
+#endif
+      AutoLock m_lock(mapper_locks[map_id]);
+      return mapper_objects[map_id]->map_must_epoch(tasks, constraints, tag);
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorManager::perform_scheduling(void)
     //--------------------------------------------------------------------------
     {
@@ -1857,8 +1895,8 @@ namespace LegionRuntime {
                                            const std::vector<MapperID> &thieves)
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_SPEW,"handling a steal request on processor %x "
-                         "from processor %x", local_proc.id,thief.id);
+      log_run(LEVEL_SPEW,"handling a steal request on processor " IDFMT " "
+                         "from processor " IDFMT "", local_proc.id,thief.id);
       // Iterate over the task descriptions, asking the appropriate mapper
       // whether we can steal the task
       std::set<TaskOp*> stolen;
@@ -1959,8 +1997,8 @@ namespace LegionRuntime {
         for (std::set<TaskOp*>::const_iterator it = stolen.begin();
               it != stolen.end(); it++)
         {
-          log_task(LEVEL_DEBUG,"task %s (ID %lld) stolen from processor %x "
-                               "by processor %x", (*it)->variants->name,
+          log_task(LEVEL_DEBUG,"task %s (ID %lld) stolen from processor " IDFMT " "
+                               "by processor " IDFMT "", (*it)->variants->name,
                                (*it)->get_unique_task_id(), local_proc.id,
                                thief.id);
         }
@@ -2149,7 +2187,7 @@ namespace LegionRuntime {
     void ProcessorManager::dump_state(FILE *target)
     //--------------------------------------------------------------------------
     {
-      fprintf(target,"State of Processor: %x (kind=%d)\n", 
+      fprintf(target,"State of Processor: " IDFMT " (kind=%d)\n", 
               local_proc.id, proc_kind);
       fprintf(target,"  Current Pending Task: %d\n", current_pending);
       fprintf(target,"  Has Executing Task: %d\n", current_executing);
@@ -2173,6 +2211,7 @@ namespace LegionRuntime {
     bool ProcessorManager::perform_dependence_checks(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFERRED_DEPENDENCE_ANALYSIS
       bool remaining_ops = false;
       UserEvent trigger_event;
       bool needs_trigger = false;
@@ -2219,6 +2258,88 @@ namespace LegionRuntime {
         trigger_event.trigger();
 
       return remaining_ops;
+#else
+      std::vector<Operation*> ops;
+      bool remaining_ops = false;
+      UserEvent trigger_event;
+      bool needs_trigger = false;
+      bool return_analysis_hold = false;
+      // Quick check without holding the lock
+      if (!pending_dependence_analysis)
+      {
+        AutoLock d_lock(dependence_lock);
+        // Recheck after taking the lock
+        // to avoid losing the race
+        if (!pending_dependence_analysis)
+        {
+          // Very important to mark that no one else can
+          // do dependence analysis while we are have
+          // things that still need dependence analysis
+          pending_dependence_analysis = true;
+          return_analysis_hold = true;
+          // An important optimization here is that we always pull
+          // elements off the deeper queues first which optimizes
+          // for a depth-first traversal of the task/operation tree.
+          unsigned handled_ops = 0;
+          for (int idx = int(dependence_queues.size())-1;
+                idx >= 0; idx--)
+          {
+            std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
+            while ((handled_ops < superscalar_width) &&
+                    !current_queue.empty())
+            {
+              ops.push_back(current_queue.front());
+              current_queue.pop_front();
+              handled_ops++;
+            }
+            remaining_ops = remaining_ops || !current_queue.empty();
+            // If we know we have remaining ops and we've
+            // got all the ops we need, then we can break
+            if ((handled_ops == superscalar_width) && remaining_ops)
+              break;
+          }
+          // If we no longer have any remaining dependence analyses
+          // to do, then see if we have a garbage collection
+          // epoch that we can trigger.
+          if (!remaining_ops && gc_epoch_event.exists())
+          {
+            trigger_event = gc_epoch_trigger;
+            needs_trigger = true;
+            gc_epoch_event = Event::NO_EVENT;
+          }
+        }
+      }
+      else
+      {
+        AutoLock d_lock(dependence_lock,1,false);
+        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
+        {
+          if (!dependence_queues[idx].queue.empty())
+            return true;
+        }
+        return false;
+      }
+      // Don't trigger the event while holding the lock
+      // You never know what the low-level runtime might decide to do
+      if (needs_trigger)
+        trigger_event.trigger();
+
+      // Ask each of the operations to issue their mapping task
+      // onto the utility processor
+      for (unsigned idx = 0; idx < ops.size(); idx++)
+      {
+        ops[idx]->trigger_dependence_analysis();
+      }
+      if (return_analysis_hold)
+      {
+        AutoLock d_lock(dependence_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(pending_dependence_analysis);
+#endif
+        pending_dependence_analysis = false;
+      }
+      return remaining_ops;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3068,6 +3189,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_make_persistent(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_MAKE_PERSISTENT, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::package_message(Serializer &rez, MessageKind k,
                                          bool flush)
     //--------------------------------------------------------------------------
@@ -3467,6 +3595,11 @@ namespace LegionRuntime {
               runtime->handle_future_result(derez);
               break;
             }
+          case SEND_MAKE_PERSISTENT:
+            {
+              runtime->handle_make_persistent(derez, remote_address_space);
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -3555,7 +3688,8 @@ namespace LegionRuntime {
         acquire_op_lock(Reservation::create_reservation()),
         release_op_lock(Reservation::create_reservation()),
         capture_op_lock(Reservation::create_reservation()),
-        trace_op_lock(Reservation::create_reservation())
+        trace_op_lock(Reservation::create_reservation()),
+        epoch_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run(LEVEL_DEBUG,"Initializing high-level runtime in address space %x",
@@ -3931,6 +4065,15 @@ namespace LegionRuntime {
       available_trace_ops.clear();
       trace_op_lock.destroy_reservation();
       trace_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<MustEpochOp*>::const_iterator it = 
+            available_epoch_ops.begin(); it !=
+            available_epoch_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_epoch_ops.clear();
+      epoch_op_lock.destroy_reservation();
+      epoch_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -4073,7 +4216,7 @@ namespace LegionRuntime {
     {
       IndexSpace space = IndexSpace::create_index_space(max_num_elmts);
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG,"Creating index space %x in task %s (ID %lld) with "
+      log_index(LEVEL_DEBUG,"Creating index space " IDFMT " in task %s (ID %lld) with "
                             "%ld maximum elements", space.id, 
                             ctx->variants->name, ctx->get_unique_task_id(), 
                             max_num_elmts);
@@ -4108,7 +4251,7 @@ namespace LegionRuntime {
       // Make a dummy index space that will be associated with the domain
       IndexSpace space = domain.get_index_space(true/*create if needed*/);
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG,"Creating dummy index space %x in task %s "
+      log_index(LEVEL_DEBUG,"Creating dummy index space " IDFMT " in task %s "
                             "(ID %lld) for domain", 
                             space.id, ctx->variants->name,
                             ctx->get_unique_task_id());
@@ -4140,7 +4283,7 @@ namespace LegionRuntime {
       if (!handle.exists())
         return;
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG, "Destroying index space %x in task %s (ID %lld)", 
+      log_index(LEVEL_DEBUG, "Destroying index space " IDFMT " in task %s (ID %lld)", 
                       handle.id, ctx->variants->name, 
                       ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -4189,7 +4332,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space %x in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4346,7 +4489,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space %x in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4438,7 +4581,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space %x in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4638,7 +4781,7 @@ namespace LegionRuntime {
       }
       if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid handle %d for get index space domain", 
+        log_index(LEVEL_ERROR, "Invalid handle " IDFMT " for get index space domain", 
                                 handle.id);
         assert(false);
         exit(ERROR_INVALID_INDEX_DOMAIN);
@@ -4954,7 +5097,7 @@ namespace LegionRuntime {
       LogicalRegion region(tid, index_space, field_space);
 #ifdef DEBUG_HIGH_LEVEL
       log_region(LEVEL_DEBUG, "Creating logical region in task %s (ID %lld) "
-                              "with index space %x and field space %x in new "
+                              "with index space " IDFMT " and field space %x in new "
                               "tree %d",
                               ctx->variants->name,ctx->get_unique_task_id(), 
                               index_space.id, field_space.id, tid);
@@ -4986,7 +5129,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      log_region(LEVEL_DEBUG, "Deleting logical region (%x,%x) in task %s "
+      log_region(LEVEL_DEBUG, "Deleting logical region (" IDFMT ",%x) in task %s "
                               "(ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
                               ctx->variants->name,ctx->get_unique_task_id());
@@ -5587,7 +5730,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (%x,%x,%x) "
+      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT ",%x,%x) "
                            "in task %s (ID %lld)",
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
@@ -5602,8 +5745,8 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
-                            "that conflicts with mapped region (%x,%x,%x) at "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
+                            "that conflicts with mapped region (" IDFMT ",%x,%x) at "
                             "index %d of parent task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
                             "receive this error message.",
@@ -5622,7 +5765,7 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -5657,7 +5800,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (%x,%x,%x) "
+      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT ",%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id, 
                            req.region.tree_id, ctx->variants->name, 
@@ -5671,8 +5814,8 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
-                            "that conflicts with mapped region (%x,%x,%x) at "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
+                            "that conflicts with mapped region (" IDFMT ",%x,%x) at "
                             "index %d of parent task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
                             "receive this error message.",
@@ -5691,7 +5834,7 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (%x,%x,%x) "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -6487,6 +6630,104 @@ namespace LegionRuntime {
 #endif
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap Runtime::execute_must_epoch(Context ctx, 
+                                          const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      MustEpochOp *epoch_op = get_available_epoch_op();
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Executing a must epoch in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal Legion execute must epoch call in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      FutureMap result = epoch_op->initialize(ctx, launcher, check_privileges);
+#else
+      FutureMap result = epoch_op->initialize(ctx, launcher, 
+                                              false/*check privileges*/);
+#endif
+      // Do all the stuff we normally have to do for a single task launch
+      // except now for many task launches.
+      Processor proc = ctx->get_executing_processor();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+      ProcessorManager *manager = proc_managers[proc];
+      // Set the task options for all the constituent tasks
+      epoch_op->set_task_options(manager);
+      // Now find all the parent task regions we need to invalidate
+      std::vector<PhysicalRegion> unmapped_regions;
+      epoch_op->find_conflicted_regions(unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Now we can issue the must epoch
+      add_to_dependence_queue(proc, epoch_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else
+        {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(), 
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution)
+      {
+        result.wait_all_results(); 
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7312,6 +7553,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_make_persistent(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_make_persistent(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -7705,6 +7953,14 @@ namespace LegionRuntime {
       Future::Impl::handle_future_result(derez, this);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::handle_make_persistent(Deserializer &derez,
+                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceManager::handle_make_persistent(derez, forest, source);
+    }
+
 #ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
     Processor Runtime::get_cleanup_proc(Processor p) const
@@ -7764,7 +8020,7 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(0/*unique id*/, PROF_BEGIN_SCHEDULER);
 #endif
-      log_run(LEVEL_DEBUG,"Running scheduler on processor %x", proc.id);
+      log_run(LEVEL_DEBUG,"Running scheduler on processor " IDFMT "", proc.id);
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
 #ifdef DYNAMIC_TESTS
@@ -8104,6 +8360,30 @@ namespace LegionRuntime {
 #endif
       proc_managers[proc]->invoke_mapper_rank_copy_sources(mappable,
                                 memories, destination, chosen_order);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::invoke_mapper_notify_profiling(Processor proc, TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+      proc_managers[proc]->invoke_mapper_notify_profiling(task);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::invoke_mapper_map_must_epoch(Processor proc,
+        const std::vector<Task*> &tasks,
+        const std::vector<Mapper::MappingConstraint> &constraints,
+        MapperID map_id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+      return proc_managers[proc]->invoke_mapper_map_must_epoch(tasks, 
+                                                      constraints, map_id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8776,6 +9056,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    MustEpochOp* Runtime::get_available_epoch_op(void)
+    //--------------------------------------------------------------------------
+    {
+      MustEpochOp *result = NULL;
+      {
+        AutoLock e_lock(epoch_op_lock);
+        if (!available_epoch_ops.empty())
+        {
+          result = available_epoch_ops.front();
+          available_epoch_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = new MustEpochOp(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -8951,6 +9253,14 @@ namespace LegionRuntime {
     {
       AutoLock t_lock(trace_op_lock);
       available_trace_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_epoch_op(MustEpochOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock e_lock(epoch_op_lock);
+      available_epoch_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -9163,7 +9473,7 @@ namespace LegionRuntime {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
         if (cnt > 0)
@@ -9193,7 +9503,7 @@ namespace LegionRuntime {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
         if (cnt > 0)
@@ -9223,7 +9533,7 @@ namespace LegionRuntime {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
         if (cnt > 0)
@@ -9253,7 +9563,7 @@ namespace LegionRuntime {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
+        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen); 
         if (cnt > 0)
@@ -9279,7 +9589,7 @@ namespace LegionRuntime {
             out_ops.begin(); it != out_ops.end(); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Acquire Op: %lld: %p (%x,%d) triggered %d\n",
+        fprintf(f,"Outstanding Acquire Op: %lld: %p (" IDFMT ",%d) triggered %d\n",
                   it->first, it->second, completion.id, completion.gen,
                   completion.has_triggered());
         if (!it->second->wait_barriers.empty())
@@ -9289,7 +9599,7 @@ namespace LegionRuntime {
                 it->second->wait_barriers.end(); bit++)
           {
             Event e = bit->get_barrier().get_previous_phase();
-            fprintf(f,"Preceding barrier (%x,%d) has triggered %d\n",
+            fprintf(f,"Preceding barrier (" IDFMT ",%d) has triggered %d\n",
                     e.id, e.gen, e.has_triggered());
           }
         }
@@ -9334,28 +9644,28 @@ namespace LegionRuntime {
         {
           case TaskOp::INDIVIDUAL_TASK_KIND:
             {
-              fprintf(f,"Outstanding Individual Task %lld: %p %s (%x,%d)\n",
+              fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::POINT_TASK_KIND:
             {
-              fprintf(f,"Outstanding Point Task %lld: %p %s (%x,%d)\n",
+              fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::INDEX_TASK_KIND:
             {
-              fprintf(f,"Outstanding Index Task %lld: %p %s (%x,%d)\n",
+              fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::SLICE_TASK_KIND:
             {
-              fprintf(f,"Outstanding Slice Task %lld: %p %s (%x,%d)\n",
+              fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
@@ -9637,9 +9947,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert((p.id & 0xffff) < (MAX_NUM_PROCS+1));
+      assert(p.local_id() < (MAX_NUM_PROCS+1));
 #endif
-      return runtime_map[(p.id & 0xffff)];
+      return runtime_map[p.local_id()];
     }
 
     //--------------------------------------------------------------------------
@@ -10234,12 +10544,12 @@ namespace LegionRuntime {
       // processor objects that works on both the shared and general
       // low-level runtimes.
 #ifdef DEBUG_HIGH_LEVEL
-      assert((p.id & 0xffff) < (MAX_NUM_PROCS+1));
+      assert(p.local_id() < (MAX_NUM_PROCS+1));
 #endif 
 #ifndef SHARED_LOWLEVEL
-      if (separate_runtime_instances || ((p.id & 0xffff) == 0))
+      if (separate_runtime_instances || (p.local_id() == 0))
 #else
-      if (separate_runtime_instances || (p.id == 1))
+      if (separate_runtime_instances || (p.local_id() == 1))
 #endif
       {
         // Compute these three data structures necessary for
@@ -10284,7 +10594,7 @@ namespace LegionRuntime {
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++)
           {
-            const unsigned space = (it->id & 0xffff0000);
+            const unsigned space = it->address_space(); 
             std::map<unsigned,AddressSpaceID>::const_iterator finder = 
               address_space_indexes.find(space);
             if (finder == address_space_indexes.end())
@@ -10301,7 +10611,7 @@ namespace LegionRuntime {
                 it != all_procs.end(); it++)
           {
             std::map<unsigned,AddressSpaceID>::const_iterator finder = 
-              address_space_indexes.find(it->id & 0xffff0000);
+              address_space_indexes.find(it->address_space());
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != address_space_indexes.end());
 #endif
@@ -10357,12 +10667,12 @@ namespace LegionRuntime {
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
-          runtime_map[(it->id & 0xffff)] = local_rt;
+          runtime_map[it->local_id()] = local_rt;
         }
         for (std::set<Processor>::const_iterator it = local_util_procs.begin();
               it != local_util_procs.end(); it++)
         {
-          runtime_map[(it->id & 0xffff)] = local_rt;
+          runtime_map[it->local_id()] = local_rt;
         }
       }
       // Arrive at the barrier
@@ -10371,12 +10681,12 @@ namespace LegionRuntime {
       unsigned needed_count = 0;
       {
         std::set<Processor> utility_procs;
-        const unsigned local_space = 0xffff0000 & p.id;
+        const unsigned local_space = p.address_space();
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {
 #ifndef SHARED_LOWLEVEL
-          if (local_space != (0xffff0000 & it->id))
+          if (local_space != it->address_space())
             continue;
 #endif
           needed_count++;

@@ -281,7 +281,7 @@ namespace LegionRuntime {
       if (node->parent == NULL)
       {
         log_run(LEVEL_ERROR,"Parent index partition requested for "
-                            "index space %x with no parent. Use "
+                            "index space " IDFMT " with no parent. Use "
                             "has_parent_index_partition to check "
                             "before requesting a parent.", handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -578,7 +578,7 @@ namespace LegionRuntime {
       if (node->parent == NULL)
       {
         log_run(LEVEL_ERROR,"Parent logical partition requested for "
-                            "logical region (%x,%x,%d) with no parent. Use "
+                            "logical region (" IDFMT ",%x,%d) with no parent. Use "
                             "has_parent_logical_partition to check "
                             "before requesting a parent.", 
                             handle.index_space.id,
@@ -1756,7 +1756,7 @@ namespace LegionRuntime {
         index_nodes.find(space);
       if (it == index_nodes.end())
       {
-        log_index(LEVEL_ERROR,"Unable to find entry for index space %x.  This "
+        log_index(LEVEL_ERROR,"Unable to find entry for index space " IDFMT ".  This "
                               "is either a runtime bug, or requires Legion "
                               "fences if index space names are being returned "
                               "out of the context in which they are created.",
@@ -1820,7 +1820,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!has_node(handle.index_space))
       {
-        log_region(LEVEL_ERROR,"Unable to find index space entry %x for "
+        log_region(LEVEL_ERROR,"Unable to find index space entry " IDFMT " for "
                                "logical region. This is either a runtime bug "
                                "or requires Legion fences if names are being "
                                "returned out of the context in which they are "
@@ -4419,21 +4419,23 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalInvalidator::PhysicalInvalidator(ContextID c)
-      : ctx(c), total(true), invalid_mask(FieldMask(FIELD_ALL_ONES))
+      : ctx(c), total(true), force(true), 
+        invalid_mask(FieldMask(FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInvalidator::PhysicalInvalidator(ContextID c, const FieldMask &m)
-      : ctx(c), total(false), invalid_mask(m)
+    PhysicalInvalidator::PhysicalInvalidator(ContextID c, const FieldMask &m,
+                                             const bool f)
+      : ctx(c), total(false), force(f), invalid_mask(m)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalInvalidator::PhysicalInvalidator(const PhysicalInvalidator &rhs)
-      : ctx(0), total(false), invalid_mask(FieldMask())
+      : ctx(0), total(false), force(false), invalid_mask(FieldMask())
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4470,7 +4472,7 @@ namespace LegionRuntime {
       if (total)
         node->invalidate_physical_state(ctx);
       else
-        node->invalidate_physical_state(ctx, invalid_mask);
+        node->invalidate_physical_state(ctx, invalid_mask, force);
       return true;
     }
 
@@ -4481,7 +4483,7 @@ namespace LegionRuntime {
       if (total)
         node->invalidate_physical_state(ctx);
       else
-        node->invalidate_physical_state(ctx, invalid_mask);
+        node->invalidate_physical_state(ctx, invalid_mask, force);
       return true;
     }
 
@@ -4924,9 +4926,9 @@ namespace LegionRuntime {
         {
           if (visible_memories.find(*it) == visible_memories.end())
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x "
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
                                      "which is not visible from processor "
-                                     "%x when mapping region %d of mappable "
+                                     "" IDFMT " when mapping region %d of mappable "
                                      "(ID %lld)!  Removing memory from the "
                                      "chosen ordering!", it->id, 
                                      target_proc.id, index, 
@@ -4939,10 +4941,10 @@ namespace LegionRuntime {
               (info->req.current_instances.find(*it) == 
                 info->req.current_instances.end()))
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x "
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
                                      "for restricted region requirement "
                                      "when mapping region %d of mappable "
-                                     "(ID %lld) on processor %x!  Removing "
+                                     "(ID %lld) on processor " IDFMT "!  Removing "
                                      "memory from the chosen ordering!", 
                                      it->id, index, 
                                      info->mappable->get_unique_mappable_id(),
@@ -5161,9 +5163,9 @@ namespace LegionRuntime {
             filtered_memories.push_back(*it);
           else
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory %x "
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
                                      "which is not visible from processor "
-                                     "%x when mapping region %d of mappable "
+                                     "" IDFMT " when mapping region %d of mappable "
                                      "(ID %lld)!  Removing memory from the "
                                      "chosen ordering!", it->id, 
                                      target_proc.id, index, 
@@ -5563,9 +5565,9 @@ namespace LegionRuntime {
             // just register a normal dependence
             if (validate)
             {
-              if (user.op->register_region_dependence(prev_user.op, 
+              if (user.op->register_region_dependence(user.idx, prev_user.op,
                                                       prev_user.gen, 
-                                                      prev_user.idx))
+                                                      prev_user.idx, dtype))
               {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                 // Now we can prune it from the list
@@ -5583,7 +5585,9 @@ namespace LegionRuntime {
             }
             else
             {
-              if (user.op->register_dependence(prev_user.op, prev_user.gen))
+              if (user.op->register_dependence(user.idx, prev_user.op, 
+                                               prev_user.gen, 
+                                               prev_user.idx, dtype))
               {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                 // Now we can prune it from the list
@@ -7981,7 +7985,8 @@ namespace LegionRuntime {
                                  next_closer.get_dirty_mask());
 
         if (!closer.permit_leave_open)
-          invalidate_instance_views(state, closing_mask, true/*clean*/);
+          invalidate_instance_views(state, closing_mask, 
+                                    true/*clean*/, false/*force*/);
         else
           state.dirty_mask -= closing_mask;
         // Finally release our hold on the state
@@ -8055,10 +8060,10 @@ namespace LegionRuntime {
         {
           if (valid_memories.find(*it) == valid_memories.end())
           {
-            log_region(LEVEL_WARNING,"WARNING: memory %x was specified "
+            log_region(LEVEL_WARNING,"WARNING: memory " IDFMT " was specified "
                                      "to be reused in rank_copy_targets "
                                      "when closing mappable operation ID %lld."
-                                     "Memory %x will be ignored.", it->id,
+                                     "Memory " IDFMT " will be ignored.", it->id,
                                closer.info->mappable->get_unique_mappable_id(),
                                it->id);
             to_delete.push_back(*it);
@@ -8682,7 +8687,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_instance_views(PhysicalState &state,
                                                  const FieldMask &invalid_mask,
-                                                 bool clean)
+                                                 bool clean, bool force)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8693,7 +8698,7 @@ namespace LegionRuntime {
             state.valid_views.begin(); it != state.valid_views.end(); it++)
       {
         it->second -= invalid_mask;
-        if (!it->second)
+        if (!it->second && (force || !it->first->is_persistent()))
           to_delete.push_back(it->first);
       }
       for (std::vector<InstanceView*>::const_iterator it = to_delete.begin();
@@ -8750,7 +8755,8 @@ namespace LegionRuntime {
       new_view->add_valid_reference();
       if (dirty)
       {
-        invalidate_instance_views(state, valid_mask, false/*clean*/);
+        invalidate_instance_views(state, valid_mask, 
+                                  false/*clean*/, false/*force*/);
         state.dirty_mask |= valid_mask;
       }
       std::map<InstanceView*,FieldMask>::iterator finder = 
@@ -8792,7 +8798,8 @@ namespace LegionRuntime {
       }
       if (!!dirty_mask)
       {
-        invalidate_instance_views(state, dirty_mask, false/*clean*/);
+        invalidate_instance_views(state, dirty_mask, 
+                                  false/*clean*/, false/*force*/);
         state.dirty_mask |= dirty_mask;
       }
       for (std::vector<InstanceView*>::const_iterator it = new_views.begin();
@@ -8988,7 +8995,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::invalidate_physical_state(ContextID ctx,
-                                                  const FieldMask &invalid_mask)
+                                                  const FieldMask &invalid_mask,
+                                                  bool force)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8996,7 +9004,7 @@ namespace LegionRuntime {
 #endif
       PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
 
-      invalidate_instance_views(state, invalid_mask, true/*clean*/);
+      invalidate_instance_views(state, invalid_mask, true/*clean*/, force);
       invalidate_reduction_views(state, invalid_mask);
       state.children.valid_fields -= invalid_mask;
       std::vector<Color> to_delete;
@@ -9307,8 +9315,9 @@ namespace LegionRuntime {
                 // just register a normal dependence
                 if (validate)
                 {
-                  if (user.op->register_region_dependence(it->op, 
-                                                          it->gen, it->idx))
+                  if (user.op->register_region_dependence(user.idx, it->op, 
+                                                          it->gen, it->idx,
+                                                          dtype))
                   {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                     // Now we can prune it from the list and continue
@@ -9328,7 +9337,8 @@ namespace LegionRuntime {
                 }
                 else
                 {
-                  if (user.op->register_dependence(it->op, it->gen))
+                  if (user.op->register_dependence(user.idx, it->op, it->gen,
+                                                   it->idx, dtype))
                   {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
                     // Now we can prune it from the list and continue
@@ -9420,22 +9430,17 @@ namespace LegionRuntime {
           it++;
           continue;
         }
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         DependenceType dtype = check_dependence_type(it->usage, 
                                                      closer.user.usage);
-        // Make what are normally no-dependences look like control dependences
-        if (dtype == NO_DEPENDENCE)
-          dtype = PROMOTED_DEPENDENCE;
-#endif
 #ifdef LEGION_LOGGING
-        if (dtype != PROMOTED_DEPENDENCE)
+        if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
           LegionLogging::log_mapping_dependence(
               Machine::get_executing_processor(),
               closer.user.op->get_parent()->get_unique_task_id(),
               it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
 #ifdef LEGION_SPY
-        if (dtype != PROMOTED_DEPENDENCE)
+        if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
           LegionSpy::log_mapping_dependence(
               closer.user.op->get_parent()->get_unique_task_id(),
               it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
@@ -9443,8 +9448,9 @@ namespace LegionRuntime {
         // Register the dependence 
         if (closer.validates)
         {
-          if (closer.user.op->register_region_dependence(it->op,
-                                                         it->gen, it->idx))
+          if (closer.user.op->register_region_dependence(closer.user.idx, 
+                                                         it->op, it->gen, 
+                                                         it->idx, dtype))
           {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
             it = users.erase(it);
@@ -9459,7 +9465,8 @@ namespace LegionRuntime {
         }
         else
         {
-          if (closer.user.op->register_dependence(it->op, it->gen))
+          if (closer.user.op->register_dependence(closer.user.idx, it->op, 
+                                                  it->gen, it->idx, dtype))
           {
 #if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
             it = users.erase(it);
@@ -9896,6 +9903,10 @@ namespace LegionRuntime {
       if (!IS_REDUCE(info->req))
       {
         InstanceView *new_view = view->as_instance_view();
+        // If the user requested that this view become persistent make it so
+        if (info->req.make_persistent)
+          new_view->make_persistent();
+
         // Issue updates for any fields which needed to be brought up
         // to date with the current versions of those fields
         // (assuming we are not write discard)
@@ -9928,7 +9939,8 @@ namespace LegionRuntime {
             // when going down the tree so release it 
             // and then reacquire it
             release_physical_state(state);
-            PhysicalInvalidator invalidator(info->ctx, user.field_mask);
+            PhysicalInvalidator invalidator(info->ctx, user.field_mask,
+                                            false/*force invalidate*/);
             visit_node(&invalidator);
             // Re-acquire the physical state
             acquire_physical_state(state, true/*exclusive*/);
@@ -10095,7 +10107,7 @@ namespace LegionRuntime {
       context->runtime->send_region_state(target, rez);
       // If we're supposed to invalidate the state, do that now
       if (invalidate)
-        invalidate_physical_state(ctx, send_mask);
+        invalidate_physical_state(ctx, send_mask, false/*force*/);
       return continue_traversal;
     }
 
@@ -10161,7 +10173,7 @@ namespace LegionRuntime {
         // Transform field mask to our node 
         node->column_source->transform_field_mask(invalidate_mask, source);
         // Perform the invalidation
-        node->invalidate_physical_state(ctx, invalidate_mask);
+        node->invalidate_physical_state(ctx, invalidate_mask, false/*force*/);
       }
       
       // Note we don't need a separate routine for unpack send back state
@@ -10174,7 +10186,7 @@ namespace LegionRuntime {
                                            const FieldMask &capture_mask) 
     //--------------------------------------------------------------------------
     {
-      logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
+      logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
           handle.index_space.id, handle.field_space.id,handle.tree_id,
           row_source->color, logger->get_depth());
       logger->down();
@@ -10213,7 +10225,7 @@ namespace LegionRuntime {
                                             const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
+      logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d", 
           handle.index_space.id, handle.field_space.id,handle.tree_id,
           row_source->color, logger->get_depth());
       logger->down();
@@ -10315,7 +10327,7 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Instance %x   Memory %x   Mask %s",
+          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -10343,7 +10355,7 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Reduction Instance %x   Memory %x  Mask %s",
+          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT "  Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -10379,7 +10391,7 @@ namespace LegionRuntime {
                                           const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      logger->log("Region Node (%x,%d,%d) Color %d at depth %d (%p)", 
+      logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d (%p)", 
           handle.index_space.id, handle.field_space.id,handle.tree_id,
           row_source->color, logger->get_depth(), this);
       logger->down();
@@ -10410,7 +10422,7 @@ namespace LegionRuntime {
                                            const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      logger->log("Region Node (%x,%d,%d) Color %d at depth %d (%p)", 
+      logger->log("Region Node (" IDFMT ",%d,%d) Color %d at depth %d (%p)", 
           handle.index_space.id, handle.field_space.id,handle.tree_id,
           row_source->color, logger->get_depth(), this);
       logger->down();
@@ -10731,7 +10743,7 @@ namespace LegionRuntime {
       }
       context->runtime->send_partition_state(target, rez);
       if (invalidate)
-        invalidate_physical_state(ctx, send_mask);
+        invalidate_physical_state(ctx, send_mask, false/*force*/);
       return continue_traversal;
     }
 
@@ -10799,7 +10811,7 @@ namespace LegionRuntime {
         // Transform the field mask to our node 
         node->column_source->transform_field_mask(invalidate_mask, source);
         // Perform the invalidation 
-        node->invalidate_physical_state(ctx, invalidate_mask);
+        node->invalidate_physical_state(ctx, invalidate_mask, false/*force*/);
       }
       
       // Note we don't need a separate routine for unpack send back state
@@ -10954,7 +10966,7 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Instance %x   Memory %x   Mask %s",
+          logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -10982,7 +10994,7 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Reduction Instance %x   Memory %x  Mask %s",
+          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT "  Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -11233,7 +11245,7 @@ namespace LegionRuntime {
       context->unregister_physical_manager(this->did);
       if (owner && instance.exists())
       {
-        log_leak(LEVEL_WARNING,"Leaking physical instance %x in memory %x",
+        log_leak(LEVEL_WARNING,"Leaking physical instance " IDFMT " in memory " IDFMT "",
                                instance.id, memory.id);
       }
     }
@@ -11278,11 +11290,11 @@ namespace LegionRuntime {
                                      const FieldMask &mask, size_t bf,
                          const std::map<FieldID,Domain::CopySrcDstField> &infos,
                          const std::map<unsigned,FieldID> &indexes,
-                         Event u_event, unsigned dep)
+                         Event u_event, unsigned dep, bool persist)
       : PhysicalManager(ctx, did, owner_space, local_space, mem, inst), 
         region_node(node), allocated_fields(mask), blocking_factor(bf), 
         use_event(u_event), field_infos(infos), field_indexes(indexes), 
-        depth(dep), recycled(false)
+        depth(dep), recycled(false), persistent(persist)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -11415,8 +11427,8 @@ namespace LegionRuntime {
         {
           // If either of these conditions were true, then we
           // should actually delete the physical instance.
-          log_garbage(LEVEL_DEBUG,"Garbage collecting physical instance %x "
-                                "in memory %x in address space %d",
+          log_garbage(LEVEL_DEBUG,"Garbage collecting physical instance " IDFMT " "
+                                "in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
 #ifdef LEGION_PROF
           LegionProf::register_instance_deletion(instance.id);
@@ -11653,6 +11665,7 @@ namespace LegionRuntime {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      rez.serialize(persistent);
     }
 
     //--------------------------------------------------------------------------
@@ -11687,6 +11700,8 @@ namespace LegionRuntime {
         fields.insert(fid);
         derez.deserialize(field_infos[fid]);
       }
+      bool persistent;
+      derez.deserialize(persistent);
       RegionNode *node = context->get_node(handle);
       FieldMask mask = node->column_source->get_field_mask(fields);
       std::map<unsigned,FieldID> field_indexes;
@@ -11696,7 +11711,7 @@ namespace LegionRuntime {
                                    context->runtime->address_space,
                                    mem, inst, node, mask, blocking_factor,
                                    field_infos, field_indexes, 
-                                   use_event, depth);
+                                   use_event, depth, persistent);
       else
         return NULL;
     }
@@ -11785,6 +11800,67 @@ namespace LegionRuntime {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    bool InstanceManager::is_persistent(void) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to hold any locks as this is a monotonic variable
+      return persistent;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceManager::make_persistent(AddressSpaceID origin)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to do this if we weren't persistent to begin with
+      if (!persistent)
+      {
+        persistent = true;
+        // Now notify others about the update
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        if (owner)
+        {
+          Serializer rez;
+          rez.serialize(did);
+          // If it is the owner send the update to all the remote address spaces
+          for (std::set<AddressSpaceID>::const_iterator it = 
+                remote_spaces.begin(); it != remote_spaces.end(); it++)
+          {
+            // Don't need to send it back to the origin
+            if ((*it) != origin)
+            {
+              context->runtime->send_make_persistent((*it), rez);
+            }
+          }
+        }
+        else if (origin != owner_space)
+        {
+          // Not the owner, so send the update to the owner
+          Serializer rez;
+          rez.serialize(did);
+          context->runtime->send_make_persistent(owner_space, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceManager::handle_make_persistent(Deserializer &derez,
+                               RegionTreeForest *context, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(context->has_manager(did));
+#endif
+      InstanceManager *manager = 
+        context->find_manager(did)->as_instance_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(manager != NULL);
+#endif
+      manager->make_persistent(source);
+    }
+
     /////////////////////////////////////////////////////////////
     // ReductionManager 
     /////////////////////////////////////////////////////////////
@@ -11840,8 +11916,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
-        log_garbage(LEVEL_DEBUG,"Garbage collecting reduction instance %x "
-                                "in memory %x in address space %d",
+        log_garbage(LEVEL_DEBUG,"Garbage collecting reduction instance " IDFMT " "
+                                "in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
 #ifdef LEGION_PROF
         LegionProf::register_instance_deletion(instance.id);
@@ -13766,6 +13842,20 @@ namespace LegionRuntime {
       // Otherwise we're already remote from the target and therefore
       // all of our parents are also already remote so we are done
       return owner_did;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceView::is_persistent(void) const
+    //--------------------------------------------------------------------------
+    {
+      return manager->is_persistent();
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::make_persistent(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->make_persistent(manager->local_space);
     }
 
     //--------------------------------------------------------------------------

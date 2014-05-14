@@ -298,7 +298,7 @@ namespace LegionRuntime {
         destruction_event = UserEvent::create_user_event();
       }
       else
-        destruction_event.id = 0; // make a no-user event
+        destruction_event = UserEvent::NO_USER_EVENT; // make a no-user event
     }
 
     //--------------------------------------------------------------------------

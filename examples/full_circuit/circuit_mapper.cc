@@ -18,6 +18,8 @@
 
 using namespace LegionRuntime::HighLevel;
 
+LegionRuntime::Logger::Category log_mapper("mapper");
+
 CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor p)
   : DefaultMapper(m, rt, p)
 {
@@ -149,4 +151,66 @@ bool CircuitMapper::map_task(Task *task)
   // We don't care about the result
   return false;
 }
+
+bool CircuitMapper::map_inline(Inline *inline_operation)
+{
+  // let the default mapper do its thing, and then override the
+  //  blocking factor to force SOA
+  bool ret = DefaultMapper::map_inline(inline_operation);
+  RegionRequirement& req = inline_operation->requirement;
+  req.blocking_factor = req.max_blocking_factor;
+  return ret;
+}
+
+void CircuitMapper::notify_mapping_failed(const Mappable *mappable)
+{
+  switch (mappable->get_mappable_kind())
+  {
+    case Mappable::TASK_MAPPABLE:
+      {
+        Task *task = mappable->as_mappable_task();
+        int failed_idx = -1;
+        for (unsigned idx = 0; idx < task->regions.size(); idx++)
+        {
+          if (task->regions[idx].mapping_failed)
+          {
+            failed_idx = idx;
+            break;
+          }
+        }
+        log_mapper.error("Failed task mapping for region %d of task %s (%p)\n", 
+			 failed_idx, task->variants->name, task); 
+        assert(false);
+        break;
+      }
+    case Mappable::COPY_MAPPABLE:
+      {
+        Copy *copy = mappable->as_mappable_copy();
+        int failed_idx = -1;
+        for (unsigned idx = 0; idx < copy->src_requirements.size(); idx++)
+        {
+          if (copy->src_requirements[idx].mapping_failed)
+          {
+            failed_idx = idx;
+            break;
+          }
+        }
+        for (unsigned idx = 0; idx < copy->dst_requirements.size(); idx++)
+        {
+          if (copy->dst_requirements[idx].mapping_failed)
+          {
+            failed_idx = copy->src_requirements.size() + idx;
+            break;
+          }
+        }
+        log_mapper.error("Failed copy mapping for region %d of copy (%p)\n", 
+			 failed_idx, copy);
+        assert(false);
+        break;
+      }
+    default:
+      assert(false);
+  }
+}
+
 

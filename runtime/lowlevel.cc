@@ -465,16 +465,11 @@ namespace LegionRuntime {
 
     /*static*/ Runtime *Runtime::runtime = 0;
 
-    static const unsigned MAX_LOCAL_EVENTS = 300000;
-    static const unsigned MAX_LOCAL_LOCKS = 100000;
+    //static const unsigned MAX_LOCAL_EVENTS = 300000;
+    //static const unsigned MAX_LOCAL_LOCKS = 100000;
 
     Node::Node(void)
     {
-      gasnet_hsl_init(&mutex);
-      events.reserve(MAX_LOCAL_EVENTS);
-      num_events = 0;
-      locks.reserve(MAX_LOCAL_LOCKS);
-      num_locks = 0;
     }
 
     struct LockRequestArgs {
@@ -536,11 +531,31 @@ namespace LegionRuntime {
 
     ReductionOpTable reduce_op_table;
 
-    IndexSpace::Impl::Impl(IndexSpace _me, IndexSpace _parent,
-			   size_t _num_elmts,
-			   const ElementMask *_initial_valid_mask /*= 0*/, bool _frozen /*= false*/)
-      : me(_me)
+    IndexSpace::Impl::Impl(void)
     {
+      init(IndexSpace::NO_SPACE, -1);
+    }
+
+    void IndexSpace::Impl::init(IndexSpace _me, unsigned _init_owner)
+    {
+      assert(!_me.exists() || (_init_owner == ID(_me).node()));
+
+      me = _me;
+      locked_data.valid = false;
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.in_use = true;
+      lock.set_local_data(&locked_data);
+      valid_mask = 0;
+      valid_mask_complete = false;
+      valid_mask_event = Event::NO_EVENT;
+      gasnet_hsl_init(&valid_mask_mutex);
+    }
+
+    void IndexSpace::Impl::init(IndexSpace _me, IndexSpace _parent,
+				size_t _num_elmts,
+				const ElementMask *_initial_valid_mask /*= 0*/, bool _frozen /*= false*/)
+    {
+      me = _me;
       locked_data.valid = true;
       locked_data.parent = _parent;
       locked_data.frozen = _frozen;
@@ -557,7 +572,7 @@ namespace LegionRuntime {
 	avail_mask = 0;
 	locked_data.first_elmt = valid_mask->first_enabled();
 	locked_data.last_elmt = valid_mask->last_enabled();
-	log_region.info("subregion %x (of %x) restricted to [%zd,%zd]",
+	log_region.info("subregion " IDFMT " (of " IDFMT ") restricted to [%zd,%zd]",
 			me.id, _parent.id, locked_data.first_elmt,
 			locked_data.last_elmt);
       } else {
@@ -575,27 +590,6 @@ namespace LegionRuntime {
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
       lock.set_local_data(&locked_data);
-    }
-
-    // this version is called when we create a proxy for a remote region
-    IndexSpace::Impl::Impl(IndexSpace _me)
-      : me(_me)
-    {
-      locked_data.valid = false;
-      locked_data.parent = IndexSpace::NO_SPACE;
-      locked_data.frozen = false;
-      locked_data.num_elmts = 0;
-      locked_data.first_elmt = 0;
-      locked_data.last_elmt = 0;
-      locked_data.valid_mask_owners = 0;
-      locked_data.avail_mask_owner = -1;
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
-      lock.in_use = true;
-      lock.set_local_data(&locked_data);
-      valid_mask = 0;
-      valid_mask_complete = false;
-      valid_mask_event = Event::NO_EVENT;
-      gasnet_hsl_init(&valid_mask_mutex);
     }
 
     IndexSpace::Impl::~Impl(void)
@@ -692,7 +686,7 @@ namespace LegionRuntime {
       ValidMaskDataArgs resp_args;
       resp_args.is = args.is;
       resp_args.block_id = 0;
-      //printf("sending mask data for region %x to %d (%p, %zd)\n",
+      //printf("sending mask data for region " IDFMT " to %d (%p, %zd)\n",
       //	     args.region.id, args.sender, mask_data, mask_len);
       while(mask_len >= (1 << 11)) {
 	ValidMaskDataMessage::request(args.sender, resp_args,
@@ -726,7 +720,7 @@ namespace LegionRuntime {
       bool trigger = false;
       {
 	AutoHSLLock a(r_impl->valid_mask_mutex);
-	//printf("got piece of valid mask data for region %x (%d expected)\n",
+	//printf("got piece of valid mask data for region " IDFMT " (%d expected)\n",
 	//       args.region.id, r_impl->valid_mask_count);
 	r_impl->valid_mask_count--;
         if(r_impl->valid_mask_count == 0) {
@@ -736,7 +730,7 @@ namespace LegionRuntime {
       }
 
       if(trigger) {
-	//printf("triggering %x/%d\n",
+	//printf("triggering " IDFMT "/%d\n",
 	//       r_impl->valid_mask_event.id, r_impl->valid_mask_event.gen);
 	r_impl->valid_mask_event.impl()->trigger(r_impl->valid_mask_event.gen,
 						 gasnet_mynode());
@@ -887,11 +881,21 @@ namespace LegionRuntime {
       return true;
     }
 
+    AddressSpace RegionInstance::address_space(void) const
+    {
+      return ID(id).node();
+    }
+
+    IDType RegionInstance::local_id(void) const
+    {
+      return ID(id).index();
+    }
+
     ///////////////////////////////////////////////////
     // Events
 
-    /*static*/ Event::Impl *Event::Impl::first_free = 0;
-    /*static*/ gasnet_hsl_t Event::Impl::freelist_mutex = GASNET_HSL_INITIALIZER;
+    ///*static*/ Event::Impl *Event::Impl::first_free = 0;
+    ///*static*/ gasnet_hsl_t Event::Impl::freelist_mutex = GASNET_HSL_INITIALIZER;
 
     Event::Impl::Impl(void)
     {
@@ -941,7 +945,7 @@ namespace LegionRuntime {
 
     void handle_event_subscribe(EventSubscribeArgs args)
     {
-      log_event(LEVEL_DEBUG, "event subscription: node=%d event=%x/%d",
+      log_event(LEVEL_DEBUG, "event subscription: node=%d event=" IDFMT "/%d",
 		args.node, args.event.id, args.event.gen);
 
       Event::Impl *impl = args.event.impl();
@@ -959,7 +963,7 @@ namespace LegionRuntime {
       //  triggered, signal without taking the mutex
       unsigned stale_gen = impl->generation;
       if(stale_gen >= args.event.gen) {
-	log_event(LEVEL_DEBUG, "event subscription early-out: node=%d event=%x/%d (<= %d)",
+	log_event(LEVEL_DEBUG, "event subscription early-out: node=%d event=" IDFMT "/%d (<= %d)",
 		  args.node, args.event.id, args.event.gen, stale_gen);
 	EventTriggerArgs trigger_args;
 	trigger_args.node = gasnet_mynode();
@@ -973,7 +977,7 @@ namespace LegionRuntime {
 	AutoHSLLock a(impl->mutex);
         // first trigger any generations which are below are current generation
         if(impl->generation > (args.previous_subscribe_gen)) {
-          log_event(LEVEL_DEBUG, "event subscription already done: node=%d event=%x/%d (<= %d)",
+          log_event(LEVEL_DEBUG, "event subscription already done: node=%d event=" IDFMT "/%d (<= %d)",
 		    args.node, args.event.id, args.event.gen, impl->generation);
 	  EventTriggerArgs trigger_args;
 	  trigger_args.node = gasnet_mynode();
@@ -988,7 +992,7 @@ namespace LegionRuntime {
               wait_gen <= args.event.gen; wait_gen++) {
           // nope - needed generation hasn't happened yet, so add this node to
 	  //  the mask
-	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=%x/%d (> %d)",
+	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=" IDFMT "/%d (> %d)",
 		    args.node, args.event.id, wait_gen, impl->generation);
 	  //impl->remote_waiters |= (1ULL << args.node);
           std::map<Event::gen_t,NodeMask>::iterator finder =
@@ -1007,6 +1011,7 @@ namespace LegionRuntime {
       fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
       for(int i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &Runtime::runtime->nodes[i];
+#ifdef FIXME
 	AutoHSLLock a1(n->mutex);
 
 	for(unsigned j = 0; j < n->events.size(); j++) {
@@ -1017,7 +1022,7 @@ namespace LegionRuntime {
 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
 	    continue;
 
-          fprintf(f,"Event %x: gen=%d subscr=%d local=%zd remote=%zd\n",
+          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
 		  e->me.id, e->generation, e->gen_subscribed, 
 		  e->local_waiters.size(), e->remote_waiters.size());
 	  for(std::map<Event::gen_t, std::vector<Event::Impl::EventWaiter *> >::iterator it = e->local_waiters.begin();
@@ -1040,6 +1045,7 @@ namespace LegionRuntime {
 	    fprintf(f, "\n");
 	  }
 	}
+#endif
       }
       fprintf(f,"DONE\n");
       fflush(f);
@@ -1048,13 +1054,15 @@ namespace LegionRuntime {
     void handle_event_trigger(EventTriggerArgs args)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      log_event(LEVEL_DEBUG, "Remote trigger of event %x/%d from node %d!",
+      log_event(LEVEL_DEBUG, "Remote trigger of event " IDFMT "/%d from node %d!",
 		args.event.id, args.event.gen, args.node);
       args.event.impl()->trigger(args.event.gen, args.node);
     }
 
     /*static*/ const Event Event::NO_EVENT = { 0, 0 };
-
+    // Take this you POS C++ type system
+    /* static */ const UserEvent UserEvent::NO_USER_EVENT = 
+          *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
     Event::Impl *Event::impl(void) const
     {
       return Runtime::runtime->get_event_impl(*this);
@@ -1116,13 +1124,13 @@ namespace LegionRuntime {
 	bool last_trigger = false;
 #ifdef LOCK_FREE_MERGED_EVENTS
 	unsigned count_left = __sync_fetch_and_add(&count_needed, -1);
-	log_event(LEVEL_INFO, "recevied trigger merged event %x/%d (%d)",
+	log_event(LEVEL_INFO, "recevied trigger merged event " IDFMT "/%d (%d)",
 		  finish_event.id, finish_event.gen, count_left);
 	last_trigger = (count_left == 1);
 #else
 	{
 	  AutoHSLLock a(mutex);
-	  log_event(LEVEL_INFO, "recevied trigger merged event %x/%d (%d)",
+	  log_event(LEVEL_INFO, "recevied trigger merged event " IDFMT "/%d (%d)",
 		    finish_event.id, finish_event.gen, count_needed);
 	  count_needed--;
 	  if(count_needed == 0) last_trigger = true;
@@ -1150,7 +1158,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"event merger: %x/%d\n", finish_event.id, finish_event.gen);
+	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event.id, finish_event.gen);
       }
 
     protected:
@@ -1190,7 +1198,7 @@ namespace LegionRuntime {
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
-	log_event(LEVEL_INFO, "merged event %x/%d waiting for %x/%d",
+	log_event(LEVEL_INFO, "merged event " IDFMT "/%d waiting for " IDFMT "/%d",
 		  finish_event.id, finish_event.gen, (*it).id, (*it).gen);
 	m->add_event(*it);
       }
@@ -1275,6 +1283,30 @@ namespace LegionRuntime {
 
     /*static*/ Event Event::Impl::create_event(void)
     {
+      Event::Impl *impl = Runtime::runtime->local_event_free_list->alloc_entry();
+      assert(impl);
+      assert(ID(impl->me).type() == ID::ID_EVENT);
+      if(impl) {
+	assert(impl->generation == impl->free_generation);
+	impl->free_generation++; // normal events are one-shot
+	Event ev = impl->me;
+	ev.gen = impl->generation + 1;
+	//printf("REUSE EVENT %x/%d\n", ev.id, ev.gen);
+	log_event.info("event created: event=" IDFMT "/%d", ev.id, ev.gen);
+#ifdef EVENT_TRACING
+        {
+          EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
+          item.event_id = ev.id;
+          item.event_gen = ev.gen;
+          item.action = EventTraceItem::ACT_CREATE;
+        }
+#endif
+	return ev;
+      }
+      assert(false);
+      return Event::NO_EVENT;
+#if 0
+      
       //DetailedTimer::ScopedPush sp(17);
       // see if the freelist has an event we can reuse
       Event::Impl *impl = 0;
@@ -1290,8 +1322,8 @@ namespace LegionRuntime {
 	impl->free_generation++; // normal events are one-shot
 	Event ev = impl->me;
 	ev.gen = impl->generation + 1;
-	//printf("REUSE EVENT %x/%d\n", ev.id, ev.gen);
-	log_event(LEVEL_SPEW, "event reused: event=%x/%d", ev.id, ev.gen);
+	//printf("REUSE EVENT " IDFMT "/%d\n", ev.id, ev.gen);
+	log_event(LEVEL_SPEW, "event reused: event=" IDFMT "/%d", ev.id, ev.gen);
 #ifdef EVENT_TRACING
         {
           EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1324,8 +1356,8 @@ namespace LegionRuntime {
 	  (*it).in_use = true;
 	  Event ev = (*it).me;
 	  ev.gen = (*it).generation + 1;
-	  //printf("REUSE EVENT %x/%d\n", ev.id, ev.gen);
-	  log_event(LEVEL_SPEW, "event reused: event=%x/%d", ev.id, ev.gen);
+	  //printf("REUSE EVENT " IDFMT "/%d\n", ev.id, ev.gen);
+	  log_event(LEVEL_SPEW, "event reused: event=" IDFMT "/%d", ev.id, ev.gen);
 #ifdef EVENT_TRACING
           {
 	    EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1349,8 +1381,8 @@ namespace LegionRuntime {
       events[index].free_generation++; // this event will be available after this generation
       Runtime::runtime->nodes[gasnet_mynode()].num_events = index + 1;
       ev.gen = 1; // waiting for first generation of this new event
-      //printf("NEW EVENT %x/%d\n", ev.id, ev.gen);
-      log_event(LEVEL_SPEW, "event created: event=%x/%d", ev.id, ev.gen);
+      //printf("NEW EVENT " IDFMT "/%d\n", ev.id, ev.gen);
+      log_event(LEVEL_SPEW, "event created: event=" IDFMT "/%d", ev.id, ev.gen);
 #ifdef EVENT_TRACING
       {
         EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1360,6 +1392,7 @@ namespace LegionRuntime {
       }
 #endif
       return ev;
+#endif
     }
 
     void Event::Impl::add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed /*= false*/)
@@ -1381,7 +1414,7 @@ namespace LegionRuntime {
 	AutoHSLLock a(mutex);
 
 	if(event.gen > generation) {
-	  log_event(LEVEL_DEBUG, "event not ready: event=%x/%d owner=%d gen=%d subscr=%d",
+	  log_event(LEVEL_DEBUG, "event not ready: event=" IDFMT "/%d owner=%d gen=%d subscr=%d",
 		    event.id, event.gen, owner, generation, gen_subscribed);
 	  // we haven't triggered the needed generation yet - add to list of
 	  //  waiters, and subscribe if we're not the owner
@@ -1430,25 +1463,25 @@ namespace LegionRuntime {
       PthreadCondWaiter(Event::Impl *i)
         : impl(i)
       {
-        CHECK_PTHREAD( pthread_cond_init(&cond, NULL) );
+        gasnett_cond_init(&cond);
       }
       ~PthreadCondWaiter(void) 
       {
-        CHECK_PTHREAD( pthread_cond_destroy(&cond) );
+        gasnett_cond_destroy(&cond);
       }
 
       virtual bool event_triggered(void)
       {
         // Need to hold the lock to avoid the race
         AutoHSLLock(impl->mutex);
-        pthread_cond_signal(&cond);
+        gasnett_cond_signal(&cond);
         // we're allocated on caller's stack, so deleting would be bad
         return false;
       }
       virtual void print_info(FILE *f) { fprintf(f,"external waiter\n"); }
 
     public:
-      pthread_cond_t cond;
+      gasnett_cond_t cond;
       Event::Impl *impl;
     };
 
@@ -1467,7 +1500,7 @@ namespace LegionRuntime {
 	  }
 
 	  // now just sleep on the condition variable - hope we wake up
-	  pthread_cond_wait(&w.cond, &mutex->lock);
+          gasnett_cond_wait(&w.cond, &mutex->lock);
 	}
       }
     }
@@ -1480,14 +1513,14 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void)
       {
-	log_event.info("deferred trigger occuring: %x/%d", after_event.id, after_event.gen);
+	log_event.info("deferred trigger occuring: " IDFMT "/%d", after_event.id, after_event.gen);
 	after_event.impl()->trigger(after_event.gen, gasnet_mynode(), Event::NO_EVENT);
         return true;
       }
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred trigger: after=%x/%d\n",
+	fprintf(f,"deferred trigger: after=" IDFMT "/%d\n",
 	       after_event.id, after_event.gen);
       }
 
@@ -1503,13 +1536,13 @@ namespace LegionRuntime {
 	Event after_event;
 	after_event.id = me.id;
 	after_event.gen = gen_triggered;
-	log_event.info("deferring event trigger: in=%x/%d out=%x/%d\n",
+	log_event.info("deferring event trigger: in=" IDFMT "/%d out=" IDFMT "/%d\n",
 		       wait_on.id, wait_on.gen, me.id, gen_triggered);
 	wait_on.impl()->add_waiter(wait_on, new DeferredEventTrigger(after_event));
 	return;
       }
 
-      log_event(LEVEL_SPEW, "event triggered: event=%x/%d by node %d", 
+      log_event(LEVEL_SPEW, "event triggered: event=" IDFMT "/%d by node %d", 
 		me.id, gen_triggered, trigger_node);
 #ifdef EVENT_TRACING
       {
@@ -1519,16 +1552,16 @@ namespace LegionRuntime {
         item.action = EventTraceItem::ACT_TRIGGER;
       }
 #endif
-      //printf("[%d] TRIGGER %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
+      //printf("[%d] TRIGGER " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
       std::deque<EventWaiter *> to_wake;
       bool release_event = false;
       {
 	//TimeStamp ts("foo", true);
-	//printf("[%d] TRIGGER MUTEX IN %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
+	//printf("[%d] TRIGGER MUTEX IN " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
 	AutoHSLLock a(mutex);
-	//printf("[%d] TRIGGER MUTEX HOLD %x/%d\n", gasnet_mynode(), me.id, gen_triggered);
+	//printf("[%d] TRIGGER MUTEX HOLD " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
 
-	//printf("[%d] TRIGGER GEN: %x/%d->%d\n", gasnet_mynode(), me.id, generation, gen_triggered);
+	//printf("[%d] TRIGGER GEN: " IDFMT "/%d->%d\n", gasnet_mynode(), me.id, generation, gen_triggered);
 	// SJT: there is at least one unavoidable case where we'll receive
 	//  duplicate trigger notifications, so if we see a triggering of
 	//  an older generation, just ignore it
@@ -1589,10 +1622,11 @@ namespace LegionRuntime {
 	// if this is one of our events, put ourselves on the free
 	//  list (we don't need our lock for this)
 	if(owner == gasnet_mynode()) {
-	  AutoHSLLock al(&freelist_mutex);
+	  //AutoHSLLock al(&freelist_mutex);
 	  base_arrival_count = current_arrival_count = 0;
-	  next_free = first_free;
-	  first_free = this;
+	  Runtime::runtime->local_event_free_list->free_entry(this);
+	  //next_free = first_free;
+	  //first_free = this;
 	}
       }
 
@@ -1663,7 +1697,7 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void)
       {
-	log_barrier.info("deferred barrier arrival: %x/%d (%llx), delta=%d\n",
+	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d\n",
 			 barrier.id, barrier.gen, barrier.timestamp, delta);
 	barrier.impl()->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT);
         return true;
@@ -1671,7 +1705,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred arrival: barrier=%x/%d (%llx), delta=%d\n",
+	fprintf(f,"deferred arrival: barrier=" IDFMT "/%d (%llx), delta=%d\n",
 	       barrier.id, barrier.gen, barrier.timestamp, delta);
       }
 
@@ -1754,7 +1788,7 @@ namespace LegionRuntime {
           Event e;
           e.id = me.id;
           e.gen = barrier_gen;
-          //printf("sending deferred arrival to %d for %x/%d (%x/%d)\n",
+          //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
           //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
 	  BarrierAdjustMessage::send_request(owner, e, delta, timestamp, wait_on);
 	  return;
@@ -1764,13 +1798,13 @@ namespace LegionRuntime {
 	b.id = me.id;
 	b.gen = barrier_gen;
 	b.timestamp = timestamp;
-	log_barrier.info("deferring barrier arrival: delta=%d in=%x/%d out=%x/%d (%llx)\n",
+	log_barrier.info("deferring barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)\n",
 			 delta, wait_on.id, wait_on.gen, me.id, barrier_gen, timestamp);
 	wait_on.impl()->add_waiter(wait_on, new DeferredBarrierArrival(b, delta));
 	return;
       }
 
-      log_barrier.info("barrier adjustment: event=%x/%d delta=%d ts=%llx", 
+      log_barrier.info("barrier adjustment: event=" IDFMT "/%d delta=%d ts=%llx", 
 		       me.id, barrier_gen, delta, timestamp);
 
       if(owner != gasnet_mynode()) {
@@ -1808,7 +1842,7 @@ namespace LegionRuntime {
               pending_updates[barrier_gen] = p;
             }
             act_delta = p->handle_adjustment(timestamp, delta);
-            log_barrier.info("barrier timestamp adjustment: %x/%d, %llx/%d -> %d",
+            log_barrier.info("barrier timestamp adjustment: " IDFMT "/%d, %llx/%d -> %d",
                              me.id, barrier_gen, timestamp, delta, act_delta);
           }
 
@@ -1832,7 +1866,7 @@ namespace LegionRuntime {
       }
 
       if(trigger_gen != 0) {
-	log_barrier.info("barrier trigger: event=%x/%d", 
+	log_barrier.info("barrier trigger: event=" IDFMT "/%d", 
 			 me.id, trigger_gen);
 	trigger(trigger_gen, gasnet_mynode());
       }
@@ -1858,7 +1892,7 @@ namespace LegionRuntime {
       // and let the barrier rearm as many times as necessary without being released
       impl->free_generation = (unsigned)-1;
 
-      log_barrier.info("barrier created: %x/%d base_count=%d", e.id, e.gen, impl->base_arrival_count);
+      log_barrier.info("barrier created: " IDFMT "/%d base_count=%d", e.id, e.gen, impl->base_arrival_count);
 
       Barrier result;
       result.id = e.id;
@@ -1936,7 +1970,7 @@ namespace LegionRuntime {
       me = _me;
       owner = _init_owner;
       count = ZERO_COUNT;
-      log_reservation.spew("count init %x=[%p]=%d", me.id, &count, count);
+      log_reservation.spew("count init " IDFMT "=[%p]=%d", me.id, &count, count);
       mode = 0;
       in_use = false;
       mutex = new gasnet_hsl_t;
@@ -1960,7 +1994,7 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Reservation::Impl *impl = args.lock.impl();
 
-      log_reservation(LEVEL_DEBUG, "reservation request: reservation=%x, node=%d, mode=%d",
+      log_reservation(LEVEL_DEBUG, "reservation request: reservation=" IDFMT ", node=%d, mode=%d",
 	       args.lock.id, args.node, args.mode);
 
       // can't send messages while holding mutex, so remember args and who
@@ -1978,7 +2012,7 @@ namespace LegionRuntime {
 	if(impl->owner != gasnet_mynode()) {
 	  // can reuse the args we were given
 	  log_reservation(LEVEL_DEBUG, 
-              "forwarding reservation request: reservation=%x, from=%d, to=%d, mode=%d",
+              "forwarding reservation request: reservation=" IDFMT ", from=%d, to=%d, mode=%d",
 		   args.lock.id, args.node, impl->owner, args.mode);
 	  req_forward_target = impl->owner;
 	  break;
@@ -1996,7 +2030,7 @@ namespace LegionRuntime {
           assert(!impl->remote_waiter_mask);
 
 	  log_reservation(LEVEL_DEBUG, 
-              "granting reservation request: reservation=%x, node=%d, mode=%d",
+              "granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
 		   args.lock.id, args.node, args.mode);
 	  g_args.lock = args.lock;
 	  g_args.mode = 0; // always give it exclusively for now
@@ -2011,7 +2045,7 @@ namespace LegionRuntime {
 	//  just set a bit saying that the node is waiting and get back to
 	//  work
 	log_reservation(LEVEL_DEBUG, 
-            "deferring reservation request: reservation=%x, node=%d, mode=%d (count=%d cmode=%d)",
+            "deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
 		 args.lock.id, args.node, args.mode, impl->count, impl->mode);
         impl->remote_waiter_mask.set_bit(args.node);
       } while(0);
@@ -2059,7 +2093,7 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_reservation(LEVEL_DEBUG, 
-          "reservation request granted: reservation=%x mode=%d", // mask=%lx",
+          "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
 	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
       std::deque<Event> to_wake;
@@ -2090,7 +2124,7 @@ namespace LegionRuntime {
       for(std::deque<Event>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	log_reservation(LEVEL_DEBUG, "release trigger: reservation=%x event=%x/%d",
+	log_reservation(LEVEL_DEBUG, "release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
 		 args.lock.id, (*it).id, (*it).gen);
 	(*it).impl()->trigger((*it).gen, gasnet_mynode());
       }
@@ -2100,7 +2134,7 @@ namespace LegionRuntime {
 			   Event after_lock /*= Event::NO_EVENT*/)
     {
       log_reservation(LEVEL_DEBUG, 
-          "local reservation request: reservation=%x mode=%d excl=%d event=%x/%d count=%d impl=%p",
+          "local reservation request: reservation=" IDFMT " mode=%d excl=%d event=" IDFMT "/%d count=%d impl=%p",
 	       me.id, new_mode, exclusive, after_lock.id, after_lock.gen, count, this);
 
       // collapse exclusivity into mode
@@ -2161,7 +2195,7 @@ namespace LegionRuntime {
 	  //  other node (even if we're currently sharing with the wrong mode)
 	  if(!got_lock && !requested) {
 	    log_reservation(LEVEL_DEBUG, 
-                "requesting reservation: reservation=%x node=%d mode=%d",
+                "requesting reservation: reservation=" IDFMT " node=%d mode=%d",
 		     me.id, owner, new_mode);
 	    args.node = gasnet_mynode();
 	    args.lock = me;
@@ -2176,7 +2210,7 @@ namespace LegionRuntime {
 	}
   
 	log_reservation(LEVEL_DEBUG, 
-            "local reservation result: reservation=%x got=%d req=%d count=%d",
+            "local reservation result: reservation=" IDFMT " got=%d req=%d count=%d",
 		 me.id, got_lock ? 1 : 0, requested ? 1 : 0, count);
 
 	// if we didn't get the lock, put our event on the queue of local
@@ -2275,7 +2309,7 @@ namespace LegionRuntime {
 
       do {
 	log_reservation(LEVEL_DEBUG, 
-            "release: reservation=%x count=%d mode=%d owner=%d", // share=%lx wait=%lx",
+            "release: reservation=" IDFMT " count=%d mode=%d owner=%d", // share=%lx wait=%lx",
 			me.id, count, mode, owner); //, remote_sharer_mask, remote_waiter_mask);
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
@@ -2286,7 +2320,7 @@ namespace LegionRuntime {
 	count--;
 	log_reservation.spew("count -- [%p]=%d", &count, count);
 	log_reservation(LEVEL_DEBUG, 
-            "post-release: reservation=%x count=%d mode=%d", // share=%lx wait=%lx",
+            "post-release: reservation=" IDFMT " count=%d mode=%d", // share=%lx wait=%lx",
 		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
 	if(count > ZERO_COUNT) break;
 
@@ -2328,7 +2362,7 @@ namespace LegionRuntime {
 
       if(release_target != -1)
       {
-	log_reservation.debug("releasing reservation %x back to owner %d",
+	log_reservation.debug("releasing reservation " IDFMT " back to owner %d",
 			      me.id, release_target);
 	LockReleaseMessage::request(release_target, r_args);
 #ifdef LOCK_TRACING
@@ -2362,7 +2396,7 @@ namespace LegionRuntime {
       for(std::deque<Event>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	log_reservation(LEVEL_DEBUG, "release trigger: reservation=%x event=%x/%d",
+	log_reservation(LEVEL_DEBUG, "release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
 		 me.id, (*it).id, (*it).gen);
 	(*it).impl()->trigger((*it).gen, gasnet_mynode());
       }
@@ -2402,7 +2436,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred lock: lock=%x after=%x/%d\n",
+	fprintf(f,"deferred lock: lock=" IDFMT " after=" IDFMT "/%d\n",
 	       lock.id, after_lock.id, after_lock.gen);
       }
 
@@ -2417,17 +2451,17 @@ namespace LegionRuntime {
 		     Event wait_on /* = Event::NO_EVENT */) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      //printf("LOCK(%x, %d, %d, %x) -> ", id, mode, exclusive, wait_on.id);
+      //printf("LOCK(" IDFMT ", %d, %d, " IDFMT ") -> ", id, mode, exclusive, wait_on.id);
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
 	Event e = impl()->acquire(mode, exclusive);
-	//printf("(%x/%d)\n", e.id, e.gen);
+	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
 	Event after_lock = Event::Impl::create_event();
 	wait_on.impl()->add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
-	//printf("*(%x/%d)\n", after_lock.id, after_lock.gen);
+	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
 	return after_lock;
       }
     }
@@ -2445,7 +2479,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred unlock: lock=%x\n",
+	fprintf(f,"deferred unlock: lock=" IDFMT "\n",
 	       lock.id);
       }
     protected:
@@ -2472,32 +2506,27 @@ namespace LegionRuntime {
       //DetailedTimer::ScopedPush sp(18);
 
       // see if the freelist has an event we can reuse
-      Reservation::Impl *impl = 0;
-      {
-	AutoHSLLock al(&Impl::freelist_mutex);
-	if(Impl::first_free) {
-	  impl = Impl::first_free;
-	  Impl::first_free = impl->next_free;
-	}
-      }
+      Reservation::Impl *impl = Runtime::runtime->local_reservation_free_list->alloc_entry();
+      assert(impl);
+      assert(ID(impl->me).type() == ID::ID_LOCK);
       if(impl) {
 	AutoHSLLock al(impl->mutex);
 
-	// make sure we still "hold" this lock, and that it's not in use
 	assert(impl->owner == gasnet_mynode());
-	assert(impl->count == 1 + Impl::ZERO_COUNT);
+	assert(impl->count == Impl::ZERO_COUNT);
 	assert(impl->mode == Impl::MODE_EXCL);
 	assert(impl->local_waiters.size() == 0);
         assert(!impl->remote_waiter_mask);
 	assert(!impl->in_use);
 
 	impl->in_use = true;
-	impl->count = Impl::ZERO_COUNT;  // unlock it
 
-	log_reservation(LEVEL_INFO, "reservation reused: reservation=%x", impl->me.id);
+	log_reservation(LEVEL_INFO, "reservation reused: reservation=" IDFMT "", impl->me.id);
 	return impl->me;
       }
-
+      assert(false);
+      return Reservation::NO_RESERVATION;
+#if 0
       // TODO: figure out if it's safe to iterate over a vector that is
       //  being resized?
       AutoHSLLock a(Runtime::runtime->nodes[gasnet_mynode()].mutex);
@@ -2533,8 +2562,9 @@ namespace LegionRuntime {
       locks[index].init(r, gasnet_mynode());
       locks[index].in_use = true;
       Runtime::runtime->nodes[gasnet_mynode()].num_locks = index + 1;
-      log_reservation.info("created new reservation: reservation=%x", r.id);
+      log_reservation.info("created new reservation: reservation=" IDFMT "", r.id);
       return r;
+#endif
     }
 
     void Reservation::Impl::release_reservation(void)
@@ -2557,15 +2587,11 @@ namespace LegionRuntime {
         local_data_size = 0;
         own_local = false;
       	in_use = false;
+	count = ZERO_COUNT;
       }
-      log_reservation.info("releasing reservation: reservation=%x", me.id);
+      log_reservation.info("releasing reservation: reservation=" IDFMT "", me.id);
 
-      // now take the freelist mutex to put ourselves on the free list
-      {
-	AutoHSLLock al(freelist_mutex);
-	next_free = first_free;
-	first_free = this;
-      }
+      Runtime::runtime->local_reservation_free_list->free_entry(this);
     }
 
     class DeferredLockDestruction : public Event::Impl::EventWaiter {
@@ -2580,7 +2606,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred lock destruction: lock=%x\n", lock.id);
+	fprintf(f,"deferred lock destruction: lock=" IDFMT "\n", lock.id);
       }
 
     protected:
@@ -2614,6 +2640,16 @@ namespace LegionRuntime {
 
     ///////////////////////////////////////////////////
     // Memory
+
+    AddressSpace Memory::address_space(void) const
+    {
+      return ID(id).node();
+    }
+
+    IDType Memory::local_id(void) const
+    {
+      return ID(id).index();
+    }
 
     Memory::Impl *Memory::impl(void) const
     {
@@ -2671,7 +2707,7 @@ namespace LegionRuntime {
 	  // perfect match
 	  off_t retval = it->first;
 	  free_blocks.erase(it);
-	  log_malloc.info("alloc full block: mem=%x size=%zd ofs=%zd\n", me.id, size, retval);
+	  log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd\n", me.id, size, retval);
 	  return retval;
 	}
 	
@@ -2680,13 +2716,13 @@ namespace LegionRuntime {
 	  off_t leftover = it->second - size;
 	  off_t retval = it->first + leftover;
 	  it->second = leftover;
-	  log_malloc.info("alloc partial block: mem=%x size=%zd ofs=%zd\n", me.id, size, retval);
+	  log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd\n", me.id, size, retval);
 	  return retval;
 	}
       }
 
       // no blocks large enough - boo hoo
-      log_malloc.info("alloc FAILED: mem=%x size=%zd\n", me.id, size);
+      log_malloc.info("alloc FAILED: mem=" IDFMT " size=%zd\n", me.id, size);
       return -1;
     }
 
@@ -2985,12 +3021,12 @@ namespace LegionRuntime {
     {
       Memory::Impl *impl = args.mem.impl();
 
-      log_copy.debug("received remote write request: mem=%x, offset=%zd, size=%zd, seq=%d/%d, event=%x/%d",
+      log_copy.debug("received remote write request: mem=" IDFMT ", offset=%zd, size=%zd, seq=%d/%d, event=" IDFMT "/%d",
 		     args.mem.id, args.offset, datalen,
 		     args.sender, args.sequence_id,
 		     args.event.id, args.event.gen);
 #ifdef DEBUG_REMOTE_WRITES
-      printf("received remote write request: mem=%x, offset=%zd, size=%zd, seq=%d/%d, event=%x/%d\n",
+      printf("received remote write request: mem=" IDFMT ", offset=%zd, size=%zd, seq=%d/%d, event=" IDFMT "/%d\n",
 		     args.mem.id, args.offset, datalen,
 	             args.sender, args.sequence_id, args.event.id, args.event.gen);
       printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
@@ -3052,7 +3088,7 @@ namespace LegionRuntime {
           entry.remaining_count = -1;
 	  partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+	  printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, entry.remaining_count);
 #endif
@@ -3060,7 +3096,7 @@ namespace LegionRuntime {
 	  // have an existing entry (either another write or the fence)
 	  PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: have entry for %d/%d: %x/%d, %d -> %d\n",
+	  printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d, %d -> %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, 
 		 entry.remaining_count, entry.remaining_count - 1);
@@ -3088,9 +3124,9 @@ namespace LegionRuntime {
     struct RemoteReduceArgs : public BaseMedium {
       Memory mem;
       off_t offset;
-      off_t stride;
+      int stride;
       ReductionOpID redop_id;
-      bool red_fold;
+      //bool red_fold;
       unsigned sender;
       unsigned sequence_id;
       Event event;
@@ -3101,21 +3137,32 @@ namespace LegionRuntime {
     {
       Memory::Impl *impl = args.mem.impl();
 
-      log_copy.debug("received remote reduce request: mem=%x, offset=%zd+%zd, size=%zd, redop=%d(%s), seq=%d/%d, event=%x/%d",
+      ReductionOpID redop_id;
+      bool red_fold;
+      if(args.redop_id > 0) {
+	redop_id = args.redop_id;
+	red_fold = false;
+      } else if(args.redop_id < 0) {
+	redop_id = -args.redop_id;
+	red_fold = true;
+      } else {
+	assert(args.redop_id != 0);
+      }
+
+      log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%d, size=%zd, redop=%d(%s), seq=%d/%d, event=" IDFMT "/%d",
 		     args.mem.id, args.offset, args.stride, datalen,
-		     args.redop_id, (args.red_fold ? "fold" : "apply"),
+		     redop_id, (red_fold ? "fold" : "apply"),
 		     args.sender, args.sequence_id,
 		     args.event.id, args.event.gen);
 
-      assert(args.redop_id != 0);
-      const ReductionOpUntyped *redop = reduce_op_table[args.redop_id];
+      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
 
       size_t count = datalen / redop->sizeof_rhs;
 
       void *lhs = args.mem.impl()->get_direct_ptr(args.offset, args.stride * count);
       assert(lhs);
 
-      if(args.red_fold)
+      if(red_fold)
 	redop->fold_strided(lhs, data, count,
 			    args.stride, redop->sizeof_rhs, false /*not exclusive*/);
       else
@@ -3136,7 +3183,7 @@ namespace LegionRuntime {
           entry.remaining_count = -1;
 	  partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+	  printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, entry.remaining_count);
 #endif
@@ -3144,7 +3191,7 @@ namespace LegionRuntime {
 	  // have an existing entry (either another write or the fence)
 	  PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: have entry for %d/%d: %x/%d, %d -> %d\n",
+	  printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d, %d -> %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, 
 		 entry.remaining_count, entry.remaining_count - 1);
@@ -3179,7 +3226,7 @@ namespace LegionRuntime {
 
     void handle_remote_write_fence(RemoteWriteFenceArgs args)
     {
-      log_copy.debug("remote write fence (mem = %08x, seq = %d/%d, count = %d, event = %08x/%d)\n",
+      log_copy.debug("remote write fence (mem = " IDFMT ", seq = %d/%d, count = %d, event = " IDFMT "/%d)\n",
 		     args.mem.id, args.sender, args.sequence_id, args.num_writes, args.event.id, args.event.gen);
 
       assert(args.sequence_id != 0);
@@ -3197,7 +3244,7 @@ namespace LegionRuntime {
           entry.remaining_count = args.num_writes;
 	  partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: new entry for %d/%d: %x/%d, %d\n",
+	  printf("PWT: %d: new entry for %d/%d: " IDFMT "/%d, %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, entry.remaining_count);
 #endif
@@ -3205,7 +3252,7 @@ namespace LegionRuntime {
 	  // have an existing entry (previous writes)
 	  PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
-	  printf("PWT: %d: have entry for %d/%d: %x/%d -> %x/%d, %d -> %d\n",
+	  printf("PWT: %d: have entry for %d/%d: " IDFMT "/%d -> " IDFMT "/%d, %d -> %d\n",
 		 gasnet_mynode(), key.sender, key.sequence_id,
 		 entry.event.id, entry.event.gen, 
 		 args.event.id, args.event.gen,
@@ -3237,7 +3284,7 @@ namespace LegionRuntime {
 			     const void *data, size_t datalen,
 			     unsigned sequence_id, Event event, bool make_copy = false)
     {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd, event=%x/%d",
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd, event=" IDFMT "/%d",
 		     mem.id, offset, datalen,
 		     event.id, event.gen);
 
@@ -3310,7 +3357,7 @@ namespace LegionRuntime {
 			     off_t stride, size_t lines,
 			     unsigned sequence_id, Event event, bool make_copy = false)
     {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zdx%zd, event=%x/%d",
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, event=" IDFMT "/%d",
 		     mem.id, offset, datalen, lines,
 		     event.id, event.gen);
 
@@ -3386,7 +3433,7 @@ namespace LegionRuntime {
 			     const SpanList &spans, size_t datalen,
 			     unsigned sequence_id, Event event, bool make_copy = false)
     {
-      log_copy.debug("sending remote write request: mem=%x, offset=%zd, size=%zd(%zd spans), event=%x/%d",
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd(%zd spans), event=" IDFMT "/%d",
 		     mem.id, offset, datalen, spans.size(),
 		     event.id, event.gen);
 
@@ -3501,7 +3548,7 @@ namespace LegionRuntime {
       const ReductionOpUntyped *redop = reduce_op_table[redop_id];
       size_t rhs_size = redop->sizeof_rhs;
 
-      log_copy.debug("sending remote reduction request: mem=%x, offset=%zd+%zd, size=%zdx%zd, redop=%d(%s), event=%x/%d",
+      log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%zd+%zd, size=%zdx%zd, redop=%d(%s), event=" IDFMT "/%d",
 		     mem.id, offset, dst_stride, rhs_size, count,
 		     redop_id, (red_fold ? "fold" : "apply"),
 		     event.id, event.gen);
@@ -3526,8 +3573,10 @@ namespace LegionRuntime {
 	  args.mem = mem;
 	  args.offset = offset;
 	  args.stride = dst_stride;
-	  args.redop_id = redop_id;
-	  args.red_fold = red_fold;
+	  assert(((off_t)(args.stride)) == dst_stride); // did it fit?
+	  // fold encoded as a negation of the redop_id
+	  args.redop_id = red_fold ? -redop_id : redop_id;
+	  //args.red_fold = red_fold;
 	  args.event = Event::NO_EVENT;
 	  args.sender = gasnet_mynode();
 	  args.sequence_id = sequence_id;
@@ -3558,8 +3607,10 @@ namespace LegionRuntime {
 	args.mem = mem;
 	args.offset = offset;
 	args.stride = dst_stride;
-	args.redop_id = redop_id;
-	args.red_fold = red_fold;
+	assert(((off_t)(args.stride)) == dst_stride); // did it fit?
+	// fold encoded as a negation of the redop_id
+	args.redop_id = red_fold ? -redop_id : redop_id;
+	//args.red_fold = red_fold;
 	args.event = event;
 	args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
@@ -3880,11 +3931,11 @@ namespace LegionRuntime {
 							      count_offset, list_size, parent_inst);
 
       // find/make an available index to store this in
-      unsigned index;
+      IDType index;
       {
 	AutoHSLLock al(mutex);
 
-	unsigned size = instances.size();
+	size_t size = instances.size();
 	for(index = 0; index < size; index++)
 	  if(!instances[index]) {
 	    i.id |= index;
@@ -3892,6 +3943,7 @@ namespace LegionRuntime {
 	    instances[index] = i_impl;
 	    break;
 	  }
+        assert(index < (((IDType)1) << ID::INDEX_L_BITS));
 
 	i.id |= index;
 	i_impl->me = i;
@@ -3899,7 +3951,7 @@ namespace LegionRuntime {
 	if(index >= size) instances.push_back(i_impl);
       }
 
-      log_inst.info("local instance %x created in memory %x at offset %zd (redop=%d list_size=%zd parent_inst=%x block_size=%zd)",
+      log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %zd (redop=%d list_size=%zd parent_inst=" IDFMT " block_size=%zd)",
 		    i.id, me.id, inst_offset, redopid, list_size,
                     parent_inst.id, block_size);
 
@@ -3909,13 +3961,20 @@ namespace LegionRuntime {
     struct CreateInstanceArgs : public BaseMedium {
       Memory m;
       IndexSpace r;
+      RegionInstance parent_inst;
+    };
+
+    struct CreateInstancePayload {
       size_t bytes_needed;
       size_t block_size;
-      unsigned element_size; // reduced from size_t for space constraints
+      size_t element_size;
       //off_t adjust;
-      int list_size; // reduced from off_t for space constraints
+      off_t list_size;
       ReductionOpID redopid;
-      RegionInstance parent_inst;
+      int linearization_bits[RegionInstance::Impl::MAX_LINEARIZATION_LEN];
+      size_t num_fields; // as long as it needs to be
+      const size_t &field_size(int idx) const { return *((&num_fields)+idx); }
+      size_t &field_size(int idx) { return *((&num_fields)+idx); }
     };
 
     struct CreateInstanceResp : public BaseReply {
@@ -3929,22 +3988,21 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       CreateInstanceResp resp;
 
-      const int *data = (const int *)msgdata;
+      const CreateInstancePayload *payload = (const CreateInstancePayload *)msgdata;
+      assert(msglen == (sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields));
 
-      int num_fields = *data++;
-      std::vector<size_t> field_sizes(num_fields);
-      for(int i = 0; i < num_fields; i++)
-	field_sizes[i] = *data++;
-      msglen -= (num_fields + 1) * sizeof(int);
+      std::vector<size_t> field_sizes(payload->num_fields);
+      for(int i = 0; i < payload->num_fields; i++)
+	field_sizes[i] = payload->field_size(i);
 
       resp.i = args.m.impl()->create_instance(args.r, 
-					      data,
-					      args.bytes_needed,
-					      args.block_size,
-					      args.element_size,
+					      payload->linearization_bits,
+					      payload->bytes_needed,
+					      payload->block_size,
+					      payload->element_size,
 					      field_sizes,
-					      args.redopid,
-					      args.list_size,
+					      payload->redopid,
+					      payload->list_size,
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
@@ -3969,29 +4027,31 @@ namespace LegionRuntime {
 							off_t list_size,
 							RegionInstance parent_inst)
     {
-      int payload[512];
-      payload[0] = field_sizes.size();
-      // Not a precise assertion but close enough for now
-      assert((field_sizes.size()+1) < 512);
+      size_t payload_size = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
+      CreateInstancePayload *payload = (CreateInstancePayload *)alloca(payload_size);
+
+      payload->bytes_needed = bytes_needed;
+      payload->block_size = block_size;
+      payload->element_size = element_size;
+      //payload->adjust = ?
+      payload->list_size = list_size;
+      payload->redopid = redopid;
+
+      for(unsigned i = 0; i < RegionInstance::Impl::MAX_LINEARIZATION_LEN; i++)
+	payload->linearization_bits[i] = linearization_bits[i];
+
+      payload->num_fields = field_sizes.size();
       for(unsigned i = 0; i < field_sizes.size(); i++)
-	payload[i + 1] = field_sizes[i];
-      memcpy(payload + (field_sizes.size() + 1), linearization_bits, RegionInstance::Impl::MAX_LINEARIZATION_LEN * sizeof(int));
+	payload->field_size(i) = field_sizes[i];
 
       CreateInstanceArgs args;
       args.m = me;
       args.r = r;
-      args.bytes_needed = bytes_needed;
-      args.block_size = block_size;
-      args.element_size = element_size;
-      assert(args.element_size == element_size); // did it fit into 32 bits?
-      args.redopid = redopid;
-      args.list_size = list_size;
-      assert(args.list_size == list_size); // did it fit into 32 bits?
       args.parent_inst = parent_inst;
       log_inst(LEVEL_DEBUG, "creating remote instance: node=%d", ID(me).node());
       CreateInstanceResp resp = CreateInstanceMessage::request(ID(me).node(), args,
-							       payload, 512 * sizeof(int), PAYLOAD_COPY);
-      log_inst(LEVEL_DEBUG, "created remote instance: inst=%x offset=%zd", resp.i.id, resp.inst_offset);
+							       payload, payload_size, PAYLOAD_COPY);
+      log_inst(LEVEL_DEBUG, "created remote instance: inst=" IDFMT " offset=%zd", resp.i.id, resp.inst_offset);
 
       DomainLinearization linear;
       linear.deserialize(linearization_bits);
@@ -4005,7 +4065,7 @@ namespace LegionRuntime {
       if(index >= instances.size()) {
 	AutoHSLLock a(mutex);
 	if(index >= instances.size()) {
-	  log_inst(LEVEL_DEBUG, "resizing instance array: mem=%x old=%zd new=%d",
+	  log_inst(LEVEL_DEBUG, "resizing instance array: mem=" IDFMT " old=%zd new=%d",
 		   me.id, instances.size(), index+1);
 	  for(unsigned i = instances.size(); i <= index; i++)
 	    instances.push_back(0);
@@ -4038,7 +4098,7 @@ namespace LegionRuntime {
     void Memory::Impl::destroy_instance_local(RegionInstance i, 
 					      bool local_destroy)
     {
-      log_inst(LEVEL_INFO, "destroying local instance: mem=%x inst=%x", me.id, i.id);
+      log_inst(LEVEL_INFO, "destroying local instance: mem=" IDFMT " inst=" IDFMT "", me.id, i.id);
 
       // all we do for now is free the actual data storage
       unsigned index = ID(i).index_l();
@@ -4079,7 +4139,7 @@ namespace LegionRuntime {
 	DestroyInstanceArgs args;
 	args.m = me;
 	args.i = i;
-	log_inst(LEVEL_DEBUG, "destroying remote instance: node=%d inst=%x", owner, i.id);
+	log_inst(LEVEL_DEBUG, "destroying remote instance: node=%d inst=" IDFMT "", owner, i.id);
 
 	DestroyInstanceMessage::request(owner, args);
       }
@@ -4107,7 +4167,7 @@ namespace LegionRuntime {
     void Processor::Impl::set_utility_processor(UtilityProcessor *_util_proc)
     {
       if(is_idle_task_enabled()) {
-	log_util.info("delegating idle task handling for %x to %x",
+	log_util.info("delegating idle task handling for " IDFMT " to " IDFMT "",
 		      me.id, util.id);
 	disable_idle_task();
 	_util_proc->enable_idle_task(this);
@@ -4259,7 +4319,7 @@ namespace LegionRuntime {
 
 	  void add_waiter(void)
 	  {
-	    log_task.info("thread %p registering a listener on event %x/%d",
+	    log_task.info("thread %p registering a listener on event " IDFMT "/%d",
 			  thread, event.id, event.gen);
 	    if(event.has_triggered())
 	      triggered = true;
@@ -4269,7 +4329,7 @@ namespace LegionRuntime {
 
 	  virtual bool event_triggered(void)
 	  {
-	    log_task.info("thread %p notified for event %x/%d",
+	    log_task.info("thread %p notified for event " IDFMT "/%d",
 			  thread, event.id, event.gen);
 
 	    // now take the thread's (really the processor's) lock and see if
@@ -4300,7 +4360,7 @@ namespace LegionRuntime {
 
 	  virtual void print_info(FILE *f)
 	  {
-	    fprintf(f,"thread %p waiting on %x/%d\n",
+	    fprintf(f,"thread %p waiting on " IDFMT "/%d\n",
 		   thread, event.id, event.gen);
 	  }
 
@@ -4341,7 +4401,7 @@ namespace LegionRuntime {
 	  {
 	    AutoHSLLock al(proc->mutex);
 
-	    log_task.info("thread %p (proc %x) needs to sleep on event %x/%d",
+	    log_task.info("thread %p (proc " IDFMT ") needs to sleep on event " IDFMT "/%d",
 			  this, proc->me.id, wait_for.id, wait_for.gen);
 	    
 	    assert(state == STATE_RUN);
@@ -4355,7 +4415,7 @@ namespace LegionRuntime {
 		proc->resumable_threads.pop_front();
 		assert(resumee->state == STATE_RESUMABLE);
 
-		log_task.info("waiting thread %p yielding to thread %p for proc %x",
+		log_task.info("waiting thread %p yielding to thread %p for proc " IDFMT "",
 			      this, resumee, proc->me.id);
 
 		resumee->state = STATE_RUN;
@@ -4375,14 +4435,14 @@ namespace LegionRuntime {
 		  Task *newtask = proc->ready_tasks.front();
 		  proc->ready_tasks.pop_front();
 		
-		  log_task.info("thread %p (proc %x) running task %p instead of sleeping",
+		  log_task.info("thread %p (proc " IDFMT ") running task %p instead of sleeping",
 			        this, proc->me.id, newtask);
 
 		  al.release();
 		  newtask->run();
 		  al.reacquire();
 
-		  log_task.info("thread %p (proc %x) done with inner task %p, back to waiting on %x/%d",
+		  log_task.info("thread %p (proc " IDFMT ") done with inner task %p, back to waiting on " IDFMT "/%d",
 			        this, proc->me.id, newtask, wait_for.id, wait_for.gen);
 
 		  delete newtask;
@@ -4394,14 +4454,14 @@ namespace LegionRuntime {
 	        if(proc->shared_queue) {
 	          Task *stask = proc->shared_queue->pop();
                   if(stask) {
-		    log_task.info("thread %p (proc %x) running shared task %p instead of sleeping",
+		    log_task.info("thread %p (proc " IDFMT ") running shared task %p instead of sleeping",
 			          this, proc->me.id, stask);
 
 		    al.release();
 		    stask->run();
 		    al.reacquire();
 
-		    log_task.info("thread %p (proc %x) done with inner shared task %p, back to waiting on %x/%d",
+		    log_task.info("thread %p (proc " IDFMT ") done with inner shared task %p, back to waiting on " IDFMT "/%d",
 			          this, proc->me.id, stask, wait_for.id, wait_for.gen);
 
 		    delete stask;
@@ -4415,7 +4475,7 @@ namespace LegionRuntime {
 	      //  is currently running it
 	      if(!block && proc->idle_task_enabled && 
 		 proc->idle_task && !proc->in_idle_task) {
-		log_task.info("thread %p (proc %x) running idle task instead of sleeping",
+		log_task.info("thread %p (proc " IDFMT ") running idle task instead of sleeping",
 			      this, proc->me.id);
 
 		proc->in_idle_task = true;
@@ -4426,7 +4486,7 @@ namespace LegionRuntime {
 
 		proc->in_idle_task = false;
 
-		log_task.info("thread %p (proc %x) done with idle task, back to waiting on %x/%d",
+		log_task.info("thread %p (proc " IDFMT ") done with idle task, back to waiting on " IDFMT "/%d",
 			      this, proc->me.id, wait_for.id, wait_for.gen);
 
 		continue;
@@ -4436,23 +4496,23 @@ namespace LegionRuntime {
 	      //   so go to sleep, putting ourselves on the preemptable queue
 	      //   if !block
 	      if(block) {
-		log_task.info("thread %p (proc %x) blocked on event %x/%d",
+		log_task.info("thread %p (proc " IDFMT ") blocked on event " IDFMT "/%d",
 			      this, proc->me.id, wait_for.id, wait_for.gen);
 		state = STATE_BLOCKED;
 	      } else {
-		log_task.info("thread %p (proc %x) sleeping (preemptable) on event %x/%d",
+		log_task.info("thread %p (proc " IDFMT ") sleeping (preemptable) on event " IDFMT "/%d",
 			      this, proc->me.id, wait_for.id, wait_for.gen);
 		state = STATE_PREEMPTABLE;
 		proc->preemptable_threads.push_back(this);
 	      }
 	      proc->active_thread_count--;
 	      gasnett_cond_wait(&condvar, &proc->mutex.lock);
-	      log_task.info("thread %p (proc %x) awake",
+	      log_task.info("thread %p (proc " IDFMT ") awake",
 			    this, proc->me.id);
 	      assert(state == STATE_RUN);
 	    }
 
-	    log_task.info("thread %p (proc %x) done sleeping on event %x/%d",
+	    log_task.info("thread %p (proc " IDFMT ") done sleeping on event " IDFMT "/%d",
 			  this, proc->me.id, wait_for.id, wait_for.gen);
             // Have to do this while holding the lock
             assert(event_stack == entry);
@@ -4474,7 +4534,7 @@ namespace LegionRuntime {
 	  // first thing - take the lock and set our status
 	  state = STATE_IDLE;
 
-	  log_task(LEVEL_DEBUG, "worker thread ready: proc=%x", proc->me.id);
+	  log_task(LEVEL_DEBUG, "worker thread ready: proc=" IDFMT "", proc->me.id);
 
 	  // we spend what looks like our whole life holding the processor
 	  //  lock - we explicitly let go when we run tasks and implicitly
@@ -4498,7 +4558,7 @@ namespace LegionRuntime {
 	      // let go of the lock while we call the init task
 	      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 	      if(it != task_id_table.end()) {
-		log_task(LEVEL_INFO, "calling processor init task: proc=%x", proc->me.id);
+		log_task(LEVEL_INFO, "calling processor init task: proc=" IDFMT "", proc->me.id);
                 // consider ourselves to be running for the duration of the init task
                 state = STATE_RUN;
 		gasnet_hsl_unlock(&proc->mutex);
@@ -4506,9 +4566,9 @@ namespace LegionRuntime {
 		gasnet_hsl_lock(&proc->mutex);
                 // now back to "idle"
                 state = STATE_IDLE;
-		log_task(LEVEL_INFO, "finished processor init task: proc=%x", proc->me.id);
+		log_task(LEVEL_INFO, "finished processor init task: proc=" IDFMT "", proc->me.id);
 	      } else {
-		log_task(LEVEL_INFO, "no processor init task: proc=%x", proc->me.id);
+		log_task(LEVEL_INFO, "no processor init task: proc=" IDFMT "", proc->me.id);
 	      }
 
 	      // now we can set 'init_done', and signal anybody who is in the
@@ -4516,13 +4576,13 @@ namespace LegionRuntime {
 	      proc->init_done = true;
               // Enable the idle task
               if(proc->util_proc) {
-                log_task.info("idle task enabled for processor %x on util proc %x",
+                log_task.info("idle task enabled for processor " IDFMT " on util proc " IDFMT "",
                               proc->me.id, proc->util.id);
 
                 proc->util_proc->enable_idle_task(proc);
               } else {
                 assert(proc->kind != Processor::UTIL_PROC);
-                log_task.info("idle task enabled for processor %x", proc->me.id);
+                log_task.info("idle task enabled for processor " IDFMT "", proc->me.id);
                 proc->idle_task_enabled = true;
               }
 	      for(std::set<Thread *>::iterator it = proc->all_threads.begin();
@@ -4562,7 +4622,7 @@ namespace LegionRuntime {
 #endif
 
               if(newtask) {
-	        log_task.info("thread running ready task %p for proc %x",
+	        log_task.info("thread running ready task %p for proc " IDFMT "",
 			      newtask, proc->me.id);
 	        proc->active_thread_count++;
 	        state = STATE_RUN;
@@ -4574,7 +4634,7 @@ namespace LegionRuntime {
 
 	        state = STATE_IDLE;
 	        proc->active_thread_count--;
-	        log_task.info("thread finished running task %p for proc %x",
+	        log_task.info("thread finished running task %p for proc " IDFMT "",
 			      newtask, proc->me.id);
 	        delete newtask;
 	        continue;
@@ -4585,7 +4645,7 @@ namespace LegionRuntime {
 	    if((proc->active_thread_count < proc->max_active_threads) &&
 	       proc->idle_task_enabled && 
 	       proc->idle_task && !proc->in_idle_task) {
-	      log_task.info("thread %p (proc %x) running idle task",
+	      log_task.info("thread %p (proc " IDFMT ") running idle task",
 			    this, proc->me.id);
 
 	      proc->in_idle_task = true;
@@ -4600,20 +4660,20 @@ namespace LegionRuntime {
 	      proc->active_thread_count--;
 	      state = STATE_IDLE;
 
-	      log_task.info("thread %p (proc %x) done with idle task",
+	      log_task.info("thread %p (proc " IDFMT ") done with idle task",
 			    this, proc->me.id);
 
 	      continue;
 	    }
 
 	    // out of ideas, go to sleep
-	    log_task.info("thread %p (proc %x) has no work - sleeping",
+	    log_task.info("thread %p (proc " IDFMT ") has no work - sleeping",
 			  this, proc->me.id);
 	    proc->avail_threads.push_back(this);
 
 	    gasnett_cond_wait(&condvar, &proc->mutex.lock);
 
-	    log_task.info("thread %p (proc %x) awake and looking for work",
+	    log_task.info("thread %p (proc " IDFMT ") awake and looking for work",
 			  this, proc->me.id);
 	  }
 
@@ -4632,20 +4692,20 @@ namespace LegionRuntime {
 	    // let go of the lock while we call the shutdown task
 	    Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
 	    if(it != task_id_table.end()) {
-	      log_task(LEVEL_INFO, "calling processor shutdown task: proc=%x", proc->me.id);
+	      log_task(LEVEL_INFO, "calling processor shutdown task: proc=" IDFMT "", proc->me.id);
 
 	      al.release();
 	      (it->second)(0, 0, proc->me);
 	      al.reacquire();
 
-	      log_task(LEVEL_INFO, "finished processor shutdown task: proc=%x", proc->me.id);
+	      log_task(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", proc->me.id);
 	    }
 	    if(proc->shutdown_event.exists())
 	      proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
             proc->finished();
 	  }
 
-	  log_task(LEVEL_DEBUG, "worker thread terminating: proc=%x", proc->me.id);
+	  log_task(LEVEL_DEBUG, "worker thread terminating: proc=" IDFMT "", proc->me.id);
 	}
 
         virtual Processor get_processor(void) const
@@ -4665,7 +4725,7 @@ namespace LegionRuntime {
 
 	virtual bool event_triggered(void)
 	{
-	  log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=%x/%d",
+	  log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=" IDFMT "/%d",
 		   task->func_id, 
 		   task->finish_event.id, task->finish_event.gen);
 
@@ -4684,7 +4744,7 @@ namespace LegionRuntime {
 
 	virtual void print_info(FILE *f)
 	{
-	  fprintf(f,"deferred task: func=%d proc=%x finish=%x/%d\n",
+	  fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
 		 task->func_id, task->proc->me.id, task->finish_event.id, task->finish_event.gen);
 	}
 
@@ -4735,7 +4795,7 @@ namespace LegionRuntime {
 	//   they're ready
 	for(int i = 0; i < total_threads; i++) {
 	  Thread *t = new Thread(this);
-	  log_task(LEVEL_DEBUG, "creating worker thread : proc=%x thread=%p", me.id, t);
+	  log_task(LEVEL_DEBUG, "creating worker thread : proc=" IDFMT " thread=%p", me.id, t);
 	  t->start_thread(stack_size, core_id, "local worker");
 	}
       }
@@ -4754,7 +4814,7 @@ namespace LegionRuntime {
           while (!avail_threads.empty()) {
             Thread *thread = avail_threads.front();
             avail_threads.pop_front();
-            log_task(LEVEL_DEBUG, "waking thread to shutdown: proc=%x task=%p thread=%p", me.id, task, thread);
+            log_task(LEVEL_DEBUG, "waking thread to shutdown: proc=" IDFMT " task=%p thread=%p", me.id, task, thread);
 	    gasnett_cond_signal(&thread->condvar);
             //thread->set_task_and_wake(task);
           }
@@ -4786,7 +4846,7 @@ namespace LegionRuntime {
             ready_tasks.push_back(task);
         }
 
-	log_task.info("pushing ready task %p onto list for proc %x (active=%d, idle=%zd, preempt=%zd)",
+	log_task.info("pushing ready task %p onto list for proc " IDFMT " (active=%d, idle=%zd, preempt=%zd)",
 		      task, me.id, active_thread_count,
 		      avail_threads.size(), preemptable_threads.size());
 
@@ -4870,7 +4930,7 @@ namespace LegionRuntime {
 	// early out - if the event has obviously triggered (or is NO_EVENT)
 	//  don't build up continuation
 	if(start_event.has_triggered()) {
-	  log_task(LEVEL_INFO, "new ready task: func=%d start=%x/%d finish=%x/%d",
+	  log_task(LEVEL_INFO, "new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen,
 		   finish_event.id, finish_event.gen);
 #ifdef SHARED_TASK_QUEUE
@@ -4882,7 +4942,7 @@ namespace LegionRuntime {
 #endif
 	  add_ready_task(task);
 	} else {
-	  log_task(LEVEL_DEBUG, "deferring spawn: func=%d event=%x/%d",
+	  log_task(LEVEL_DEBUG, "deferring spawn: func=%d event=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen);
 	  start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(task));
 	}
@@ -4891,13 +4951,13 @@ namespace LegionRuntime {
       virtual void enable_idle_task(void)
       {
 	if(util_proc) {
-	  log_task.info("idle task enabled for processor %x on util proc %x",
+	  log_task.info("idle task enabled for processor " IDFMT " on util proc " IDFMT "",
 			me.id, util.id);
 
 	  util_proc->enable_idle_task(this);
 	} else {
 	  assert(kind != Processor::UTIL_PROC);
-	  log_task.info("idle task enabled for processor %x", me.id);
+	  log_task.info("idle task enabled for processor " IDFMT "", me.id);
           // need the lock when modifying data structures
           AutoHSLLock a(mutex);
 	  idle_task_enabled = true;
@@ -4930,12 +4990,12 @@ namespace LegionRuntime {
       virtual void disable_idle_task(void)
       {
 	if(util_proc) {
-	  log_task.info("idle task disabled for processor %x on util proc %x",
+	  log_task.info("idle task disabled for processor " IDFMT " on util proc " IDFMT "",
 			me.id, util.id);
 
 	  util_proc->disable_idle_task(this);
 	} else {
-	  log_task.info("idle task disabled for processor %x", me.id);
+	  log_task.info("idle task disabled for processor " IDFMT "", me.id);
 	  idle_task_enabled = false;
 	}
       }
@@ -4996,7 +5056,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"utility thread for processor %x: after=%x/%d\n", 
+	fprintf(f,"utility thread for processor " IDFMT ": after=" IDFMT "/%d\n", 
             proc->me.id, finish_event.id, finish_event.gen);
       }
 
@@ -5153,7 +5213,7 @@ namespace LegionRuntime {
 #ifdef __SSE2__
           _mm_pause();
 #endif
-	  log_util.spew("utility thread polling on event %x/%d",
+	  log_util.spew("utility thread polling on event " IDFMT "/%d",
 			wait_for.id, wait_for.gen);
 	  //usleep(1000);
 	}
@@ -5177,17 +5237,17 @@ namespace LegionRuntime {
 	// need to call init for utility processor too
 	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 	if(it != task_id_table.end()) {
-	  log_task(LEVEL_INFO, "calling processor init task for utility proc: proc=%x", proc->me.id);
+	  log_task(LEVEL_INFO, "calling processor init task for utility proc: proc=" IDFMT "", proc->me.id);
 	  (it->second)(0, 0, proc->me);
-	  log_task(LEVEL_INFO, "finished processor init task for utility proc: proc=%x", proc->me.id);
+	  log_task(LEVEL_INFO, "finished processor init task for utility proc: proc=" IDFMT "", proc->me.id);
 	} else {
-	  log_task(LEVEL_INFO, "no processor init task for utility proc: proc=%x", proc->me.id);
+	  log_task(LEVEL_INFO, "no processor init task for utility proc: proc=" IDFMT "", proc->me.id);
 	}
 
 	// we spend most of our life with the utility processor's lock (or
 	//   waiting for it) - we only drop it when we have work to do
 	gasnet_hsl_lock(&proc->mutex);
-	log_util.info("utility worker thread started, proc=%x", proc->me.id);
+	log_util.info("utility worker thread started, proc=" IDFMT "", proc->me.id);
 
 	while(!proc->shutdown_requested) {
 	  // try to run tasks from the runnable queue
@@ -5195,10 +5255,10 @@ namespace LegionRuntime {
 	    UtilityTask *task = proc->tasks.front();
 	    proc->tasks.pop_front();
 	    gasnet_hsl_unlock(&proc->mutex);
-	    log_util.debug("running task %p in utility thread", task);
+	    log_util.info("running task %p (%d) in utility thread", task, task->func_id);
 	    task->run();
+	    log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
 	    delete task;
-	    log_util.debug("done with task %p in utility thread", task);
 	    gasnet_hsl_lock(&proc->mutex);
 	  }
 
@@ -5207,10 +5267,10 @@ namespace LegionRuntime {
             UtilityTask *task = proc->shared_queue->pop();
             if (task) {
               gasnet_hsl_unlock(&proc->mutex);
-              log_util.debug("running shared task %p in utility thread", task);
+              log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
               task->run();
+              log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
               delete task;
-              log_util.debug("done with shared task %p in utility thread", task);
               gasnet_hsl_lock(&proc->mutex);
             }
           }
@@ -5238,9 +5298,9 @@ namespace LegionRuntime {
 		gasnet_hsl_unlock(&proc->mutex);
 
 		// run the idle task on behalf of the idle proc
-		log_util.debug("running idle task for %x", idle_proc->me.id);
+		log_util.debug("running idle task for " IDFMT "", idle_proc->me.id);
 		proc->idle_task->run(idle_proc->me);
-		log_util.debug("done with idle task for %x", idle_proc->me.id);
+		log_util.debug("done with idle task for " IDFMT "", idle_proc->me.id);
 
 		gasnet_hsl_lock(&proc->mutex);
 		proc->procs_in_idle_task.erase(idle_proc);
@@ -5255,13 +5315,13 @@ namespace LegionRuntime {
               && ((proc->shared_queue == NULL) || proc->shared_queue->empty())
 #endif
              ) {
-	    log_util.info("utility thread going to sleep");
+	    log_util.info("utility thread going to sleep (%p, %p)", this, proc);
 	    gasnett_cond_wait(&proc->condvar, &proc->mutex.lock);
 	    log_util.info("utility thread awake again");
 	  }
 	}
 
-	log_util.info("utility worker thread shutting down, proc=%x", proc->me.id);
+	log_util.info("utility worker thread shutting down, proc=" IDFMT "", proc->me.id);
 	proc->threads.erase(this);
 	if(proc->threads.size() == 0)
 	  proc->run_counter->decrement();
@@ -5270,11 +5330,11 @@ namespace LegionRuntime {
         // Let go of the lock while holding calling the shutdown task
         it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
         if(it != task_id_table.end()) {
-          log_task(LEVEL_INFO, "calling processor shutdown task for utility proc: proc=%x", proc->me.id);
+          log_task(LEVEL_INFO, "calling processor shutdown task for utility proc: proc=" IDFMT "", proc->me.id);
 
           (it->second)(0, 0, proc->me);
 
-          log_task(LEVEL_INFO, "finished processor shutdown task for utility proc: proc=%x", proc->me.id);
+          log_task(LEVEL_INFO, "finished processor shutdown task for utility proc: proc=" IDFMT "", proc->me.id);
         }
         //if(proc->shutdown_event.exists())
         //  proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
@@ -5326,6 +5386,7 @@ namespace LegionRuntime {
     {
       for(int i = 0; i < num_worker_threads; i++) {
 	UtilityThread *t = new UtilityThread(this);
+        log_util.info("utility thread %p created for proc "IDFMT"(%p)", t, this->me.id, this);
 	threads.insert(t);
 	t->start_thread(stack_size, -1, "utility worker");
       }
@@ -5423,7 +5484,7 @@ namespace LegionRuntime {
 
       if(threads.size() == 0) return;
 
-      log_util.info("thread waiting for utility proc %x threads to shut down",
+      log_util.info("thread waiting for utility proc " IDFMT " threads to shut down",
 		    me.id);
       while(threads.size() > 0)
 	gasnett_cond_wait(&condvar, &mutex.lock);
@@ -5433,9 +5494,9 @@ namespace LegionRuntime {
 
     struct SpawnTaskArgs : public BaseMedium {
       Processor proc;
-      Processor::TaskFuncID func_id;
       Event start_event;
       Event finish_event;
+      Processor::TaskFuncID func_id;
       int priority;
     };
 
@@ -5468,7 +5529,7 @@ namespace LegionRuntime {
       if(ptr != 0) {
 	//assert(0);
 	//printf("oh, good - we're a gpu thread - we'll spin for now\n");
-	//printf("waiting for %x/%d\n", id, gen);
+	//printf("waiting for " IDFMT "/%d\n", id, gen);
 	while(!e->has_triggered(gen)) {
 #ifdef __SSE2__
           _mm_pause();
@@ -5483,7 +5544,13 @@ namespace LegionRuntime {
       //  we wait
       //printf("waiting on event, polling gasnet to hopefully not die\n");
       while(!e->has_triggered(gen)) {
-	do_some_polling();
+	// can't poll here - the GPU DMA code sometimes polls from inside an active
+	//  message handler (consider turning polling back on once that's fixed)
+	//do_some_polling();
+#ifdef __SSE2__
+	_mm_pause();
+#endif
+	// no sleep - we don't want an OS-scheduler-latency here
 	//usleep(10000);
       }
       return;
@@ -5511,7 +5578,7 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = args.proc.impl();
-      log_task(LEVEL_DEBUG, "remote spawn request: proc_id=%x task_id=%d event=%x/%d",
+      log_task(LEVEL_DEBUG, "remote spawn request: proc_id=" IDFMT " task_id=%d event=" IDFMT "/%d",
 	       args.proc.id, args.func_id, args.start_event.id, args.start_event.gen);
       p->spawn_task(args.func_id, data, datalen,
 		    args.start_event, args.finish_event, args.priority);
@@ -5538,7 +5605,7 @@ namespace LegionRuntime {
 			      Event start_event, Event finish_event,
                               int priority)
       {
-	log_task(LEVEL_DEBUG, "spawning remote task: proc=%x task=%d start=%x/%d finish=%x/%d",
+	log_task(LEVEL_DEBUG, "spawning remote task: proc=" IDFMT " task=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
 		 me.id, func_id, 
 		 start_event.id, start_event.gen,
 		 finish_event.id, finish_event.gen);
@@ -5581,6 +5648,16 @@ namespace LegionRuntime {
       impl()->disable_idle_task();
     }
 
+    AddressSpace Processor::address_space(void) const
+    {
+      return ID(id).node();
+    }
+
+    IDType Processor::local_id(void) const
+    {
+      return ID(id).index();
+    }
+
     ///////////////////////////////////////////////////
     // Runtime
 
@@ -5590,7 +5667,10 @@ namespace LegionRuntime {
       case ID::ID_EVENT:
 	{
 	  Node *n = &runtime->nodes[id.node()];
-
+	  Event::Impl *impl = n->events.lookup_entry(id.index(), id.node());
+	  assert(impl->me == id.convert<Event>());
+	  return impl;
+#if 0
 	  unsigned index = id.index();
 	  if(index >= n->num_events) {
 	    AutoHSLLock a(n->mutex); // take lock before we actually resize
@@ -5610,6 +5690,7 @@ namespace LegionRuntime {
 	    }
 	  }
 	  return &(n->events[index]);
+#endif
 	}
 
       default:
@@ -5623,6 +5704,10 @@ namespace LegionRuntime {
       case ID::ID_LOCK:
 	{
 	  Node *n = &runtime->nodes[id.node()];
+	  Reservation::Impl *impl = n->reservations.lookup_entry(id.index(), id.node());
+	  assert(impl->me == id.convert<Reservation>());
+	  return impl;
+#if 0
 	  std::vector<Reservation::Impl>& locks = nodes[id.node()].locks;
 
 	  unsigned index = id.index();
@@ -5645,6 +5730,7 @@ namespace LegionRuntime {
 	    }
 	  }
 	  return &(locks[index]);
+#endif
 	}
 
       case ID::ID_INDEXSPACE:
@@ -5691,7 +5777,10 @@ namespace LegionRuntime {
       assert(id.type() == ID::ID_INDEXSPACE);
 
       Node *n = &runtime->nodes[id.node()];
-
+      IndexSpace::Impl *impl = n->index_spaces.lookup_entry(id.index(), id.node());
+      assert(impl->me == id.convert<IndexSpace>());
+      return impl;
+#if 0
       unsigned index = id.index();
       if(index >= n->index_spaces.size()) {
 	AutoHSLLock a(n->mutex); // take lock before we actually resize
@@ -5701,7 +5790,7 @@ namespace LegionRuntime {
       }
 
       if(!n->index_spaces[index]) { // haven't seen this metadata before?
-	//printf("UNKNOWN METADATA %x\n", id.id());
+	//printf("UNKNOWN METADATA " IDFMT "\n", id.id());
 	AutoHSLLock a(n->mutex); // take lock before we actually allocate
 	if(!n->index_spaces[index]) {
 	  n->index_spaces[index] = new IndexSpace::Impl(id.convert<IndexSpace>());
@@ -5709,6 +5798,7 @@ namespace LegionRuntime {
       }
 
       return n->index_spaces[index];
+#endif
     }
 
     RegionInstance::Impl *Runtime::get_instance_impl(ID id)
@@ -5735,7 +5825,7 @@ namespace LegionRuntime {
 
       if(!mem->instances[id.index_l()]) {
 	if(!mem->instances[id.index_l()]) {
-	  //printf("[%d] creating proxy instance: inst=%x\n", gasnet_mynode(), id.id());
+	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", gasnet_mynode(), id.id());
 	  mem->instances[id.index_l()] = new RegionInstance::Impl(id.convert<RegionInstance>(), mem->me);
 	}
       }
@@ -5769,64 +5859,34 @@ namespace LegionRuntime {
     /*static*/ IndexSpace IndexSpace::create_index_space(size_t num_elmts)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      // find an available ID
-      std::vector<IndexSpace::Impl *>& index_spaces = Runtime::runtime->nodes[gasnet_mynode()].index_spaces;
 
-      unsigned index = 0;
-      {
-	AutoHSLLock a(Runtime::runtime->nodes[gasnet_mynode()].mutex);
-
-	while((index < index_spaces.size()) && (index_spaces[index] != 0)) index++;
-	if(index >= index_spaces.size()) index_spaces.resize(index + 1);
-	// assign a dummy, but non-zero value to reserve this entry
-	// this lets us do the object creation outside the critical section
-	index_spaces[index] = (IndexSpace::Impl *)1;
-      }
-
-      IndexSpace r = ID(ID::ID_INDEXSPACE, 
-			gasnet_mynode(), 
-			index).convert<IndexSpace>();
-
-      IndexSpace::Impl *impl =new IndexSpace::Impl(r, NO_SPACE, num_elmts);
-      index_spaces[index] = impl;
+      IndexSpace::Impl *impl = Runtime::runtime->local_index_space_free_list->alloc_entry();
       
-      log_meta(LEVEL_INFO, "index space created: id=%x num_elmts=%zd",
-	       r.id, num_elmts);
-      return r;
+      impl->init(impl->me, NO_SPACE, num_elmts);
+      
+      log_meta(LEVEL_INFO, "index space created: id=" IDFMT " num_elmts=%zd",
+	       impl->me.id, num_elmts);
+      return impl->me;
     }
 
     /*static*/ IndexSpace IndexSpace::create_index_space(IndexSpace parent, const ElementMask &mask)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      // find an available ID
-      std::vector<IndexSpace::Impl *>& index_spaces = Runtime::runtime->nodes[gasnet_mynode()].index_spaces;
 
-      unsigned index = 0;
-      {
-	AutoHSLLock a(Runtime::runtime->nodes[gasnet_mynode()].mutex);
-
-	while((index < index_spaces.size()) && (index_spaces[index] != 0)) index++;
-	if(index >= index_spaces.size()) index_spaces.resize(index + 1);
-	// assign a dummy, but non-zero value to reserve this entry
-	// this lets us do the object creation outside the critical section
-	index_spaces[index] = (IndexSpace::Impl *)1;
-      }
-
-      IndexSpace r = ID(ID::ID_INDEXSPACE, 
-			gasnet_mynode(), 
-			index).convert<IndexSpace>();
+      IndexSpace::Impl *impl = Runtime::runtime->local_index_space_free_list->alloc_entry();
+      assert(impl);
+      assert(ID(impl->me).type() == ID::ID_INDEXSPACE);
 
       StaticAccess<IndexSpace::Impl> p_data(parent.impl());
-      IndexSpace::Impl *impl =
-	new IndexSpace::Impl(r, parent,
-			     p_data->num_elmts, 
-			     &mask,
-			     true);  // TODO: actually decide when to safely consider a subregion frozen
-      index_spaces[index] = impl;
+
+      impl->init(impl->me, parent,
+		 p_data->num_elmts, 
+		 &mask,
+		 true);  // TODO: actually decide when to safely consider a subregion frozen
       
-      log_meta(LEVEL_INFO, "index space created: id=%x parent=%x (num_elmts=%zd)",
-	       r.id, parent.id, p_data->num_elmts);
-      return r;
+      log_meta(LEVEL_INFO, "index space created: id=" IDFMT " parent=" IDFMT " (num_elmts=%zd)",
+	       impl->me.id, parent.id, p_data->num_elmts);
+      return impl->me;
     }
 
     IndexSpaceAllocator IndexSpace::create_allocator(void) const
@@ -5844,7 +5904,7 @@ namespace LegionRuntime {
       Memory::Impl *m_impl = Runtime::runtime->get_memory_impl(memory);
 
       IndexSpaceAllocator a = m_impl->create_allocator(*this, 2 * mask_size);
-      log_meta(LEVEL_INFO, "allocator created: region=%x memory=%x id=%x",
+      log_meta(LEVEL_INFO, "allocator created: region=" IDFMT " memory=" IDFMT " id=" IDFMT "",
 	       this->id, memory.id, a.id);
       return a;
 #endif
@@ -5968,7 +6028,7 @@ namespace LegionRuntime {
 						 redop_id,
 						 -1 /*list size*/,
 						 RegionInstance::NO_INST);
-      log_meta(LEVEL_INFO, "instance created: region=%x memory=%x id=%x bytes=%zd",
+      log_meta(LEVEL_INFO, "instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
       return i;
     }
@@ -5989,7 +6049,7 @@ namespace LegionRuntime {
 
       RegionInstance i = m_impl->create_instance(get_index_space(), inst_bytes, 
 							inst_adjust, redopid);
-      log_meta(LEVEL_INFO, "instance created: region=%x memory=%x id=%x bytes=%zd adjust=%zd redop=%d",
+      log_meta(LEVEL_INFO, "instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd adjust=%zd redop=%d",
 	       this->id, memory.id, i.id, inst_bytes, inst_adjust, redopid);
       return i;
     }
@@ -6012,7 +6072,7 @@ namespace LegionRuntime {
       RegionInstance i = m_impl->create_instance(*this, inst_bytes, 
 							inst_adjust, redopid,
 							list_size, parent_inst);
-      log_meta(LEVEL_INFO, "instance created: region=%x memory=%x id=%x bytes=%zd adjust=%zd redop=%d list_size=%zd parent_inst=%x",
+      log_meta(LEVEL_INFO, "instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd adjust=%zd redop=%d list_size=%zd parent_inst=" IDFMT "",
 	       this->id, memory.id, i.id, inst_bytes, inst_adjust, redopid,
 	       list_size, parent_inst.id);
       return i;
@@ -6042,7 +6102,7 @@ namespace LegionRuntime {
       virtual bool event_triggered(void)
       {
         StaticAccess<RegionInstance::Impl> i_data(impl);
-        log_meta(LEVEL_INFO, "instance destroyed: space=%x id=%x",
+        log_meta(LEVEL_INFO, "instance destroyed: space=" IDFMT " id=" IDFMT "",
                  i_data->is.id, impl->me.id);
         impl->memory.impl()->destroy_instance(impl->me, true); 
         return true;
@@ -6066,7 +6126,7 @@ namespace LegionRuntime {
         return;
       }
       StaticAccess<RegionInstance::Impl> i_data(i_impl);
-      log_meta(LEVEL_INFO, "instance destroyed: space=%x id=%x",
+      log_meta(LEVEL_INFO, "instance destroyed: space=" IDFMT " id=" IDFMT "",
 	       i_data->is.id, this->id);
       i_impl->memory.impl()->destroy_instance(*this, true);
     }
@@ -6084,7 +6144,7 @@ namespace LegionRuntime {
       if(!r_impl->valid_mask_complete) {
 	Event wait_on = r_impl->request_valid_mask();
 	
-	log_copy.info("missing valid mask (%x/%p) - waiting for %x/%d",
+	log_copy.info("missing valid mask (" IDFMT "/%p) - waiting for " IDFMT "/%d",
 		      id, r_impl->valid_mask,
 		      wait_on.id, wait_on.gen);
 
@@ -6158,7 +6218,7 @@ namespace LegionRuntime {
     {
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-	//printf("ENABLE %p %d %d %d %x\n", raw_data, offset, start, count, impl->bits[0]);
+	//printf("ENABLE %p %d %d %d " IDFMT "\n", raw_data, offset, start, count, impl->bits[0]);
 	int pos = start - first_element;
         assert(pos < num_elements);
 	for(int i = 0; i < count; i++) {
@@ -6166,9 +6226,9 @@ namespace LegionRuntime {
 	  *ptr |= (1ULL << (pos & 0x3f));
 	  pos++;
 	}
-	//printf("ENABLED %p %d %d %d %x\n", raw_data, offset, start, count, impl->bits[0]);
+	//printf("ENABLED %p %d %d %d " IDFMT "\n", raw_data, offset, start, count, impl->bits[0]);
       } else {
-	//printf("ENABLE(2) %x %d %d %d\n", memory.id, offset, start, count);
+	//printf("ENABLE(2) " IDFMT " %d %d %d\n", memory.id, offset, start, count);
 	Memory::Impl *m_impl = memory.impl();
 
 	int pos = start - first_element;
@@ -6176,7 +6236,7 @@ namespace LegionRuntime {
 	  off_t ofs = offset + ((pos >> 6) << 3);
 	  uint64_t val;
 	  m_impl->get_bytes(ofs, &val, sizeof(val));
-	  //printf("ENABLED(2) %d,  %x\n", ofs, val);
+	  //printf("ENABLED(2) %d,  " IDFMT "\n", ofs, val);
 	  val |= (1ULL << (pos & 0x3f));
 	  m_impl->put_bytes(ofs, &val, sizeof(val));
 	  pos++;
@@ -6201,7 +6261,7 @@ namespace LegionRuntime {
 	  pos++;
 	}
       } else {
-	//printf("DISABLE(2) %x %d %d %d\n", memory.id, offset, start, count);
+	//printf("DISABLE(2) " IDFMT " %d %d %d\n", memory.id, offset, start, count);
 	Memory::Impl *m_impl = memory.impl();
 
 	int pos = start - first_element;
@@ -6209,7 +6269,7 @@ namespace LegionRuntime {
 	  off_t ofs = offset + ((pos >> 6) << 3);
 	  uint64_t val;
 	  m_impl->get_bytes(ofs, &val, sizeof(val));
-	  //printf("DISABLED(2) %d,  %x\n", ofs, val);
+	  //printf("DISABLED(2) %d,  " IDFMT "\n", ofs, val);
 	  val &= ~(1ULL << (pos & 0x3f));
 	  m_impl->put_bytes(ofs, &val, sizeof(val));
 	  pos++;
@@ -6229,7 +6289,7 @@ namespace LegionRuntime {
 	start = first_enabled_elmt;
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-	//printf("FIND_ENABLED %p %d %d %x\n", raw_data, first_element, count, impl->bits[0]);
+	//printf("FIND_ENABLED %p %d %d " IDFMT "\n", raw_data, first_element, count, impl->bits[0]);
 	for(int pos = start; pos <= num_elements - count; pos++) {
 	  int run = 0;
 	  while(1) {
@@ -6241,7 +6301,7 @@ namespace LegionRuntime {
 	}
       } else {
 	Memory::Impl *m_impl = memory.impl();
-	//printf("FIND_ENABLED(2) %x %d %d %d\n", memory.id, offset, first_element, count);
+	//printf("FIND_ENABLED(2) " IDFMT " %d %d %d\n", memory.id, offset, first_element, count);
 	for(int pos = start; pos <= num_elements - count; pos++) {
 	  int run = 0;
 	  while(1) {
@@ -6553,7 +6613,7 @@ namespace LegionRuntime {
       const ElementMask &mask = data->is.get_valid_mask();
       if (!mask.is_set(ptr))
       {
-        fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region %x\n",ptr,data->is.id);
+        fprintf(stderr,"ERROR: Accessing invalid pointer %d in logical region " IDFMT "\n",ptr,data->is.id);
         assert(false);
       }
     }
@@ -6632,7 +6692,7 @@ namespace LegionRuntime {
 
       virtual void print_info(void)
       {
-	printf("deferred copy: src=%x tgt=%x region=%x after=%x/%d\n",
+	printf("deferred copy: src=" IDFMT " tgt=" IDFMT " region=" IDFMT " after=" IDFMT "/%d\n",
 	       src.id, target.id, region.id, after_copy.id, after_copy.gen);
       }
 
@@ -6655,7 +6715,7 @@ namespace LegionRuntime {
     {
       Memory::Impl *impl = args.mem.impl();
 
-      log_copy.debug("received remote reduction list request: mem=%x, offset=%zd, size=%zd, redopid=%d",
+      log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
 		     args.mem.id, args.offset, datalen, args.redopid);
 
       switch(impl->kind) {
@@ -6933,15 +6993,15 @@ namespace LegionRuntime {
       IndexSpace dst_region = StaticAccess<RegionInstance::Impl>(dst_impl)->region;
 
       if(src_region == dst_region) {
-	log_copy.info("region match: %x\n", src_region.id);
+	log_copy.info("region match: " IDFMT "\n", src_region.id);
 	return copy_to_untyped(target, src_region, wait_on);
       } else
 	if(src_region.impl()->is_parent_of(dst_region)) {
-	  log_copy.info("src is parent of dst: %x >= %x\n", src_region.id, dst_region.id);
+	  log_copy.info("src is parent of dst: " IDFMT " >= " IDFMT "\n", src_region.id, dst_region.id);
 	  return copy_to_untyped(target, dst_region, wait_on);
 	} else
 	  if(dst_region.impl()->is_parent_of(src_region)) {
-	    log_copy.info("dst is parent of src: %x >= %x\n", dst_region.id, src_region.id);
+	    log_copy.info("dst is parent of src: " IDFMT " >= " IDFMT "\n", dst_region.id, src_region.id);
 	    return copy_to_untyped(target, src_region, wait_on);
 	  } else {
 	    assert(0);
@@ -6970,7 +7030,7 @@ namespace LegionRuntime {
       IndexSpace src_region = StaticAccess<RegionInstance::Impl>(src_impl)->region;
       IndexSpace dst_region = StaticAccess<RegionInstance::Impl>(dst_impl)->region;
 
-      log_copy.info("copy_to_untyped(%x(%x), %x(%x), %x, %x/%d)",
+      log_copy.info("copy_to_untyped(" IDFMT "(" IDFMT "), " IDFMT "(" IDFMT "), " IDFMT ", " IDFMT "/%d)",
 		    id, src_region.id,
 		    target.id, dst_region.id, 
 		    region.id, wait_on.id, wait_on.gen);
@@ -6981,7 +7041,7 @@ namespace LegionRuntime {
       Memory::Impl *src_mem = src_impl->memory.impl();
       Memory::Impl *dst_mem = dst_impl->memory.impl();
 
-      log_copy.debug("copy instance: %x (%d) -> %x (%d), wait=%x/%d", id, src_mem->kind, target.id, dst_mem->kind, wait_on.id, wait_on.gen);
+      log_copy.debug("copy instance: " IDFMT " (%d) -> " IDFMT " (%d), wait=" IDFMT "/%d", id, src_mem->kind, target.id, dst_mem->kind, wait_on.id, wait_on.gen);
 
       size_t bytes_to_copy, elmt_size;
       {
@@ -6991,7 +7051,7 @@ namespace LegionRuntime {
 		       reduce_op_table[src_data->redopid]->sizeof_rhs :
 		       StaticAccess<IndexSpace::Impl>(src_data->region.impl())->elmt_size);
       }
-      log_copy.debug("COPY %x (%d) -> %x (%d) - %zd bytes (%zd)", id, src_mem->kind, target.id, dst_mem->kind, bytes_to_copy, elmt_size);
+      log_copy.debug("COPY " IDFMT " (%d) -> " IDFMT " (%d) - %zd bytes (%zd)", id, src_mem->kind, target.id, dst_mem->kind, bytes_to_copy, elmt_size);
 
       // check to see if we can access the source memory - if not, we'll send
       //  the request to somebody who can
@@ -7001,7 +7061,7 @@ namespace LegionRuntime {
 	unsigned delegate = ID(src_impl->memory).node();
 	assert(delegate != gasnet_mynode());
 
-	log_copy.info("passsing the buck to node %d for %x->%x copy",
+	log_copy.info("passsing the buck to node %d for " IDFMT "->" IDFMT " copy",
 		      delegate, src_mem->me.id, dst_mem->me.id);
 	Event after_copy = Event::Impl::create_event();
 	RemoteCopyArgs args;
@@ -7024,7 +7084,7 @@ namespace LegionRuntime {
 	unsigned delegate = ID(dst_impl->memory).node();
 	assert(delegate != gasnet_mynode());
 
-	log_copy.info("passsing the buck to node %d for %x->%x copy",
+	log_copy.info("passsing the buck to node %d for " IDFMT "->" IDFMT " copy",
 		      delegate, src_mem->me.id, dst_mem->me.id);
 	Event after_copy = Event::Impl::create_event();
 	RemoteCopyArgs args;
@@ -7042,7 +7102,7 @@ namespace LegionRuntime {
 
       if(!wait_on.has_triggered()) {
 	Event after_copy = Event::Impl::create_event();
-	log_copy.debug("copy deferred: %x (%d) -> %x (%d), wait=%x/%d after=%x/%d", id, src_mem->kind, target.id, dst_mem->kind, wait_on.id, wait_on.gen, after_copy.id, after_copy.gen);
+	log_copy.debug("copy deferred: " IDFMT " (%d) -> " IDFMT " (%d), wait=" IDFMT "/%d after=" IDFMT "/%d", id, src_mem->kind, target.id, dst_mem->kind, wait_on.id, wait_on.gen, after_copy.id, after_copy.gen);
 	wait_on.impl()->add_waiter(wait_on,
 				   new DeferredCopy(*this, target,
 						    region,
@@ -7511,11 +7571,11 @@ namespace LegionRuntime {
 	switch(*cur++) {
 	case NODE_ANNOUNCE_PROC:
 	  {
-	    ID id((unsigned)*cur++);
+	    ID id((IDType)*cur++);
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < annc_data.num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
-	    ID util_id((unsigned)*cur++);
+	    ID util_id((IDType)*cur++);
 	    Processor util = util_id.convert<Processor>();
 	    if(remote) {
 	      RemoteProcessor *proc = new RemoteProcessor(p, kind, util);
@@ -7526,7 +7586,7 @@ namespace LegionRuntime {
 
 	case NODE_ANNOUNCE_MEM:
 	  {
-	    ID id((unsigned)*cur++);
+	    ID id((IDType)*cur++);
 	    Memory m = id.convert<Memory>();
 	    assert(id.index_h() < annc_data.num_memories);
             Memory::Kind kind = (Memory::Kind)(*cur++);
@@ -7542,8 +7602,8 @@ namespace LegionRuntime {
 	case NODE_ANNOUNCE_PMA:
 	  {
 	    ProcessorMemoryAffinity pma;
-	    pma.p = ID((unsigned)*cur++).convert<Processor>();
-	    pma.m = ID((unsigned)*cur++).convert<Memory>();
+	    pma.p = ID((IDType)*cur++).convert<Processor>();
+	    pma.m = ID((IDType)*cur++).convert<Memory>();
 	    pma.bandwidth = *cur++;
 	    pma.latency = *cur++;
 
@@ -7554,8 +7614,8 @@ namespace LegionRuntime {
 	case NODE_ANNOUNCE_MMA:
 	  {
 	    MemoryMemoryAffinity mma;
-	    mma.m1 = ID((unsigned)*cur++).convert<Memory>();
-	    mma.m2 = ID((unsigned)*cur++).convert<Memory>();
+	    mma.m1 = ID((IDType)*cur++).convert<Memory>();
+	    mma.m2 = ID((IDType)*cur++).convert<Memory>();
 	    mma.bandwidth = *cur++;
 	    mma.latency = *cur++;
 
@@ -8062,6 +8122,15 @@ namespace LegionRuntime {
 
       Runtime *r = Runtime::runtime = new Runtime;
       r->nodes = new Node[gasnet_nodes()];
+
+      // create allocators for local node events/locks/index spaces
+      {
+	Node& n = r->nodes[gasnet_mynode()];
+	r->local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
+	r->local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
+	r->local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
+      }
+
 #ifdef DEADLOCK_TRACE
       r->next_thread = 0;
       signal(SIGTERM, sigterm_catch);
@@ -8345,7 +8414,7 @@ namespace LegionRuntime {
 	  Processor p = ID(ID::ID_PROCESSOR, 
 			   gasnet_mynode(), 
 			   n->processors.size()).convert<Processor>();
-	  //printf("GPU's ID is %x\n", p.id);
+	  //printf("GPU's ID is " IDFMT "\n", p.id);
  	  GPUProcessor *gp = new GPUProcessor(p, 
                                               (i < peer_gpus.size() ?
                                                 peer_gpus[i] : 
@@ -8469,7 +8538,7 @@ namespace LegionRuntime {
             {
               if (i == j) continue;
               CUdevice peer;
-              CHECK_CU( cuDeviceGet(&device, peer_gpus[j]) );
+              CHECK_CU( cuDeviceGet(&peer, peer_gpus[j]) );
               int can_access;
               CHECK_CU( cuDeviceCanAccessPeer(&can_access, device, peer) );
               if (can_access)
@@ -8950,7 +9019,7 @@ namespace LegionRuntime {
       int index = impl->linearization.get_image(dp);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
       // if (debug_mappings) {
-      // 	printf("READ: %x (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
+      // 	printf("READ: " IDFMT " (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
       // 	for(size_t i = 0; (i < bytes) && (i < 32); i++)
       // 	  printf(" %02x", ((unsigned char *)dst)[i]);
       // 	printf("\n");
@@ -8984,7 +9053,7 @@ namespace LegionRuntime {
       assert(impl->linearization.valid());
       int index = impl->linearization.get_image(dp);
       // if (debug_mappings) {
-      // 	printf("WRITE: %x (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
+      // 	printf("WRITE: " IDFMT " (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
       // 	for(size_t i = 0; (i < bytes) && (i < 32); i++)
       // 	  printf(" %02x", ((const unsigned char *)src)[i]);
       // 	printf("\n");
@@ -9364,6 +9433,8 @@ namespace LegionRuntime {
       return dst;
     }
 
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset);
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset);
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);
   };
 

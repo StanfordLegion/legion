@@ -21,6 +21,7 @@
 #include <set>
 #include <map>
 #include <cstdarg>
+#include <stdint.h>
 
 #include "common.h"
 #include "utilities.h"
@@ -46,9 +47,19 @@ namespace LegionRuntime {
 
     class Machine;
 
+#ifdef LEGION_IDS_ARE_64BIT
+    typedef unsigned long long IDType;
+#define IDFMT "%llx"
+#else
+    typedef unsigned IDType;
+#define IDFMT "%x"
+#endif
+
+    typedef unsigned int AddressSpace;
+
     class Event {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       typedef unsigned gen_t;
 
       id_t id;
@@ -96,6 +107,8 @@ namespace LegionRuntime {
     public:
       static UserEvent create_user_event(void);
       void trigger(Event wait_on = Event::NO_EVENT) const;
+
+      static const UserEvent NO_USER_EVENT;
     };
 
     // a Barrier is similar to a UserEvent, except that it has a count of how
@@ -119,7 +132,7 @@ namespace LegionRuntime {
 
     class Reservation {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       id_t id;
       bool operator<(const Reservation& rhs) const { return id < rhs.id; }
       bool operator==(const Reservation& rhs) const { return id == rhs.id; }
@@ -149,7 +162,7 @@ namespace LegionRuntime {
 
     class Processor {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       id_t id;
       bool operator<(const Processor& rhs) const { return id < rhs.id; }
       bool operator==(const Processor& rhs) const { return id == rhs.id; }
@@ -178,6 +191,11 @@ namespace LegionRuntime {
       void enable_idle_task(void);
       void disable_idle_task(void);
 
+      // Return the address space for this processor
+      AddressSpace address_space(void) const;
+      // Return the local ID within the address space
+      IDType local_id(void) const;
+
       // special task IDs
       enum {
         // Save ID 0 for the force shutdown function
@@ -194,7 +212,7 @@ namespace LegionRuntime {
 
     class Memory {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       id_t id;
       bool operator<(const Memory &rhs) const { return id < rhs.id; }
       bool operator==(const Memory &rhs) const { return id == rhs.id; }
@@ -206,6 +224,11 @@ namespace LegionRuntime {
       static const Memory NO_MEMORY;
 
       bool exists(void) const { return id != 0; }
+
+      // Return the address space for this memory
+      AddressSpace address_space(void) const;
+      // Return the local ID within the address space
+      IDType local_id(void) const;
 
       // Different Memory types
       enum Kind {
@@ -499,7 +522,7 @@ namespace LegionRuntime {
 
     class RegionInstance {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       id_t id;
       bool operator<(const RegionInstance &rhs) const { return id < rhs.id; }
       bool operator==(const RegionInstance &rhs) const { return id == rhs.id; }
@@ -514,12 +537,15 @@ namespace LegionRuntime {
 
       void destroy(Event wait_on = Event::NO_EVENT) const;
 
+      AddressSpace address_space(void) const;
+      IDType local_id(void) const;
+
       LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
     };
 
     class IndexSpace {
     public:
-      typedef unsigned id_t;
+      typedef IDType id_t;
       id_t id;
       bool operator<(const IndexSpace &rhs) const { return id < rhs.id; }
       bool operator==(const IndexSpace &rhs) const { return id == rhs.id; }
@@ -530,7 +556,7 @@ namespace LegionRuntime {
 
       static const IndexSpace NO_SPACE;
 
-      bool exists(void) const { return id != 0; }
+      bool exists(void) const { return id != 0; } 
 
       static IndexSpace create_index_space(size_t num_elmts);
       static IndexSpace create_index_space(IndexSpace parent,
@@ -769,7 +795,7 @@ namespace LegionRuntime {
 	return d;
       }
 
-      int *serialize(int *data) const
+      IDType *serialize(IDType *data) const
       {
 	*data++ = dim;
 	if(dim == 0) {
@@ -781,7 +807,7 @@ namespace LegionRuntime {
 	return data;
       }
 
-      const int *deserialize(const int *data)
+      const IDType *deserialize(const IDType *data)
       {
 	dim = *data++;
 	if(dim == 0) {
@@ -796,7 +822,7 @@ namespace LegionRuntime {
       LegionRuntime::LowLevel::IndexSpace get_index_space(void) const
       {
 	assert(is_id);
-	IndexSpace is = { static_cast<id_t>(is_id) };
+	IndexSpace is = { static_cast<IDType>(is_id) };
 	return is;
       }
 
@@ -1017,7 +1043,7 @@ namespace LegionRuntime {
 
     protected:
     public:
-      int is_id;
+      IDType is_id;
       int dim;
       int rect_data[2 * MAX_RECT_DIM];
 

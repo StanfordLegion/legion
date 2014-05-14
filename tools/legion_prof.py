@@ -20,17 +20,17 @@ import string, re
 from getopt import getopt
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
-processor_pat = re.compile(prefix + r'Prof Processor (?P<proc>[0-9]+) (?P<utility>[0-1]) (?P<kind>[0-9]+)')
-memory_pat = re.compile(prefix + r'Prof Memory (?P<mem>[0-9]+) (?P<kind>[0-9]+)')
+processor_pat = re.compile(prefix + r'Prof Processor (?P<proc>[a-f0-9]+) (?P<utility>[0-1]) (?P<kind>[0-9]+)')
+memory_pat = re.compile(prefix + r'Prof Memory (?P<mem>[a-f0-9]+) (?P<kind>[0-9]+)')
 task_variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<name>\w+)')
-unique_task_pat = re.compile(prefix + r'Prof Unique Task (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<tid>[0-9]+) (?P<dim>[0-9]+) (?P<p0>[0-9\-]+) (?P<p1>[0-9\-]+) (?P<p2>[0-9\-]+)')
-unique_map_pat = re.compile(prefix + r'Prof Unique Map (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-unique_close_pat = re.compile(prefix + r'Prof Unique Close (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-unique_copy_pat = re.compile(prefix + r'Prof Unique Copy (?P<proc>[0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
-event_pat = re.compile(prefix + r'Prof Event (?P<proc>[0-9]+) (?P<kind>[0-9]+) (?P<uid>[0-9]+) (?P<time>[0-9]+)')
-create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
-field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
-destroy_pat = re.compile(prefix + r'Prof Destroy Instance (?P<iid>[0-9]+) (?P<time>[0-9]+)')
+unique_task_pat = re.compile(prefix + r'Prof Unique Task (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<tid>[0-9]+) (?P<dim>[0-9]+) (?P<p0>[0-9\-]+) (?P<p1>[0-9\-]+) (?P<p2>[0-9\-]+)')
+unique_map_pat = re.compile(prefix + r'Prof Unique Map (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
+unique_close_pat = re.compile(prefix + r'Prof Unique Close (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
+unique_copy_pat = re.compile(prefix + r'Prof Unique Copy (?P<proc>[a-f0-9]+) (?P<uid>[0-9]+) (?P<puid>[0-9]+)')
+event_pat = re.compile(prefix + r'Prof Event (?P<proc>[a-f0-9]+) (?P<kind>[0-9]+) (?P<uid>[0-9]+) (?P<time>[0-9]+)')
+create_pat = re.compile(prefix + r'Prof Create Instance (?P<iid>[a-f0-9]+) (?P<mem>[0-9]+) (?P<redop>[0-9]+) (?P<bf>[0-9]+) (?P<time>[0-9]+)')
+field_pat = re.compile(prefix + r'Prof Instance Field (?P<iid>[a-f0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)')
+destroy_pat = re.compile(prefix + r'Prof Destroy Instance (?P<iid>[a-f0-9]+) (?P<time>[0-9]+)')
 
 # List of event kinds from legion_profiling.h
 event_kind_ids = {
@@ -1427,14 +1427,14 @@ def parse_log_file(file_name, state):
             m = processor_pat.match(line)
             if m is not None:
                 state.create_processor(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     utility = int(m.group('utility')) == 1,
                     kind = int(m.group('kind')))
                 continue
             m = memory_pat.match(line)
             if m is not None:
                 state.create_memory(
-                    mem = int(m.group('mem')),
+                    mem = int(m.group('mem'),16),
                     kind = int(m.group('kind')))
                 continue
             m = task_variant_pat.match(line)
@@ -1446,7 +1446,7 @@ def parse_log_file(file_name, state):
             m = unique_task_pat.match(line)
             if m is not None:
                 state.create_unique_task(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     task_id = int(m.group('tid')),
                     dim = int(m.group('dim')),
@@ -1457,7 +1457,7 @@ def parse_log_file(file_name, state):
             m = unique_map_pat.match(line)
             if m is not None:
                 if not state.create_unique_map(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     replay_lines.append(line)
@@ -1465,7 +1465,7 @@ def parse_log_file(file_name, state):
             m = unique_close_pat.match(line)
             if m is not None:
                 if not state.create_unique_close(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     replay_lines.append(line)
@@ -1473,7 +1473,7 @@ def parse_log_file(file_name, state):
             m = unique_copy_pat.match(line)
             if m is not None:
                 if not state.create_unique_copy(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     replay_lines.append(line)
@@ -1482,7 +1482,7 @@ def parse_log_file(file_name, state):
             if m is not None:
                 time = long(m.group('time'))
                 if not state.create_event(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     kind_id = int(m.group('kind')),
                     uid = int(m.group('uid')),
                     time = time):
@@ -1493,7 +1493,7 @@ def parse_log_file(file_name, state):
             m = create_pat.match(line)
             if m is not None:
                 state.create_instance(
-                    iid = int(m.group('iid')),
+                    iid = int(m.group('iid'),16),
                     mem = int(m.group('mem')),
                     redop = int(m.group('redop')),
                     bf = int(m.group('bf')),
@@ -1502,14 +1502,14 @@ def parse_log_file(file_name, state):
             m = field_pat.match(line)
             if m is not None:
                 state.add_instance_field(
-                    iid = int(m.group('iid')),
+                    iid = int(m.group('iid'),16),
                     fid = int(m.group('fid')),
                     size = int(m.group('size')))
                 continue
             m = destroy_pat.match(line)
             if m is not None:
                 state.destroy_instance(
-                      iid = int(m.group('iid')),
+                      iid = int(m.group('iid'),16),
                       time = long(m.group('time')))
                 continue
             # If we made it here, then we failed to match.
@@ -1522,7 +1522,7 @@ def parse_log_file(file_name, state):
             m = unique_map_pat.match(line)
             if m is not None:
                 if state.create_unique_map(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     to_delete.add(line)
@@ -1530,7 +1530,7 @@ def parse_log_file(file_name, state):
             m = unique_close_pat.match(line)
             if m is not None:
                 if state.create_unique_close(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     to_delete.add(line)
@@ -1538,7 +1538,7 @@ def parse_log_file(file_name, state):
             m = unique_copy_pat.match(line)
             if m is not None:
                 if state.create_unique_copy(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     uid = int(m.group('uid')),
                     parent_uid = int(m.group('puid'))):
                     to_delete.add(line)
@@ -1547,7 +1547,7 @@ def parse_log_file(file_name, state):
             if m is not None:
                 time = long(m.group('time'))
                 if state.create_event(
-                    proc_id = int(m.group('proc')),
+                    proc_id = int(m.group('proc'),16),
                     kind_id = int(m.group('kind')),
                     uid = int(m.group('uid')),
                     time = time):

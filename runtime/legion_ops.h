@@ -69,6 +69,7 @@ namespace LegionRuntime {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_trace(LegionTrace *trace);
+      void set_must_epoch(MustEpochOp *epoch);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -155,13 +156,19 @@ namespace LegionRuntime {
       // Return true if the operation has committed and can be 
       // pruned out of the list of mapping dependences.
       bool register_dependence(Operation *target, GenerationID target_gen);
+      // A more general case of the one above that gives information about
+      // the two regions involved in the dependence and the dependence type.
+      bool register_dependence(unsigned idx, Operation *target, 
+                               GenerationID target_gen, unsigned target_idx,
+                               DependenceType dtype);
       // This is a special case of register dependence that will
       // also mark that we can verify a region produced by an earlier
       // operation so that operation can commit earlier.
       // Return true if the operation has committed and can be pruned
       // out of the list of dependences.
-      bool register_region_dependence(Operation *target,
-                              GenerationID target_gen, unsigned target_idx);
+      bool register_region_dependence(unsigned idx, Operation *target,
+                              GenerationID target_gen, unsigned target_idx,
+                              DependenceType dtype);
       // This method is invoked by one of the two above to perform
       // the registration.  Returns true if we have not yet commited
       // and should therefore be notified once the dependent operation
@@ -256,6 +263,10 @@ namespace LegionRuntime {
       LegionTrace *trace;
       // Track whether we are tracing this operation
       bool tracing;
+      // Our must epoch if we have one
+      MustEpochOp *must_epoch;
+      // Generation for out mapping epoch
+      GenerationID must_epoch_gen;
     };
 
     /**
@@ -757,6 +768,103 @@ namespace LegionRuntime {
       bool one_valid;
       bool one_speculated;
       bool one_value;
+    };
+
+    /**
+     * \class MustEpochOp
+     * This operation is actually a meta-operation that
+     * represents a collection of operations which all
+     * must be guaranteed to be run in parallel.  It
+     * mediates all the various stages of performing
+     * these operations and ensures that they can all
+     * be run in parallel or it reports an error.
+     */
+    class MustEpochOp : public Operation {
+    public:
+      struct DependenceRecord {
+      public:
+        DependenceRecord(unsigned op1, unsigned op2,
+                         unsigned reg1, unsigned reg2,
+                         DependenceType d)
+          : op1_idx(op1), op2_idx(op2), 
+            reg1_idx(reg1), reg2_idx(reg2),
+            dtype(d) { }
+      public:
+        unsigned op1_idx;
+        unsigned op2_idx;
+        unsigned reg1_idx;
+        unsigned reg2_idx;
+        DependenceType dtype;
+      };
+    public:
+      MustEpochOp(Runtime *rt);
+      MustEpochOp(const MustEpochOp &rhs);
+      virtual ~MustEpochOp(void);
+    public:
+      MustEpochOp& operator=(const MustEpochOp &rhs);
+    public:
+      FutureMap initialize(SingleTask *ctx,
+                           const MustEpochLauncher &launcher,
+                           bool check_privileges);
+      void set_task_options(ProcessorManager *manager);
+      void find_conflicted_regions(std::vector<PhysicalRegion> &unmapped); 
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
+    public:
+      void verify_dependence(Operation *source_op, GenerationID source_gen,
+                             Operation *target_op, GenerationID target_gen);
+      bool record_dependence(Operation *source_op, GenerationID source_gen,
+                             Operation *target_op, GenerationID target_gen,
+                             unsigned source_idx, unsigned target_idx,
+                             DependenceType dtype);
+    public:
+      void register_single_task(SingleTask *single);
+      void register_slice_task(SliceTask *slice);
+      void set_future(const DomainPoint &point, 
+                      const void *result, size_t result_size, bool owned);
+      void unpack_future(const DomainPoint &point, Deserializer &derez);
+    public:
+      // Methods for keeping track of when we can complete and commit
+      void register_subop(Operation *op);
+      void notify_subop_complete(Operation *op);
+      void notify_subop_commit(Operation *op);
+    protected:
+      int find_operation_index(Operation *op, GenerationID generation);
+      TaskOp* find_task_by_index(int index);
+    protected:
+      std::vector<IndividualTask*>        indiv_tasks;
+      std::vector<IndexTask*>             index_tasks;
+    protected:
+      // The component slices for distribution
+      std::set<SliceTask*>         slice_tasks;
+      // The actual base operations
+      // Needs to be a set to ensure deduplication
+      std::set<SingleTask*>        single_tasks;
+    protected:
+      MapperID                     mapper_id;
+      MappingTagID                 mapper_tag;
+    protected:
+      FutureMap result_map;
+      unsigned remaining_subop_completes;
+      unsigned remaining_subop_commits;
+    protected:
+      unsigned triggering_index;
+      // Used to know if we successfully triggered everything
+      // and therefore have all of the single tasks and a
+      // valid set of constraints.
+      bool triggering_complete;
+      std::vector<Mapper::MappingConstraint> constraints;
+      // Used for computing the constraints
+      std::vector<std::set<SingleTask*> > task_sets;
+    protected:
+      std::vector<DependenceRecord> dependences;
     };
 
   }; //namespace HighLevel

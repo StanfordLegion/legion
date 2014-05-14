@@ -90,6 +90,8 @@ template<typename AT>
 __global__
 void calc_new_currents_kernel(ptr_t first,
                               int num_wires,
+			      float dt,
+			      int steps,
                               RegionAccessor<AT,ptr_t> fa_in_ptr,
                               RegionAccessor<AT,ptr_t> fa_out_ptr,
                               RegionAccessor<AT,PointerLocation> fa_in_loc,
@@ -109,9 +111,7 @@ void calc_new_currents_kernel(ptr_t first,
   if (tid < num_wires)
   {
     ptr_t wire_ptr = first + tid;
-    float dt = DELTAT;
     float recip_dt = 1.f/dt;
-    const int steps = STEPS;
 
     float temp_v[WIRE_SEGMENTS+1];
     float temp_i[WIRE_SEGMENTS];
@@ -264,8 +264,16 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
   SegmentAccessors<RegionAccessor<AccessorType::SOA<sizeof(float)>,float>,(WIRE_SEGMENTS-1)>
     voltage_segments(soa_voltage);
 
+#ifdef TIME_CUDA_KERNELS
+  cudaEvent_t ev_start, ev_end;
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
+#endif
   calc_new_currents_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_wire,
                                                                            piece.num_wires,
+									   piece.dt,
+									   piece.steps,
                                                                            soa_in_ptr,
                                                                            soa_out_ptr,
                                                                            soa_in_loc,
@@ -278,7 +286,17 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
                                                                            soa_ghost_voltage,
                                                                            current_segments,
                                                                            voltage_segments);
+#ifdef TIME_CUDA_KERNELS
+  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
+#endif
   CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
+#ifdef TIME_CUDA_KERNELS
+  float ms;
+  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
+  printf("CNC TIME = %f\n", ms);
+#endif
   CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
 
   free(soa_current);
@@ -313,6 +331,7 @@ template<typename AT1, typename AT2>
 __global__
 void distribute_charge_kernel(ptr_t first,
                               const int num_wires,
+			      float dt,
                               RegionAccessor<AT1,ptr_t> fa_in_ptr,
                               RegionAccessor<AT1,ptr_t> fa_out_ptr,
                               RegionAccessor<AT1,PointerLocation> fa_in_loc,
@@ -328,8 +347,6 @@ void distribute_charge_kernel(ptr_t first,
   if (tid < num_wires)
   {
     ptr_t wire_ptr = first + tid;
-
-    const float dt = DELTAT;
 
     float in_dq = -dt * fa_in_current.read(wire_ptr);
     float out_dq = dt * fa_out_current.read(wire_ptr);
@@ -407,8 +424,15 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
+#ifdef TIME_CUDA_KERNELS
+  cudaEvent_t ev_start, ev_end;
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
+#endif
   distribute_charge_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_wire,
                                                                            piece.num_wires,
+									   piece.dt,
                                                                            soa_in_ptr,
                                                                            soa_out_ptr,
                                                                            soa_in_loc,
@@ -419,7 +443,17 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
                                                                            fold_shr_charge,
                                                                            fold_ghost_charge);
 
+#ifdef TIME_CUDA_KERNELS
+  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
+#endif
   CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
+#ifdef TIME_CUDA_KERNELS
+  float ms;
+  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
+  printf("DC TIME = %f\n", ms);
+#endif
   CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
 #endif
 }
@@ -530,6 +564,12 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_nodes + (threads_per_block-1)) / threads_per_block;
 
+#ifdef TIME_CUDA_KERNELS
+  cudaEvent_t ev_start, ev_end;
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
+  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
+#endif
   update_voltages_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_node,
                                                                          piece.num_nodes,
                                                                          soa_pvt_voltage,
@@ -541,7 +581,17 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
                                                                          soa_pvt_leakage,
                                                                          soa_shr_leakage,
                                                                          soa_ptr_loc);
+#ifdef TIME_CUDA_KERNELS
+  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
+#endif
   CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
+#ifdef TIME_CUDA_KERNELS
+  float ms;
+  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
+  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
+  printf("UV TIME = %f\n", ms);
+#endif
   CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
 #endif
 }

@@ -95,12 +95,13 @@ namespace LegionRuntime {
       std::deque<GPUJob*> copies;
 
       // Our CUDA context that we will create
+      CUdevice  proc_dev;
       CUcontext proc_ctx;
 
       // Streams for different copy types
-      cudaStream_t host_to_device_stream;
-      cudaStream_t device_to_host_stream;
-      cudaStream_t device_to_device_stream;
+      CUstream host_to_device_stream;
+      CUstream device_to_host_stream;
+      CUstream device_to_device_stream;
 
       // List of pending copies on each stream
       std::deque<GPUJob*> host_device_copies;
@@ -124,11 +125,10 @@ namespace LegionRuntime {
 	gasnett_cond_init(&parent_condvar);
 	gasnett_cond_init(&worker_condvar);
         // Make our context and then immediately pop it off
-        CUdevice cuDevice;
-        CHECK_CU( cuDeviceGet(&cuDevice, gpu_index) );
+        CHECK_CU( cuDeviceGet(&proc_dev, gpu_index) );
 
         CHECK_CU( cuCtxCreate(&proc_ctx, CU_CTX_MAP_HOST |
-                              CU_CTX_SCHED_BLOCKING_SYNC, cuDevice) );
+                              CU_CTX_SCHED_BLOCKING_SYNC, proc_dev) );
         
         CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
       }
@@ -157,12 +157,12 @@ namespace LegionRuntime {
 	CHECK_CUDART( cudaMalloc(&fbmem_gpu_base, fbmem_size + fbmem_reserve) );
 
         // initialize the streams for copy operations
-        CHECK_CUDART( cudaStreamCreateWithFlags(&host_to_device_stream,
-                                                cudaStreamNonBlocking) );
-        CHECK_CUDART( cudaStreamCreateWithFlags(&device_to_host_stream,
-                                                cudaStreamNonBlocking) );
-        CHECK_CUDART( cudaStreamCreateWithFlags(&device_to_device_stream,
-                                                cudaStreamNonBlocking) );
+        CHECK_CU( cuStreamCreate(&host_to_device_stream,
+                                 CU_STREAM_NON_BLOCKING) );
+        CHECK_CU( cuStreamCreate(&device_to_host_stream,
+                                 CU_STREAM_NON_BLOCKING) );
+        CHECK_CU( cuStreamCreate(&device_to_device_stream,
+                                 CU_STREAM_NON_BLOCKING) );
 
 	log_gpu(LEVEL_INFO, "gpu initialized: zcmem=%p/%p fbmem=%p",
 		zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
@@ -263,11 +263,11 @@ namespace LegionRuntime {
 	log_gpu.info("shutting down");
         Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
         if(it != task_id_table.end()) {
-          log_gpu(LEVEL_INFO, "calling processor shutdown task: proc=%x", gpu->me.id);
+          log_gpu(LEVEL_INFO, "calling processor shutdown task: proc=" IDFMT "", gpu->me.id);
 
           (it->second)(0, 0, gpu->me);
 
-          log_gpu(LEVEL_INFO, "finished processor shutdown task: proc=%x", gpu->me.id);
+          log_gpu(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", gpu->me.id);
         }
 	gpu->finished();
       }
@@ -425,7 +425,9 @@ namespace LegionRuntime {
         if (!shutdown_requested)
         {
           // Push our context onto the stack
-          CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          //CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPushCurrent(proc_ctx);
           // First see if any of our copies are ready
           check_for_complete_copies();
           std::vector<GPUJob*> ready_copies;
@@ -442,7 +444,9 @@ namespace LegionRuntime {
             (*it)->execute();
           }
           // Now pop our context back off the stack
-          CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+          //CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPopCurrent(&proc_ctx);
         }
       }
     };
@@ -478,7 +482,7 @@ namespace LegionRuntime {
 
     void GPUTask::print_info(FILE *f)
     {
-      fprintf(f,"GPU Task: %p after=%x/%d\n",
+      fprintf(f,"GPU Task: %p after=" IDFMT "/%d\n",
           this, finish_event.id, finish_event.gen);
     }
 
@@ -488,7 +492,7 @@ namespace LegionRuntime {
 	log_gpu.info("job %p can start right away!?", this);
 	gpu->internal->enqueue_task(this);
       } else {
-	log_gpu.info("job %p waiting for %x/%d", this, start_event.id, start_event.gen);
+	log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
 	start_event.impl()->add_waiter(start_event, this);
       }
     }
@@ -545,7 +549,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-        fprintf(f,"GPU Memcpy: %p after=%x/%d\n",
+        fprintf(f,"GPU Memcpy: %p after=" IDFMT "/%d\n",
             this, finish_event.id, finish_event.gen);
       }
 
@@ -555,7 +559,7 @@ namespace LegionRuntime {
           log_gpu.info("job %p can start right away!?", this);
           gpu->internal->enqueue_copy(this);
         } else {
-          log_gpu.info("job %p waiting for %x/%d", this, start_event.id, start_event.gen);
+          log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
           start_event.impl()->add_waiter(start_event, this);
         }
       }
@@ -564,9 +568,9 @@ namespace LegionRuntime {
 
       void post_execute(void)
       {
-        CHECK_CUDART( cudaEventCreateWithFlags(&complete_event,
-                                               cudaEventDisableTiming) );
-        CHECK_CUDART( cudaEventRecord(complete_event, local_stream) );
+        CHECK_CU( cuEventCreate(&complete_event, 
+                                CU_EVENT_DISABLE_TIMING) );
+        CHECK_CU( cuEventRecord(complete_event, local_stream) );
         if (kind == cudaMemcpyHostToDevice)
           gpu->internal->add_host_device_copy(this);
         else if (kind == cudaMemcpyDeviceToHost)
@@ -579,14 +583,14 @@ namespace LegionRuntime {
 
       virtual bool is_finished(void)
       {
-        cudaError_t result = cudaEventQuery(complete_event);
-        if (result == cudaSuccess)
+        CUresult result = cuEventQuery(complete_event);
+        if (result == CUDA_SUCCESS)
           return true;
-        else if (result == cudaErrorNotReady)
+        else if (result == CUDA_ERROR_NOT_READY)
           return false;
         else
         {
-          CHECK_CUDART( result );
+          CHECK_CU( result );
         }
         return false;
       }
@@ -597,12 +601,12 @@ namespace LegionRuntime {
         if (finish_event.exists())
           finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
         // Destroy our event
-        CHECK_CUDART( cudaEventDestroy(complete_event) );
+        CHECK_CU( cuEventDestroy(complete_event) );
       }
     protected:
       cudaMemcpyKind kind;
-      cudaStream_t local_stream;
-      cudaEvent_t complete_event;
+      CUstream local_stream;
+      CUevent complete_event;
     };
 
     class GPUMemcpy1D : public GPUMemcpy {
@@ -626,11 +630,10 @@ namespace LegionRuntime {
 	off_t span_start = pos * elmt_size;
 	size_t span_bytes = len * elmt_size;
 
-        CHECK_CUDART( cudaMemcpyAsync(((char *)dst)+span_start,
-                                      ((char *)src)+span_start,
-                                      span_bytes,
-                                      cudaMemcpyDefault,
-                                      local_stream) );
+        CHECK_CU( cuMemcpyAsync((CUdeviceptr)(((char*)dst)+span_start),
+                                (CUdeviceptr)(((char*)src)+span_start),
+                                span_bytes,
+                                local_stream) );
       }
 
       virtual void execute(void)
@@ -672,8 +675,24 @@ namespace LegionRuntime {
         log_gpu.info("gpu memcpy 2d: dst=%p src=%p "
                      "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
                      dst, src, dst_stride, src_stride, bytes, lines, kind); 
-        CHECK_CUDART( cudaMemcpy2DAsync(dst, dst_stride, src, src_stride,
-                        bytes, lines, cudaMemcpyDefault, local_stream) );
+        //CHECK_CUDART( cudaMemcpy2DAsync(dst, dst_stride, src, src_stride,
+        //                bytes, lines, cudaMemcpyDefault, local_stream) );
+        CUDA_MEMCPY2D copy_info;
+        copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_info.srcDevice = (CUdeviceptr)src;
+        copy_info.srcHost = src;
+        copy_info.srcPitch = src_stride;
+        copy_info.srcY = 0;
+        copy_info.srcXInBytes = 0;
+        copy_info.dstDevice = (CUdeviceptr)dst;
+        copy_info.dstHost = dst;
+        copy_info.dstPitch = dst_stride;
+        copy_info.dstY = 0;
+        copy_info.dstXInBytes = 0;
+        copy_info.WidthInBytes = bytes;
+        copy_info.Height = lines;
+        CHECK_CU( cuMemcpy2DAsync(&copy_info, local_stream) );
         post_execute();
         log_gpu.info("gpu memcpy 2d complete: dst=%p src=%p "
                      "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
@@ -686,6 +705,7 @@ namespace LegionRuntime {
       size_t bytes, lines;
     };
 
+#if 0
     class GPUMemcpyGeneric : public GPUJob {
     public:
       struct PendingMemcpy {
@@ -727,7 +747,7 @@ namespace LegionRuntime {
           log_gpu.info("job %p can start right away!?", this);
           gpu->internal->enqueue_copy(this);
         } else {
-          log_gpu.info("job %p waiting for %x/%d", this, start_event.id, start_event.gen);
+          log_gpu.info("job %p waiting for " IDFMT "/%d", this, start_event.id, start_event.gen);
           start_event.impl()->add_waiter(start_event, this);
         }
       }
@@ -796,7 +816,7 @@ namespace LegionRuntime {
         }
         else
           assert(false); // who does host to host here?!?
-	log_gpu.info("gpu memcpy generic: gpuptr=%p mem=%x offset=%zd bytes=%zd kind=%d",
+	log_gpu.info("gpu memcpy generic: gpuptr=%p mem=" IDFMT " offset=%zd bytes=%zd kind=%d",
 		     gpu_ptr, memory->me.id, mem_offset, elmt_size, kind);
         // Initialize our first buffer
         CHECK_CUDART( cudaMallocHost((void**)&current_buffer, base_buffer_size) );
@@ -808,7 +828,7 @@ namespace LegionRuntime {
 	  do_span(0, 1);
 	}
 
-	log_gpu.info("gpu memcpy generic done: gpuptr=%p mem=%x offset=%zd bytes=%zd kind=%d",
+	log_gpu.info("gpu memcpy generic done: gpuptr=%p mem=" IDFMT " offset=%zd bytes=%zd kind=%d",
 		     gpu_ptr, memory->me.id, mem_offset, elmt_size, kind);
         // Make an event and put it on the stream
         CHECK_CUDART( cudaEventCreateWithFlags(&completion_event,
@@ -869,6 +889,7 @@ namespace LegionRuntime {
       size_t remaining_bytes;
       char *current_buffer;
     };
+#endif
 
     GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
              int num_local_gpus, Processor _util,
@@ -928,7 +949,7 @@ namespace LegionRuntime {
 				  Event start_event, Event finish_event,
                                   int priority)
     {
-      log_gpu.info("new gpu task: func_id=%d start=%x/%d finish=%x/%d",
+      log_gpu.info("new gpu task: func_id=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen, finish_event.id, finish_event.gen);
       if(func_id != 0) {
 	(new GPUTask(this, finish_event,
@@ -943,7 +964,7 @@ namespace LegionRuntime {
 
     void GPUProcessor::enable_idle_task(void)
     {
-      log_gpu.info("idle task enabled for processor %x", me.id);
+      log_gpu.info("idle task enabled for processor " IDFMT "", me.id);
 #ifdef UTIL_PROCS_FOR_GPU
       if (util_proc)
         util_proc->enable_idle_task(this);
@@ -958,8 +979,8 @@ namespace LegionRuntime {
 
     void GPUProcessor::disable_idle_task(void)
     {
-      //log_gpu.info("idle task NOT disabled for processor %x", me.id);
-      log_gpu.info("idle task disabled for processor %x", me.id);
+      //log_gpu.info("idle task NOT disabled for processor " IDFMT "", me.id);
+      log_gpu.info("idle task disabled for processor " IDFMT "", me.id);
 #ifdef UTIL_PROCS_FOR_GPU
       if (util_proc)
         util_proc->disable_idle_task(this);
@@ -1070,6 +1091,33 @@ namespace LegionRuntime {
                         cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
     }
 
+    void GPUProcessor::copy_to_peer(GPUProcessor *dst, off_t dst_offset,
+                                    off_t src_offset, size_t bytes,
+                                    Event start_event, Event finish_event)
+    {
+      (new GPUMemcpy1D(this, finish_event,
+              ((char*)dst->internal->fbmem_gpu_base) + 
+                      (dst->internal->fbmem_reserve + dst_offset),
+              ((char*)internal->fbmem_gpu_base) + 
+                      (internal->fbmem_reserve + src_offset),
+              bytes, cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
+    }
+
+    void GPUProcessor::copy_to_peer_2d(GPUProcessor *dst,
+                                       off_t dst_offset, off_t src_offset,
+                                       off_t dst_stride, off_t src_stride,
+                                       size_t bytes, size_t lines,
+                                       Event start_event, Event finish_event)
+    {
+      (new GPUMemcpy2D(this, finish_event,
+                       ((char*)dst->internal->fbmem_gpu_base) +
+                                (dst->internal->fbmem_reserve + dst_offset),
+                       ((char*)internal->fbmem_gpu_base) +
+                                (internal->fbmem_reserve + src_offset),
+                        dst_stride, src_stride, bytes, lines,
+                        cudaMemcpyDeviceToDevice))->run_or_wait(start_event);
+    }
+
     void GPUProcessor::register_host_memory(void *base, size_t size)
     {
       internal->register_host_memory(base, size);
@@ -1091,30 +1139,40 @@ namespace LegionRuntime {
       internal->handle_copies();
     }
 
-    /*static*/ std::vector<GPUProcessor*> GPUProcessor::local_gpus;
-
+    /*static*/ GPUProcessor** GPUProcessor::node_gpus;
+    /*static*/ size_t GPUProcessor::num_node_gpus;
     static volatile bool dma_shutdown_requested = false;
     static std::vector<pthread_t> dma_threads;
+
+    struct gpu_dma_args {
+      GPUProcessor **node_gpus;
+      size_t num_node_gpus;
+    };
 
     /*static*/
     void* GPUProcessor::gpu_dma_worker_loop(void *args)
     {
+      size_t num_local = GPUProcessor::num_node_gpus;
+      GPUProcessor **local_gpus = GPUProcessor::node_gpus;
       while (!dma_shutdown_requested)
       {
         // Iterate over all the GPU processors and perform the copies
-        for (std::vector<GPUProcessor*>::const_iterator it = local_gpus.begin();
-              it != local_gpus.end(); it++)
+        for (unsigned idx = 0; idx < num_local; idx++)
         {
-          (*it)->handle_copies();
+          local_gpus[idx]->handle_copies();
         }
       }
+      free(local_gpus);
       return NULL;
     }
 
     /*static*/
     void GPUProcessor::start_gpu_dma_thread(const std::vector<GPUProcessor*> &local)
     {
-      local_gpus = local;
+      GPUProcessor::num_node_gpus = local.size();
+      GPUProcessor::node_gpus = (GPUProcessor**)malloc(local.size()*sizeof(GPUProcessor*));
+      for (unsigned idx = 0; idx < local.size(); idx++)
+        GPUProcessor::node_gpus[idx] = local[idx];
       pthread_attr_t attr;
       CHECK_PTHREAD( pthread_attr_init(&attr) );
       if (proc_assignment)

@@ -1296,7 +1296,8 @@ namespace LegionRuntime {
                                    Processor local_proc,
                     const std::map<ReductionView*,FieldMask> &valid_reductions);
       void invalidate_instance_views(PhysicalState &state,
-                                     const FieldMask &invalid_mask, bool clean);
+                                     const FieldMask &invalid_mask, 
+                                     bool clean, bool force);
       void invalidate_reduction_views(PhysicalState &state,
                                       const FieldMask &invalid_mask);
       void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
@@ -1315,7 +1316,8 @@ namespace LegionRuntime {
       void invalidate_physical_state(ContextID ctx);
       // Entry
       void invalidate_physical_state(ContextID ctx, 
-                                     const FieldMask &invalid_mask);
+                                     const FieldMask &invalid_mask,
+                                     bool force);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual unsigned get_color(void) const = 0;
@@ -1801,7 +1803,8 @@ namespace LegionRuntime {
     class PhysicalInvalidator : public NodeTraverser {
     public:
       PhysicalInvalidator(ContextID ctx);
-      PhysicalInvalidator(ContextID ctx, const FieldMask &invalid_mask);
+      PhysicalInvalidator(ContextID ctx, const FieldMask &invalid_mask,
+                          const bool force);
       PhysicalInvalidator(const PhysicalInvalidator &rhs);
       ~PhysicalInvalidator(void);
     public:
@@ -1813,6 +1816,7 @@ namespace LegionRuntime {
     protected:
       const ContextID ctx;
       const bool total;
+      const bool force;
       const FieldMask invalid_mask;
     };
 
@@ -1999,7 +2003,7 @@ namespace LegionRuntime {
                       const FieldMask &mask, size_t blocking_factor,
                       const std::map<FieldID,Domain::CopySrcDstField> &infos,
                       const std::map<unsigned,FieldID> &indexes,
-                      Event use_event, unsigned depth);
+                      Event use_event, unsigned depth, bool persistent = false);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -2028,7 +2032,6 @@ namespace LegionRuntime {
     public:
       DistributedID send_manager(AddressSpaceID target, 
                                  std::set<PhysicalManager*> &needed_managers);
-    public:
       static void handle_send_manager(RegionTreeForest *context, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
@@ -2044,6 +2047,12 @@ namespace LegionRuntime {
       bool match_instance(size_t field_size, const Domain &dom) const;
       bool match_instance(const std::vector<size_t> &fields_sizes,
                           const Domain &dom, const size_t bf) const;
+    public:
+      bool is_persistent(void) const;
+      void make_persistent(AddressSpaceID origin);
+      static void handle_make_persistent(Deserializer &derez,
+                                         RegionTreeForest *context,
+                                         AddressSpaceID source);
     public:
       RegionNode *const region_node;
       const FieldMask allocated_fields;
@@ -2062,6 +2071,13 @@ namespace LegionRuntime {
       bool recycled;
       // Keep a set of the views we need to see when recycling
       std::set<InstanceView*> valid_views;
+    protected:
+      // This is monotonic variable that once it becomes true
+      // will remain true for the duration of the instance lifetime.
+      // If set to true, it should prevent the instance from ever
+      // being collected before the context in which it was created
+      // is destroyed.
+      bool persistent;
     };
 
     /**
@@ -2335,6 +2351,9 @@ namespace LegionRuntime {
                       std::set<PhysicalManager*> &needed_managers);
       DistributedID send_back_state(AddressSpaceID target,
                       std::set<PhysicalManager*> &needed_managers);
+    public:
+      bool is_persistent(void) const;
+      void make_persistent(void);
     protected:
       void pack_instance_view(Serializer &rez);
       void unpack_instance_view(Deserializer &derez, AddressSpaceID source);
@@ -2520,6 +2539,9 @@ namespace LegionRuntime {
     public:
       InstanceRef(void);
       InstanceRef(Event ready, Reservation lock, const ViewHandle &handle);
+    public:
+      bool operator==(const InstanceRef &rhs) const;
+      bool operator!=(const InstanceRef &rhs) const;
     public:
       inline bool has_ref(void) const { return handle.has_view(); }
       inline Event get_ready_event(void) const { return ready_event; }

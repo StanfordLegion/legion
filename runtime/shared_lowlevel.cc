@@ -371,11 +371,23 @@ namespace LegionRuntime {
 	typedef unsigned EventIndex;
 	typedef unsigned EventGeneration;
     public:
+        struct TriggerableInfo {
+        public:
+            TriggerableInfo(Triggerable *t, TriggerHandle h,
+                            EventGeneration n)
+              : target(t), handle(h), needed(n) { }
+        public:
+            Triggerable *target;
+            TriggerHandle handle;
+            EventGeneration needed;
+        };
+    public:
 	EventImpl(EventIndex idx, bool activate=false) 
 		: index(idx)
 	{
 	  in_use = activate;
 	  generation = 0;
+          free_generation = 0;
 	  sources = 0;
           mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
           wait_cond = (pthread_cond_t*)malloc(sizeof(pthread_cond_t));
@@ -388,6 +400,7 @@ namespace LegionRuntime {
 	    // when the event matches the generation
 	    current.id = index;
 	    current.gen = generation+1;
+            free_generation = generation+1;
 	    sources = 1;
 #ifdef DEBUG_LOW_LEVEL
 	    assert(current.exists());
@@ -430,16 +443,17 @@ namespace LegionRuntime {
     private: 
 	bool in_use;
 	unsigned sources;
+        unsigned arrivals; // for use with barriers
 	const EventIndex index;
 	EventGeneration generation;
+        EventGeneration free_generation;
 	// The version of the event to hand out (i.e. with generation+1)
 	// so we can detect when the event has triggered with testing
 	// generational equality
 	Event current; 
 	pthread_mutex_t *mutex;
 	pthread_cond_t *wait_cond;
-	std::vector<Triggerable*> triggerables;
-        std::vector<TriggerHandle> trigger_handles;
+        std::list<TriggerableInfo> triggerables;
     }; 
 
     ////////////////////////////////////////////////////////
@@ -570,6 +584,9 @@ namespace LegionRuntime {
     ////////////////////////////////////////////////////////
 
     /* static */ const Event Event::NO_EVENT = { 0, 0 };
+    // Take this you POS C++ type system
+    /* static */ const UserEvent UserEvent::NO_USER_EVENT = 
+          *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
 
     bool Event::has_triggered(void) const
     {
@@ -788,26 +805,47 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOW_LEVEL
 		assert(generation == current.gen);
 #endif
+                // Get the set of people to trigger
+                std::vector<TriggerableInfo> to_trigger;
+                for (std::list<TriggerableInfo>::iterator it = triggerables.begin();
+                      it != triggerables.end(); /*nothing*/)
+                {
+                  if (it->needed == generation)
+                  {
+                    to_trigger.push_back(*it);
+                    it = triggerables.erase(it);
+                  }
+                  else
+                    it++;
+                }
+                finished = (generation == free_generation);
+                if (finished)
+                {
+                  in_use = false;
+                  assert(triggerables.empty());
+                }
+                else
+                {
+                  // Otherwise we are a barrier so update the state
+                  sources = arrivals;
+                  current.gen++;
+                }
                 // Wake up any waiters
 		PTHREAD_SAFE_CALL(pthread_cond_broadcast(wait_cond));
 		// Can't be holding the lock when triggering other triggerables
 		PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-		// Trigger any dependent events
-		while (!triggerables.empty())
-		{
-#ifdef DEBUG_LOW_LEVEL
-                        assert(triggerables.size() == trigger_handles.size());
-#endif
-			triggerables.back()->trigger(1, trigger_handles.back());
-			triggerables.pop_back();
-                        trigger_handles.pop_back();
-		}
-		// Reacquire the lock and mark that in_use is false
-		PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-		in_use = false;
-                finished = true;
+		// Trigger any dependent events for this generation
+                for (std::vector<TriggerableInfo>::const_iterator it = 
+                      to_trigger.begin(); it != to_trigger.end(); it++)
+                {
+                  it->target->trigger(1, it->handle);
+                }
         }
-	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));	
+        else
+        {
+          // Not done so release the lock
+          PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));	
+        }
         // tell the runtime that we're free
         if (finished)
           Runtime::get_runtime()->free_event(this);
@@ -827,6 +865,7 @@ namespace LegionRuntime {
 		// comment in constructor
 		current.id = index;
 		current.gen = generation+1;
+                free_generation = generation+1;
 #ifdef DEBUG_LOW_LEVEL
 		assert(current.exists());
 #endif
@@ -844,11 +883,7 @@ namespace LegionRuntime {
 	{
 		result = true;
 		// Enqueue it
-		triggerables.push_back(target);	
-                trigger_handles.push_back(handle);
-#ifdef DEBUG_LOW_LEVEL
-                assert(triggerables.size() == trigger_handles.size());
-#endif
+                triggerables.push_back(TriggerableInfo(target, handle, gen));
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));	
 	return result;
@@ -891,6 +926,9 @@ namespace LegionRuntime {
       result.gen = current.gen;
       // Set the number of expected arrivals
       sources = expected_arrivals;
+      arrivals = expected_arrivals;
+      // Make sure we don't prematurely free this event
+      free_generation = (unsigned)-1;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
       return result;
     }
@@ -908,8 +946,8 @@ namespace LegionRuntime {
       int old_sources = sources;
       sources += delta;
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-      log_barrier.info("barrier %x.%d - adjust %d + %d = %d",
-		       current.id, current.gen, old_sources, delta, old_sources + delta);
+      //log_barrier.info("barrier " IDFMT ".%d - adjust %d + %d = %d",
+      //	       current.id, current.gen, old_sources, delta, old_sources + delta);
       Barrier result;
       result.id = current.id;
       result.gen = current.gen;
@@ -925,8 +963,10 @@ namespace LegionRuntime {
         fprintf(stdout,"Event %d, Generation %d has %ld waiters\n",
             index, generation, triggerables.size());
         for (unsigned idx = 0; idx < triggerables.size(); idx++)
+        for (std::list<TriggerableInfo>::const_iterator it = triggerables.begin();
+              it != triggerables.end(); it++)
         {
-          fprintf(stdout,"  Waiter: %p\n", triggerables[idx]);
+          fprintf(stdout,"  Waiter: %p\n", it->target);
         }
         fflush(stdout);
       }
@@ -963,14 +1003,15 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       EventImpl *impl = Runtime::get_runtime()->get_free_event();
       Barrier b = impl->get_barrier(expected_arrivals);
-      log_barrier.info("barrier %x.%d - create %d", b.id, b.gen, expected_arrivals);
+      //log_barrier.info("barrier " IDFMT ".%d - create %d", b.id, b.gen, expected_arrivals);
       return b;
     }
 
     void Barrier::destroy_barrier(void)
     {
-      // TODO: Implement barrier destruction
-      assert(false);
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      EventImpl *impl = Runtime::get_runtime()->get_event_impl(*this);
+      Runtime::get_runtime()->free_event(impl);
     }
 
     Barrier Barrier::advance_barrier(void) const
@@ -1001,7 +1042,7 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       if (!id) return;
       EventImpl *impl = Runtime::get_runtime()->get_event_impl(*this);
-      log_barrier.info("barrier %x.%d - arrive %d", this->id, this->gen, count);
+      //log_barrier.info("barrier " IDFMT ".%d - arrive %d", this->id, this->gen, count);
       if (wait_on.exists())
       {
         // Not the most efficient way to do this, but it works for now
@@ -1154,7 +1195,7 @@ namespace LegionRuntime {
 	Event result = Event::NO_EVENT;
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
         log_reservation(LEVEL_DEBUG,"reservation request: reservation=%x mode=%d "
-                                    "excl=%d event=%x/%d count=%d",
+                                    "excl=%d event=" IDFMT "/%d count=%d",
                  index, m, exc, wait_on.id, wait_on.gen, holders); 
         // check to see if we have to wait on event first
         bool must_wait = false;
@@ -1239,7 +1280,7 @@ namespace LegionRuntime {
     void ReservationImpl::release(Event wait_on)
     {
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-        log_reservation(LEVEL_DEBUG,"release request: reservation=%x mode=%d excl=%d event=%x/%d count=%d",
+        log_reservation(LEVEL_DEBUG,"release request: reservation=%x mode=%d excl=%d event=" IDFMT "/%d count=%d",
                  index, mode, exclusive, wait_on.id, wait_on.gen, holders);
         std::set<EventImpl*> to_trigger;
 	if (wait_on.exists())
@@ -1532,6 +1573,16 @@ namespace LegionRuntime {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
         ProcessorImpl *p = Runtime::get_runtime()->get_processor_impl(*this);
         p->disable_idle_task();
+    }
+
+    AddressSpace Processor::address_space(void) const
+    {
+      return 0;
+    }
+
+    IDType Processor::local_id(void) const
+    {
+      return id;
     }
 
     void ProcessorImpl::initialize_state(size_t stacksize)
@@ -2069,6 +2120,16 @@ namespace LegionRuntime {
     Memory::Kind MemoryImpl::get_kind(void) const
     {
       return kind;
+    }
+
+    AddressSpace Memory::address_space(void) const
+    {
+      return 0;
+    }
+
+    IDType Memory::local_id(void) const
+    {
+      return id;
     }
 
     ////////////////////////////////////////////////////////
@@ -2713,6 +2774,16 @@ namespace LegionRuntime {
       return RegionAccessor<AccessorType::Generic>(AccessorType::Generic::Untyped(impl));
     }
 
+    AddressSpace RegionInstance::address_space(void) const 
+    {
+      return 0;
+    }
+
+    IDType RegionInstance::local_id(void) const
+    {
+      return id;
+    }
+
     class DeferredInstDestroy : public Triggerable {
     public:
       DeferredInstDestroy(RegionInstance::Impl *i) : impl(i) { }
@@ -3125,13 +3196,6 @@ namespace LegionRuntime {
     void* RegionInstance::Impl::get_address(int index, size_t field_start, size_t field_size,
 					    size_t within_field)
     {
-      // does instance have a linearization/translation?
-      if(get_linearization().get_dim() > 0) {
-	assert(get_linearization().get_dim() == 1);
-	int new_index = get_linearization().get_mapping<1>()->image(index);
-	index = new_index;
-      }
-
       if(block_size == 1) {
 	// simple AOS case:
 	return (base_ptr + (index * elmt_size) + field_start + within_field);
@@ -3835,9 +3899,12 @@ namespace LegionRuntime {
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
+		int xl_index = index; // translated index
+		if(inst->get_linearization().get_dim() == 1)
+		  xl_index = inst->get_linearization().get_mapping<1>()->image(index);
 		assert(bytes > 0);
 		memcpy(buffer + write_offset, 
-		       inst->get_address(index, field_start, field_size, within_field),
+		       inst->get_address(xl_index, field_start, field_size, within_field),
 		       bytes);
 		offset += bytes;
 		size -= bytes;
@@ -3859,8 +3926,11 @@ namespace LegionRuntime {
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
 		//        inst->get_address(index, field_start, within_field));
+		int xl_index = index; // translated index
+		if(inst->get_linearization().get_dim() == 1)
+		  xl_index = inst->get_linearization().get_mapping<1>()->image(index);
 		assert(bytes > 0);
-		memcpy(inst->get_address(index, field_start, field_size, within_field),
+		memcpy(inst->get_address(xl_index, field_start, field_size, within_field),
 		       buffer + read_offset, 
 		       bytes);
 		offset += bytes;
@@ -3953,10 +4023,16 @@ namespace LegionRuntime {
           RegionInstance::Impl *dst_inst = Runtime::get_runtime()->get_instance_impl(dsts[0].inst);
           // This should be from one reduction fold instance to another
           for (int index = start; index < (start+count); index++)
-          {
+	  {
+	    int src_index = index;
+	    if(src_inst->get_linearization().get_dim() == 1)
+	      src_index = src_inst->get_linearization().get_mapping<1>()->image(index);
+	    int dst_index = index;
+	    if(dst_inst->get_linearization().get_dim() == 1)
+	      dst_index = src_inst->get_linearization().get_mapping<1>()->image(index);
             // Assume that there is only one field and they are contiguous
-            void *src_ptr = src_inst->get_address(index, 0, redop->sizeof_rhs, 0);
-            void *dst_ptr = dst_inst->get_address(index, 0, redop->sizeof_rhs, 0);
+            void *src_ptr = src_inst->get_address(src_index, 0, redop->sizeof_rhs, 0);
+            void *dst_ptr = dst_inst->get_address(dst_index, 0, redop->sizeof_rhs, 0);
             redop->fold(dst_ptr, src_ptr, 1, false/*exclusive*/);
           }
         }
@@ -4000,8 +4076,14 @@ namespace LegionRuntime {
                                     field_start, field_size, within_field);
           for (int index = start; index < (start+count); index++)
           {
-            void *src_ptr = src_inst->get_address(index, 0, redop->sizeof_rhs, 0);  
-            void *dst_ptr = dst_inst->get_address(index, field_start, field_size, within_field);
+	    int src_index = index;
+	    if(src_inst->get_linearization().get_dim() == 1)
+	      src_index = src_inst->get_linearization().get_mapping<1>()->image(index);
+	    int dst_index = index;
+	    if(dst_inst->get_linearization().get_dim() == 1)
+	      dst_index = src_inst->get_linearization().get_mapping<1>()->image(index);
+            void *src_ptr = src_inst->get_address(src_index, 0, redop->sizeof_rhs, 0);  
+            void *dst_ptr = dst_inst->get_address(dst_index, field_start, field_size, within_field);
             redop->apply(dst_ptr, src_ptr, 1, false/*exclusive*/);
           }
         }
@@ -4994,11 +5076,14 @@ namespace LegionRuntime {
       check_bounds(region, ptr);
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      int index = ((impl->get_linearization().get_dim() == 1) ?
+		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
+		     ptr.value);
       size_t field_start, field_size, within_field;
       size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
 				 field_start, field_size, within_field);
       assert(bytes == bytes2);
-      const char *src = (const char *)(impl->get_address(ptr.value, field_start, field_size, within_field));
+      const char *src = (const char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
@@ -5029,11 +5114,14 @@ namespace LegionRuntime {
       check_bounds(region, ptr);
 #endif
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      int index = ((impl->get_linearization().get_dim() == 1) ?
+		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
+		     ptr.value);
       size_t field_start, field_size, within_field;
       size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
 				 field_start, field_size, within_field);
       assert(bytes == bytes2);
-      char *dst = (char *)(impl->get_address(ptr.value, field_start, field_size, within_field));
+      char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
     }
 
@@ -5074,6 +5162,8 @@ namespace LegionRuntime {
       return dst;
     }
 
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset);
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset);
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);
 
     //static const void *(AccessorType::Generic::Untyped::*dummy_ptr)(const Rect<3>&, Rect<3>&, ByteOffset*) = AccessorType::Generic::Untyped::raw_rect_ptr<3>;

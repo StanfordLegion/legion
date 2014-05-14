@@ -1163,6 +1163,7 @@ namespace LegionRuntime {
       early_map = false;
       enable_WAR_optimization = false;
       reduction_list = false;
+      make_persistent = false;
       blocking_factor = 1;
       target_ranking.clear();
       additional_fields.clear();
@@ -1384,6 +1385,18 @@ namespace LegionRuntime {
                                      MapperID id /*=0*/, MappingTagID t /*=0*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
         predicate(pred), map_id(id), tag(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // MustEpochLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochLauncher::MustEpochLauncher(MapperID id /*= 0*/,   
+                                         MappingTagID tag/*= 0*/)
+      : map_id(id), mapping_tag(tag)
     //--------------------------------------------------------------------------
     {
     }
@@ -2596,6 +2609,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->end_trace(ctx, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap HighLevelRuntime::execute_must_epoch(Context ctx,
+                                              const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->execute_must_epoch(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------

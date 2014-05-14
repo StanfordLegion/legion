@@ -287,7 +287,7 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
-      log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,
@@ -312,7 +312,7 @@ namespace LegionRuntime {
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
-      const int *idata = (const int *)data;
+      const IDType *idata = (const IDType *)data;
 
       idata = domain.deserialize(idata);
 
@@ -320,9 +320,9 @@ namespace LegionRuntime {
 
       int priority = 0;
 
-      while(((idata - ((const int *)data))*sizeof(int)) < datalen) {
-	RegionInstance src_inst = ID((unsigned)*idata++).convert<RegionInstance>();
-	RegionInstance dst_inst = ID((unsigned)*idata++).convert<RegionInstance>();
+      while(((idata - ((const IDType *)data))*sizeof(IDType)) < datalen) {
+	RegionInstance src_inst = ID((IDType)*idata++).convert<RegionInstance>();
+	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
 
         // If either one of the instances is in GPU memory increase priority
@@ -352,9 +352,9 @@ namespace LegionRuntime {
       }
 
       // better have consumed exactly the right amount of data
-      assert(((idata - ((const int *)data))*sizeof(int)) == datalen);
+      assert(((idata - ((const IDType *)data))*sizeof(IDType)) == datalen);
 
-      log_dma.info("dma request %p deserialized - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,
@@ -375,7 +375,7 @@ namespace LegionRuntime {
     size_t CopyRequest::serialize(void *buffer, size_t maxlen)
     {
       // domain info goes first
-      int *msgptr = domain.serialize((int *)buffer);
+      IDType *msgptr = domain.serialize((IDType *)buffer);
 
       // now OAS vectors
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
@@ -408,7 +408,7 @@ namespace LegionRuntime {
 
     bool DmaRequest::Waiter::event_triggered(void)
     {
-      log_dma.info("request %p triggered in state %d (lock = %x)",
+      log_dma.info("request %p triggered in state %d (lock = " IDFMT ")",
 		   req, req->state, current_lock.id);
 
       if(current_lock.exists()) {
@@ -426,7 +426,7 @@ namespace LegionRuntime {
 
     void DmaRequest::Waiter::print_info(FILE *f)
     {
-      fprintf(f,"dma request %p: after %x/%d\n", 
+      fprintf(f,"dma request %p: after " IDFMT "/%d\n", 
 	      req, req->after_copy.id, req->after_copy.gen);
     }
 
@@ -454,7 +454,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, is_impl->lock.me.id);
+	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
 	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
@@ -464,7 +464,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.info("request %p - valid mask needed for index space %x - sleeping on event %x/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -477,7 +477,7 @@ namespace LegionRuntime {
 	  RegionInstance::Impl *dst_impl = it->first.second.impl();
 
 	  if(!src_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->first.first.id);
+	    log_dma.info("dma request %p - no src instance (" IDFMT ") metadata yet", this, it->first.first.id);
 	    if(just_check) return false;
 
 	    Event e = src_impl->lock.acquire(1, false);
@@ -485,7 +485,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
 	      src_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, src_impl->lock.me.id);
+	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock " IDFMT "", this, src_impl->lock.me.id);
 	      waiter.sleep_on_event(e, src_impl->lock.me);
 	      return false;
 	    }
@@ -496,7 +496,7 @@ namespace LegionRuntime {
 	  }
 
 	  if(!dst_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, it->first.second.id);
+	    log_dma.info("dma request %p - no dst instance (" IDFMT ") metadata yet", this, it->first.second.id);
 	    if(just_check) return false;
 
 	    Event e = dst_impl->lock.acquire(1, false);
@@ -504,7 +504,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
 	      dst_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, dst_impl->lock.me.id);
+	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock " IDFMT "", this, dst_impl->lock.me.id);
 	      waiter.sleep_on_event(e, dst_impl->lock.me);
 	      return false;
 	    }
@@ -1481,7 +1481,7 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
-	//printf("buffered copy of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+	//printf("buffered copy of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 	while(bytes > buffer_size) {
 	  src_mem->get_bytes(src_offset, buffer, buffer_size);
 	  dst_mem->put_bytes(dst_offset, buffer, buffer_size);
@@ -1708,6 +1708,40 @@ namespace LegionRuntime {
     protected:
       GPUProcessor *gpu;
     };
+
+    class GPUPeerMemPairCopier : public DelayedMemPairCopier {
+    public:
+      GPUPeerMemPairCopier(GPUProcessor *_src, GPUProcessor *_dst)
+        : src(_src), dst(_dst)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
+                                                              dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+        Event e = Event::Impl::create_event();
+        src->copy_to_peer(dst, dst_offset, src_offset, bytes, Event::NO_EVENT, e);
+        events.insert(e);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        Event e = Event::Impl::create_event();
+        src->copy_to_peer_2d(dst, dst_offset, src_offset,
+                             dst_stride, src_stride, bytes, lines,
+                             Event::NO_EVENT, e);
+        events.insert(e);
+      }
+    protected:
+      GPUProcessor *src, *dst;
+    };
      
     static unsigned rdma_sequence_no = 1;
 
@@ -1751,7 +1785,7 @@ namespace LegionRuntime {
 
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
-	//printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+	//printf("remote write of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #ifdef TIME_REMOTE_WRITES
         unsigned long long start = TimeStamp::get_current_time_in_micros();
 #endif
@@ -1759,7 +1793,7 @@ namespace LegionRuntime {
 	if(bytes >= TARGET_XFER_SIZE) {
 	  // large enough that we can transfer it by itself
 #ifdef DEBUG_REMOTE_WRITES
-	  printf("remote write of %zd bytes (%x:%zd -> %x:%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+	  printf("remote write of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
 #endif
 	  num_writes += do_remote_write(dst_mem->me, dst_offset, src_base + src_offset, bytes, 
 					sequence_id, Event::NO_EVENT, false /* no copy */);
@@ -1851,7 +1885,7 @@ namespace LegionRuntime {
         if(g->src_spans.size() == 1) {
           const SpanListEntry& span = *(g->src_spans.begin());
 #ifdef DEBUG_REMOTE_WRITES
-	  printf("remote write of %zd bytes (singleton %x:%zd -> %x:%zd)\n", span.second, src_mem->me.id, (char *)span.first - src_base, dst_mem->me.id, g->dst_start);
+	  printf("remote write of %zd bytes (singleton " IDFMT ":%zd -> " IDFMT ":%zd)\n", span.second, src_mem->me.id, (char *)span.first - src_base, dst_mem->me.id, g->dst_start);
           printf("  datb[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
                  span.first,
                  ((unsigned *)(span.first))[0], ((unsigned *)(span.first))[1],
@@ -1871,7 +1905,7 @@ namespace LegionRuntime {
 	// general case: do_remote_write knows how to take a span list now, so let it
 	//  handle the actual gathering
 #ifdef DEBUG_REMOTE_WRITES
-	printf("remote write of %zd bytes (gather -> %x:%zd), trigger=%x/%d\n", g->dst_size, dst_mem->me.id, g->dst_start, trigger.id, trigger.gen);
+	printf("remote write of %zd bytes (gather -> " IDFMT ":%zd), trigger=" IDFMT "/%d\n", g->dst_size, dst_mem->me.id, g->dst_start, trigger.id, trigger.gen);
 #endif
 	// TODO: handle case where single write can include event trigger in message
 	num_writes += do_remote_write(dst_mem->me, g->dst_start, 
@@ -1920,7 +1954,7 @@ namespace LegionRuntime {
 #else
 	  copy_gather(g);
 #ifdef DEBUG_REMOTE_WRITES
-	  printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
+	  printf("remote write fence: " IDFMT "/%d\n", after_copy.id, after_copy.gen);
 #endif
 	  do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
 #endif
@@ -1935,7 +1969,7 @@ namespace LegionRuntime {
               after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
             } else {
 #ifdef DEBUG_REMOTE_WRITES
-	      printf("remote write fence: %x/%d\n", after_copy.id, after_copy.gen);
+	      printf("remote write fence: " IDFMT "/%d\n", after_copy.id, after_copy.gen);
 #endif
 	      //do_remote_write(dst_mem->me, 0, 0, 0, after_copy);
 	      do_remote_fence(dst_mem->me, sequence_id, num_writes, after_copy);
@@ -1970,7 +2004,7 @@ namespace LegionRuntime {
       Memory::Impl::MemoryKind src_kind = src_impl->kind;
       Memory::Impl::MemoryKind dst_kind = dst_impl->kind;
 
-      log_dma.info("copier: %x(%d) -> %x(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
+      log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
       // can we perform simple memcpy's?
       if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
@@ -1997,8 +2031,10 @@ namespace LegionRuntime {
          (dst_kind == Memory::Impl::MKIND_GPUFB)) {
 	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
 	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-        if ((src_gpu == dst_gpu) || src_gpu->can_access_peer(dst_gpu))
+        if (src_gpu == dst_gpu)
           return new GPUinFBMemPairCopier(src_gpu);
+        else if (src_gpu->can_access_peer(dst_gpu))
+          return new GPUPeerMemPairCopier(src_gpu, dst_gpu);
         else
         {
           fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
@@ -2223,7 +2259,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"copy completion logger - %x/%d\n", event.id, event.gen);
+	fprintf(f,"copy completion logger - " IDFMT "/%d\n", event.id, event.gen);
       }
 
     protected:
@@ -2267,7 +2303,7 @@ namespace LegionRuntime {
       default: assert(0);
       };
 
-      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,
@@ -2317,7 +2353,7 @@ namespace LegionRuntime {
       //RegionMetaDataUntyped::Impl *src_reg = src_data->region.impl();
       //RegionMetaDataUntyped::Impl *tgt_reg = tgt_data->region.impl();
 
-      log_dma.info("copy: %x->%x (%x/%p)",
+      log_dma.info("copy: " IDFMT "->" IDFMT " (" IDFMT "/%p)",
 		    src.id, target.id, is.id, is_impl->valid_mask);
 
       // if we're missing the valid mask at this point, we've screwed up
@@ -2325,7 +2361,7 @@ namespace LegionRuntime {
 	assert(is_impl->valid_mask_complete);
       }
 
-      log_dma.debug("performing copy %x (%d) -> %x (%d) - %zd bytes (%zd)", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size);
+      log_dma.debug("performing copy " IDFMT " (%d) -> " IDFMT " (%d) - %zd bytes (%zd)", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size);
 
       switch(src_mem->kind) {
       case Memory::Impl::MKIND_SYSMEM:
@@ -2420,7 +2456,7 @@ namespace LegionRuntime {
 	      // from the range executor and we have to trigger it ourselves
 	      Event finish_event = rexec.finish();
 	      if(finish_event.exists()) {
-		log_dma.info("triggering event %x/%d after empty remote copy",
+		log_dma.info("triggering event " IDFMT "/%d after empty remote copy",
 			     finish_event.id, finish_event.gen);
 		assert(finish_event == after_copy);
 		finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
@@ -2564,7 +2600,7 @@ namespace LegionRuntime {
 	assert(0);
       }
 
-      log_dma.debug("finished copy %x (%d) -> %x (%d) - %zd bytes (%zd), event=%x/%d", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size, after_copy.id, after_copy.gen);
+      log_dma.debug("finished copy " IDFMT " (%d) -> " IDFMT " (%d) - %zd bytes (%zd), event=" IDFMT "/%d", src.id, src_mem->kind, target.id, tgt_mem->kind, bytes_to_copy, elmt_size, after_copy.id, after_copy.gen);
 #endif
     }
     
@@ -2586,7 +2622,7 @@ namespace LegionRuntime {
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
-      log_dma.info("dma request %p created - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -2613,7 +2649,7 @@ namespace LegionRuntime {
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
     {
-      const int *idata = (const int *)data;
+      const IDType *idata = (const IDType *)data;
 
       idata = domain.deserialize(idata);
 
@@ -2637,9 +2673,9 @@ namespace LegionRuntime {
       inst_lock_needed = *idata++;
 
       // better have consumed exactly the right amount of data
-      assert(((idata - ((const int *)data))*sizeof(int)) == datalen);
+      assert(((idata - ((const IDType *)data))*sizeof(IDType)) == datalen);
 
-      log_dma.info("dma request %p deserialized - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -2658,7 +2694,7 @@ namespace LegionRuntime {
     size_t ReduceRequest::serialize(void *buffer, size_t maxlen)
     {
       // domain info goes first
-      int *msgptr = domain.serialize((int *)buffer);
+      IDType *msgptr = domain.serialize((IDType *)buffer);
 
       // now source fields
       *msgptr++ = srcs.size();
@@ -2707,7 +2743,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock %x", this, is_impl->lock.me.id);
+	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
 	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
@@ -2717,7 +2753,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.info("request %p - valid mask needed for index space %x - sleeping on event %x/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -2731,7 +2767,7 @@ namespace LegionRuntime {
 	  RegionInstance::Impl *src_impl = it->inst.impl();
 
 	  if(!src_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no src instance (%x) metadata yet", this, it->inst.id);
+	    log_dma.info("dma request %p - no src instance (" IDFMT ") metadata yet", this, it->inst.id);
 	    if(just_check) return false;
 
 	    Event e = src_impl->lock.acquire(1, false);
@@ -2739,7 +2775,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - src instance metadata invalid - instant trigger", this);
 	      src_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock %x", this, src_impl->lock.me.id);
+	      log_dma.info("request %p - src instance metadata invalid - sleeping on lock " IDFMT "", this, src_impl->lock.me.id);
 	      waiter.sleep_on_event(e, src_impl->lock.me);
 	      return false;
 	    }
@@ -2754,7 +2790,7 @@ namespace LegionRuntime {
 	  RegionInstance::Impl *dst_impl = dst.inst.impl();
 
 	  if(!dst_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no dst instance (%x) metadata yet", this, dst.inst.id);
+	    log_dma.info("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst.inst.id);
 	    if(just_check) return false;
 
 	    Event e = dst_impl->lock.acquire(1, false);
@@ -2762,7 +2798,7 @@ namespace LegionRuntime {
 	      log_dma.info("request %p - dst instance metadata invalid - instant trigger", this);
 	      dst_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock %x", this, dst_impl->lock.me.id);
+	      log_dma.info("request %p - dst instance metadata invalid - sleeping on lock " IDFMT "", this, dst_impl->lock.me.id);
 	      waiter.sleep_on_event(e, dst_impl->lock.me);
 	      return false;
 	    }
@@ -2786,7 +2822,7 @@ namespace LegionRuntime {
 	    // request an exclusive lock on the instance to protect reductions
 	    inst_lock_event = dst.inst.impl()->lock.acquire(0, true /*excl*/);
 	    state = STATE_INST_LOCK;
-	    log_dma.info("request %p - instance lock acquire event %x/%d",
+	    log_dma.info("request %p - instance lock acquire event " IDFMT "/%d",
 			 this, inst_lock_event.id, inst_lock_event.gen);
 	  } else {
 	    // go straight to ready
@@ -2807,7 +2843,7 @@ namespace LegionRuntime {
 	  log_dma.info("request %p - instance lock acquired", this);
 	  state = STATE_READY;
 	} else {
-	  log_dma.info("request %p - instance lock - sleeping on event %x/%d", this, inst_lock_event.id, inst_lock_event.gen);
+	  log_dma.info("request %p - instance lock - sleeping on event " IDFMT "/%d", this, inst_lock_event.id, inst_lock_event.gen);
 	  waiter.sleep_on_event(inst_lock_event);
 	  return false;
 	}
@@ -2859,7 +2895,7 @@ namespace LegionRuntime {
       Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
       Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
 
-      //printf("kinds: %x=%d %x=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
+      //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
 
       // we have the same jumble of memory type and layout permutations here - again we'll
       //  solve a few of them point-wise and then try to unify later
@@ -3067,7 +3103,7 @@ namespace LegionRuntime {
 	assert(0);
       }
 
-      log_dma.info("dma request %p finished - %x[%d]->%x[%d]:%d (+%zd) %s %d (%x) %x/%d %x/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3273,7 +3309,7 @@ namespace LegionRuntime {
 	// now do a copy for each memory pair
 	std::set<Event> finish_events;
 
-	log_dma.info("copy: %zd distinct src/dst mem pairs, is=%x", oas_by_mem.size(), is_id);
+	log_dma.info("copy: %zd distinct src/dst mem pairs, is=" IDFMT "", oas_by_mem.size(), is_id);
 
 	for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
 	  Memory src_mem = it->first.first;
@@ -3293,7 +3329,7 @@ namespace LegionRuntime {
 
 	  // ask which node should perform the copy
 	  int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
-	  log_dma.info("copy: srcmem=%x dstmem=%x node=%d", src_mem.id, dst_mem.id, dma_node);
+	  log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
 	  
 	  if(dma_node == gasnet_mynode()) {
 	    log_dma.info("performing copy on local node");
@@ -3309,12 +3345,12 @@ namespace LegionRuntime {
 	    args.after_copy = ev;
 	    args.priority = priority;
 
-	    static const size_t MAX_MESSAGE_SIZE = 2048;
+	    static const size_t MAX_MESSAGE_SIZE = 16384;
 	    int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
 
 	    size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
 
-	    log_dma.info("performing copy on remote node (%d), event=%x/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    log_dma.info("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
 	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_COPY);
 	  
 	    finish_events.insert(ev);
@@ -3373,12 +3409,12 @@ namespace LegionRuntime {
 	  args.after_copy = ev;
 	  args.priority = 0 /*priority*/;
 
-	  static const size_t MAX_MESSAGE_SIZE = 2048;
-	  int msgdata[MAX_MESSAGE_SIZE / sizeof(int)];
+	  static const size_t MAX_MESSAGE_SIZE = 16384;
+	  IDType msgdata[MAX_MESSAGE_SIZE / sizeof(IDType)];
 
 	  size_t msglen = r->serialize(msgdata, MAX_MESSAGE_SIZE);
 
-	  log_dma.info("performing reduction on remote node (%d), event=%x/%d",
+	  log_dma.info("performing reduction on remote node (%d), event=" IDFMT "/%d",
 		       src_node, args.after_copy.id, args.after_copy.gen);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_COPY);
 	  // done with the local copy of the request

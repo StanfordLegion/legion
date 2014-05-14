@@ -378,7 +378,6 @@ namespace LegionRuntime {
       task_priority = 0;
       start_time = 0;
       stop_time = 0;
-      complete_time = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -964,7 +963,7 @@ namespace LegionRuntime {
               log_index(LEVEL_ERROR,"Parent task %s (ID %lld) of task %s "
                                     "(ID %lld) "
                                     "does not have an index requirement for "
-                                    "index space %x as a parent of child "
+                                    "index space " IDFMT " as a parent of child "
                                     "task's index requirement index %d",
                                     parent_ctx->variants->name, 
                                     parent_ctx->get_unique_task_id(),
@@ -977,8 +976,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PATH:
             {
-              log_index(LEVEL_ERROR,"Index space %x is not a sub-space of "
-                                    "parent index space %x for index "
+              log_index(LEVEL_ERROR,"Index space " IDFMT " is not a sub-space of "
+                                    "parent index space " IDFMT " for index "
                                     "requirement %d of task %s (ID %lld)",
                                     indexes[idx].handle.id, 
                                     indexes[idx].parent.id, idx,
@@ -990,7 +989,7 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
-              log_index(LEVEL_ERROR,"Privileges %x for index space %x are "
+              log_index(LEVEL_ERROR,"Privileges %x for index space " IDFMT " are "
                                     "not a subset of privileges of parent "
                                     "task's privileges for index space "
                                     "requirement %d of task %s (ID %lld)",
@@ -1026,7 +1025,7 @@ namespace LegionRuntime {
             break;
           case ERROR_INVALID_REGION_HANDLE:
             {
-              log_region(LEVEL_ERROR, "Invalid region handle (%x,%d,%d) for "
+              log_region(LEVEL_ERROR, "Invalid region handle (" IDFMT ",%d,%d) for "
                                     "region requirement %d of task %s "
                                     "(ID %lld)",
                                     regions[idx].region.index_space.id, 
@@ -1118,7 +1117,7 @@ namespace LegionRuntime {
             {
               log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of task %s "
                                       "(ID %lld) does not have a region "
-                                      "requirement for region (%x,%x,%x) "
+                                      "requirement for region (" IDFMT ",%x,%x) "
                                       "as a parent of child task's region "
                                       "requirement index %d",
                                       parent_ctx->variants->name, 
@@ -1135,8 +1134,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PATH:
             {
-              log_region(LEVEL_ERROR,"Region (%x,%x,%x) is not a sub-region of "
-                                      "parent region (%x,%x,%x) for region "
+              log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
+                                      "parent region (" IDFMT ",%x,%x) for region "
                                       "requirement %d of task %s (ID %lld)",
                                       regions[idx].region.index_space.id,
                                       regions[idx].region.field_space.id, 
@@ -1153,7 +1152,7 @@ namespace LegionRuntime {
             {
               log_region(LEVEL_ERROR,"Partition (%x,%x,%x) is not a "
                                      "sub-partition of parent region "
-                                     "(%x,%x,%x) for region requirement %d "
+                                     "(" IDFMT ",%x,%x) for region requirement %d "
                                      "task %s (ID %lld)",
                                       regions[idx].partition.index_partition, 
                                       regions[idx].partition.field_space.id, 
@@ -1181,7 +1180,7 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PRIVILEGES:
             {
-              log_region(LEVEL_ERROR,"Privileges %x for region (%x,%x,%x) are "
+              log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
                                      "not a subset of privileges of parent "
                                      "task's privileges for "
                                      "region requirement %d of task %s "
@@ -1249,6 +1248,8 @@ namespace LegionRuntime {
     {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
+      if (rhs->must_epoch != NULL)
+        this->set_must_epoch(rhs->must_epoch);
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -2116,6 +2117,17 @@ namespace LegionRuntime {
       assert(premapping_events.find(tid) != premapping_events.end());
 #endif
       premapping_events[tid].erase(term_premap);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* SingleTask::get_instance(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < physical_instances.size());
+      assert(physical_instances[idx].has_ref());
+#endif
+      return physical_instances[idx].get_handle().get_view()->get_manager(); 
     }
 
     //--------------------------------------------------------------------------
@@ -3226,7 +3238,7 @@ namespace LegionRuntime {
       }
       log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of inline task %s "
                               "(ID %lld) does not have a region "
-                              "requirement for region (%x,%x,%x) "
+                              "requirement for region (" IDFMT ",%x,%x) "
                               "as a parent of child task's region "
                               "requirement index %d",
                               variants->name, 
@@ -3259,7 +3271,7 @@ namespace LegionRuntime {
       }
       log_index(LEVEL_ERROR,"Parent task %s (ID %lld) of inline task %s "
                             "(ID %lld) does not have an index space "
-                            "requirement for index space %x "
+                            "requirement for index space " IDFMT " "
                             "as a parent of chlid task's index requirement "
                             "index %d",
                             variants->name,
@@ -3627,38 +3639,45 @@ namespace LegionRuntime {
         // Not remote
         if (is_premapped() || premap_task())
         {
-          // See if this task is going to be sent
-          // remotely in which case we need to do the
-          // mapping now, otherwise we can defer it
-          // until the task ends up on the target processor
-          if (is_locally_mapped() && !runtime->is_local(target_proc))
-          {
-            if (perform_mapping())
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              bool still_local = 
-#endif
-              distribute_task();
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!still_local);
-#endif
-            }
-            else // failed to map
-              success = false; 
-          }
+          // See if we have a must epoch in which case
+          // we can simply record ourselves and we are done
+          if (must_epoch != NULL)
+            must_epoch->register_single_task(this);
           else
           {
-            if (distribute_task())
+            // See if this task is going to be sent
+            // remotely in which case we need to do the
+            // mapping now, otherwise we can defer it
+            // until the task ends up on the target processor
+            if (is_locally_mapped() && !runtime->is_local(target_proc))
             {
-              // Still local so try mapping and launching
               if (perform_mapping())
               {
-                // Still local and mapped so
-                // we can now launch it
-                launch_task();
+#ifdef DEBUG_HIGH_LEVEL
+                bool still_local = 
+#endif
+                distribute_task();
+#ifdef DEBUG_HIGH_LEVEL
+                assert(!still_local);
+#endif
               }
               else // failed to map
-                success = false;
+                success = false; 
+            }
+            else
+            {
+              if (distribute_task())
+              {
+                // Still local so try mapping and launching
+                if (perform_mapping())
+                {
+                  // Still local and mapped so
+                  // we can now launch it
+                  launch_task();
+                }
+                else // failed to map
+                  success = false;
+              }
             }
           }
         }
@@ -3672,7 +3691,18 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    bool SingleTask::map_all_regions(Processor target, Event user_event)
+    void SingleTask::unmap_all_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      virtual_mapped.clear();
+      region_deleted.clear();
+      num_virtual_mappings = 0;
+      physical_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::map_all_regions(Processor target, Event user_event,
+                                     bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3694,7 +3724,9 @@ namespace LegionRuntime {
         regions[idx].mapping_failed = false;
         regions[idx].selected_memory = Memory::NO_MEMORY;
       }
-      bool notify = runtime->invoke_mapper_map_task(current_proc, this);
+      bool notify = false;
+      if (!mapper_invoked)
+        notify = runtime->invoke_mapper_map_task(current_proc, this);
       // Info for virtual mappings
       virtual_mapped.resize(regions.size(),false);
       locally_mapped.resize(regions.size(),true);
@@ -3782,9 +3814,9 @@ namespace LegionRuntime {
             if (visible_memories.find(premap_memory) != visible_memories.end())
             {
               log_region(LEVEL_ERROR,"Illegal premapped region for logical "
-                                      "region (%x,%d,%d) index %d of task "
-                                      "%s (UID %lld)!  Memory %x is not "
-                                      "visible from processor %x!", 
+                                      "region (" IDFMT ",%d,%d) index %d of task "
+                                      "%s (UID %lld)!  Memory " IDFMT " is not "
+                                      "visible from processor " IDFMT "!", 
                                        regions[idx].region.index_space.id, 
                                        regions[idx].region.field_space.id, 
                                        regions[idx].region.tree_id, idx, 
@@ -3837,7 +3869,7 @@ namespace LegionRuntime {
       LegionProf::register_event(get_unique_task_id(), PROF_END_MAP_ANALYSIS);
 #endif
       return map_success;
-    } 
+    }  
 
     //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(
@@ -4275,7 +4307,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      log_task(LEVEL_DEBUG,"Task %s (ID %lld) starting on processor %x",
+      log_task(LEVEL_DEBUG,"Task %s (ID %lld) starting on processor " IDFMT "",
                             this->variants->name, get_unique_task_id(), 
                             executing_processor.id);
       assert(regions.size() == physical_regions.size());
@@ -4334,8 +4366,11 @@ namespace LegionRuntime {
       runtime->pause_execution(executing_processor);
 
       if (profile_task)
+      {
         this->stop_time = (TimeStamp::get_current_time_in_micros() -
                               Runtime::init_time);
+        runtime->invoke_mapper_notify_profiling(executing_processor, this);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_regions.size());
       assert(regions.size() == physical_instances.size());
@@ -4550,7 +4585,7 @@ namespace LegionRuntime {
       if (splits.empty())
       {
         log_run(LEVEL_ERROR,"Invalid mapper domain slice result for mapper %d "
-                            "on processor %d for task %s (ID %lld)",
+                            "on processor " IDFMT " for task %s (ID %lld)",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -4580,7 +4615,7 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor %d for task %s (ID %lld).  Mapper "
+                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
                             "returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
@@ -4596,7 +4631,7 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor %d for task %s (ID %lld).  Mapper "
+                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
                             "returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
@@ -4612,7 +4647,7 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor %d for task %s (ID %lld).  Mapper "
+                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
                             "returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
@@ -4736,35 +4771,40 @@ namespace LegionRuntime {
           {
             if (is_sliced())
             {
-              // See if we're going to send it
-              // remotely.  If so we need to do
-              // the mapping now.  Otherwise we
-              // can defer the mapping until we get
-              // on the target processor.
-              if (!runtime->is_local(target_proc))
-              {
-                if (perform_mapping())
-                {
-#ifdef DEBUG_HIGH_LEVEL
-                  bool still_local = 
-#endif
-                  distribute_task();
-#ifdef DEBUG_HIGH_LEVEL
-                  assert(!still_local);
-#endif
-                }
-                else // failed to map
-                  success = false;
-              }
+              if (must_epoch != NULL)
+                register_must_epoch();
               else
               {
-                // We know that it is staying on one
-                // of our local processors.  If it is
-                // still this processor then map and run it
-                if (distribute_task())
+                // See if we're going to send it
+                // remotely.  If so we need to do
+                // the mapping now.  Otherwise we
+                // can defer the mapping until we get
+                // on the target processor.
+                if (!runtime->is_local(target_proc))
                 {
-                  // Still local so we can map and launch it
-                  success = map_and_launch();
+                  if (perform_mapping())
+                  {
+#ifdef DEBUG_HIGH_LEVEL
+                    bool still_local = 
+#endif
+                    distribute_task();
+#ifdef DEBUG_HIGH_LEVEL
+                    assert(!still_local);
+#endif
+                  }
+                  else // failed to map
+                    success = false;
+                }
+                else
+                {
+                  // We know that it is staying on one
+                  // of our local processors.  If it is
+                  // still this processor then map and run it
+                  if (distribute_task())
+                  {
+                    // Still local so we can map and launch it
+                    success = map_and_launch();
+                  }
                 }
               }
             }
@@ -5276,7 +5316,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::perform_mapping(void)
+    bool IndividualTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
       // Before we try mapping the task, ask the mapper to pick a task variant
@@ -5300,7 +5340,8 @@ namespace LegionRuntime {
       // Now try to do the mapping, we can just use our completion
       // event since we know this task will object will be active
       // throughout the duration of the computation
-      bool map_success = map_all_regions(target_proc, get_task_completion());
+      bool map_success = map_all_regions(target_proc, 
+                                         get_task_completion(), mapper_invoked);
       // If we mapped, then we are no longer stealable
       if (map_success)
         spawn_task = false;
@@ -5492,7 +5533,10 @@ namespace LegionRuntime {
       else
       {
         // Set our future, but don't trigger it yet
-        result.impl->set_result(res, res_size, owned);
+        if (must_epoch == NULL)
+          result.impl->set_result(res, res_size, owned);
+        else
+          must_epoch->set_future(index_point, res, res_size, owned);
       }
     }
 
@@ -5741,7 +5785,10 @@ namespace LegionRuntime {
       // First unpack the privilege state
       unpack_privilege_state(derez);
       // Unpack the future result
-      result.impl->unpack_future(derez);
+      if (must_epoch == NULL)
+        result.impl->unpack_future(derez);
+      else
+        must_epoch->unpack_future(index_point, derez);
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution();
@@ -5981,14 +6028,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::perform_mapping(void)
+    bool PointTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
-      bool map_success = map_all_regions(target_proc, point_termination);
+      bool map_success = map_all_regions(target_proc, 
+                                         point_termination, mapper_invoked);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (map_success && (num_virtual_mappings == 0))
@@ -6223,17 +6271,7 @@ namespace LegionRuntime {
                                   owner->regions[idx].region);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::unmap_all_regions(void)
-    //--------------------------------------------------------------------------
-    {
-      virtual_mapped.clear();
-      region_deleted.clear();
-      num_virtual_mappings = 0;
-      physical_instances.clear();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PointTask::send_back_remote_state(AddressSpaceID target, unsigned idx,
@@ -6342,7 +6380,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::perform_mapping(void)
+    bool WrapperTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6839,7 +6877,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FutureMap IndexTask::initialize_task(SingleTask *ctx,
                                          const IndexLauncher &launcher,
-                                         bool check_privileges)
+                                         bool check_privileges,
+                                         bool track /*= true*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -6872,14 +6911,13 @@ namespace LegionRuntime {
       if (must_parallelism)
         must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
-      initialize_base_task(ctx, true/*track*/, launcher.predicate, task_id);
+      initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (check_privileges)
         perform_privilege_checks();
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      future_map = FutureMap(new FutureMap::Impl(ctx, this, 
-                                             variants->return_size, runtime));
+      future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -6907,7 +6945,8 @@ namespace LegionRuntime {
     Future IndexTask::initialize_task(SingleTask *ctx,
                                       const IndexLauncher &launcher,
                                       ReductionOpID redop, 
-                                      bool check_privileges)
+                                      bool check_privileges,
+                                      bool track /*= true*/)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -6951,7 +6990,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_UNFOLDABLE_REDUCTION_OP);
       }
-      initialize_base_task(ctx, true/*track*/, launcher.predicate, task_id);
+      initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (check_privileges)
         perform_privilege_checks();
       initialize_physical_contexts();
@@ -7028,8 +7067,7 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      future_map = FutureMap(new FutureMap::Impl(ctx, this, 
-                                             variants->return_size, runtime));
+      future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -7300,7 +7338,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::perform_mapping(void)
+    bool IndexTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
       // This will only get called if we had slices that failed to map locally
@@ -7558,9 +7596,22 @@ namespace LegionRuntime {
       else
       {
         AutoLock o_lock(op_lock);
-        Future f = future_map.get_future(point);
-        f.impl->set_result(result, result_size, owner);
+        if (must_epoch == NULL)
+        {
+          Future f = future_map.get_future(point);
+          f.impl->set_result(result, result_size, owner);
+        }
+        else
+          must_epoch->set_future(point, result, result_size, owner);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::register_must_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -7677,8 +7728,13 @@ namespace LegionRuntime {
           {
             DomainPoint p;
             unpack_point(derez, p);
-            Future f = future_map.impl->get_future(p);
-            f.impl->unpack_future(derez);
+            if (must_epoch == NULL)
+            {
+              Future f = future_map.impl->get_future(p);
+              f.impl->unpack_future(derez);
+            }
+            else
+              must_epoch->unpack_future(p, derez);
           }
         }
       }
@@ -7932,7 +7988,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::perform_mapping(void)
+    bool SliceTask::perform_mapping(bool mapper_invoked)
     //--------------------------------------------------------------------------
     {
       bool map_success = true;
@@ -7947,7 +8003,7 @@ namespace LegionRuntime {
 
         for (unsigned idx = 0; idx < points.size(); idx++)
         {
-          bool point_success = points[idx]->perform_mapping();
+          bool point_success = points[idx]->perform_mapping(mapper_invoked);
           if (!point_success)
           {
             // Failed to map, so unmap everything up to this point
@@ -8307,6 +8363,20 @@ namespace LegionRuntime {
       }
       else
         index_owner->handle_future(point, result, result_size, owner);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_must_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(must_epoch != NULL);
+#endif
+      if (points.empty())
+        enumerate_points();
+      must_epoch->register_slice_task(this);
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        must_epoch->register_single_task(points[idx]);
     }
 
     //--------------------------------------------------------------------------

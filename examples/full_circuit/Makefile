@@ -33,7 +33,10 @@ GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
 CC_FLAGS	?=
+#CC_FLAGS        += -DDEADLOCK_TRACE -DNODE_LOGGING
+#CC_FLAGS        += -DFULL_SIZE_INSTANCES
 NVCC_FLAGS	?=
+#NVCC_FLAGS      += -DTIME_CUDA_KERNELS
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 

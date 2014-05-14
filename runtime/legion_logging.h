@@ -16,7 +16,7 @@
 
 
 #ifndef __LEGION_LOGGING_H__
-#define __LEGION_LOGGING_H___
+#define __LEGION_LOGGING_H__
 
 #ifdef LEGION_LOGGING
 

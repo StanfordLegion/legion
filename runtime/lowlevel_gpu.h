@@ -92,6 +92,14 @@ namespace LegionRuntime {
                              size_t bytes, size_t lines,
                              Event start_event, Event finish_event);
 
+      void copy_to_peer(GPUProcessor *dst, off_t dst_offset, 
+                        off_t src_offset, size_t bytes,
+                        Event start_event, Event finish_event);
+      void copy_to_peer_2d(GPUProcessor *dst, off_t dst_offset, off_t src_offset,
+                           off_t dst_stride, off_t src_stride,
+                           size_t bytes, size_t lines,
+                           Event start_event, Event finish_event);
+
       //void copy_to_fb_generic(off_t dst_offset, 
       //			      Memory::Impl *src_mem, off_t src_offset,
       //			      size_t bytes,
@@ -136,7 +144,8 @@ namespace LegionRuntime {
       static void start_gpu_dma_thread(const std::vector<GPUProcessor*> &local_gpus);
       static void stop_gpu_dma_threads(void);
     private:
-      static std::vector<GPUProcessor*> local_gpus;
+      static GPUProcessor **node_gpus;
+      static size_t num_node_gpus;
     public:
       class Internal;
 

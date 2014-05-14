@@ -30,6 +30,9 @@ public:
   virtual void slice_domain(const Task *task, const Domain &domain,
                             std::vector<DomainSplit> &slices);
   virtual bool map_task(Task *task);
+  virtual bool map_inline(Inline *inline_operation);
+
+  virtual void notify_mapping_failed(const Mappable *mappable);
 #if 0
   virtual bool rank_copy_targets(const Mappable *mappble,
                                  const std::set<Memory> &current_instances,

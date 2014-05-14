@@ -754,6 +754,7 @@ namespace LegionRuntime {
       bool early_map;
       bool enable_WAR_optimization;
       bool reduction_list;
+      bool make_persistent;
       size_t blocking_factor;
       // TODO: hardness factor
       std::vector<Memory> target_ranking;
@@ -1317,6 +1318,37 @@ namespace LegionRuntime {
     };
 
     //==========================================================================
+    //                        Must Parallelism Classes
+    //==========================================================================
+    
+    /**
+     * \struct MustEpochLauncher
+     * This is a meta-launcher object which contains other launchers.  The
+     * purpose of this meta-launcher is to guarantee that all of the operations
+     * specified in this launcher be guaranteed to run simultaneously.  This
+     * enables the use of synchronization mechanisms such as phase barriers
+     * and reservations between these operations without concern for deadlock.
+     * If any condition is detected that will prevent simultaneous 
+     * parallel execution of the operations the runtime will report an error.
+     * These conditions include true data dependences on regions as well
+     * as cases where mapping decisions artificially serialize operations
+     * such as two tasks being mapped to the same processor.
+     */
+    struct MustEpochLauncher {
+    public:
+      MustEpochLauncher(MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline void add_single_task(const DomainPoint &point,
+                                  const TaskLauncher &launcher);
+      inline void add_index_task(const IndexLauncher &launcher);
+    public:
+      MapperID                        map_id;
+      MappingTagID               mapping_tag;
+      std::vector<TaskLauncher> single_tasks;
+      std::vector<IndexLauncher> index_tasks;
+    };
+
+    //==========================================================================
     //                            Mapping Classes
     //==========================================================================
     
@@ -1417,7 +1449,6 @@ namespace LegionRuntime {
       // Profiling information for the task
       unsigned long long                  start_time;
       unsigned long long                  stop_time;
-      unsigned long long                  complete_time;
     public:
       inline UniqueID get_unique_task_id(void) const;
     public:
@@ -1700,6 +1731,27 @@ namespace LegionRuntime {
         Processor proc;
         bool recurse;
         bool stealable;
+      };
+    public:
+      /**
+       * \struct MappingConstraint
+       * A mapping constraint object captures constraints on
+       * two different operations which needs to be satisfied 
+       * in order for the tasks to be executed in parallel.
+       * We use these as part of the must parallelism call.
+       */
+      struct MappingConstraint {
+      public:
+        MappingConstraint(Task *one, unsigned id1,
+                          Task *two, unsigned id2,
+                          DependenceType d)
+          : t1(one), idx1(id1), t2(two), idx2(id2), dtype(d) { }
+      public:
+        Task *t1;
+        unsigned idx1;
+        Task *t2;
+        unsigned idx2;
+        DependenceType dtype;
       };
     public:
       Mapper(void) { }
@@ -2085,6 +2137,25 @@ namespace LegionRuntime {
        * @return should the runtime notify the mapper of a successful mapping
        */
       virtual bool map_copy(Copy *copy) = 0; 
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Must Epoch 
+       * ----------------------------------------------------------------------
+       *  This is the mapping call for must epochs where a collection of tasks
+       *  are all being requested to run in a must-parallelism mode so that
+       *  they can synchronize.  The same mapping operations must be performed
+       *  for each of the Task objects as in 'map_task', with the additional
+       *  constraints that the mappings for the region requirements listed
+       *  in the 'constraints' vector be satisifed to ensure the tasks 
+       *  actually can run in parallel.
+       *  @param tasks the tasks to be mapped
+       *  @param constraints the constraints on the mapping
+       *  @return should the runtime notify the tasks of a successful mapping
+       */
+      virtual bool map_must_epoch(const std::vector<Task*> &tasks,
+                            const std::vector<MappingConstraint> &constraints,
+                            MappingTagID tag) = 0;
 
       /**
        * ----------------------------------------------------------------------
@@ -3156,6 +3227,19 @@ namespace LegionRuntime {
        * Mark the end of trace that was being performed.
        */
       void end_trace(Context ctx, TraceID tid);
+    public:
+      //------------------------------------------------------------------------
+      // Must Parallelism 
+      //------------------------------------------------------------------------
+      /**
+       * Launch a collection of operations that all must be guaranteed to 
+       * execute in parallel.  This construct is necessary for ensuring the
+       * correctness of tasks which use simultaneous coherence and perform
+       * synchronization between different physical instances (e.g. using
+       * phase barriers or reservations).  
+       */
+      FutureMap execute_must_epoch(Context ctx, 
+                                   const MustEpochLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Miscellaneous Operations
@@ -4332,6 +4416,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void MustEpochLauncher::add_single_task(const DomainPoint &point,
+                                                   const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      single_tasks.push_back(launcher);
+      single_tasks.back().point = point;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void MustEpochLauncher::add_index_task(const IndexLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      index_tasks.push_back(launcher);
     }
 
     //--------------------------------------------------------------------------

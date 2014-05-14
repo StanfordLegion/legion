@@ -48,11 +48,11 @@
 #endif
 
 #ifndef MAX_FIELDS
-#define MAX_FIELDS         2048 // must be divisible by 2^FIELD_SHIFT
+#define MAX_FIELDS         128 // must be divisible by 2^FIELD_SHIFT
 #endif
 
 #ifndef FIELD_LOG2
-#define FIELD_LOG2         11 // log2(MAX_FIELDS)
+#define FIELD_LOG2         7 // log2(MAX_FIELDS)
 #endif
 // The folowing macros are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
@@ -252,6 +252,9 @@ namespace LegionRuntime {
       ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK = 102,
       ERROR_INVALID_PARENT_REQUEST = 103,
       ERROR_INVALID_FIELD_ID = 104,
+      ERROR_NESTED_MUST_EPOCH = 105,
+      ERROR_UNMATCHED_MUST_EPOCH = 106,
+      ERROR_MUST_EPOCH_FAILURE = 107,
     };
 
     // enum and namepsaces don't really get along well
@@ -339,7 +342,7 @@ namespace LegionRuntime {
     class TaskArgument;
     class ArgumentMap;
     class Lock;
-    class LockRequest;
+    struct LockRequest;
     class Grant;
     class PhaseBarrier;
     struct RegionRequirement;
@@ -399,6 +402,7 @@ namespace LegionRuntime {
     class NotPredOp;
     class AndPredOp;
     class OrPredOp;
+    class MustEpochOp;
     class TaskOp;
 
     // legion_tasks.h
@@ -439,7 +443,7 @@ namespace LegionRuntime {
     class PremapTraverser;
     class MappingTraverser;
 
-    class LogicalState;
+    struct LogicalState;
     class PhysicalVersion;
 
     class DistributedCollectable;
@@ -468,12 +472,12 @@ namespace LegionRuntime {
     struct LogicalUser;
     struct PhysicalUser;
     class TreeCloser;
-    class LogicalCloser;
-    class PhysicalCloser;
+    struct LogicalCloser;
+    struct PhysicalCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;
-    class CloseInfo;
+    struct CloseInfo;
 
     // legion_utilities.h
     class Serializer;
@@ -543,8 +547,8 @@ namespace LegionRuntime {
     typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
       Context,HighLevelRuntime*,void*&,size_t&);
-    //typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-    typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    // typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
     typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;
 
@@ -570,6 +574,7 @@ namespace LegionRuntime {
     friend class NotPredOp;                       \
     friend class AndPredOp;                       \
     friend class OrPredOp;                        \
+    friend class MustEpochOp;                     \
     friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \
