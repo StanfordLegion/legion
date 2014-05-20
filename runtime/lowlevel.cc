@@ -24,8 +24,7 @@
 
 using namespace LegionRuntime::Accessor;
 
-#define USE_GPU
-#ifdef USE_GPU
+#ifdef USE_CUDA
 #include "lowlevel_gpu.h"
 #endif
 
@@ -2863,7 +2862,7 @@ namespace LegionRuntime {
 	  delete[] base_orig;
       }
 
-#ifdef USE_GPU
+#ifdef USE_CUDA
       // For pinning CPU memories for use with asynchronous
       // GPU copies
       void pin_memory(GPUProcessor *proc)
@@ -7655,7 +7654,7 @@ namespace LegionRuntime {
     static std::vector<LocalProcessor *> local_cpus;
     static std::vector<UtilityProcessor *> local_util_procs;
     static size_t stack_size_in_mb;
-#ifdef USE_GPU
+#ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
 #endif
 
@@ -7679,7 +7678,11 @@ namespace LegionRuntime {
         return me->get_processor();
       }
       // Otherwise this better be a GPU processor 
+#ifdef USE_CUDA
       return GPUProcessor::get_processor();
+#else
+      assert(0);
+#endif
     }
 
     static std::map<Processor, std::set<Processor> *> proc_groups;
@@ -7930,37 +7933,6 @@ namespace LegionRuntime {
     {
       the_machine = this;
 
-      // see if we've been spawned by gasnet or been run directly
-      bool in_gasnet_spawn = false;
-      bool in_mpi_mode = false;
-      for(int i = 0; i < *argc; i++) {
-	if(!strncmp((*argv)[i], "-GASNET", 7))
-	  in_gasnet_spawn = true;
-	if(!strncmp((*argv)[i], "-MPI", 4))
-	  in_mpi_mode = true;
-      }
-
-      if(!in_gasnet_spawn && !in_mpi_mode) {
-	printf("doesn't look like this was called from gasnetrun - lemme try to spawn it for you...\n");
-	int np = 1;
-	const char *p = getenv("GASNET_SSH_SERVERS");
-	if(p)
-	  while(*p)
-	    if(*p++ == ',') np++;
-	char np_str[10];
-	sprintf(np_str, "%d", np);
-	const char **new_argv = new const char *[*argc + 4];
-	new_argv[0] = "gasnetrun_ibv";
-	new_argv[1] = "-n";
-	new_argv[2] = np_str;
-	for(int i = 0; i < *argc; i++) new_argv[i+3] = (*argv)[i];
-	new_argv[*argc + 3] = 0;
-	execvp(new_argv[0], (char **)new_argv);
-	// should never get here...
-	perror("execvp");
-	exit(1);
-      }
-	  
       for(ReductionOpTable::const_iterator it = redop_table.begin();
 	  it != redop_table.end();
 	  it++)
@@ -8203,7 +8175,7 @@ namespace LegionRuntime {
         }
       }
 
-#ifdef USE_GPU
+#ifdef USE_CUDA
       // Initialize the driver API
       CHECK_CU( cuInit(0) );
       // Keep track of the local system memories so we can pin them
@@ -8305,7 +8277,7 @@ namespace LegionRuntime {
 				       n->memories.size(), 0).convert<Memory>(),
 				    cpu_mem_size_in_mb << 20);
 	n->memories.push_back(cpumem);
-#ifdef USE_GPU
+#ifdef USE_CUDA
         local_mems.push_back(cpumem);
 #endif
 	adata[apos++] = NODE_ANNOUNCE_MEM;
@@ -8329,7 +8301,7 @@ namespace LegionRuntime {
 				    regmem_base,
 				    true);
 	n->memories.push_back(regmem);
-#ifdef USE_GPU
+#ifdef USE_CUDA
         local_mems.push_back(regmem);
 #endif
 	adata[apos++] = NODE_ANNOUNCE_MEM;
@@ -8402,7 +8374,7 @@ namespace LegionRuntime {
 	adata[apos++] = 25;    // "higher" latency
       }
 
-#ifdef USE_GPU
+#ifdef USE_CUDA
       if(num_local_gpus > 0) {
         if (num_local_gpus > (peer_gpus.size() + dumb_gpus.size()))
         {
@@ -8549,6 +8521,12 @@ namespace LegionRuntime {
 
         if (gpu_dma_thread)
           GPUProcessor::start_gpu_dma_thread(local_gpus);
+      }
+#else // ifdef USE_CUDA
+      if(num_local_gpus > 0) {
+          printf("Requested %d GPUs, but CUDA is not enabled!\n",
+            num_local_gpus);
+          assert(false);
       }
 #endif
 
@@ -8742,7 +8720,7 @@ namespace LegionRuntime {
 	  it++)
 	(*it)->start_worker_threads(stack_size_in_mb << 20);
 
-#ifdef USE_GPU
+#ifdef USE_CUDA
       for(std::vector<GPUProcessor *>::iterator it = local_gpus.begin();
 	  it != local_gpus.end();
 	  it++)
@@ -8789,7 +8767,7 @@ namespace LegionRuntime {
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       stop_dma_worker_threads();
-#ifndef SHARED_LOWLEVEL
+#ifdef USE_CUDA
       GPUProcessor::stop_gpu_dma_threads();
 #endif
       stop_activemsg_threads();

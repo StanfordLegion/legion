@@ -1836,7 +1836,8 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(" IDFMT ",%d,%d) for inline mapping (ID %lld)",
+                                   "(" IDFMT ",%d,%d) for inline mapping "
+                                   "(ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
@@ -1885,8 +1886,8 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of inline mapping "
                                    "(ID %lld) does not have a region "
-                                   "requirement for region (" IDFMT ",%x,%x) as a "
-                                   "parent of region requirement",
+                                   "requirement for region (" IDFMT ",%x,%x) "
+                                   "as a parent of region requirement",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
                                    unique_op_id, 
@@ -1900,10 +1901,10 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
-                                   "parent region (" IDFMT ",%x,%x) for "
-                                   "region requirement of inline mapping "
-                                   "(ID %lld)",
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a "
+                                   "sub-region of parent region (" IDFMT 
+                                   ",%x,%x) for region requirement of inline "
+                                   "mapping (ID %lld)",
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id,
@@ -1929,10 +1930,10 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
-                                   "not a subset of privileges of parent "
-                                   "task's privileges for region requirement "
-                                   "of inline mapping (ID %lld)",
+            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT 
+                                   ",%x,%x) are not a subset of privileges "
+                                   "of parent task's privileges for region "
+                                   "requirement of inline mapping (ID %lld)",
                                    requirement.privilege, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -2162,10 +2163,11 @@ namespace LegionRuntime {
                                                               dst_space, path);
           if (!has_path)
           {
-            log_run(LEVEL_ERROR,"Destination index space " IDFMT " for requirement %d "
-                                "of cross-region copy (ID %lld) in task %s "
-                                "(ID %lld) is not a sub-region of the source "
-                                "index space " IDFMT ".",
+            log_run(LEVEL_ERROR,"Destination index space " IDFMT " for "
+                                "requirement %d of cross-region copy "
+                                "(ID %lld) in task %s (ID %lld) is not "
+                                "a sub-region of the source index space " 
+                                IDFMT ".",
                                 dst_space.id, idx, get_unique_copy_id(),
                                 parent_ctx->variants->name,
                                 parent_ctx->get_unique_task_id(),
@@ -2819,8 +2821,8 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of copy operation "
                                    "(ID %lld) does not have a region "
-                                   "requirement for region (" IDFMT ",%x,%x) as a "
-                                   "parent of index %d of %s region "
+                                   "requirement for region (" IDFMT ",%x,%x) "
+                                   "as a parent of index %d of %s region "
                                    "requirements",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
@@ -2836,8 +2838,9 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
-                                   "parent region (" IDFMT ",%x,%x) for index %d of "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a "
+                                   "sub-region of parent region (" IDFMT 
+                                   ",%x,%x) for index %d of "
                                    "%s region requirements of copy "
                                    "operation (ID %lld)",
                                    requirement.region.index_space.id,
@@ -2868,7 +2871,8 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
+            log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT 
+                                   ",%x,%x) are "
                                    "not a subset of privileges of parent "
                                    "task's privileges for index %d of %s "
                                    "region requirements for copy "
@@ -3951,10 +3955,10 @@ namespace LegionRuntime {
         const RegionRequirement &req = region.impl->get_requirement();
         if (req.region != requirement.region)
         {
-          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT ",%d,%d) "
-                                 "and logical region (" IDFMT ",%d,%d) used for "
-                                 "mapping physical region for acquire "
-                                 "operation (ID %lld)",
+          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT 
+                                 ",%d,%d) and logical region (" IDFMT 
+                                 ",%d,%d) used for mapping physical region "
+                                 "for acquire operation (ID %lld)",
                                  requirement.region.index_space.id,
                                  requirement.region.field_space.id,
                                  requirement.region.tree_id,
@@ -3981,8 +3985,8 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(" IDFMT ",%d,%d) of requirement for acquire "
-                                   "operation (ID %lld)",
+                                   "(" IDFMT ",%d,%d) of requirement for "
+                                   "acquire operation (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
@@ -4011,8 +4015,8 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of acquire "
                                    "operation (ID %lld) does not have a region "
-                                   "requirement for region (" IDFMT ",%x,%x) as a "
-                                   "parent",
+                                   "requirement for region (" IDFMT 
+                                   ",%x,%x) as a parent",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
                                    unique_op_id, 
@@ -4026,8 +4030,9 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
-                                   "parent region (" IDFMT ",%x,%x) of requirement "
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a "
+                                   "sub-region of parent region (" IDFMT 
+                                   ",%x,%x) of requirement "
                                    "for acquire operation (ID %lld)",
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -4371,9 +4376,9 @@ namespace LegionRuntime {
         const RegionRequirement &req = region.impl->get_requirement();
         if (req.region != requirement.region)
         {
-          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT ",%d,%d) "
-                                 "and logical region (" IDFMT ",%d,%d) used for "
-                                 "mapping physical region for release "
+          log_region(LEVEL_ERROR,"Mismatch between logical region (" IDFMT 
+                                 ",%d,%d) and logical region (" IDFMT ",%d,%d) "
+                                 "used for mapping physical region for release "
                                  "operation (ID %lld)",
                                  requirement.region.index_space.id,
                                  requirement.region.field_space.id,
@@ -4401,8 +4406,8 @@ namespace LegionRuntime {
         case ERROR_INVALID_REGION_HANDLE:
           {
             log_region(LEVEL_ERROR,"Requirest for invalid region handle "
-                                   "(" IDFMT ",%d,%d) of requirement for release "
-                                   "operation (ID %lld)",
+                                   "(" IDFMT ",%d,%d) of requirement for "
+                                   "release operation (ID %lld)",
                                    requirement.region.index_space.id, 
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
@@ -4431,8 +4436,8 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of release "
                                    "operation (ID %lld) does not have a region "
-                                   "requirement for region (" IDFMT ",%x,%x) as a "
-                                   "parent",
+                                   "requirement for region (" IDFMT 
+                                   ",%x,%x) as a parent",
                                    parent_ctx->variants->name, 
                                    parent_ctx->get_unique_task_id(),
                                    unique_op_id, 
@@ -4446,9 +4451,10 @@ namespace LegionRuntime {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
-                                   "parent region (" IDFMT ",%x,%x) of requirement "
-                                   "for release operation (ID %lld)",
+            log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a "
+                                   "sub-region of parent region (" IDFMT 
+                                   ",%x,%x) of requirement for release "
+                                   "operation (ID %lld)",
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id,

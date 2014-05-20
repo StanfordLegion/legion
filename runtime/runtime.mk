@@ -15,13 +15,6 @@
 
 
 # If using the general low-level runtime
-# select a GASNET conduit to use
-CONDUIT = ibv
-#CONDUIT = gemini
-#CONDUIT = mpi
-#CONDUIT = udp
-
-# If using the general low-level runtime
 # select a target GPU architecture
 GPU_ARCH = fermi
 #GPU_ARCH = kepler
@@ -30,6 +23,10 @@ GPU_ARCH = fermi
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
+
+# defaults for GASNet
+CONDUIT = udp
+GASNET = $(LG_RT_DIR)/gasnet/release
 
 # Handle some of the common machines we frequent
 
@@ -103,8 +100,12 @@ endif
 # Falgs for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
-ifndef CUDA
-$(error CUDA variable is not defined, aborting build)
+# general low-level uses CUDA by default
+USE_CUDA ?= 1
+ifeq ($(strip $(USE_CUDA)),1)
+  ifndef CUDA
+    $(error CUDA variable is not defined, aborting build)
+  endif
 endif
 
 ifndef GASNET
@@ -112,6 +113,8 @@ $(error GASNET variable is not defined, aborting build)
 endif
 
 # General CUDA variables
+ifeq ($(strip $(USE_CUDA)),1)
+CC_FLAGS        += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
 NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
@@ -134,6 +137,7 @@ NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
+endif
 
 # General GASNET variables
 INC_FLAGS	+= -I$(GASNET)/include
@@ -185,7 +189,10 @@ CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
-LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_gpu.cc
+LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc
+ifeq ($(strip $(USE_CUDA)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_gpu.cc
+endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc $(LG_RT_DIR)/lowlevel_dma.cc
 GPU_RUNTIME_SRC +=
 else

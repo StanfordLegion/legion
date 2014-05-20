@@ -41,18 +41,21 @@ namespace LegionRuntime {
       // Logger calls for the machine architecture
       static inline void log_utility_processor(IDType unique_id)
       {
-        log_spy(LEVEL_INFO, "Utility " IDFMT "", unique_id);
+        log_spy(LEVEL_INFO, "Utility " IDFMT "", 
+                unique_id);
       }
 
       static inline void log_processor(IDType unique_id, IDType util_id, 
                                        unsigned kind)
       {
-        log_spy(LEVEL_INFO, "Processor " IDFMT " " IDFMT " %u", unique_id, util_id, kind);
+        log_spy(LEVEL_INFO, "Processor " IDFMT " " IDFMT " %u", 
+                unique_id, util_id, kind);
       }
 
       static inline void log_memory(IDType unique_id, size_t capacity)
       {
-        log_spy(LEVEL_INFO, "Memory " IDFMT " %lu", unique_id, capacity);
+        log_spy(LEVEL_INFO, "Memory " IDFMT " %lu", 
+                unique_id, capacity);
       }
 
       static inline void log_proc_mem_affinity(IDType proc_id, 
@@ -277,7 +280,8 @@ namespace LegionRuntime {
                                             unsigned redop,
                                             const char *mask)
       {
-        log_spy(LEVEL_INFO,"Copy Events " IDFMT " " IDFMT " " IDFMT " %u %u " IDFMT " %u " IDFMT " %u %u %s",
+        log_spy(LEVEL_INFO,"Copy Events " IDFMT " " IDFMT " " IDFMT 
+                           " %u %u " IDFMT " %u " IDFMT " %u %u %s",
             src_inst, dst_inst, index_handle, field_handle,
             tree_id, start_event.id, start_event.gen, term_event.id,
             term_event.gen, redop, mask);
@@ -288,7 +292,8 @@ namespace LegionRuntime {
                          IDType mem_id, IDType index_handle, 
                          unsigned field_handle, unsigned tree_id)
       {
-        log_spy(LEVEL_INFO, "Physical Instance " IDFMT " " IDFMT " " IDFMT " %u %u", 
+        log_spy(LEVEL_INFO, "Physical Instance " IDFMT " " IDFMT " " 
+                            IDFMT " %u %u", 
             inst_id, mem_id, index_handle, field_handle, tree_id);
       }
 
@@ -296,7 +301,8 @@ namespace LegionRuntime {
           IDType mem_id, IDType index_handle, unsigned field_handle, 
           unsigned tree_id, bool fold, unsigned indirect_id = 0)
       {
-        log_spy(LEVEL_INFO, "Reduction Instance " IDFMT " " IDFMT " " IDFMT " %u %u %u %u", 
+        log_spy(LEVEL_INFO, "Reduction Instance " IDFMT " " IDFMT " " 
+                            IDFMT " %u %u %u %u", 
                              inst_id, mem_id, index_handle, field_handle, 
                              tree_id, fold, indirect_id);
       }

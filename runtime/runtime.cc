@@ -1997,8 +1997,8 @@ namespace LegionRuntime {
         for (std::set<TaskOp*>::const_iterator it = stolen.begin();
               it != stolen.end(); it++)
         {
-          log_task(LEVEL_DEBUG,"task %s (ID %lld) stolen from processor " IDFMT " "
-                               "by processor " IDFMT "", (*it)->variants->name,
+          log_task(LEVEL_DEBUG,"task %s (ID %lld) stolen from processor " IDFMT
+                               " by processor " IDFMT "", (*it)->variants->name,
                                (*it)->get_unique_task_id(), local_proc.id,
                                thief.id);
         }
@@ -4216,8 +4216,8 @@ namespace LegionRuntime {
     {
       IndexSpace space = IndexSpace::create_index_space(max_num_elmts);
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG,"Creating index space " IDFMT " in task %s (ID %lld) with "
-                            "%ld maximum elements", space.id, 
+      log_index(LEVEL_DEBUG,"Creating index space " IDFMT " in task %s "
+                            "(ID %lld) with %ld maximum elements", space.id, 
                             ctx->variants->name, ctx->get_unique_task_id(), 
                             max_num_elmts);
       if (ctx->is_leaf())
@@ -4283,7 +4283,8 @@ namespace LegionRuntime {
       if (!handle.exists())
         return;
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG, "Destroying index space " IDFMT " in task %s (ID %lld)", 
+      log_index(LEVEL_DEBUG, "Destroying index space " IDFMT " in task %s "
+                             "(ID %lld)", 
                       handle.id, ctx->variants->name, 
                       ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -4332,7 +4333,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4489,7 +4491,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4581,7 +4584,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(pid > 0);
       log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
-                            "space " IDFMT " in task %s (ID %lld)", pid, parent.id,
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
@@ -4781,7 +4785,8 @@ namespace LegionRuntime {
       }
       if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid handle " IDFMT " for get index space domain", 
+        log_index(LEVEL_ERROR, "Invalid handle " IDFMT " for get index space "
+                               "domain", 
                                 handle.id);
         assert(false);
         exit(ERROR_INVALID_INDEX_DOMAIN);
@@ -5097,8 +5102,8 @@ namespace LegionRuntime {
       LogicalRegion region(tid, index_space, field_space);
 #ifdef DEBUG_HIGH_LEVEL
       log_region(LEVEL_DEBUG, "Creating logical region in task %s (ID %lld) "
-                              "with index space " IDFMT " and field space %x in new "
-                              "tree %d",
+                              "with index space " IDFMT " and field space %x "
+                              "in new tree %d",
                               ctx->variants->name,ctx->get_unique_task_id(), 
                               index_space.id, field_space.id, tid);
       if (ctx->is_leaf())
@@ -5129,8 +5134,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      log_region(LEVEL_DEBUG, "Deleting logical region (" IDFMT ",%x) in task %s "
-                              "(ID %lld)",
+      log_region(LEVEL_DEBUG, "Deleting logical region (" IDFMT ",%x) in "
+                              "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
                               ctx->variants->name,ctx->get_unique_task_id());
       if (ctx->is_leaf())
@@ -5730,8 +5735,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT ",%x,%x) "
-                           "in task %s (ID %lld)",
+      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT 
+                           ",%x,%x) in task %s (ID %lld)",
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
                            launcher.requirement.region.tree_id, 
@@ -5745,11 +5750,12 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
-                            "that conflicts with mapped region (" IDFMT ",%x,%x) at "
-                            "index %d of parent task %s (ID %lld) that would "
-                            "ultimately result in deadlock.  Instead you "
-                            "receive this error message.",
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT 
+                            ",%x,%x) that conflicts with mapped region (" 
+                            IDFMT ",%x,%x) at index %d of parent task %s "
+                            "(ID %lld) that would ultimately result in "
+                            "deadlock.  Instead you receive this error "
+                            "message.",
                             launcher.requirement.region.index_space.id,
                             launcher.requirement.region.field_space.id,
                             launcher.requirement.region.tree_id,
@@ -5765,7 +5771,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+                            IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -5800,7 +5807,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT ",%x,%x) "
+      log_run(LEVEL_DEBUG, "Registering a map operation for region (" 
+                            IDFMT ",%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id, 
                            req.region.tree_id, ctx->variants->name, 
@@ -5814,8 +5822,10 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
-                            "that conflicts with mapped region (" IDFMT ",%x,%x) at "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+                            IDFMT ",%x,%x) "
+                            "that conflicts with mapped region (" 
+                            IDFMT ",%x,%x) at "
                             "index %d of parent task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
                             "receive this error message.",
@@ -5834,7 +5844,8 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT ",%x,%x) "
+        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+                            IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
                             "ultimately result in deadlock.  Instead you "
@@ -9589,7 +9600,8 @@ namespace LegionRuntime {
             out_ops.begin(); it != out_ops.end(); it++)
       {
         Event completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Acquire Op: %lld: %p (" IDFMT ",%d) triggered %d\n",
+        fprintf(f,"Outstanding Acquire Op: %lld: %p (" 
+                  IDFMT ",%d) triggered %d\n",
                   it->first, it->second, completion.id, completion.gen,
                   completion.has_triggered());
         if (!it->second->wait_barriers.empty())
@@ -9644,28 +9656,32 @@ namespace LegionRuntime {
         {
           case TaskOp::INDIVIDUAL_TASK_KIND:
             {
-              fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
+              fprintf(f,"Outstanding Individual Task %lld: %p %s (" 
+                        IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::POINT_TASK_KIND:
             {
-              fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
+              fprintf(f,"Outstanding Point Task %lld: %p %s (" 
+                        IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::INDEX_TASK_KIND:
             {
-              fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
+              fprintf(f,"Outstanding Index Task %lld: %p %s (" 
+                        IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
             }
           case TaskOp::SLICE_TASK_KIND:
             {
-              fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
+              fprintf(f,"Outstanding Slice Task %lld: %p %s (" 
+                        IDFMT ",%d)\n",
                 it->first, it->second, it->second->variants->name,
                 completion.id, completion.gen);
               break;
@@ -9717,6 +9733,9 @@ namespace LegionRuntime {
     /*static*/ bool Runtime::check_privileges = true;
     /*static*/ bool Runtime::verify_disjointness = false;
     /*static*/ bool Runtime::bit_mask_logging = false;
+#endif
+#ifdef DEBUG_PERF
+    /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
 #endif
 #ifdef LEGION_PROF
     /*static*/ int Runtime::num_profiling_nodes = -1;
@@ -9838,6 +9857,9 @@ namespace LegionRuntime {
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
+#endif
+#ifdef DEBUG_PERF
+          INT_ARG("-hl:perf_tol", perf_trace_tolerance);
 #endif
 #ifdef LEGION_PROF
           INT_ARG("-hl:prof", num_profiling_nodes);

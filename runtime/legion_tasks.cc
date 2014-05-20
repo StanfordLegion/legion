@@ -963,8 +963,8 @@ namespace LegionRuntime {
               log_index(LEVEL_ERROR,"Parent task %s (ID %lld) of task %s "
                                     "(ID %lld) "
                                     "does not have an index requirement for "
-                                    "index space " IDFMT " as a parent of child "
-                                    "task's index requirement index %d",
+                                    "index space " IDFMT " as a parent of "
+                                    "child task's index requirement index %d",
                                     parent_ctx->variants->name, 
                                     parent_ctx->get_unique_task_id(),
                                     this->variants->name, get_unique_task_id(), 
@@ -976,8 +976,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PATH:
             {
-              log_index(LEVEL_ERROR,"Index space " IDFMT " is not a sub-space of "
-                                    "parent index space " IDFMT " for index "
+              log_index(LEVEL_ERROR,"Index space " IDFMT " is not a sub-space "
+                                    "of parent index space " IDFMT " for index "
                                     "requirement %d of task %s (ID %lld)",
                                     indexes[idx].handle.id, 
                                     indexes[idx].parent.id, idx,
@@ -989,8 +989,8 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
-              log_index(LEVEL_ERROR,"Privileges %x for index space " IDFMT " are "
-                                    "not a subset of privileges of parent "
+              log_index(LEVEL_ERROR,"Privileges %x for index space " IDFMT 
+                                    " are not a subset of privileges of parent "
                                     "task's privileges for index space "
                                     "requirement %d of task %s (ID %lld)",
                                     indexes[idx].privilege, 
@@ -1025,8 +1025,8 @@ namespace LegionRuntime {
             break;
           case ERROR_INVALID_REGION_HANDLE:
             {
-              log_region(LEVEL_ERROR, "Invalid region handle (" IDFMT ",%d,%d) for "
-                                    "region requirement %d of task %s "
+              log_region(LEVEL_ERROR, "Invalid region handle (" IDFMT ",%d,%d)"
+                                    " for region requirement %d of task %s "
                                     "(ID %lld)",
                                     regions[idx].region.index_space.id, 
                                     regions[idx].region.field_space.id, 
@@ -1117,9 +1117,9 @@ namespace LegionRuntime {
             {
               log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of task %s "
                                       "(ID %lld) does not have a region "
-                                      "requirement for region (" IDFMT ",%x,%x) "
-                                      "as a parent of child task's region "
-                                      "requirement index %d",
+                                      "requirement for region (" IDFMT 
+                                      ",%x,%x) as a parent of child task's "
+                                      "region requirement index %d",
                                       parent_ctx->variants->name, 
                                       parent_ctx->get_unique_task_id(),
                                       this->variants->name, 
@@ -1134,9 +1134,10 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PATH:
             {
-              log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a sub-region of "
-                                      "parent region (" IDFMT ",%x,%x) for region "
-                                      "requirement %d of task %s (ID %lld)",
+              log_region(LEVEL_ERROR,"Region (" IDFMT ",%x,%x) is not a "
+                                      "sub-region of parent region (" IDFMT 
+                                      ",%x,%x) for region requirement %d of "
+                                      "task %s (ID %lld)",
                                       regions[idx].region.index_space.id,
                                       regions[idx].region.field_space.id, 
                                       regions[idx].region.tree_id,
@@ -1152,8 +1153,8 @@ namespace LegionRuntime {
             {
               log_region(LEVEL_ERROR,"Partition (%x,%x,%x) is not a "
                                      "sub-partition of parent region "
-                                     "(" IDFMT ",%x,%x) for region requirement %d "
-                                     "task %s (ID %lld)",
+                                     "(" IDFMT ",%x,%x) for region "
+                                     "requirement %d task %s (ID %lld)",
                                       regions[idx].partition.index_partition, 
                                       regions[idx].partition.field_space.id, 
                                       regions[idx].partition.tree_id, 
@@ -1180,9 +1181,9 @@ namespace LegionRuntime {
             }
           case ERROR_BAD_REGION_PRIVILEGES:
             {
-              log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT ",%x,%x) are "
-                                     "not a subset of privileges of parent "
-                                     "task's privileges for "
+              log_region(LEVEL_ERROR,"Privileges %x for region (" IDFMT 
+                                     ",%x,%x) are not a subset of privileges " 
+                                     "of parent task's privileges for "
                                      "region requirement %d of task %s "
                                      "(ID %lld)",
                                      regions[idx].privilege, 
@@ -3814,9 +3815,10 @@ namespace LegionRuntime {
             if (visible_memories.find(premap_memory) != visible_memories.end())
             {
               log_region(LEVEL_ERROR,"Illegal premapped region for logical "
-                                      "region (" IDFMT ",%d,%d) index %d of task "
-                                      "%s (UID %lld)!  Memory " IDFMT " is not "
-                                      "visible from processor " IDFMT "!", 
+                                      "region (" IDFMT ",%d,%d) index %d of "
+                                      "task %s (UID %lld)!  Memory " IDFMT 
+                                      " is not visible from processor " IDFMT 
+                                      "!", 
                                        regions[idx].region.index_space.id, 
                                        regions[idx].region.field_space.id, 
                                        regions[idx].region.tree_id, idx, 
@@ -4615,8 +4617,8 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
-                            "returned an empty domain for split %d.",
+                            "on processor " IDFMT " for task %s (ID %lld).  "
+                            "Mapper returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
                   assert(false);
@@ -4631,8 +4633,8 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
-                            "returned an empty domain for split %d.",
+                            "on processor " IDFMT " for task %s (ID %lld).  "
+                            "Mapper returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
                   assert(false);
@@ -4647,8 +4649,8 @@ namespace LegionRuntime {
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  Mapper "
-                            "returned an empty domain for split %d.",
+                            "on processor " IDFMT " for task %s (ID %lld).  "
+                            "Mapper returned an empty domain for split %d.",
                             map_id, current_proc.id, variants->name, 
                             get_unique_task_id(), idx);
                   assert(false);

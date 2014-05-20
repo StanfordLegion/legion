@@ -817,7 +817,9 @@ namespace LegionRuntime {
 	MKIND_GLOBAL,  // accessible via GASnet (spread over all nodes)
 	MKIND_RDMA,    // remote, but accessible via RDMA
 	MKIND_REMOTE,  // not accessible
+#ifdef USE_CUDA
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
+#endif
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
       };
 

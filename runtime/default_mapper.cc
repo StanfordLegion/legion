@@ -52,7 +52,8 @@ namespace LegionRuntime {
         machine_interface(MappingUtilities::MachineQueryInterface(m))
     //--------------------------------------------------------------------------
     {
-      log_mapper(LEVEL_SPEW,"Initializing the default mapper for processor " IDFMT "",
+      log_mapper(LEVEL_SPEW,"Initializing the default mapper for "
+                            "processor " IDFMT "",
                  local_proc.id);
       // Check to see if there any input arguments to parse
       {
@@ -224,8 +225,9 @@ namespace LegionRuntime {
         {
           if (!index--)
           {
-            log_mapper(LEVEL_SPEW,"Attempting a steal from processor " IDFMT " "
-                                  "on processor " IDFMT "",local_proc.id,it->id);
+            log_mapper(LEVEL_SPEW,"Attempting a steal from processor " IDFMT
+                                  " on processor " IDFMT "",
+                                  local_proc.id,it->id);
             targets.insert(*it);
             break;
           }
@@ -313,7 +315,8 @@ namespace LegionRuntime {
                 if (shared)
                 {
                   log_mapper(LEVEL_DEBUG,"Task %s (ID %lld) stolen from "
-                                         "processor " IDFMT " by processor " IDFMT "",
+                                         "processor " IDFMT " by processor " 
+                                         IDFMT "",
                                          (*inner_it)->variants->name, 
                                          (*inner_it)->get_unique_task_id(), 
                                          local_proc.id, thief.id);

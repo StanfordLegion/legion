@@ -1472,6 +1472,10 @@ namespace LegionRuntime {
     public:
       static bool dynamic_independence_tests;
 #endif 
+#ifdef DEBUG_PERF
+    public:
+      static unsigned long long perf_trace_tolerance;
+#endif
 #ifdef LEGION_PROF
     public:
       static int num_profiling_nodes;

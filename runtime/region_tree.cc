@@ -53,6 +53,23 @@ namespace LegionRuntime {
 #ifdef DYNAMIC_TESTS
       this->dynamic_lock = Reservation::create_reservation();
 #endif
+#ifdef DEBUG_PERF
+      this->perf_trace_lock = Reservation::create_reservation();
+      int max_local_id = 1;
+      const std::set<Processor> &procs = runtime->machine->get_all_processors();
+      for (std::set<Processor>::const_iterator it = procs.begin();
+            it != procs.end(); it++)
+      {
+        if (runtime->is_local(*it))
+        {
+          int local = it->local_id();
+          if (local > max_local_id)
+            max_local_id = local;
+        }
+      }
+      // Reserve enough space for traces for each processor
+      traces.resize(max_local_id);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -77,6 +94,10 @@ namespace LegionRuntime {
 #ifdef DYNAMIC_TESTS
       dynamic_lock.destroy_reservation();
       dynamic_lock = Reservation::NO_RESERVATION;
+#endif
+#ifdef DEBUG_PERF
+      perf_trace_lock.destroy_reservation();
+      perf_trace_lock = Reservation::NO_RESERVATION;
 #endif
     }
 
@@ -578,8 +599,8 @@ namespace LegionRuntime {
       if (node->parent == NULL)
       {
         log_run(LEVEL_ERROR,"Parent logical partition requested for "
-                            "logical region (" IDFMT ",%x,%d) with no parent. Use "
-                            "has_parent_logical_partition to check "
+                            "logical region (" IDFMT ",%x,%d) with no parent. "
+                            "Use has_parent_logical_partition to check "
                             "before requesting a parent.", 
                             handle.index_space.id,
                             handle.field_space.id,
@@ -607,6 +628,9 @@ namespace LegionRuntime {
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
 #endif
@@ -653,6 +677,9 @@ namespace LegionRuntime {
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
     }
 
@@ -865,6 +892,9 @@ namespace LegionRuntime {
                                                   )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
 #endif
@@ -915,6 +945,9 @@ namespace LegionRuntime {
               it != to_delete.end(); it++)
           req.current_instances.erase(*it);
       }
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
       return result;
     }
 
@@ -933,6 +966,9 @@ namespace LegionRuntime {
                                                      )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -957,6 +993,9 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
       bool result = traverser.traverse(start_node);
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
       if (result)
         return traverser.get_instance_ref();
       else
@@ -975,6 +1014,9 @@ namespace LegionRuntime {
                                                        )
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -997,6 +1039,9 @@ namespace LegionRuntime {
       InstanceView *view = ref.get_handle().get_view()->as_instance_view();
       FieldMask needed_mask;
       target_node->remap_region(ctx.get_id(), view, user_mask, needed_mask);
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
       return MappingRef(view, needed_mask);
     }
 
@@ -1017,6 +1062,9 @@ namespace LegionRuntime {
                                                         ) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(REGISTER_PHYSICAL_REGION_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -1041,6 +1089,9 @@ namespace LegionRuntime {
                                      false/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
                                      FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -1192,6 +1243,9 @@ namespace LegionRuntime {
                                         Event precondition)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      begin_perf_trace(COPY_ACROSS_ANALYSIS);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(src_req.handle_type == SINGULAR);
       assert(dst_req.handle_type == SINGULAR);
@@ -1266,6 +1320,9 @@ namespace LegionRuntime {
                                       field_mask);
         free(field_mask);
       }
+#endif
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       // No need to add copy users since we added them when we
       // mapped this copy operation
@@ -1561,6 +1618,9 @@ namespace LegionRuntime {
                                                   Color c)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, CREATE_NODE_CALL);
+#endif
       IndexSpaceNode *result = new IndexSpaceNode(d, parent, c, this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -1592,6 +1652,9 @@ namespace LegionRuntime {
                                                  bool disjoint)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, CREATE_NODE_CALL);
+#endif
       IndexPartNode *result = new IndexPartNode(p, parent, c, color_space,
                                                 disjoint, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1621,6 +1684,9 @@ namespace LegionRuntime {
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, CREATE_NODE_CALL);
+#endif
       FieldSpaceNode *result = new FieldSpaceNode(space, this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -1643,6 +1709,9 @@ namespace LegionRuntime {
                                               PartitionNode *parent)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, CREATE_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (parent != NULL)
       {
@@ -1705,6 +1774,9 @@ namespace LegionRuntime {
                                                  RegionNode *parent)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, CREATE_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
       assert(p.field_space == parent->handle.field_space);
@@ -1751,15 +1823,19 @@ namespace LegionRuntime {
     IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, GET_NODE_CALL);
+#endif
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/); 
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
         index_nodes.find(space);
       if (it == index_nodes.end())
       {
-        log_index(LEVEL_ERROR,"Unable to find entry for index space " IDFMT ".  This "
-                              "is either a runtime bug, or requires Legion "
-                              "fences if index space names are being returned "
-                              "out of the context in which they are created.",
+        log_index(LEVEL_ERROR,"Unable to find entry for index space " IDFMT "."
+                              "This is either a runtime bug, or requires "
+                              "Legion fences if index space names are being "
+                              "returned out of the context in which they are "
+                              "created.",
                               space.id);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -1773,6 +1849,9 @@ namespace LegionRuntime {
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, GET_NODE_CALL);
+#endif
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexPartition,IndexPartNode*>::const_iterator it =
         index_parts.find(part);
@@ -1795,6 +1874,9 @@ namespace LegionRuntime {
     FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, GET_NODE_CALL);
+#endif
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator it = 
         field_nodes.find(space);
@@ -1817,6 +1899,9 @@ namespace LegionRuntime {
     RegionNode* RegionTreeForest::get_node(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, GET_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (!has_node(handle.index_space))
       {
@@ -1881,6 +1966,9 @@ namespace LegionRuntime {
     PartitionNode* RegionTreeForest::get_node(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, GET_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (!has_node(handle.index_partition))
       {
@@ -2044,6 +2132,9 @@ namespace LegionRuntime {
     bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexSpace child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, ARE_DISJOINT_CALL);
+#endif
       std::vector<Color> path;
       if (compute_index_path(parent, child, path))
         return false;
@@ -2087,6 +2178,9 @@ namespace LegionRuntime {
     bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexPartition child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, ARE_DISJOINT_CALL);
+#endif
       std::vector<Color> path;
       if (compute_partition_path(parent, child, path))
         return false;
@@ -2142,6 +2236,9 @@ namespace LegionRuntime {
                                     IndexSpace child, std::vector<Color> &path)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, COMPUTE_PATH_CALL);
+#endif
       IndexSpaceNode *child_node = get_node(child); 
       path.push_back(child_node->color);
       if (parent == child) 
@@ -2171,6 +2268,9 @@ namespace LegionRuntime {
                                 IndexPartition child, std::vector<Color> &path)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, COMPUTE_PATH_CALL);
+#endif
       IndexPartNode *child_node = get_node(child);
       path.push_back(child_node->color);
       if (child_node->parent == NULL)
@@ -2344,6 +2444,9 @@ namespace LegionRuntime {
     void RegionTreeForest::resize_node_contexts(unsigned total_contexts)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this, RESIZE_CONTEXTS_CALL);
+#endif
       // We're only reading the maps of nodes, so we only need read permissions
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       for (std::map<LogicalRegion,RegionNode*>::const_iterator it = 
@@ -2495,6 +2598,486 @@ namespace LegionRuntime {
       parent->add_disjoint(c1,c2);
     }
 #endif // DYNAMIC_TESTS
+
+#ifdef DEBUG_PERF
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::record_call(int kind, unsigned long long time)
+    //--------------------------------------------------------------------------
+    {
+      Processor p = Machine::get_executing_processor();
+      traces[p.local_id()].record_call(kind, time);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::begin_perf_trace(int kind)
+    //--------------------------------------------------------------------------
+    {
+      Processor p = Machine::get_executing_processor();
+      unsigned long long start = TimeStamp::get_current_time_in_micros();
+      assert(p.local_id() < traces.size());
+      traces[p.local_id()] = PerfTrace(kind, start);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::end_perf_trace(unsigned long long tolerance)
+    //--------------------------------------------------------------------------
+    {
+      Processor p = Machine::get_executing_processor();
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      PerfTrace &trace = traces[p.local_id()];
+      unsigned long long diff = stop - trace.start;
+      if (diff >= tolerance)
+      {
+        AutoLock t_lock(perf_trace_lock);
+        trace.report_trace(diff);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeForest::PerfTrace::PerfTrace(int k, unsigned long long s)
+      : kind(k), start(s)
+    //--------------------------------------------------------------------------
+    {
+      // Allocate space for all of the calls
+      for (unsigned idx = 0; idx < NUM_CALL_KIND; idx++)
+        records.push_back(CallRecord(idx));
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::PerfTrace::report_trace(unsigned long long diff)
+    //--------------------------------------------------------------------------
+    {
+      // Print out the kind of trace 
+      switch (kind)
+      {
+        case REGION_DEPENDENCE_ANALYSIS:
+          {
+            fprintf(stdout,"REGION DEPENDENCE ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case PREMAP_PHYSICAL_REGION_ANALYSIS:
+          {
+            fprintf(stdout,"PREMAP PHYSICAL REGION ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case MAP_PHYSICAL_REGION_ANALYSIS:
+          {
+            fprintf(stdout,"MAP PHYSICAL REGION ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case REMAP_PHYSICAL_REGION_ANALYSIS:
+          {
+            fprintf(stdout,"REMAP PHYSICAL REGION ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case REGISTER_PHYSICAL_REGION_ANALYSIS:
+          {
+            fprintf(stdout,"REGISTER PHYSICAL REGION ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        case COPY_ACROSS_ANALYSIS:
+          {
+            fprintf(stdout,"COPY ACROSS ANALYSIS: %lld us\n",diff);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // Record all the call records which have a non-zero call count
+      // Keep them in order from largest to smallest using a simple
+      // insertion sort
+      std::list<unsigned> record_indexes;
+      for (unsigned idx = 0; idx < records.size(); idx++)
+      {
+        if (records[idx].count > 0)
+        {
+          bool inserted = false;
+          for (std::list<unsigned>::iterator it = record_indexes.begin();
+                it != record_indexes.end(); it++)
+          {
+            if (records[idx].total_time > records[*it].total_time)
+            {
+              record_indexes.insert(it, idx);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted)
+            record_indexes.push_back(idx);
+        }
+      }
+
+      // Then print out all the records
+      for (std::list<unsigned>::const_iterator it = record_indexes.begin();
+            it != record_indexes.end(); it++)
+      {
+        // Print out the kind of call record
+        const CallRecord &rec = records[*it];
+        switch (rec.kind)
+        {
+          case CREATE_NODE_CALL:
+            {
+              fprintf(stdout,"  Create Node Call:\n");
+              break;
+            }
+          case GET_NODE_CALL:
+            {
+              fprintf(stdout,"  Get Node Call:\n");
+              break;
+            }
+          case ARE_DISJOINT_CALL:
+            {
+              fprintf(stdout,"  Are Disjoint Call:\n");
+              break;
+            }
+          case COMPUTE_PATH_CALL:
+            {
+              fprintf(stdout,"  Compute Path Call:\n");
+              break;
+            }
+          case RESIZE_CONTEXTS_CALL:
+            {
+              fprintf(stdout,"  Resize Contexts Call:\n");
+              break;
+            }
+          case CREATE_INSTANCE_CALL:
+            {
+              fprintf(stdout,"  Create Instance Call:\n");
+              break;
+            }
+          case CREATE_REDUCTION_CALL:
+            {
+              fprintf(stdout,"  Create Reduction Call:\n");
+              break;
+            }
+          case PERFORM_PREMAP_CLOSE_CALL:
+            {
+              fprintf(stdout,"  Perform Premap Close Call:\n");
+              break;
+            }
+          case MAPPING_TRAVERSE_CALL:
+            {
+              fprintf(stdout,"  Mapping Traverse Call:\n");
+              break;
+            }
+          case MAP_PHYSICAL_REGION_CALL:
+            {
+              fprintf(stdout,"  Map Physical Region Call:\n");
+              break;
+            }
+          case MAP_REDUCTION_REGION_CALL:
+            {
+              fprintf(stdout,"  Map Reduction Region Call:\n");
+              break;
+            }
+          case RESERVE_CONTEXTS_CALL:
+            {
+              fprintf(stdout,"  Reserve Contexts Call:\n");
+              break;
+            }
+          case ACQUIRE_PHYSICAL_STATE_CALL:
+            {
+              fprintf(stdout,"  Acquire Physical State Call:\n");
+              break;
+            }
+          case RELEASE_PHYSICAL_STATE_CALL:
+            {
+              fprintf(stdout,"  Release Physical State Call:\n");
+              break;
+            }
+          case REGISTER_LOGICAL_NODE_CALL:
+            {
+              fprintf(stdout,"  Register Logical Node Call:\n");
+              break;
+            }
+          case OPEN_LOGICAL_NODE_CALL:
+            {
+              fprintf(stdout,"  Open Logical Node Call:\n");
+              break;
+            }
+          case CLOSE_LOGICAL_NODE_CALL:
+            {
+              fprintf(stdout,"  Close Logical Node Call:\n");
+              break;
+            }
+          case SIPHON_LOGICAL_CHILDREN_CALL:
+            {
+              fprintf(stdout,"  Siphon Logical Children Call:\n");
+              break;
+            }
+          case PERFORM_LOGICAL_CLOSE_CALL:
+            {
+              fprintf(stdout,"  Perform Logical Close Call:\n");
+              break;
+            }
+          case RECORD_CLOSE_CALL:
+            {
+              fprintf(stdout,"  Record Close Call:\n");
+              break;
+            }
+          case UPDATE_CLOSE_CALL:
+            {
+              fprintf(stdout,"  Update Close Call:\n");
+              break;
+            }
+          case ADVANCE_FIELD_CALL:
+            {
+              fprintf(stdout,"  Advance Field Call:\n");
+              break;
+            }
+          case FILTER_PREV_EPOCH_CALL:
+            {
+              fprintf(stdout,"  Filter Previous Epoch Call:\n");
+              break;
+            }
+          case FILTER_CURR_EPOCH_CALL:
+            {
+              fprintf(stdout,"  Filter Current Epoch Call:\n");
+              break;
+            }
+          case FILTER_CLOSE_CALL:
+            {
+              fprintf(stdout,"  Filter Close Call:\n");
+              break;
+            }
+          case INITIALIZE_LOGICAL_CALL:
+            {
+              fprintf(stdout,"  Initialize Logical Call:\n");
+              break;
+            }
+          case INVALIDATE_LOGICAL_CALL:
+            {
+              fprintf(stdout,"  Invalidate Logical Call:\n");
+              break;
+            }
+          case REGISTER_LOGICAL_DEPS_CALL:
+            {
+              fprintf(stdout,"  Register Logical Dependences Call:\n");
+              break;
+            }
+          case CLOSE_PHYSICAL_NODE_CALL:
+            {
+              fprintf(stdout,"  Close Physical Node Call:\n");
+              break;
+            }
+          case SELECT_CLOSE_TARGETS_CALL:
+            {
+              fprintf(stdout,"  Select Close Targets Call:\n");
+              break;
+            }
+          case SIPHON_PHYSICAL_CHILDREN_CALL:
+            {
+              fprintf(stdout,"  Siphone Physical Children Call:\n");
+              break;
+            }
+          case CLOSE_PHYSICAL_CHILD_CALL:
+            {
+              fprintf(stdout,"  Close Physical Child Call:\n");
+              break;
+            }
+          case FIND_VALID_INSTANCE_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Find Valid Instance Views Call:\n");
+              break;
+            }
+          case FIND_VALID_REDUCTION_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Find Valid Reduction Views Call:\n");
+              break;
+            }
+          case PULL_VALID_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Pull Valid Views Call:\n");
+              break;
+            }
+          case ISSUE_UPDATE_COPIES_CALL:
+            {
+              fprintf(stdout,"  Issue Update Copies Call:\n");
+              break;
+            }
+          case ISSUE_UPDATE_REDUCTIONS_CALL:
+            {
+              fprintf(stdout,"  Issue Update Reductions Call:\n");
+              break;
+            }
+          case INVALIDATE_INSTANCE_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Invalidate Instance Views Call:\n");
+              break;
+            }
+          case INVALIDATE_REDUCTION_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Invalidate Reduction Views Call:\n");
+              break;
+            }
+          case UPDATE_VALID_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Update Valid Views Call:\n");
+              break;
+            }
+          case UPDATE_REDUCTION_VIEWS_CALL:
+            {
+              fprintf(stdout,"  Update Reduction Views Call:\n");
+              break;
+            }
+          case FLUSH_REDUCTIONS_CALL:
+            {
+              fprintf(stdout,"  Flush Reductions Call:\n");
+              break;
+            }
+          case INITIALIZE_PHYSICAL_STATE_CALL:
+            {
+              fprintf(stdout,"  Initialize Physical State Call:\n");
+              break;
+            }
+          case INVALIDATE_PHYSICAL_STATE_CALL:
+            {
+              fprintf(stdout,"  Invalidate Physical State Call:\n");
+              break;
+            }
+          case PERFORM_DEPENDENCE_CHECKS_CALL:
+            {
+              fprintf(stdout,"  Perform Dependence Checks Call:\n");
+              break;
+            }
+          case PERFORM_CLOSING_CHECKS_CALL:
+            {
+              fprintf(stdout,"  Perform Closing Checks Call:\n");
+              break;
+            }
+          case REMAP_REGION_CALL:
+            {
+              fprintf(stdout,"  Remap Region Call:\n");
+              break;
+            }
+          case REGISTER_REGION_CALL:
+            {
+              fprintf(stdout,"  Register Region Call:\n");
+              break;
+            }
+          case CLOSE_PHYSICAL_STATE_CALL:
+            {
+              fprintf(stdout,"  Close Physical State Call:\n");
+              break;
+            }
+          case GARBAGE_COLLECT_CALL:
+            {
+              fprintf(stdout,"  Garbage Collect Call:\n");
+              break;
+            }
+          case NOTIFY_INVALID_CALL:
+            {
+              fprintf(stdout,"  Notify Invalid Call:\n");
+              break;
+            }
+          case GET_RECYCLE_EVENT_CALL:
+            {
+              fprintf(stdout,"  Get Recycle Event Call:\n");
+              break;
+            }
+          case DEFER_COLLECT_USER_CALL:
+            {
+              fprintf(stdout,"  Defer Collect User Call:\n");
+              break;
+            }
+          case GET_SUBVIEW_CALL:
+            {
+              fprintf(stdout,"  Get Subview Call:\n");
+              break;
+            }
+          case COPY_TO_CALL:
+            {
+              fprintf(stdout,"  Copy-To Call:\n");
+              break;
+            }
+          case REDUCE_TO_CALL:
+            {
+              fprintf(stdout,"  Reduce-To Call:\n");
+              break;
+            }
+          case COPY_FROM_CALL:
+            {
+              fprintf(stdout,"  Copy-From Call:\n");
+              break;
+            }
+          case REDUCE_FROM_CALL:
+            {
+              fprintf(stdout,"  Reduce-From Call:\n");
+              break;
+            }
+          case HAS_WAR_DEPENDENCE_CALL:
+            {
+              fprintf(stdout,"  Has WAR Dependence Call:\n");
+              break;
+            }
+          case ACCUMULATE_EVENTS_CALL:
+            {
+              fprintf(stdout,"  Accumulate Events Call:\n");
+              break;
+            }
+          case ADD_COPY_USER_CALL:
+            {
+              fprintf(stdout,"  Add Copy User Call:\n");
+              break;
+            }
+          case ADD_USER_CALL:
+            {
+              fprintf(stdout,"  Add User Call:\n");
+              break;
+            }
+          case ADD_USER_ABOVE_CALL:
+            {
+              fprintf(stdout,"  Add User Above Call:\n");
+              break;
+            }
+          case ADD_LOCAL_USER_CALL:
+            {
+              fprintf(stdout,"  Add Local User Call:\n");
+              break;
+            }
+          case FIND_COPY_PRECONDITIONS_CALL:
+            {
+              fprintf(stdout,"  Find Copy Preconditions Call:\n");
+              break;
+            }
+          case FIND_COPY_PRECONDITIONS_ABOVE_CALL:
+            {
+              fprintf(stdout,"  Find Copy Preconditions Above Call:\n");
+              break;
+            }
+          case HAS_WAR_DEPENDENCE_ABOVE_CALL:
+            {
+              fprintf(stdout,"  Has WAR Dependence Above Call:\n");
+              break;
+            }
+          case UPDATE_VERSIONS_CALL:
+            {
+              fprintf(stdout,"  Update Versions Call:\n");
+              break;
+            }
+          case CONDENSE_USER_LIST_CALL:
+            {
+              fprintf(stdout,"  Condense User List Call:\n");
+              break;
+            }
+          case PERFORM_REDUCTION_CALL:
+            {
+              fprintf(stdout,"  Perform Reduction Call:\n");
+              break;
+            }
+          default:
+            assert(false);
+        }
+        // Print out the statistics
+        fprintf(stdout,"    Total calls: %d\n", rec.count);
+        fprintf(stdout,"    Total time: %lld us\n", rec.total_time);
+        fprintf(stdout,"    Avg time: %lld us\n", rec.total_time/rec.count);
+        fprintf(stdout,"    Max time: %lld us\n", rec.max_time);
+        fprintf(stdout,"    Min time: %lld us\n", rec.min_time);
+      }
+      fflush(stdout);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Index Tree Node 
@@ -3396,6 +3979,9 @@ namespace LegionRuntime {
                                                      RegionNode *node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this->context, CREATE_INSTANCE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(!create_fields.empty());
 #endif
@@ -3540,6 +4126,9 @@ namespace LegionRuntime {
                                                        ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this->context, CREATE_REDUCTION_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop > 0);
 #endif
@@ -4660,6 +5249,9 @@ namespace LegionRuntime {
                                                    LogicalRegion closing_handle)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(node->context, PERFORM_PREMAP_CLOSE_CALL);
+#endif
       // Check to see if we have any close operations to perform
       std::deque<CloseInfo> close_ops;
       path.get_close_operations(depth, close_ops);
@@ -4881,6 +5473,9 @@ namespace LegionRuntime {
     void MappingTraverser::traverse_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(node->context, MAPPING_TRAVERSE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(has_child);
 #endif
@@ -4903,6 +5498,9 @@ namespace LegionRuntime {
     bool MappingTraverser::map_physical_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(node->context, MAP_PHYSICAL_REGION_CALL);
+#endif
       std::vector<Memory> &chosen_order = info->req.target_ranking;
       const std::set<FieldID> &additional_fields = info->req.additional_fields;
       // Clamp the selected blocking factor
@@ -4926,11 +5524,11 @@ namespace LegionRuntime {
         {
           if (visible_memories.find(*it) == visible_memories.end())
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
-                                     "which is not visible from processor "
-                                     "" IDFMT " when mapping region %d of mappable "
-                                     "(ID %lld)!  Removing memory from the "
-                                     "chosen ordering!", it->id, 
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT 
+                                     " which is not visible from processor "
+                                     "" IDFMT " when mapping region %d of "
+                                     "mappable (ID %lld)!  Removing memory "
+                                     "from the chosen ordering!", it->id, 
                                      target_proc.id, index, 
                                      info->mappable->get_unique_mappable_id());
             continue;
@@ -4941,12 +5539,12 @@ namespace LegionRuntime {
               (info->req.current_instances.find(*it) == 
                 info->req.current_instances.end()))
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
-                                     "for restricted region requirement "
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT
+                                     " for restricted region requirement "
                                      "when mapping region %d of mappable "
-                                     "(ID %lld) on processor " IDFMT "!  Removing "
-                                     "memory from the chosen ordering!", 
-                                     it->id, index, 
+                                     "(ID %lld) on processor " IDFMT "!  "
+                                     "Removing memory from the chosen "
+                                     "ordering!", it->id, index, 
                                      info->mappable->get_unique_mappable_id(),
                                      target_proc.id);
             continue;
@@ -4980,14 +5578,6 @@ namespace LegionRuntime {
           node->find_valid_instance_views(state, user_mask,
                                           user_mask, true/*space*/,
                                           valid_instances);
-        }
-        // Add valid references to all the instances before releasing
-        // the physical state to keep them from being collected while
-        // doing the following analysis
-        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              valid_instances.begin(); it != valid_instances.end(); it++)
-        {
-          it->first->add_valid_reference();
         }
         node->release_physical_state(state);
       }
@@ -5132,12 +5722,7 @@ namespace LegionRuntime {
       // This has to go after we create the mapping reference to 
       // guarantee we hold a valid reference to the chosen instance
       // at all times
-      for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-            valid_instances.begin(); it != valid_instances.end(); it++)
-      {
-        if (it->first->remove_valid_reference())
-          delete it->first;
-      }
+      RegionTreeNode::remove_valid_references(valid_instances);
       return (chosen_inst != NULL);
     }
 
@@ -5145,6 +5730,9 @@ namespace LegionRuntime {
     bool MappingTraverser::map_reduction_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(node->context, MAP_REDUCTION_REGION_CALL);
+#endif
       std::vector<Memory> &chosen_order = info->req.target_ranking;
       // Filter out any memories that are not visible from 
       // the target processor if there is a processor that 
@@ -5163,10 +5751,10 @@ namespace LegionRuntime {
             filtered_memories.push_back(*it);
           else
           {
-            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT " "
-                                     "which is not visible from processor "
-                                     "" IDFMT " when mapping region %d of mappable "
-                                     "(ID %lld)!  Removing memory from the "
+            log_region(LEVEL_WARNING,"WARNING: Mapper specified memory " IDFMT
+                                     " which is not visible from processor "
+                                     IDFMT " when mapping region %d of mappable"
+                                     " (ID %lld)!  Removing memory from the "
                                      "chosen ordering!", it->id, 
                                      target_proc.id, index, 
                                      info->mappable->get_unique_mappable_id());
@@ -5180,13 +5768,6 @@ namespace LegionRuntime {
         PhysicalState &state = 
           node->acquire_physical_state(info->ctx, false/*exclusive*/);
         node->find_valid_reduction_views(state, user_mask, valid_views);
-        // Add valid references on all of these instances to keep
-        // them from being collected
-        for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
-              it != valid_views.end(); it++)
-        {
-          (*it)->add_valid_reference();
-        }
         node->release_physical_state(state);
       }
 
@@ -5239,11 +5820,7 @@ namespace LegionRuntime {
       if (chosen_inst != NULL)
         result = MappingRef(chosen_inst,FieldMask());
       // Remove our valid references before we return
-      for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
-            it != valid_views.end(); it++)
-      {
-        (*it)->remove_valid_reference();
-      }
+      RegionTreeNode::remove_valid_references(valid_views);
       return (chosen_inst != NULL);
     }
 
@@ -6545,6 +7122,9 @@ namespace LegionRuntime {
     void RegionTreeNode::reserve_contexts(unsigned num_contexts)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(this->context, RESERVE_CONTEXTS_CALL);
+#endif
       // Hold the lock to prevent races on multiple people
       // trying to update the reserve size.
       // Also since deques don't copy objects when
@@ -6603,6 +7183,9 @@ namespace LegionRuntime {
                                                  bool exclusive)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ACQUIRE_PHYSICAL_STATE_CALL);
+#endif
       Event wait_event = Event::NO_EVENT;
       {
         AutoLock n_lock(node_lock);
@@ -6651,6 +7234,9 @@ namespace LegionRuntime {
     bool RegionTreeNode::release_physical_state(PhysicalState &state)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, RELEASE_PHYSICAL_STATE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -6693,6 +7279,9 @@ namespace LegionRuntime {
                                                const bool already_traced)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < logical_state_size);
 #endif
@@ -6851,6 +7440,9 @@ namespace LegionRuntime {
                                              const bool already_traced)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < logical_state_size);
 #endif
@@ -6897,6 +7489,9 @@ namespace LegionRuntime {
                                             bool permit_leave_open)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(closer.ctx < logical_state_size);
 #endif
@@ -6949,6 +7544,9 @@ namespace LegionRuntime {
                                                  int next_child /*= -1*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, SIPHON_LOGICAL_CHILDREN_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -7229,6 +7827,9 @@ namespace LegionRuntime {
                                             FieldMask &already_open)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PERFORM_LOGICAL_CLOSE_CALL);
+#endif
       // First, if we have a next child and we know all pairs of children
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
@@ -7444,6 +8045,9 @@ namespace LegionRuntime {
                                                  unsigned depth)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, RECORD_CLOSE_CALL);
+#endif
       for (std::map<Color,std::list<TreeClose> >::const_iterator cit = 
             state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
@@ -7463,6 +8067,9 @@ namespace LegionRuntime {
                                    const std::deque<TreeClose> &new_close_infos)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_CLOSE_CALL);
+#endif
       // Build a mask for each child of close operations that need to pruned
       std::map<Color,FieldMask> to_prune;
       for (std::deque<TreeClose>::const_iterator cit = new_close_infos.begin();
@@ -7504,6 +8111,9 @@ namespace LegionRuntime {
                                                 const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADVANCE_FIELD_CALL);
+#endif
       std::map<VersionID,FieldMask> new_versions;
       std::vector<VersionID> to_delete;
       for (std::map<VersionID,FieldMask>::iterator it = 
@@ -7543,6 +8153,9 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FILTER_PREV_EPOCH_CALL);
+#endif
 #ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
             state.prev_epoch_users.begin(); it != 
@@ -7569,6 +8182,9 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FILTER_CURR_EPOCH_CALL);
+#endif
 #ifndef LOGICAL_FIELD_TREE
       for (std::list<LogicalUser>::iterator it = 
               state.curr_epoch_users.begin(); it !=
@@ -7611,6 +8227,9 @@ namespace LegionRuntime {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FILTER_CLOSE_CALL);
+#endif
       for (std::map<Color,std::list<TreeClose> >::iterator cit = 
             state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
@@ -7701,6 +8320,9 @@ namespace LegionRuntime {
     void RegionTreeNode::initialize_logical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INITIALIZE_LOGICAL_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < logical_state_size);
 #endif
@@ -7722,6 +8344,9 @@ namespace LegionRuntime {
     void RegionTreeNode::invalidate_logical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INVALIDATE_LOGICAL_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < logical_state_size);
 #endif
@@ -7756,6 +8381,9 @@ namespace LegionRuntime {
                                     Operation *op, const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REGISTER_LOGICAL_DEPS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < logical_state_size);
 #endif
@@ -7883,6 +8511,9 @@ namespace LegionRuntime {
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CLOSE_PHYSICAL_NODE_CALL);
+#endif
       // Acquire the physical state of the node to close
       ContextID ctx = closer.info->ctx;
       // Figure out if we have dirty data.  If we do, issue copies back to
@@ -7915,9 +8546,6 @@ namespace LegionRuntime {
 #endif
             find_valid_instance_views(state, closing_mask, closing_mask, 
                                       false/*needs space*/, valid_instances);
-            // Don't need to add valid references here because
-            // we won't invalidate them until after we are done
-            // issuing the copies.
           }
           if (!!reduc_fields)
           {
@@ -8008,6 +8636,7 @@ namespace LegionRuntime {
         }
       }
       // Remove any valid references we added to views
+      remove_valid_references(valid_instances);
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
             valid_reductions.begin(); it != valid_reductions.end(); it++)
       {
@@ -8024,6 +8653,9 @@ namespace LegionRuntime {
                           std::map<InstanceView*,FieldMask> &update_views)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, SELECT_CLOSE_TARGETS_CALL);
+#endif
       // First get the list of valid instances
       // Get the set of memories for which we have valid instances
       std::set<Memory> valid_memories;
@@ -8063,7 +8695,8 @@ namespace LegionRuntime {
             log_region(LEVEL_WARNING,"WARNING: memory " IDFMT " was specified "
                                      "to be reused in rank_copy_targets "
                                      "when closing mappable operation ID %lld."
-                                     "Memory " IDFMT " will be ignored.", it->id,
+                                     "Memory " IDFMT 
+                                     " will be ignored.", it->id,
                                closer.info->mappable->get_unique_mappable_id(),
                                it->id);
             to_delete.push_back(*it);
@@ -8172,6 +8805,9 @@ namespace LegionRuntime {
                                               int next_child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, SIPHON_PHYSICAL_CHILDREN_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8211,6 +8847,9 @@ namespace LegionRuntime {
                                               int next_child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CLOSE_PHYSICAL_CHILD_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8248,6 +8887,7 @@ namespace LegionRuntime {
         if (!select_close_targets(closer, closer.info->traversal_mask, 
                                   complete, space_views, update_views))
         {
+          remove_valid_references(space_views);
           // We failed to close, time to return
           return false;
         }
@@ -8285,10 +8925,11 @@ namespace LegionRuntime {
                               it->second, valid_views);
         }
         update_views.clear();
-        valid_views.clear();
       }
+      // Now remove any valid references that we have
+      remove_valid_references(space_views);
+      remove_valid_references(valid_views);
       // Now we're ready to perform the close operation
-      
       closer.close_tree_node(child_node, close_mask);
       // Reacquire our lock on the state upon returning
       acquire_physical_state(state, was_exclusive);
@@ -8303,6 +8944,9 @@ namespace LegionRuntime {
                                  std::map<InstanceView*,FieldMask> &valid_views)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_VALID_INSTANCE_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8324,6 +8968,11 @@ namespace LegionRuntime {
         {
           InstanceView *local_view = it->first->get_subview(get_color());
           valid_views[local_view] = it->second;
+          // Add a valid reference
+          local_view->add_valid_reference();
+          // Then remove the valid reference from the parent view
+          if (it->first->remove_valid_reference())
+            delete it->first;
         }
       }
       // Now figure out which of our valid views we can add
@@ -8345,9 +8994,25 @@ namespace LegionRuntime {
         std::map<InstanceView*,FieldMask>::iterator finder = 
           valid_views.find(it->first);
         if (finder == valid_views.end())
+        {
           valid_views[it->first] = overlap;
+          it->first->add_valid_reference();
+        }
         else
           finder->second |= overlap;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionTreeNode::remove_valid_references(
+                           const std::map<InstanceView*,FieldMask> &valid_views)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        if (it->first->remove_valid_reference())
+          delete it->first;
       }
     }
 
@@ -8357,6 +9022,9 @@ namespace LegionRuntime {
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_VALID_REDUCTION_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8380,10 +9048,24 @@ namespace LegionRuntime {
             state.reduction_views.end(); it++)
       {
         FieldMask uncovered = valid_mask - it->second;
-        if (!uncovered)
+        if (!uncovered && (valid_views.find(it->first) == valid_views.end()))
         {
           valid_views.insert(it->first);
+          it->first->add_valid_reference();
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionTreeNode::remove_valid_references(
+                                    const std::set<ReductionView*> &valid_views)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ReductionView*>::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
+      {
+        if ((*it)->remove_valid_reference())
+          delete (*it);
       }
     }
 
@@ -8392,6 +9074,9 @@ namespace LegionRuntime {
                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PULL_VALID_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8403,6 +9088,8 @@ namespace LegionRuntime {
       {
         update_valid_views(state, it->second, false/*dirty*/, it->first);
       }
+      // Remove the added valid references
+      remove_valid_references(new_valid_views);
     }
 
     //--------------------------------------------------------------------------
@@ -8412,6 +9099,9 @@ namespace LegionRuntime {
                        const std::map<InstanceView*,FieldMask> &valid_instances)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ISSUE_UPDATE_COPIES_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(!!copy_mask);
       assert(dst->logical_node == this);
@@ -8663,6 +9353,9 @@ namespace LegionRuntime {
                      const std::map<ReductionView*,FieldMask> &valid_reductions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ISSUE_UPDATE_REDUCTIONS_CALL);
+#endif
       // Go through all of our reduction instances and issue reductions
       // to the target instances
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
@@ -8690,6 +9383,9 @@ namespace LegionRuntime {
                                                  bool clean, bool force)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INVALIDATE_INSTANCE_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8717,6 +9413,9 @@ namespace LegionRuntime {
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INVALIDATE_REDUCTION_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8745,6 +9444,9 @@ namespace LegionRuntime {
                                             bool dirty, InstanceView *new_view)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
       assert(!(valid_mask - new_view->manager->allocated_fields));
@@ -8784,6 +9486,9 @@ namespace LegionRuntime {
                                     const std::vector<InstanceView*> &new_views)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8834,6 +9539,9 @@ namespace LegionRuntime {
                                                 ReductionView *new_view) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_REDUCTION_VIEWS_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.node == this);
 #endif
@@ -8857,6 +9565,9 @@ namespace LegionRuntime {
                                           MappableInfo *info)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FLUSH_REDUCTIONS_CALL);
+#endif
       // Go through the list of reduction views and see if there are
       // any that don't mesh with the current user and therefore need
       // to be flushed.
@@ -8930,6 +9641,8 @@ namespace LegionRuntime {
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
         release_physical_state(state);
+        // Release any valid view references we are holding
+        remove_valid_references(valid_views);
       }
     }
 
@@ -8937,6 +9650,9 @@ namespace LegionRuntime {
     void RegionTreeNode::initialize_physical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INITIALIZE_PHYSICAL_STATE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
@@ -8965,6 +9681,9 @@ namespace LegionRuntime {
     void RegionTreeNode::invalidate_physical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
@@ -8999,6 +9718,9 @@ namespace LegionRuntime {
                                                   bool force)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
@@ -9253,11 +9975,14 @@ namespace LegionRuntime {
 
 #ifndef LOGICAL_FIELD_TREE
     //--------------------------------------------------------------------------
-    /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
+    FieldMask RegionTreeNode::perform_dependence_checks(
         const LogicalUser &user, std::list<LogicalUser> &prev_users,
         const FieldMask &check_mask, bool validates_regions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PERFORM_DEPENDENCE_CHECKS_CALL);
+#endif
       FieldMask dominator_mask = check_mask;
       // It's not actually sound to assume we dominate something
       // if we don't observe any users of those fields.  Therefore
@@ -9408,11 +10133,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::perform_closing_checks(
+    void RegionTreeNode::perform_closing_checks(
         LogicalCloser &closer, std::list<LogicalUser> &users, 
         const FieldMask &check_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PERFORM_CLOSING_CHECKS_CALL);
+#endif
       // Since we are performing a close operation on the region
       // tree data structure, we know that we need to register
       // mapping dependences on all of the operations in the 
@@ -9503,7 +10231,7 @@ namespace LegionRuntime {
 
 #else
     //--------------------------------------------------------------------------
-    /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
+    FieldMask RegionTreeNode::perform_dependence_checks(
         const LogicalUser &user, FieldTree<LogicalUser> *users,
         const FieldMask &check_mask, bool validates_regions)
     //--------------------------------------------------------------------------
@@ -9518,7 +10246,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::perform_closing_checks(
+    void RegionTreeNode::perform_closing_checks(
         LogicalCloser &closer, FieldTree<LogicalUser> *users,
         const FieldMask &check_mask)
     //--------------------------------------------------------------------------
@@ -9868,6 +10596,9 @@ namespace LegionRuntime {
                                   FieldMask &needed_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REMAP_REGION_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
       assert(ctx < physical_state_size);
@@ -9894,6 +10625,9 @@ namespace LegionRuntime {
                                             const FieldMask &needed_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REGISTER_REGION_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -9919,6 +10653,7 @@ namespace LegionRuntime {
                                     false/*needs space*/, valid_views);
           release_physical_state(state);
           issue_update_copies(info, new_view, needed_fields, valid_views);
+          remove_valid_references(valid_views);
         }
 
         // If we mapped the region close up any partitions
@@ -10026,6 +10761,9 @@ namespace LegionRuntime {
                                   const InstanceRef &target)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CLOSE_PHYSICAL_STATE_CALL);
+#endif
       PhysicalView *view = target.get_handle().get_view(); 
       if (view->is_reduction_view())
       {
@@ -10062,6 +10800,7 @@ namespace LegionRuntime {
                                     false/*needs space*/, valid_views);
           release_physical_state(state);
           issue_update_copies(info, target_view, update_mask, valid_views);
+          remove_valid_references(valid_views);
           acquire_physical_state(state, true/*exclusive*/); 
         }
         // Now do the close to this physical instance
@@ -10355,7 +11094,8 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT "  Mask %s",
+          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT 
+                      "  Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -10994,7 +11734,8 @@ namespace LegionRuntime {
           if (!overlap)
             continue;
           char *valid_mask = overlap.to_string();
-          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT "  Mask %s",
+          logger->log("Reduction Instance " IDFMT "   Memory " IDFMT 
+                      "  Mask %s",
                       it->first->manager->get_instance().id, 
                       it->first->manager->memory.id, valid_mask);
           free(valid_mask);
@@ -11245,7 +11986,8 @@ namespace LegionRuntime {
       context->unregister_physical_manager(this->did);
       if (owner && instance.exists())
       {
-        log_leak(LEVEL_WARNING,"Leaking physical instance " IDFMT " in memory " IDFMT "",
+        log_leak(LEVEL_WARNING,"Leaking physical instance " IDFMT " in memory"
+                               IDFMT "",
                                instance.id, memory.id);
       }
     }
@@ -11402,6 +12144,9 @@ namespace LegionRuntime {
     void InstanceManager::garbage_collect(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, GARBAGE_COLLECT_CALL);
+#endif
       bool release_valid_views = true;
       if (owner)
       {
@@ -11427,8 +12172,8 @@ namespace LegionRuntime {
         {
           // If either of these conditions were true, then we
           // should actually delete the physical instance.
-          log_garbage(LEVEL_DEBUG,"Garbage collecting physical instance " IDFMT " "
-                                "in memory " IDFMT " in address space %d",
+          log_garbage(LEVEL_DEBUG,"Garbage collecting physical instance " IDFMT
+                                " in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
 #ifdef LEGION_PROF
           LegionProf::register_instance_deletion(instance.id);
@@ -11469,6 +12214,9 @@ namespace LegionRuntime {
     void InstanceManager::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, NOTIFY_INVALID_CALL);
+#endif
       // If we're the owner and we're now invalid and have no remote
       // references then we can tell the runtime that it is safe to 
       // recycle this physical instance.  Pass on the information to the
@@ -11496,6 +12244,9 @@ namespace LegionRuntime {
     Event InstanceManager::get_recycle_event(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, GET_RECYCLE_EVENT_CALL);
+#endif
       // Now do our operation, as we finish with each view we
       // can remove the resource reference that we are holding on it.
       // We accumulate the set of events representing all the users
@@ -11916,8 +12667,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(instance.exists());
 #endif
-        log_garbage(LEVEL_DEBUG,"Garbage collecting reduction instance " IDFMT " "
-                                "in memory " IDFMT " in address space %d",
+        log_garbage(LEVEL_DEBUG,"Garbage collecting reduction instance " IDFMT
+                                " in memory " IDFMT " in address space %d",
                                 instance.id, memory.id, owner_space);
 #ifdef LEGION_PROF
         LegionProf::register_instance_deletion(instance.id);
@@ -12344,6 +13095,9 @@ namespace LegionRuntime {
                                           Processor p, bool gc_epoch)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, DEFER_COLLECT_USER_CALL);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);
@@ -12573,6 +13327,9 @@ namespace LegionRuntime {
     InstanceView* InstanceView::get_subview(Color c)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, GET_SUBVIEW_CALL);
+#endif
       // This is the common case
       {
         AutoLock v_lock(view_lock);
@@ -12670,6 +13427,9 @@ namespace LegionRuntime {
                                std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, COPY_TO_CALL);
+#endif
       preconditions.insert(manager->get_use_event());
       find_copy_preconditions(preconditions, true/*writing*/, 
                               0/*redop*/, copy_mask);
@@ -12682,6 +13442,9 @@ namespace LegionRuntime {
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, COPY_FROM_CALL);
+#endif
       preconditions.insert(manager->get_use_event());
       find_copy_preconditions(preconditions, false/*writing*/,
                               0/*redop*/, copy_mask);
@@ -12695,6 +13458,9 @@ namespace LegionRuntime {
                                std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REDUCE_TO_CALL);
+#endif
       preconditions.insert(manager->get_use_event());
       find_copy_preconditions(preconditions, true/*writing*/,
                               redop, copy_mask);
@@ -12707,6 +13473,9 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, HAS_WAR_DEPENDENCE_CALL);
+#endif
       // No WAR dependences for read-only or reduce 
       if (IS_READ_ONLY(usage) || IS_REDUCE(usage))
         return false;
@@ -12737,6 +13506,9 @@ namespace LegionRuntime {
     void InstanceView::accumulate_events(std::set<Event> &all_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ACCUMULATE_EVENTS_CALL);
+#endif
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       all_events.insert(event_references.begin(),event_references.end());
     }
@@ -12775,6 +13547,9 @@ namespace LegionRuntime {
                                      Processor exec_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_COPY_USER_CALL);
+#endif
       RegionUsage usage;
       usage.redop = redop;
       usage.prop = EXCLUSIVE;
@@ -12814,6 +13589,9 @@ namespace LegionRuntime {
     InstanceRef InstanceView::add_user(PhysicalUser &user, Processor exec_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_USER_CALL);
+#endif
       std::set<Event> wait_on_events;
       Event start_use_event = manager->get_use_event();
       if (start_use_event.exists())
@@ -12999,6 +13777,9 @@ namespace LegionRuntime {
                                       PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_USER_ABOVE_CALL);
+#endif
       if (parent != NULL)
       {
         // Save the child and replace with our child 
@@ -13022,6 +13803,9 @@ namespace LegionRuntime {
                                       const PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_LOCAL_USER_CALL);
+#endif
       // Need the lock when doing this analysis
       AutoLock v_lock(view_lock);
 #ifndef PHYSICAL_FIELD_TREE
@@ -13224,6 +14008,9 @@ namespace LegionRuntime {
                                              const FieldMask &copy_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_CALL);
+#endif
       if (parent != NULL)
         parent->find_copy_preconditions_above(logical_node->get_color(),
                                             wait_on, writing, redop, copy_mask);
@@ -13239,6 +14026,9 @@ namespace LegionRuntime {
                                                      const FieldMask &copy_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_ABOVE_CALL);
+#endif
       if (parent != NULL)
         parent->find_copy_preconditions_above(logical_node->get_color(),
                                             wait_on, writing, redop, copy_mask);
@@ -13255,6 +14045,9 @@ namespace LegionRuntime {
                                                      int local_color)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+#endif
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
 #ifndef PHYSICAL_FIELD_TREE
       if (!writing)
@@ -13433,6 +14226,9 @@ namespace LegionRuntime {
                                                 Color child_color)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, HAS_WAR_DEPENDENCE_ABOVE_CALL);
+#endif
       if ((parent != NULL) &&
           parent->has_war_dependence_above(usage, user_mask, 
                                            logical_node->get_color()))
@@ -13466,6 +14262,9 @@ namespace LegionRuntime {
     void InstanceView::update_versions(const FieldMask &update_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_VERSIONS_CALL);
+#endif
       std::vector<VersionID> to_delete;
       std::map<VersionID,FieldMask> new_versions;
       for (std::map<VersionID,FieldMask>::iterator it = 
@@ -13554,6 +14353,9 @@ namespace LegionRuntime {
     void InstanceView::condense_user_list(std::list<PhysicalUser> &users)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, CONDENSE_USER_LIST_CALL);
+#endif
       // First try and regroup users with the same termination event
       // and privleges whose user masks have been split up for various reasons.
       // Also while scanning over the list, do a quick check for events
@@ -14175,6 +14977,9 @@ namespace LegionRuntime {
                                           Processor local_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
+#endif
       std::set<Event> preconditions;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
@@ -14272,6 +15077,9 @@ namespace LegionRuntime {
                                       Processor exec_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_COPY_USER_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
@@ -14303,6 +15111,9 @@ namespace LegionRuntime {
     InstanceRef ReductionView::add_user(PhysicalUser &user, Processor exec_proc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, ADD_USER_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(IS_REDUCE(user.usage));
       assert(user.usage.redop == manager->redop);
@@ -14352,6 +15163,9 @@ namespace LegionRuntime {
                               std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REDUCE_TO_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
@@ -14374,6 +15188,9 @@ namespace LegionRuntime {
                               std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, REDUCE_FROM_CALL);
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif

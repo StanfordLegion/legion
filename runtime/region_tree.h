@@ -377,7 +377,164 @@ namespace LegionRuntime {
       bool perform_dynamic_tests(unsigned num_tests);
       void add_disjointness_test(const DynamicPartTest &test);
 #endif
+#ifdef DEBUG_PERF
+    public:
+      void record_call(int kind, unsigned long long time);
+    protected:
+      void begin_perf_trace(int kind);
+      void end_perf_trace(unsigned long long tolerance);
+    public:
+      struct CallRecord {
+      public:
+        CallRecord(void)
+          : kind(0), count(0), total_time(0), max_time(0), min_time(0) { }
+        CallRecord(int k)
+          : kind(k), count(0), total_time(0), max_time(0), min_time(0) { }
+      public:
+        inline void record_call(unsigned long long time)
+        {
+          count++;
+          total_time += time;
+          if (min_time == 0)
+            min_time = time;
+          else if (time < min_time)
+            min_time = time;
+          if (time > max_time)
+            max_time = time;
+        }
+      public:
+        int kind;
+        int count;
+        unsigned long long total_time;
+        unsigned long long min_time;
+        unsigned long long max_time;
+      };
+      struct PerfTrace {
+      public:
+        PerfTrace(void)
+          : kind(0) { }
+        PerfTrace(int k, unsigned long long start);
+      public:
+        inline void record_call(int call_kind, unsigned long long time)
+        {
+          records[call_kind].record_call(time);
+        }
+        void report_trace(unsigned long long diff);
+      public:
+        int kind;
+        unsigned long long start;
+        std::vector<CallRecord> records;
+      };
+    protected:
+      Reservation perf_trace_lock;
+      std::vector<PerfTrace> traces;
+#endif
     };
+
+#ifdef DEBUG_PERF
+    enum TraceKind {
+      REGION_DEPENDENCE_ANALYSIS,  
+      PREMAP_PHYSICAL_REGION_ANALYSIS,
+      MAP_PHYSICAL_REGION_ANALYSIS,
+      REMAP_PHYSICAL_REGION_ANALYSIS,
+      REGISTER_PHYSICAL_REGION_ANALYSIS,
+      COPY_ACROSS_ANALYSIS,
+    };
+
+    enum CallKind {
+      CREATE_NODE_CALL,
+      GET_NODE_CALL,
+      ARE_DISJOINT_CALL,
+      COMPUTE_PATH_CALL,
+      RESIZE_CONTEXTS_CALL,
+      CREATE_INSTANCE_CALL,
+      CREATE_REDUCTION_CALL,
+      PERFORM_PREMAP_CLOSE_CALL,
+      MAPPING_TRAVERSE_CALL,
+      MAP_PHYSICAL_REGION_CALL,
+      MAP_REDUCTION_REGION_CALL,
+      RESERVE_CONTEXTS_CALL,
+      ACQUIRE_PHYSICAL_STATE_CALL,
+      RELEASE_PHYSICAL_STATE_CALL,
+      REGISTER_LOGICAL_NODE_CALL,
+      OPEN_LOGICAL_NODE_CALL,
+      CLOSE_LOGICAL_NODE_CALL,
+      SIPHON_LOGICAL_CHILDREN_CALL,
+      PERFORM_LOGICAL_CLOSE_CALL,
+      RECORD_CLOSE_CALL,
+      UPDATE_CLOSE_CALL,
+      ADVANCE_FIELD_CALL,
+      FILTER_PREV_EPOCH_CALL,
+      FILTER_CURR_EPOCH_CALL,
+      FILTER_CLOSE_CALL,
+      INITIALIZE_LOGICAL_CALL,
+      INVALIDATE_LOGICAL_CALL,
+      REGISTER_LOGICAL_DEPS_CALL,
+      CLOSE_PHYSICAL_NODE_CALL,
+      SELECT_CLOSE_TARGETS_CALL,
+      SIPHON_PHYSICAL_CHILDREN_CALL,
+      CLOSE_PHYSICAL_CHILD_CALL,
+      FIND_VALID_INSTANCE_VIEWS_CALL,
+      FIND_VALID_REDUCTION_VIEWS_CALL,
+      PULL_VALID_VIEWS_CALL,
+      ISSUE_UPDATE_COPIES_CALL,
+      ISSUE_UPDATE_REDUCTIONS_CALL,
+      INVALIDATE_INSTANCE_VIEWS_CALL,
+      INVALIDATE_REDUCTION_VIEWS_CALL,
+      UPDATE_VALID_VIEWS_CALL,
+      UPDATE_REDUCTION_VIEWS_CALL,
+      FLUSH_REDUCTIONS_CALL,
+      INITIALIZE_PHYSICAL_STATE_CALL,
+      INVALIDATE_PHYSICAL_STATE_CALL,
+      PERFORM_DEPENDENCE_CHECKS_CALL,
+      PERFORM_CLOSING_CHECKS_CALL,
+      REMAP_REGION_CALL,
+      REGISTER_REGION_CALL,
+      CLOSE_PHYSICAL_STATE_CALL,
+      GARBAGE_COLLECT_CALL,
+      NOTIFY_INVALID_CALL,
+      GET_RECYCLE_EVENT_CALL,
+      DEFER_COLLECT_USER_CALL,
+      GET_SUBVIEW_CALL,
+      COPY_TO_CALL,
+      REDUCE_TO_CALL,
+      COPY_FROM_CALL,
+      REDUCE_FROM_CALL,
+      HAS_WAR_DEPENDENCE_CALL,
+      ACCUMULATE_EVENTS_CALL,
+      ADD_COPY_USER_CALL,
+      ADD_USER_CALL,
+      ADD_USER_ABOVE_CALL,
+      ADD_LOCAL_USER_CALL,
+      FIND_COPY_PRECONDITIONS_CALL,
+      FIND_COPY_PRECONDITIONS_ABOVE_CALL,
+      FIND_LOCAL_COPY_PRECONDITIONS_CALL,
+      HAS_WAR_DEPENDENCE_ABOVE_CALL,
+      UPDATE_VERSIONS_CALL,
+      CONDENSE_USER_LIST_CALL,
+      PERFORM_REDUCTION_CALL,
+      NUM_CALL_KIND,
+    };
+
+    class PerfTracer {
+    public:
+      PerfTracer(RegionTreeForest *f, int k)
+        : forest(f), kind(k)
+      {
+        start = TimeStamp::get_current_time_in_micros();
+      }
+      ~PerfTracer(void)
+      {
+        unsigned long long stop = TimeStamp::get_current_time_in_micros();
+        unsigned long long diff = stop - start;
+        forest->record_call(kind, diff);
+      }
+    private:
+      RegionTreeForest *forest;
+      int kind;
+      unsigned long long start;
+    };
+#endif
 
     /**
      * \class IndexTreeNode
@@ -1273,14 +1430,20 @@ namespace LegionRuntime {
                                 const FieldMask &closing_mask,
                                 Color target_child,
                                 int next_child);
+      // This method will always add valid references to the set of views
+      // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(PhysicalState &state,
                                      const FieldMask &valid_mask,
                                      const FieldMask &space_mask, 
                                      bool needs_space,
-                           std::map<InstanceView*,FieldMask> &valid_views);
+                             std::map<InstanceView*,FieldMask> &valid_views);
+      static void remove_valid_references(
+                       const std::map<InstanceView*,FieldMask> &valid_views);
       void find_valid_reduction_views(PhysicalState &state,
                                       const FieldMask &valid_mask,
                                       std::set<ReductionView*> &valid_views);
+      static void remove_valid_references(
+                                const std::set<ReductionView*> &valid_views);
       void pull_valid_instance_views(PhysicalState &state,
                                      const FieldMask &mask);
       // Since figuring out how to issue copies is expensive, try not
@@ -1368,16 +1531,16 @@ namespace LegionRuntime {
     public:
 #ifndef LOGICAL_FIELD_TREE
       // Logical helper operations
-      static FieldMask perform_dependence_checks(const LogicalUser &user, 
+      FieldMask perform_dependence_checks(const LogicalUser &user, 
             std::list<LogicalUser> &users, const FieldMask &check_mask, 
             bool validates_regions);
-      static void perform_closing_checks(LogicalCloser &closer,
+      void perform_closing_checks(LogicalCloser &closer,
             std::list<LogicalUser> &users, const FieldMask &check_mask);
 #else
-      static FieldMask perform_dependence_checks(const LogicalUser &user,
+      FieldMask perform_dependence_checks(const LogicalUser &user,
             FieldTree<LogicalUser> *users, const FieldMask &check_mask,
             bool validates_regions);
-      static void perform_closing_checks(LogicalCloser &closer,
+      void perform_closing_checks(LogicalCloser &closer,
             FieldTree<LogicalUser> *users, const FieldMask &check_mask);
 #endif
     public:

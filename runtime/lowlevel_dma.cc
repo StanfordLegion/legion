@@ -14,7 +14,9 @@
  */
 
 #include "lowlevel_dma.h"
+#ifdef USE_CUDA
 #include "lowlevel_gpu.h"
+#endif
 #include "accessor.h"
 
 #include <queue>
@@ -325,6 +327,7 @@ namespace LegionRuntime {
 	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
 
+#ifdef USE_CUDA
         // If either one of the instances is in GPU memory increase priority
         if (priority == 0)
         {
@@ -338,6 +341,7 @@ namespace LegionRuntime {
               priority = 1;
           }
         }
+#endif
 
 	OASVec& oasvec = (*oas_by_inst)[ip];
 
@@ -1590,7 +1594,8 @@ namespace LegionRuntime {
     protected:
       std::set<Event> events;
     };
-     
+
+#ifdef USE_CUDA     
     class GPUtoFBMemPairCopier : public DelayedMemPairCopier {
     public:
       GPUtoFBMemPairCopier(Memory _src_mem, GPUProcessor *_gpu)
@@ -1742,6 +1747,7 @@ namespace LegionRuntime {
     protected:
       GPUProcessor *src, *dst;
     };
+#endif
      
     static unsigned rdma_sequence_no = 1;
 
@@ -2012,6 +2018,7 @@ namespace LegionRuntime {
 	return new MemcpyMemPairCopier(src_mem, dst_mem);
       }
 
+#ifdef USE_CUDA
       // copy to a framebuffer
       if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
 	 (dst_kind == Memory::Impl::MKIND_GPUFB)) {
@@ -2042,6 +2049,7 @@ namespace LegionRuntime {
           return NULL;
         }
       }
+#endif
 
       // try as many things as we can think of
       if((dst_kind == Memory::Impl::MKIND_REMOTE) ||
@@ -3319,10 +3327,12 @@ namespace LegionRuntime {
 	  Event ev = Event::Impl::create_event();
 
 	  int priority = 0;
+#ifdef USE_CUDA
 	  if (src_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
 	    priority = 1;
 	  else if (dst_mem.impl()->kind == Memory::Impl::MKIND_GPUFB)
 	    priority = 1;
+#endif
 
 	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
 					   wait_on, ev, priority);
