@@ -1471,7 +1471,7 @@ namespace LegionRuntime {
         superscalar_width(width), min_outstanding(min_out), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         current_pending(0), current_executing(false), 
-#ifndef DEFERRED_DEPENDENCE_ANALYSIS
+#ifdef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
         idle_task_enabled(true), pending_dependence_analysis(false),
 #else
         idle_task_enabled(true),
@@ -1479,7 +1479,8 @@ namespace LegionRuntime {
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
-            std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION))
+            std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION)),
+        mapper_messages(std::vector<std::vector<MapperMessage> >(def_mappers))
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < def_mappers; idx++)
@@ -1570,6 +1571,7 @@ namespace LegionRuntime {
         int old_size = mapper_objects.size();
         mapper_objects.resize(mid+1);
         mapper_locks.resize(mid+1);
+        mapper_messages.resize(mid+1);
         ready_queues.resize(mid+1);
         for (unsigned int i=old_size; i<(mid+1); i++)
         {
@@ -1618,8 +1620,15 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      mapper_objects[task->map_id]->select_task_options(task);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        mapper_objects[task->map_id]->select_task_options(task);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1630,8 +1639,17 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      return mapper_objects[task->map_id]->pre_map_task(task);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        result = mapper_objects[task->map_id]->pre_map_task(task);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1642,8 +1660,15 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      mapper_objects[task->map_id]->select_task_variant(task);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        mapper_objects[task->map_id]->select_task_variant(task);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1654,11 +1679,20 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      // First select the variant
-      mapper_objects[task->map_id]->select_task_variant(task);
-      // Then perform the mapping
-      return mapper_objects[task->map_id]->map_task(task);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        // First select the variant
+        mapper_objects[task->map_id]->select_task_variant(task);
+        // Then perform the mapping
+        result = mapper_objects[task->map_id]->map_task(task);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1669,8 +1703,15 @@ namespace LegionRuntime {
       assert(mappable->map_id < mapper_objects.size());
       assert(mapper_objects[mappable->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[mappable->map_id]);     
-      mapper_objects[mappable->map_id]->notify_mapping_failed(mappable);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[mappable->map_id]);     
+        mapper_objects[mappable->map_id]->notify_mapping_failed(mappable);
+        messages = mapper_messages[mappable->map_id];
+        mapper_messages[mappable->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(mappable->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1681,8 +1722,15 @@ namespace LegionRuntime {
       assert(mappable->map_id < mapper_objects.size());
       assert(mapper_objects[mappable->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[mappable->map_id]);
-      mapper_objects[mappable->map_id]->notify_mapping_result(mappable);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[mappable->map_id]);
+        mapper_objects[mappable->map_id]->notify_mapping_result(mappable);
+        messages = mapper_messages[mappable->map_id];
+        mapper_messages[mappable->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(mappable->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1694,9 +1742,16 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      mapper_objects[task->map_id]->slice_domain(task, 
-                                                 task->index_domain, splits);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        mapper_objects[task->map_id]->slice_domain(task, 
+                                                   task->index_domain, splits);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1707,8 +1762,17 @@ namespace LegionRuntime {
       assert(op->map_id < mapper_objects.size());
       assert(mapper_objects[op->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[op->map_id]);
-      return mapper_objects[op->map_id]->map_inline(op);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[op->map_id]);
+        result = mapper_objects[op->map_id]->map_inline(op);
+        messages = mapper_messages[op->map_id];
+        mapper_messages[op->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(op->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1719,8 +1783,17 @@ namespace LegionRuntime {
       assert(op->map_id < mapper_objects.size());
       assert(mapper_objects[op->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[op->map_id]);
-      return mapper_objects[op->map_id]->map_copy(op);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[op->map_id]);
+        result = mapper_objects[op->map_id]->map_copy(op);
+        messages = mapper_messages[op->map_id];
+        mapper_messages[op->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(op->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1731,8 +1804,18 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      return mapper_objects[task->map_id]->speculate_on_predicate(task, value);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        result = mapper_objects[task->map_id]->
+                                        speculate_on_predicate(task, value);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1751,10 +1834,19 @@ namespace LegionRuntime {
       assert(mappable->map_id < mapper_objects.size());
       assert(mapper_objects[mappable->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[mappable->map_id]);
-      return mapper_objects[mappable->map_id]->rank_copy_targets(mappable, 
-          handle, memories, complete, max_blocking_factor, to_reuse, 
-          to_create, create_one, blocking_factor);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[mappable->map_id]);
+        result = mapper_objects[mappable->map_id]->rank_copy_targets(mappable,
+            handle, memories, complete, max_blocking_factor, to_reuse, 
+            to_create, create_one, blocking_factor);
+        messages = mapper_messages[mappable->map_id];
+        mapper_messages[mappable->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(mappable->map_id, messages);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1768,9 +1860,16 @@ namespace LegionRuntime {
       assert(mappable->map_id < mapper_objects.size());
       assert(mapper_objects[mappable->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[mappable->map_id]);
-      mapper_objects[mappable->map_id]->rank_copy_sources(mappable,
-          memories, destination, order);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[mappable->map_id]);
+        mapper_objects[mappable->map_id]->rank_copy_sources(mappable,
+            memories, destination, order);
+        messages = mapper_messages[mappable->map_id];
+        mapper_messages[mappable->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(mappable->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1781,8 +1880,15 @@ namespace LegionRuntime {
       assert(task->map_id < mapper_objects.size());
       assert(mapper_objects[task->map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[task->map_id]);
-      mapper_objects[task->map_id]->notify_profiling_info(task);
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        mapper_objects[task->map_id]->notify_profiling_info(task);
+        messages = mapper_messages[task->map_id];
+        mapper_messages[task->map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -1796,8 +1902,96 @@ namespace LegionRuntime {
       assert(map_id < mapper_objects.size());
       assert(mapper_objects[map_id] != NULL);
 #endif
-      AutoLock m_lock(mapper_locks[map_id]);
-      return mapper_objects[map_id]->map_must_epoch(tasks, constraints, tag);
+      bool result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[map_id]);
+        result = mapper_objects[map_id]->map_must_epoch(tasks,constraints,tag);
+        messages = mapper_messages[map_id];
+        mapper_messages[map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(map_id, messages);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    int ProcessorManager::invoke_mapper_get_tunable_value(TaskOp *task,
+                                                          TunableID tid,
+                                                          MapperID map_id,
+                                                          MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(map_id < mapper_objects.size());
+      assert(mapper_objects[map_id] != NULL);
+#endif
+      int result;
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[map_id]);
+        result = mapper_objects[map_id]->get_tunable_value(task, tid, tag);
+        messages = mapper_messages[map_id];
+        mapper_messages[map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(map_id, messages);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::invoke_mapper_handle_message(MapperID map_id,
+                                                        Processor source,
+                                                        const void *message,
+                                                        size_t length)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(map_id < mapper_objects.size());
+      assert(mapper_objects[map_id] != NULL);
+#endif
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[map_id]);
+        mapper_objects[map_id]->handle_message(source, message, length);
+        messages = mapper_messages[map_id];
+        mapper_messages[map_id].clear();
+      }
+      if (!messages.empty())
+        send_mapper_messages(map_id, messages);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::defer_mapper_message(Processor target, 
+                            MapperID map_id, const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      // No need to take the lock as this can only be called inside of a
+      // mapper call which means we already hold the lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(map_id < mapper_messages.size());
+#endif
+      // Need to make a copy here of the message
+      void *copy = malloc(length);
+      memcpy(copy, message, length);
+      // save the message
+      mapper_messages[map_id].push_back(MapperMessage(target, copy, length));
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::send_mapper_messages(MapperID map_id, 
+                                           std::vector<MapperMessage> &messages)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<MapperMessage>::iterator it = messages.begin();
+            it != messages.end(); it++)
+      {
+        runtime->invoke_mapper_handle_message(it->target, map_id, local_proc,
+                                              it->message, it->length);
+        // After we are done sending the message, we can free the memory
+        free(it->message);
+      }
+      messages.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2211,7 +2405,7 @@ namespace LegionRuntime {
     bool ProcessorManager::perform_dependence_checks(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEFERRED_DEPENDENCE_ANALYSIS
+#ifndef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
       bool remaining_ops = false;
       UserEvent trigger_event;
       bool needs_trigger = false;
@@ -2318,18 +2512,17 @@ namespace LegionRuntime {
             return true;
         }
         return false;
+      } 
+
+      // Perform the dependence analysis for each of the operations
+      for (unsigned idx = 0; idx < ops.size(); idx++)
+      {
+        ops[idx]->trigger_dependence_analysis();
       }
       // Don't trigger the event while holding the lock
       // You never know what the low-level runtime might decide to do
       if (needs_trigger)
         trigger_event.trigger();
-
-      // Ask each of the operations to issue their mapping task
-      // onto the utility processor
-      for (unsigned idx = 0; idx < ops.size(); idx++)
-      {
-        ops[idx]->trigger_dependence_analysis();
-      }
       if (return_analysis_hold)
       {
         AutoLock d_lock(dependence_lock);
@@ -3196,6 +3389,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_mapper_message(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_MAPPER_MESSAGE, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::package_message(Serializer &rez, MessageKind k,
                                          bool flush)
     //--------------------------------------------------------------------------
@@ -3600,6 +3800,11 @@ namespace LegionRuntime {
               runtime->handle_make_persistent(derez, remote_address_space);
               break;
             }
+          case SEND_MAPPER_MESSAGE:
+            {
+              runtime->handle_mapper_message(derez);
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -3663,6 +3868,7 @@ namespace LegionRuntime {
         unique_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
+        mapper_info_lock(Reservation::create_reservation()),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         distributed_id_lock(Reservation::create_reservation()),
         distributed_collectable_lock(Reservation::create_reservation()),
@@ -3882,6 +4088,8 @@ namespace LegionRuntime {
       memory_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
       message_managers.clear();
+      mapper_info_lock.destroy_reservation();
+      mapper_info_lock = Reservation::NO_RESERVATION;
       available_lock.destroy_reservation();
       available_lock = Reservation::NO_RESERVATION;
       distributed_id_lock.destroy_reservation();
@@ -6742,6 +6950,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int Runtime::get_tunable_value(Context ctx, TunableID tid,
+                                   MapperID mid, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Getting a value for tunable variable %d in "
+                          "task %s (ID %lld)", tid, ctx->variants->name,
+                          ctx->get_unique_task_id());
+#endif
+      Processor proc = ctx->get_executing_processor();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif
+      ProcessorManager *manager = proc_managers[proc];
+      return manager->invoke_mapper_get_tunable_value(ctx, tid, mid, tag);
+    }
+
+    //--------------------------------------------------------------------------
     Mapper* Runtime::get_mapper(Context ctx, MapperID id)
     //--------------------------------------------------------------------------
     {
@@ -6778,6 +7004,8 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       proc_managers[proc]->add_mapper(map_id, mapper, true/*check*/);
+      AutoLock m_lock(mapper_info_lock);
+      mapper_infos[mapper] = MapperInfo(proc, map_id);
     }
 
     //--------------------------------------------------------------------------
@@ -6789,6 +7017,8 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       proc_managers[proc]->replace_default_mapper(mapper);
+      AutoLock m_lock(mapper_info_lock);
+      mapper_infos[mapper] = MapperInfo(proc, 0/*mapper id*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7571,6 +7801,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_mapper_message(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -7970,6 +8207,23 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       InstanceManager::handle_make_persistent(derez, forest, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_mapper_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Processor target;
+      derez.deserialize(target);
+      MapperID map_id;
+      derez.deserialize(map_id);
+      Processor source;
+      derez.deserialize(source);
+      size_t length = derez.get_remaining_bytes();
+      const void *message = derez.get_current_pointer();
+      derez.advance_pointer(length);
+      invoke_mapper_handle_message(target, map_id, source, message, length);
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -8395,6 +8649,63 @@ namespace LegionRuntime {
 #endif
       return proc_managers[proc]->invoke_mapper_map_must_epoch(tasks, 
                                                       constraints, map_id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::invoke_mapper_handle_message(Processor target,MapperID map_id,
+                           Processor source, const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      if (is_local(target))
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(proc_managers.find(target) != proc_managers.end());
+#endif
+        proc_managers[target]->invoke_mapper_handle_message(map_id, source, 
+                                                            message, length);
+      }
+      else
+      {
+        // Package up the message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(map_id);
+          rez.serialize(source);
+          rez.serialize(message,length);
+        }
+        send_mapper_message(find_address_space(target), rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_mapper_send_message(Mapper *mapper, Processor target,
+                                             const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      Processor source;
+      MapperID map_id;
+      // Find the source processor and the corresponding mapper ID
+      {
+        AutoLock m_lock(mapper_info_lock,1,false/*exclusive*/);
+        std::map<Mapper*,MapperInfo>::const_iterator finder = 
+          mapper_infos.find(mapper);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != mapper_infos.end());
+#endif
+        source = finder->second.proc;
+        map_id = finder->second.map_id;
+      }
+      // Note we can't actually send the message without risking deadlock
+      // so instead lookup the processor manager for the mapper and 
+      // tell it that it has a pending message to send when the mapper
+      // call actually completes.
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(source) != proc_managers.end());
+#endif
+      proc_managers[source]->defer_mapper_message(target, map_id, 
+                                                  message, length);
     }
 
     //--------------------------------------------------------------------------

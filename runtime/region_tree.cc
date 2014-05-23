@@ -56,11 +56,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       this->perf_trace_lock = Reservation::create_reservation();
       int max_local_id = 1;
+      int local_space = 
+        Machine::get_executing_processor().address_space();
       const std::set<Processor> &procs = runtime->machine->get_all_processors();
       for (std::set<Processor>::const_iterator it = procs.begin();
             it != procs.end(); it++)
       {
-        if (runtime->is_local(*it))
+        if (local_space == it->address_space())
         {
           int local = it->local_id();
           if (local > max_local_id)
@@ -68,7 +70,7 @@ namespace LegionRuntime {
         }
       }
       // Reserve enough space for traces for each processor
-      traces.resize(max_local_id);
+      traces.resize(max_local_id+1);
 #endif
     }
 
@@ -893,7 +895,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
-      begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
+      begin_perf_trace(PREMAP_PHYSICAL_REGION_ANALYSIS);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
@@ -2635,7 +2637,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     RegionTreeForest::PerfTrace::PerfTrace(int k, unsigned long long s)
-      : kind(k), start(s)
+      : tracing(true), kind(k), start(s)
     //--------------------------------------------------------------------------
     {
       // Allocate space for all of the calls
@@ -2867,7 +2869,7 @@ namespace LegionRuntime {
             }
           case SIPHON_PHYSICAL_CHILDREN_CALL:
             {
-              fprintf(stdout,"  Siphone Physical Children Call:\n");
+              fprintf(stdout,"  Siphon Physical Children Call:\n");
               break;
             }
           case CLOSE_PHYSICAL_CHILD_CALL:
@@ -2898,6 +2900,11 @@ namespace LegionRuntime {
           case ISSUE_UPDATE_REDUCTIONS_CALL:
             {
               fprintf(stdout,"  Issue Update Reductions Call:\n");
+              break;
+            }
+          case PERFORM_COPY_DOMAIN_CALL:
+            {
+              fprintf(stdout,"  Perform Copy Domain Call:\n");
               break;
             }
           case INVALIDATE_INSTANCE_VIEWS_CALL:
@@ -3043,6 +3050,11 @@ namespace LegionRuntime {
           case FIND_COPY_PRECONDITIONS_ABOVE_CALL:
             {
               fprintf(stdout,"  Find Copy Preconditions Above Call:\n");
+              break;
+            }
+          case FIND_LOCAL_COPY_PRECONDITIONS_CALL:
+            {
+              fprintf(stdout,"  Find Local Copy Preconditions Call:\n");
               break;
             }
           case HAS_WAR_DEPENDENCE_ABOVE_CALL:
@@ -9119,7 +9131,6 @@ namespace LegionRuntime {
       // we gather all the information needed to issue gather copies 
       // from multiple instances into the data structures below, we then 
       // issue the copy when we're done and update the destination instance.
-      std::set<Event> preconditions;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       std::map<InstanceView*,FieldMask> src_instances;
@@ -9143,8 +9154,8 @@ namespace LegionRuntime {
             assert(src->manager->get_instance() !=
                    dst->manager->get_instance());
 #endif
-            src->copy_from(op_mask, preconditions, src_fields);
-            dst->copy_to(  op_mask, preconditions, dst_fields);
+            src->copy_from(op_mask, src_fields);
+            dst->copy_to(  op_mask, dst_fields);
             src_instances[src] = op_mask;
           }
         }
@@ -9193,8 +9204,8 @@ namespace LegionRuntime {
                 assert(it->first->manager->get_instance() !=
                        dst->manager->get_instance());
 #endif
-                it->first->copy_from(op_mask, preconditions, src_fields);
-                dst->copy_to(op_mask, preconditions, dst_fields);
+                it->first->copy_from(op_mask, src_fields);
+                dst->copy_to(op_mask, dst_fields);
                 std::map<InstanceView*,FieldMask>::iterator finder = 
                   src_instances.find(it->first);
                 if (finder == src_instances.end())
@@ -9236,8 +9247,8 @@ namespace LegionRuntime {
               // No need to do anything if they are the same instance
               if (dst != it->first)
               {
-                it->first->copy_from(op_mask, preconditions, src_fields);
-                dst->copy_to(op_mask, preconditions, dst_fields);
+                it->first->copy_from(op_mask, src_fields);
+                dst->copy_to(op_mask, dst_fields);
                 std::map<InstanceView*,FieldMask>::iterator finder = 
                   src_instances.find(it->first);
                 if (finder == src_instances.end())
@@ -9271,6 +9282,29 @@ namespace LegionRuntime {
         assert(!dst_fields.empty());
         assert(src_fields.size() == dst_fields.size());
 #endif
+        // Create a user event that will be our event for
+        // indicating that the copy is finished.  We make 
+        // this here so we only need to traverse the 
+        // epoch lists a single time and in the process will
+        // find all the preconditions and add the copy user.
+        UserEvent copy_term = UserEvent::create_user_event();
+        std::set<Event> preconditions;
+        FieldMask update_mask; 
+        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+              src_instances.begin(); it != src_instances.end(); it++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!!it->second);
+#endif
+          it->first->add_copy_user(0/*redop*/, copy_term,
+                                   it->second, true/*reading*/,
+                                   info->local_proc, preconditions);
+          update_mask |= it->second;
+        }
+        // Now do the destination
+        dst->add_copy_user(0/*redop*/, copy_term,
+                           update_mask, false/*reading*/,
+                           info->local_proc, preconditions);
         Event copy_pre = Event::merge_events(preconditions);
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
         if (!copy_pre.exists())
@@ -9288,27 +9322,23 @@ namespace LegionRuntime {
         LegionSpy::log_event_dependences(preconditions, copy_pre);
 #endif
         Domain copy_domain = get_domain();
-        Event copy_post = copy_domain.copy(src_fields, dst_fields, copy_pre);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-        if (!copy_post.exists())
+#ifdef DEBUG_PERF
+        Event copy_post;
         {
-          UserEvent new_copy_post = UserEvent::create_user_event();
-          new_copy_post.trigger();
-          copy_post = new_copy_post;
+          PerfTracer tracer(context, PERFORM_COPY_DOMAIN_CALL);
+          copy_post = copy_domain.copy(src_fields, dst_fields, copy_pre);
         }
+#else
+        Event copy_post = copy_domain.copy(src_fields, dst_fields, copy_pre);
 #endif
-        // Update the source and destination instances with their info
-        FieldMask update_mask;
+        // Finally chain the copy termination user event trigger
+        // off the low-level copy post event
+        copy_term.trigger(copy_post);
+        // Log some information for legion spy or legion logging if necessary
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
               src_instances.begin(); it != src_instances.end(); it++)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(!!it->second);
-#endif
-          it->first->add_copy_user(0/*redop*/, copy_post, 
-                                   it->second, true/*reading*/,
-                                   info->local_proc);
-          update_mask |= it->second;
 #ifdef LEGION_LOGGING
           {
             std::set<FieldID> copy_fields;
@@ -9322,7 +9352,7 @@ namespace LegionRuntime {
                 copy_domain.get_index_space(),
                 manager_node->column_source->handle,
                 manager_node->handle.tree_id,
-                copy_pre, copy_post, copy_fields, 0/*redop*/);
+                copy_pre, copy_term, copy_fields, 0/*redop*/);
           }
 #endif
 #ifdef LEGION_SPY
@@ -9334,15 +9364,12 @@ namespace LegionRuntime {
               dst->manager->get_instance().id,
               copy_domain.get_index_space().id,
               manager_node->column_source->handle.id,
-              manager_node->handle.tree_id, copy_pre, copy_post,
+              manager_node->handle.tree_id, copy_pre, copy_term,
               0/*redop*/, string_mask);
           free(string_mask);
 #endif
         }
-        // Then add the copy user to the destination event
-        dst->add_copy_user(0/*redop*/, copy_post, 
-                           update_mask, false/*reading*/,
-                           info->local_proc);
+#endif
       }
     }
 
@@ -13423,47 +13450,44 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InstanceView::copy_to(const FieldMask &copy_mask,
-                               std::set<Event> &preconditions,
                                std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, COPY_TO_CALL);
 #endif
-      preconditions.insert(manager->get_use_event());
-      find_copy_preconditions(preconditions, true/*writing*/, 
-                              0/*redop*/, copy_mask);
+      //preconditions.insert(manager->get_use_event());
+      //find_copy_preconditions(preconditions, true/*writing*/, 
+      //                        0/*redop*/, copy_mask);
       manager->compute_copy_offsets(copy_mask, dst_fields);
     }
 
     //--------------------------------------------------------------------------
     void InstanceView::copy_from(const FieldMask &copy_mask,
-                                 std::set<Event> &preconditions,
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, COPY_FROM_CALL);
 #endif
-      preconditions.insert(manager->get_use_event());
-      find_copy_preconditions(preconditions, false/*writing*/,
-                              0/*redop*/, copy_mask);
+      //preconditions.insert(manager->get_use_event());
+      //find_copy_preconditions(preconditions, false/*writing*/,
+      //                        0/*redop*/, copy_mask);
       manager->compute_copy_offsets(copy_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------
     bool InstanceView::reduce_to(ReductionOpID redop, 
                                  const FieldMask &copy_mask,
-                                 std::set<Event> &preconditions,
                                std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REDUCE_TO_CALL);
 #endif
-      preconditions.insert(manager->get_use_event());
-      find_copy_preconditions(preconditions, true/*writing*/,
-                              redop, copy_mask);
+      //preconditions.insert(manager->get_use_event());
+      //find_copy_preconditions(preconditions, true/*writing*/,
+      //                        redop, copy_mask);
       manager->compute_copy_offsets(copy_mask, dst_fields);
       return false; // not a fold
     }
@@ -13544,7 +13568,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void InstanceView::add_copy_user(ReductionOpID redop, Event copy_term,
                                      const FieldMask &copy_mask, bool reading,
-                                     Processor exec_proc)
+                                     Processor exec_proc,
+                                     std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13560,16 +13585,16 @@ namespace LegionRuntime {
       else
         usage.privilege = READ_WRITE;
       PhysicalUser user(usage, copy_mask, copy_term);
-      std::set<Event> wait_on;
+      preconditions.insert(manager->get_use_event());
       if (parent != NULL)
       {
         // Save our color
         user.child = logical_node->get_color();
-        parent->add_user_above(wait_on, user);
+        parent->add_user_above(preconditions, user);
         // Restore the color
         user.child = -1;
       }
-      add_local_user<false>(wait_on, user);
+      add_local_user<false>(preconditions, user);
       // Note we can ignore the wait on set here since we are just
       // registering the user and filtering previous users
       // Launch the garbage collection task
@@ -13817,21 +13842,24 @@ namespace LegionRuntime {
       {
         if (!ABOVE)
           observed |= it->field_mask;
-        FieldMask overlap = user.field_mask & it->field_mask;
-        // Disjoint fields, keep going
-        if (!overlap)
-        {
-          it++;
-          continue;
-        } 
         // If they are the same user then keep going
         if (user.term_event == it->term_event)
         {
           if (!ABOVE)
-            non_dominated |= overlap;
+            non_dominated |= (user.field_mask & it->field_mask);
           it++;
           continue;
         }
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+        // We're about to do a bunch of expensive tests,
+        // so first do something cheap to see if we can
+        // prune the user out of the list.
+        if (it->term_event.has_triggered())
+        {
+          it = curr_epoch_users.erase(it);
+          continue;
+        }
+#endif
         if (ABOVE && (user.child >= 0))
         {
           // Same child, already done the analysis
@@ -13849,6 +13877,13 @@ namespace LegionRuntime {
             continue;
           }
         }
+        FieldMask overlap = user.field_mask & it->field_mask;
+        // Disjoint fields, keep going
+        if (!overlap)
+        {
+          it++;
+          continue;
+        } 
         // Now we need to do a dependence analysis
         DependenceType dt = check_dependence_type(it->usage, user.usage);
         switch (dt)
@@ -13913,24 +13948,49 @@ namespace LegionRuntime {
       }
       if (ABOVE || !!non_dominated)
       {
-        for (std::list<PhysicalUser>::const_iterator it = 
-              prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
+        for (std::list<PhysicalUser>::iterator it = 
+              prev_epoch_users.begin(); it != prev_epoch_users.end(); /*nothing*/)
         { 
           if (user.term_event == it->term_event)
+          {
+            it++;
             continue;
+          }
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+          // Before we do a bunch of expensive operations,
+          // do something cheap and check to see if the
+          // event has already triggered.
+          if (it->term_event.has_triggered())
+          {
+            it = prev_epoch_users.erase(it);
+            continue;
+          }
+#endif
           if (ABOVE && (user.child >= 0))
           {
             if (user.child == it->child)
+            {
+              it++;
               continue;
+            }
             if ((it->child >= 0) &&
                 logical_node->are_children_disjoint(unsigned(user.child),
                                                     unsigned(it->child)))
+            {
+              it++;
               continue;
+            }
           }
           if (!ABOVE && (it->field_mask * non_dominated))
+          {
+            it++;
             continue;
+          }
           if (ABOVE && (it->field_mask * user.field_mask))
+          {
+            it++;
             continue;
+          }
           // Now we need to do an actual dependence analysis
           DependenceType dt = check_dependence_type(it->usage, user.usage);
           switch (dt)
@@ -13951,6 +14011,8 @@ namespace LegionRuntime {
             default:
               assert(false); // should never get here
           }
+          // Update the user
+          it++;
         }
       }
       // Add the new previous users to previous epoch list
@@ -13959,7 +14021,7 @@ namespace LegionRuntime {
       // Add ourselves to the list of current users
       curr_epoch_users.push_back(user);
       // See if we need to compress the lists
-#ifndef LEGION_SPY
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
@@ -14002,6 +14064,7 @@ namespace LegionRuntime {
       event_references.insert(user.term_event);
     }
  
+#if 0
     //--------------------------------------------------------------------------
     void InstanceView::find_copy_preconditions(std::set<Event> &wait_on,
                                              bool writing, ReductionOpID redop,
@@ -14219,6 +14282,7 @@ namespace LegionRuntime {
       }
 #endif
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool InstanceView::has_war_dependence_above(const RegionUsage &usage,
@@ -14980,12 +15044,19 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
 #endif
-      std::set<Event> preconditions;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
-      bool fold = target->reduce_to(manager->redop, reduce_mask, 
-                                    preconditions, dst_fields);
-      this->reduce_from(manager->redop, reduce_mask, preconditions, src_fields);
+      bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
+      this->reduce_from(manager->redop, reduce_mask, src_fields);
+
+      UserEvent reduce_term = UserEvent::create_user_event();
+      std::set<Event> preconditions;
+      target->add_copy_user(manager->redop, reduce_term,
+                            reduce_mask, false/*reading*/,
+                            local_proc, preconditions);
+      this->add_copy_user(manager->redop, reduce_term,
+                          reduce_mask, true/*reading*/,
+                          local_proc, preconditions);
       Event reduce_pre = Event::merge_events(preconditions); 
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       if (!reduce_pre.exists())
@@ -15005,14 +15076,9 @@ namespace LegionRuntime {
       Domain domain = logical_node->get_domain();
       Event reduce_post = manager->issue_reduction(src_fields, dst_fields,
                                                    domain, reduce_pre, fold);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
-#endif
+      // Chain the reduction termination trigger off the 
+      // low-level event for when the reduction triggers
+      reduce_term.trigger(reduce_post);
 #ifdef LEGION_LOGGING
       {
         std::set<FieldID> reduce_fields;
@@ -15025,7 +15091,7 @@ namespace LegionRuntime {
             domain.get_index_space(),
             manager->region_node->column_source->handle,
             manager->region_node->handle.tree_id,
-            reduce_pre, reduce_post, reduce_fields, manager->redop);
+            reduce_pre, reduce_term, reduce_fields, manager->redop);
       }
 #endif
 #ifdef LEGION_SPY
@@ -15034,13 +15100,9 @@ namespace LegionRuntime {
       LegionSpy::log_copy_operation(manager->get_instance().id,
           target->get_manager()->get_instance().id, domain.get_index_space().id,
           manager->region_node->column_source->handle.id,
-          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
+          manager->region_node->handle.tree_id, reduce_pre, reduce_term,
           manager->redop, string_mask);
 #endif
-      target->add_copy_user(manager->redop, reduce_post, 
-                            reduce_mask, false/*reading*/, local_proc); 
-      this->add_copy_user(manager->redop, reduce_post,
-                          reduce_mask, true/*reading*/, local_proc);
     } 
 
     //--------------------------------------------------------------------------
@@ -15074,7 +15136,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void ReductionView::add_copy_user(ReductionOpID redop, Event copy_term,
                                       const FieldMask &mask, bool reading,
-                                      Processor exec_proc)
+                                      Processor exec_proc,
+                                      std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15086,6 +15149,12 @@ namespace LegionRuntime {
       AutoLock v_lock(view_lock);
       if (reading)
       {
+        // Register dependences on any reducers
+        for (std::list<PhysicalUser>::const_iterator it = 
+              reduction_users.begin(); it != reduction_users.end(); it++)
+        {
+          preconditions.insert(it->term_event);
+        }
         PhysicalUser user(RegionUsage(READ_ONLY,EXCLUSIVE,0),mask,copy_term);
         reading_users.push_back(user);
         if (owner_did != did)
@@ -15095,6 +15164,12 @@ namespace LegionRuntime {
       }
       else
       {
+        // Register dependences on any readers
+        for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
+              it != reading_users.end(); it++)
+        {
+          preconditions.insert(it->term_event);
+        }
         PhysicalUser user(RegionUsage(REDUCE,EXCLUSIVE,redop),mask,copy_term);
         reduction_users.push_back(user);
         if (owner_did != did)
@@ -15159,7 +15234,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     bool ReductionView::reduce_to(ReductionOpID redop, 
                                   const FieldMask &reduce_mask,
-                                  std::set<Event> &preconditions,
                               std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
@@ -15171,20 +15245,19 @@ namespace LegionRuntime {
 #endif
       // Get the destination fields for this copy
       manager->find_field_offsets(reduce_mask, dst_fields);
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      //AutoLock v_lock(view_lock,1,false/*exclusive*/);
       // Register dependences on any readers
-      for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
-            it != reading_users.end(); it++)
-      {
-        preconditions.insert(it->term_event);
-      }
+      //for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
+      //      it != reading_users.end(); it++)
+      //{
+      //  preconditions.insert(it->term_event);
+      //}
       return manager->is_foldable();
     }
     
     //--------------------------------------------------------------------------
     void ReductionView::reduce_from(ReductionOpID redop,
                                     const FieldMask &reduce_mask,
-                                    std::set<Event> &preconditions,
                               std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
@@ -15195,13 +15268,13 @@ namespace LegionRuntime {
       assert(redop == manager->redop);
 #endif
       manager->find_field_offsets(reduce_mask, src_fields);
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      //AutoLock v_lock(view_lock,1,false/*exclusive*/);
       // Register dependences on any reducers
-      for (std::list<PhysicalUser>::const_iterator it = reduction_users.begin();
-            it != reduction_users.end(); it++)
-      {
-        preconditions.insert(it->term_event);
-      }
+      //for (std::list<PhysicalUser>::const_iterator it = reduction_users.begin();
+      //      it != reduction_users.end(); it++)
+      //{
+      //  preconditions.insert(it->term_event);
+      //}
     }
 
     //--------------------------------------------------------------------------

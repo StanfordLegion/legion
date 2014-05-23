@@ -412,15 +412,17 @@ namespace LegionRuntime {
       struct PerfTrace {
       public:
         PerfTrace(void)
-          : kind(0) { }
+          : tracing(false), kind(0) { }
         PerfTrace(int k, unsigned long long start);
       public:
         inline void record_call(int call_kind, unsigned long long time)
         {
-          records[call_kind].record_call(time);
+          if (tracing)
+            records[call_kind].record_call(time);
         }
         void report_trace(unsigned long long diff);
       public:
+        bool tracing;
         int kind;
         unsigned long long start;
         std::vector<CallRecord> records;
@@ -479,6 +481,7 @@ namespace LegionRuntime {
       PULL_VALID_VIEWS_CALL,
       ISSUE_UPDATE_COPIES_CALL,
       ISSUE_UPDATE_REDUCTIONS_CALL,
+      PERFORM_COPY_DOMAIN_CALL,
       INVALIDATE_INSTANCE_VIEWS_CALL,
       INVALIDATE_REDUCTION_VIEWS_CALL,
       UPDATE_VALID_VIEWS_CALL,
@@ -2384,12 +2387,12 @@ namespace LegionRuntime {
     public:
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc) = 0;
+                                 Processor exec_proc,
+                                 std::set<Event> &preconditions) = 0;
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
-                             std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
       virtual void notify_activate(void) = 0;
@@ -2448,13 +2451,10 @@ namespace LegionRuntime {
       const FieldMask& get_physical_mask(void) const;
     public:
       void copy_to(const FieldMask &copy_mask, 
-                   std::set<Event> &preconditions,
                    std::vector<Domain::CopySrcDstField> &dst_fields);
       void copy_from(const FieldMask &copy_mask, 
-                     std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
       bool has_war_dependence(const RegionUsage &usage, 
                               const FieldMask &user_mask);
@@ -2467,7 +2467,8 @@ namespace LegionRuntime {
     public:
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
+                                 Processor exec_proc,
+                                 std::set<Event> &preconditions);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
     public:
@@ -2487,6 +2488,7 @@ namespace LegionRuntime {
       void add_local_user(std::set<Event> &wait_on, 
                           const PhysicalUser &user);
     protected:
+#if 0
       void find_copy_preconditions(std::set<Event> &wait_on, 
                                    bool writing, ReductionOpID redop, 
                                    const FieldMask &mask);
@@ -2499,6 +2501,7 @@ namespace LegionRuntime {
                                    bool writing, ReductionOpID redop,
                                    const FieldMask &copy_mask,
                                    int local_color);
+#endif
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     Color child_color);
@@ -2585,15 +2588,14 @@ namespace LegionRuntime {
     public:
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
+                                 Processor exec_proc,
+                                 std::set<Event> &preconditions);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::set<Event> &preconditions,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
     public:
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
-                       std::set<Event> &preconditions,
                        std::vector<Domain::CopySrcDstField> &src_fields);
       void notify_subscribers(const PhysicalUser &user, 
                               int skip = -1);

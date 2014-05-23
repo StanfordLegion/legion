@@ -340,6 +340,17 @@ namespace LegionRuntime {
         Event last_event;
         std::deque<Operation*> queue;
       };
+      struct MapperMessage {
+      public:
+        MapperMessage(void)
+          : target(Processor::NO_PROC), message(NULL), length(0) { }
+        MapperMessage(Processor t, void *mes, size_t l)
+          : target(t), message(mes), length(l) { }
+      public:
+        Processor target;
+        void *message;
+        size_t length;
+      };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt, unsigned min_out,
@@ -383,6 +394,16 @@ namespace LegionRuntime {
       bool invoke_mapper_map_must_epoch(const std::vector<Task*> &tasks,
           const std::vector<Mapper::MappingConstraint> &constraints,
           MapperID map_id, MappingTagID tag);
+      int invoke_mapper_get_tunable_value(TaskOp *task, TunableID tid,
+                                          MapperID mid, MappingTagID tag);
+      void invoke_mapper_handle_message(MapperID map_id, Processor source,
+                                        const void *message, size_t length);
+    public:
+      // Handle mapper messages
+      void defer_mapper_message(Processor target, MapperID map_id,
+                                const void *message, size_t length);
+      void send_mapper_messages(MapperID map_id, 
+                                std::vector<MapperMessage> &messages);
     public:
       void perform_scheduling(void);
       void process_steal_request(Processor thief, 
@@ -429,7 +450,7 @@ namespace LegionRuntime {
       unsigned current_pending;
       bool current_executing;
       bool idle_task_enabled;
-#ifndef DEFERRED_DEPENDENCE_ANALYSIS
+#ifdef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
       bool pending_dependence_analysis;
 #endif
     protected:
@@ -469,6 +490,8 @@ namespace LegionRuntime {
       std::vector<Mapper*> mapper_objects;
       // Mapper locks
       std::vector<Reservation> mapper_locks;
+      // Pending mapper messages
+      std::vector<std::vector<MapperMessage> > mapper_messages;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
@@ -597,6 +620,7 @@ namespace LegionRuntime {
         SEND_FUTURE,
         SEND_FUTURE_RESULT,
         SEND_MAKE_PERSISTENT,
+        SEND_MAPPER_MESSAGE,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -663,6 +687,7 @@ namespace LegionRuntime {
       void send_future(Serializer &rez, bool flush);
       void send_future_result(Serializer &rez, bool flush);
       void send_make_persistent(Serializer &rez, bool flush);
+      void send_mapper_message(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -909,6 +934,8 @@ namespace LegionRuntime {
       void end_trace(Context ctx, TraceID tid);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
+      int get_tunable_value(Context ctx, TunableID tid, 
+                            MapperID mid, MappingTagID tag);
     public:
       Mapper* get_mapper(Context ctx, MapperID id);
       Processor get_executing_processor(Context ctx);
@@ -1016,6 +1043,7 @@ namespace LegionRuntime {
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
+      void send_mapper_message(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1082,6 +1110,7 @@ namespace LegionRuntime {
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
+      void handle_mapper_message(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1144,6 +1173,12 @@ namespace LegionRuntime {
                                         const std::vector<Task*> &tasks,
                       const std::vector<Mapper::MappingConstraint> &constraints,
                                         MapperID map_id, MappingTagID tag);
+      void invoke_mapper_handle_message(Processor target, MapperID map_id,
+                          Processor source, const void *message, size_t length);
+    public:
+      // Handle directions and query requests from the mapper
+      void handle_mapper_send_message(Mapper *mapper, Processor target, 
+                                      const void *message, size_t length);
     public:
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
@@ -1292,7 +1327,21 @@ namespace LegionRuntime {
       std::map<AddressSpaceID,MessageManager*> message_managers;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
+    protected:
+      struct MapperInfo {
+        MapperInfo(void)
+          : proc(Processor::NO_PROC), map_id(0) { }
+        MapperInfo(Processor p, MapperID mid)
+          : proc(p), map_id(mid) { }
+      public:
+        Processor proc;
+        MapperID map_id;
+      };
+      Reservation mapper_info_lock;
+      // For every mapper remember its mapper ID and processor
+      std::map<Mapper*,MapperInfo> mapper_infos;
 #ifdef DEBUG_HIGH_LEVEL
+    protected:
       friend class TreeStateLogger;
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
 #endif

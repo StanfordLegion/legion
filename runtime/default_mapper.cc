@@ -40,7 +40,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(Machine *m, HighLevelRuntime *rt, 
                                  Processor local) 
-      : runtime(rt), local_proc(local), 
+      : Mapper(rt), local_proc(local), 
         local_kind(m->get_processor_kind(local)), machine(m),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -90,7 +90,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(const DefaultMapper &rhs)
-      : runtime(NULL), local_proc(Processor::NO_PROC),
+      : Mapper(NULL), local_proc(Processor::NO_PROC),
         local_kind(Processor::LOC_PROC), machine(NULL),
         machine_interface(MappingUtilities::MachineQueryInterface(NULL))
     //--------------------------------------------------------------------------
@@ -740,7 +740,33 @@ namespace LegionRuntime {
       return false;
     }
 
+    //--------------------------------------------------------------------------
+    int DefaultMapper::get_tunable_value(const Task *task, TunableID tid,
+                                         MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper(LEVEL_SPEW,"Get tunable value for task %s (ID %lld) in "
+                            "default mapper for processor " IDFMT "",
+                            task->variants->name,
+                            task->get_unique_task_id(), task->target_proc.id);
+      // For right now the default mapper doesn't know how to guess
+      // for tunable variables, so instead simply assert.  In the future
+      // we might consider employing a performance profiling directed
+      // approach to guessing for tunable variables.
+      assert(false);
+      return 0;
+    }
 
+    //--------------------------------------------------------------------------
+    void DefaultMapper::handle_message(Processor source,
+                                       const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper(LEVEL_SPEW,"Handle message in default mapper for processor " 
+                            IDFMT "", local_proc.id);
+      // We don't send any messages so we should never receive one
+      assert(false);
+    }
 
     //--------------------------------------------------------------------------
     /*static*/ Processor DefaultMapper::select_random_processor(

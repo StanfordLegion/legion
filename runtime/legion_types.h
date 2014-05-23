@@ -524,6 +524,7 @@ namespace LegionRuntime {
     typedef unsigned int RegionTreeID;
     typedef unsigned int DistributedID;
     typedef unsigned int AddressSpaceID;
+    typedef unsigned int TunableID;
     typedef unsigned long MappingTagID;
     typedef unsigned long VariantID;
     typedef unsigned long long UniqueID;

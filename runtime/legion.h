@@ -1754,8 +1754,11 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      Mapper(void) { }
+      Mapper(HighLevelRuntime *rt) 
+        : runtime(rt) { }
       virtual ~Mapper(void) { }
+    protected:
+      HighLevelRuntime *const runtime;
     public:
       /**
        * ----------------------------------------------------------------------
@@ -2297,6 +2300,69 @@ namespace LegionRuntime {
        */
       virtual bool speculate_on_predicate(const Task *task,
                                           bool &spec_value) = 0;
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Get Tunable Value
+       * ----------------------------------------------------------------------
+       * Ask the mapper to specify the value for a tunable variable.
+       * This operation is invoked whenever a call to 'get_tunable_value'
+       * is made by a task.  Currently all tunable variables are integers
+       * so the value returned from this method will be passed back directly
+       * as the resulting value for the tunable variable.
+       * @param task the task that is asking for the tunable variable
+       * @param tid the ID of the tunable variable (e.g. name)
+       * @param tag the context specific tag for the tunable request
+       * @return the resulting value for the tunable variable
+       */
+      virtual int get_tunable_value(const Task *task, 
+                                    TunableID tid,
+                                    MappingTagID tag) = 0;
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Handle Message
+       * ----------------------------------------------------------------------
+       * Handle a message sent from one of our adjacent mappers of the same
+       * kind on a different processor.
+       * @param source the processor whose mapper sent the message
+       * @param message buffer containing the message
+       * @param length size of the message in bytes
+       */
+      virtual void handle_message(Processor source,
+                                  const void *message, size_t length) = 0;
+
+      //------------------------------------------------------------------------
+      // All methods below here are methods that are already implemented
+      // and serve as an interface for inheriting mapper classes to 
+      // introspect the Legion runtime.  They also provide interfaces
+      // for directing the runtime to perform operations like sending
+      // messages to other mappers.  We provide these methods here in
+      // order to scope who is able to access them.  We only want mapper
+      // objects to have access to them and hence they are provided here
+      // as methods that will be inherited by sub-type mappers.
+      //------------------------------------------------------------------------
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for communication with other mappers
+      //------------------------------------------------------------------------
+
+      /**
+       * Send a message to our corresponding mapper for a different processor.
+       * @param target the processor whose mapper we are sending the message
+       * @param message a pointer to a buffer containing the message
+       * @param the size of the message to be sent in bytes
+       */
+      void send_message(Processor target, const void *message, size_t length);
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting logical region trees
+      //------------------------------------------------------------------------
+
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting the state of machine resources
+      //------------------------------------------------------------------------
     };
 
     //==========================================================================
@@ -3242,6 +3308,22 @@ namespace LegionRuntime {
                                    const MustEpochLauncher &launcher);
     public:
       //------------------------------------------------------------------------
+      // Tunable Variables 
+      //------------------------------------------------------------------------
+      /**
+       * Similar to Legion's ancestral predecessor Sequoia, Legion supports
+       * tunable variables which are integers supplied by the mapper for 
+       * individual task contexts.  The idea is that there are some parameters
+       * which should be considered parameters determined by the underlying
+       * hardware.  To make these parameters explicit, we express them as
+       * tunables which are filled in at runtime by mapper objects.  Right
+       * now all tunables are integers, however, if users develop compelling
+       * cases for other types we would be interested in knowing about them.
+       */
+      int get_tunable_value(Context ctx, TunableID tid, 
+                            MapperID mapper, MappingTagID tag);
+    public:
+      //------------------------------------------------------------------------
       // Miscellaneous Operations
       //------------------------------------------------------------------------
       /**
@@ -3695,6 +3777,7 @@ namespace LegionRuntime {
                       const char *task_name);
       static LowLevel::ReductionOpTable& get_reduction_table(void);
     private:
+      friend class Mapper;
       Runtime *runtime;
     };
 

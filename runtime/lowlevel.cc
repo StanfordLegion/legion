@@ -5263,14 +5263,19 @@ namespace LegionRuntime {
 
 #ifdef SHARED_UTILITY_QUEUE
           if (proc->shared_queue) { 
-            UtilityTask *task = proc->shared_queue->pop();
-            if (task) {
-              gasnet_hsl_unlock(&proc->mutex);
-              log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
-              task->run();
-              log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
-              delete task;
-              gasnet_hsl_lock(&proc->mutex);
+            while (!proc->shared_queue->empty()) {
+              UtilityTask *task = proc->shared_queue->pop();
+              // There is no atomicity guarantee on the check for
+              // empty and pop so we have to re-check to see if 
+              // we actually got something.
+              if (task) {
+                gasnet_hsl_unlock(&proc->mutex);
+                log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
+                task->run();
+                log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
+                delete task;
+                gasnet_hsl_lock(&proc->mutex);
+              }
             }
           }
 #endif

@@ -281,6 +281,20 @@ namespace LegionRuntime {
         }
       }
 
+      inline void print(const char *fmt, ...) __attribute__((format (printf, 2, 3)))
+      {
+        if(LEVEL_PRINT >= COMPILE_TIME_MIN_LEVEL) { // static opt-out
+          if (LEVEL_PRINT >= Logger::get_log_level()) { // dynamic opt-out
+            if (Logger::get_log_cats_enabled()[index]) {
+              va_list args;
+              va_start(args, fmt);
+              Logger::logvprintf(LEVEL_PRINT, index, fmt, args);
+              va_end(args);
+            }
+          }
+        }
+      }
+
       inline void warning(const char *fmt, ...) __attribute__((format (printf, 2, 3)))
       {
         if(LEVEL_WARNING >= COMPILE_TIME_MIN_LEVEL) {  // static opt-out

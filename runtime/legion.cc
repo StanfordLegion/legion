@@ -2620,6 +2620,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int HighLevelRuntime::get_tunable_value(Context ctx, TunableID tid,
+                                            MapperID mid, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_tunable_value(ctx, tid, mid, tag);
+    }
+
+    //--------------------------------------------------------------------------
     Mapper* HighLevelRuntime::get_mapper(Context ctx, MapperID id)
     //--------------------------------------------------------------------------
     {
@@ -2834,6 +2842,19 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::dump_profiling();
 #endif
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Mapper 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void Mapper::send_message(Processor target, 
+                              const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->handle_mapper_send_message(this, target, 
+                                                   message, length);
     }
 
   }; // namespace HighLevel

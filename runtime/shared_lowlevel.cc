@@ -4081,7 +4081,7 @@ namespace LegionRuntime {
 	      src_index = src_inst->get_linearization().get_mapping<1>()->image(index);
 	    int dst_index = index;
 	    if(dst_inst->get_linearization().get_dim() == 1)
-	      dst_index = src_inst->get_linearization().get_mapping<1>()->image(index);
+	      dst_index = dst_inst->get_linearization().get_mapping<1>()->image(index);
             void *src_ptr = src_inst->get_address(src_index, 0, redop->sizeof_rhs, 0);  
             void *dst_ptr = dst_inst->get_address(dst_index, field_start, field_size, within_field);
             redop->apply(dst_ptr, src_ptr, 1, false/*exclusive*/);

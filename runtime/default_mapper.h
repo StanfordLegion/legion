@@ -82,6 +82,12 @@ namespace LegionRuntime {
       virtual void notify_profiling_info(const Task *task);
       virtual bool speculate_on_predicate(const Task *task,
                                           bool &spec_value);
+      virtual int get_tunable_value(const Task *task, 
+                                    TunableID tid,
+                                    MappingTagID tag);
+      virtual void handle_message(Processor source,
+                                  const void *message,
+                                  size_t length);
     public:
       // Helper methods for building other kinds of mappers, made static 
       // so they can be used in non-derived classes
@@ -95,7 +101,6 @@ namespace LegionRuntime {
                               unsigned splitting_factor, 
                               std::vector<Mapper::DomainSplit> &slice);
     protected:
-      HighLevelRuntime *const runtime;
       const Processor local_proc;
       const Processor::Kind local_kind;
       Machine *const machine;
