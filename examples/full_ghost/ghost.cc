@@ -1,18 +1,3 @@
-/* Copyright 2013 Stanford University
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 
 #include <cstdio>
 #include <cassert>
@@ -323,17 +308,18 @@ void spmd_task(const Task *task,
       // that the destination instance is empty. Only
       // need to do this after the first iteration.
       if (s > 0)
-      {
         copy_launcher.add_wait_barrier(args->wait_empty[idx]);
-        // Once we have registered the dependence on the phase
-        // barrier we can advance the barrier to the next phase
-        args->wait_empty[idx] = 
-          runtime->advance_phase_barrier(ctx, args->wait_empty[idx]);
-      }
       // When we are done with the copy, signal that the
       // destination instnace is now ready
       copy_launcher.add_arrival_barrier(args->notify_ready[idx]);
       runtime->issue_copy_operation(ctx, copy_launcher);
+      // Once we've issued our copy operation, advance both of
+      // the barriers to the next generation.
+      if (s > 0)
+        args->wait_empty[idx] = 
+          runtime->advance_phase_barrier(ctx, args->wait_empty[idx]);
+      args->notify_ready[idx] = 
+        runtime->advance_phase_barrier(ctx, args->notify_ready[idx]);
     }
 
     // Acquire coherence on our left and right ghost regions
@@ -380,6 +366,9 @@ void spmd_task(const Task *task,
       if (s < (args->num_steps-1))
         release_launcher.add_arrival_barrier(args->notify_empty[idx]);
       runtime->issue_release(ctx, release_launcher);
+      if (s < (args->num_steps-1))
+        args->notify_empty[idx] = 
+          runtime->advance_phase_barrier(ctx, args->notify_empty[idx]);
     }
   }
   runtime->destroy_logical_region(ctx, local_lr);
