@@ -201,6 +201,8 @@ namespace LegionRuntime {
       DynamicTable(void);
       ~DynamicTable(void);
 
+      size_t max_entries(void) const;
+      bool has_entry(IT index) const;
       ET *lookup_entry(IT index, int owner, typename ALLOCATOR::FreeList *free_list = 0);
 
     protected:
@@ -254,6 +256,59 @@ namespace LegionRuntime {
       } else {
 	return ALLOCATOR::new_leaf_node(first_index, last_index, owner, free_list);
       }
+    }
+
+    template<typename ALLOCATOR>
+    size_t DynamicTable<ALLOCATOR>::max_entries(void) const
+    {
+      if (!root)
+        return 0;
+      size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+      for (int i = 0; i < root->level; i++)
+        elems_addressable <<= ALLOCATOR::INNER_BITS;
+      return elems_addressable;
+    }
+
+    template<typename ALLOCATOR>
+    bool DynamicTable<ALLOCATOR>::has_entry(IT index) const
+    {
+      // first, figure out how many levels the tree must have to find our index
+      int level_needed = 0;
+      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+      while(index >= elems_addressable) {
+	level_needed++;
+	elems_addressable <<= ALLOCATOR::INNER_BITS;
+      }
+
+      NodeBase *n = root;
+      if (!n || (n->level < level_needed))
+        return false;
+
+      // when we get here, root is high enough
+      assert((level_needed <= n->level) &&
+	     (index >= n->first_index) &&
+	     (index <= n->last_index));
+
+      // now walk tree, populating the path we need
+      while(n->level > 0) {
+	// intermediate nodes
+	typename ALLOCATOR::INNER_TYPE *inner = static_cast<typename ALLOCATOR::INNER_TYPE *>(n);
+
+	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
+		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+	assert((i >= 0) && (i < ALLOCATOR::INNER_TYPE::SIZE));
+
+	NodeBase *child = inner->elems[i];
+	if(child == 0) {
+          return false;	
+        }
+        assert((child != 0) &&
+	       (child->level == (n->level - 1)) &&
+	       (index >= child->first_index) &&
+	       (index <= child->last_index));
+	n = child;
+      }
+      return true;
     }
 
     template <typename ALLOCATOR>

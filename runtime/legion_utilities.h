@@ -160,15 +160,13 @@ namespace LegionRuntime {
         // If either is simultaneous we have a simultaneous dependence
         else if (IS_SIMULT(u1) || IS_SIMULT(u2))
         {
-          return check_for_anti_dependence(u1,u2,
-                                           SIMULTANEOUS_DEPENDENCE/*default*/);
+          return SIMULTANEOUS_DEPENDENCE;
         }
         else if (IS_RELAXED(u1) && IS_RELAXED(u2))
         {
           // TODO: Make this truly relaxed, right now it is the 
           // same as simultaneous
-          return check_for_anti_dependence(u1,u2,
-                                           SIMULTANEOUS_DEPENDENCE/*default*/);
+          return SIMULTANEOUS_DEPENDENCE;
           // This is what it should be: return NO_DEPENDENCE;
           // What needs to be done:
           // - RegionNode::update_valid_instances needs to allow multiple 

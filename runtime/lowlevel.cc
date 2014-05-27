@@ -1010,11 +1010,11 @@ namespace LegionRuntime {
       fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
       for(int i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &Runtime::runtime->nodes[i];
-#ifdef FIXME
-	AutoHSLLock a1(n->mutex);
-
-	for(unsigned j = 0; j < n->events.size(); j++) {
-	  Event::Impl *e = &(n->events[j]);
+        // Iterate over all the events and get their implementations
+        for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+          if (!n->events.has_entry(j))
+            continue;
+	  Event::Impl *e = n->events.lookup_entry(j, i/*node*/);
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
@@ -1044,7 +1044,6 @@ namespace LegionRuntime {
 	    fprintf(f, "\n");
 	  }
 	}
-#endif
       }
       fprintf(f,"DONE\n");
       fflush(f);
