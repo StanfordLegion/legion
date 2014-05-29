@@ -8621,14 +8621,22 @@ namespace LegionRuntime {
         assert(result); // should always succeed since targets already exist
 #endif
         // Update the closer's dirty mask
-        closer.update_dirty_mask(dirty_fields | reduc_fields |
-                                 next_closer.get_dirty_mask());
+        const FieldMask &dirty_below = next_closer.get_dirty_mask();
+        closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
 
         if (!closer.permit_leave_open)
           invalidate_instance_views(state, closing_mask, 
                                     true/*clean*/, false/*force*/);
         else
+        {
+          // If we had any dirty fields below that are getting
+          // flushed up past this level, then we have to invalidate
+          // those instances here.
+          if (!!dirty_below)
+            invalidate_instance_views(state, dirty_below,
+                                      true/*clean*/, false/*force*/);
           state.dirty_mask -= closing_mask;
+        }
         // Finally release our hold on the state
         release_physical_state(state);
       }
@@ -9102,6 +9110,65 @@ namespace LegionRuntime {
       }
       // Remove the added valid references
       remove_valid_references(new_valid_views);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::find_pending_updates(PhysicalState &state,
+                                              InstanceView *target,
+                                              FieldMask &needed_fields,
+                                              std::set<Event> &pending_events) 
+    //--------------------------------------------------------------------------
+    {
+      // Check out our fields first
+      {
+        std::map<InstanceView*,FieldMask>::const_iterator finder = 
+          state.valid_views.find(target);
+        if (finder != state.valid_views.end())
+          needed_fields -= finder->second;
+      }
+      if (!!needed_fields)
+      {
+        // Go through and see if we have any pending updates at this level
+        std::map<InstanceView*,std::map<Event,FieldMask> >::iterator
+          finder = state.pending_updates.find(target);
+        if (finder != state.pending_updates.end())
+        {
+          std::map<Event,FieldMask> &pending = finder->second;
+          if (!pending.empty())
+          {
+            for (std::map<Event,FieldMask>::const_iterator it = 
+                  pending.begin(); it != pending.end(); it++)
+            {
+              if (needed_fields * it->second)
+                continue;
+              needed_fields -= it->second;
+              pending_events.insert(it->first);
+              if (!needed_fields)
+                break;
+            }
+          }
+        }
+        // See if we still have any needed fields, if not, check the parent
+        // excluding any dirty fields which we can't count going up
+        RegionTreeNode *parent = get_parent();
+        if (!!needed_fields && (parent != NULL) && target->has_parent_view())
+        {
+          FieldMask up_mask = needed_fields - state.dirty_mask;
+          if (!!up_mask)
+          {
+            InstanceView *parent_view = target->get_parent_view();
+            FieldMask copy_up = up_mask;
+            PhysicalState &parent_state = 
+              parent->acquire_physical_state(state.ctx, false/*exclusive*/);
+            parent->find_pending_updates(parent_state, parent_view,
+                                         copy_up, pending_events);
+            parent->release_physical_state(parent_state);
+            // Now remove any fields that were removed from the copy_up
+            // mask from the set of needed fields
+            needed_fields -= (up_mask - copy_up);
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9720,6 +9787,7 @@ namespace LegionRuntime {
       state.reduction_mask = FieldMask();
       state.children = ChildState();
       state.complete_children.clear();
+      state.pending_updates.clear();
 
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
             state.valid_views.begin(); it != state.valid_views.end(); it++)
@@ -10671,16 +10739,78 @@ namespace LegionRuntime {
         // Issue updates for any fields which needed to be brought up
         // to date with the current versions of those fields
         // (assuming we are not write discard)
+        bool needs_update_views = true;
         if (!IS_WRITE_ONLY(info->req) && !!needed_fields) 
         {
-          PhysicalState &state = 
-            acquire_physical_state(info->ctx, false/*exclusive*/);
-          std::map<InstanceView*,FieldMask> valid_views;
-          find_valid_instance_views(state, needed_fields, needed_fields, 
-                                    false/*needs space*/, valid_views);
-          release_physical_state(state);
-          issue_update_copies(info, new_view, needed_fields, valid_views);
-          remove_valid_references(valid_views);
+          if (IS_READ_ONLY(info->req))
+          {
+            // Here we need to handle a special case for read-only
+            // updates.  We know that multiple tasks can be mapping
+            // in parallel and we don't want to issue duplicate
+            // copies to the same target physical instance, so we
+            // maintain a set of pending updates to physical instances.
+            // We then check to see if our needed_fields set can be
+            // reduced and only issue copies for the difference.
+            std::set<Event> pending_events;
+            FieldMask actually_needed = needed_fields;
+            PhysicalState &state = 
+              acquire_physical_state(info->ctx, true/*exclusive*/);
+            // Find any pending updates to this instance view
+            find_pending_updates(state, new_view, 
+                                 actually_needed, pending_events);
+            // If we still have some fields to update, mark
+            // that we are updating them and get the valid
+            // views with which to perform the updates
+            if (!!actually_needed)
+            {
+              UserEvent our_pending_event = UserEvent::create_user_event();
+              std::map<Event,FieldMask> &pending = 
+                                          state.pending_updates[new_view];
+              pending[our_pending_event] = actually_needed;
+              std::map<InstanceView*,FieldMask> valid_views;
+              find_valid_instance_views(state, actually_needed, 
+                  actually_needed, false/*needs space*/, valid_views);
+              release_physical_state(state);
+              issue_update_copies(info, new_view, 
+                                  actually_needed, valid_views);
+              remove_valid_references(valid_views);
+              // Reacquire the state so we can update the
+              // valid views and remove our pending event 
+              state = acquire_physical_state(info->ctx, true/*exclusive*/);
+              // Update our valid views so we don't duplicately issue copies
+              update_valid_views(state, actually_needed, 
+                                 false/*dirty*/, new_view);
+              // Then trigger our pending event and remove it 
+              our_pending_event.trigger();
+              pending.erase(our_pending_event);
+              if (pending.empty())
+                state.pending_updates.erase(new_view);
+            }
+            // Now we're done so we can release the state
+            release_physical_state(state);
+            // Mark that we no longer need to update views
+            // since they will be all up-to-date by the time
+            // we return from waiting.
+            needs_update_views = false;
+            // If we have anything to wait for, do that now
+            if (!pending_events.empty())
+            {
+              Event wait_for = Event::merge_events(pending_events);
+              wait_for.wait(true/*block*/);
+            }
+          }
+          else
+          {
+            // This is the normal non-read-only case
+            PhysicalState &state = 
+              acquire_physical_state(info->ctx, false/*exclusive*/);
+            std::map<InstanceView*,FieldMask> valid_views;
+            find_valid_instance_views(state, needed_fields, needed_fields, 
+                                      false/*needs space*/, valid_views);
+            release_physical_state(state);
+            issue_update_copies(info, new_view, needed_fields, valid_views);
+            remove_valid_references(valid_views);
+          }
         }
 
         // If we mapped the region close up any partitions
@@ -10722,7 +10852,7 @@ namespace LegionRuntime {
             closer.update_node_views(this, state);
           }
         }
-        else
+        else if (needs_update_views)
         {
           // Otherwise just issue a non-dirty update for the user fields
           update_valid_views(state, user.field_mask,
@@ -13351,6 +13481,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool InstanceView::has_parent_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent != NULL); 
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* InstanceView::get_parent_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return parent;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* InstanceView::get_subview(Color c)
     //--------------------------------------------------------------------------
     {
@@ -13585,7 +13729,9 @@ namespace LegionRuntime {
       else
         usage.privilege = READ_WRITE;
       PhysicalUser user(usage, copy_mask, copy_term);
-      preconditions.insert(manager->get_use_event());
+      Event start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+        preconditions.insert(start_use_event);
       if (parent != NULL)
       {
         // Save our color

@@ -1480,7 +1480,8 @@ namespace LegionRuntime {
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
             std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION)),
-        mapper_messages(std::vector<std::vector<MapperMessage> >(def_mappers))
+        mapper_messages(std::vector<std::vector<MapperMessage> >(def_mappers)),
+        inside_mapper_call(std::vector<bool>(def_mappers,false))
     //--------------------------------------------------------------------------
     {
       for (unsigned idx = 0; idx < def_mappers; idx++)
@@ -1491,6 +1492,7 @@ namespace LegionRuntime {
       this->idle_lock = Reservation::create_reservation();
       this->dependence_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
+      this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
       this->gc_epoch_event = Event::NO_EVENT;
@@ -1537,6 +1539,8 @@ namespace LegionRuntime {
       dependence_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
       queue_lock = Reservation::NO_RESERVATION;
+      message_lock.destroy_reservation();
+      message_lock = Reservation::NO_RESERVATION;
       stealing_lock.destroy_reservation();
       stealing_lock = Reservation::NO_RESERVATION;
       thieving_lock.destroy_reservation();
@@ -1572,12 +1576,14 @@ namespace LegionRuntime {
         mapper_objects.resize(mid+1);
         mapper_locks.resize(mid+1);
         mapper_messages.resize(mid+1);
+        inside_mapper_call.resize(mid+1);
         ready_queues.resize(mid+1);
         for (unsigned int i=old_size; i<(mid+1); i++)
         {
           mapper_objects[i] = NULL;
           mapper_locks[i].destroy_reservation();
           mapper_locks[i] = Reservation::NO_RESERVATION;
+          inside_mapper_call[i] = false;
           ready_queues[i].clear();
           outstanding_steal_requests[i] = std::set<Processor>();
         }
@@ -1623,9 +1629,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true; 
         mapper_objects[task->map_id]->select_task_options(task);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1643,9 +1655,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         result = mapper_objects[task->map_id]->pre_map_task(task);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1663,9 +1681,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         mapper_objects[task->map_id]->select_task_variant(task);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1683,12 +1707,18 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         // First select the variant
         mapper_objects[task->map_id]->select_task_variant(task);
         // Then perform the mapping
         result = mapper_objects[task->map_id]->map_task(task);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1706,9 +1736,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[mappable->map_id]);     
+        inside_mapper_call[mappable->map_id] = true;
         mapper_objects[mappable->map_id]->notify_mapping_failed(mappable);
-        messages = mapper_messages[mappable->map_id];
-        mapper_messages[mappable->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[mappable->map_id] = false;
+        if (!mapper_messages[mappable->map_id].empty())
+        {
+          messages = mapper_messages[mappable->map_id];
+          mapper_messages[mappable->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(mappable->map_id, messages);
@@ -1725,9 +1761,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[mappable->map_id]);
+        inside_mapper_call[mappable->map_id] = true;
         mapper_objects[mappable->map_id]->notify_mapping_result(mappable);
-        messages = mapper_messages[mappable->map_id];
-        mapper_messages[mappable->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[mappable->map_id] = false;
+        if (!mapper_messages[mappable->map_id].empty())
+        {
+          messages = mapper_messages[mappable->map_id];
+          mapper_messages[mappable->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(mappable->map_id, messages);
@@ -1745,10 +1787,16 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         mapper_objects[task->map_id]->slice_domain(task, 
                                                    task->index_domain, splits);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1766,9 +1814,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[op->map_id]);
+        inside_mapper_call[op->map_id] = true;
         result = mapper_objects[op->map_id]->map_inline(op);
-        messages = mapper_messages[op->map_id];
-        mapper_messages[op->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[op->map_id] = false;
+        if (!mapper_messages[op->map_id].empty())
+        {
+          messages = mapper_messages[op->map_id];
+          mapper_messages[op->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(op->map_id, messages);
@@ -1787,9 +1841,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[op->map_id]);
+        inside_mapper_call[op->map_id] = true;
         result = mapper_objects[op->map_id]->map_copy(op);
-        messages = mapper_messages[op->map_id];
-        mapper_messages[op->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[op->map_id] = false;
+        if (!mapper_messages[op->map_id].empty())
+        {
+          messages = mapper_messages[op->map_id];
+          mapper_messages[op->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(op->map_id, messages);
@@ -1808,10 +1868,16 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         result = mapper_objects[task->map_id]->
                                         speculate_on_predicate(task, value);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1838,11 +1904,17 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[mappable->map_id]);
+        inside_mapper_call[mappable->map_id] = true;
         result = mapper_objects[mappable->map_id]->rank_copy_targets(mappable,
             handle, memories, complete, max_blocking_factor, to_reuse, 
             to_create, create_one, blocking_factor);
-        messages = mapper_messages[mappable->map_id];
-        mapper_messages[mappable->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[mappable->map_id] = false;
+        if (!mapper_messages[mappable->map_id].empty())
+        {
+          messages = mapper_messages[mappable->map_id];
+          mapper_messages[mappable->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(mappable->map_id, messages);
@@ -1863,10 +1935,16 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[mappable->map_id]);
+        inside_mapper_call[mappable->map_id] = true;
         mapper_objects[mappable->map_id]->rank_copy_sources(mappable,
             memories, destination, order);
-        messages = mapper_messages[mappable->map_id];
-        mapper_messages[mappable->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[mappable->map_id] = false;
+        if (!mapper_messages[mappable->map_id].empty())
+        {
+          messages = mapper_messages[mappable->map_id];
+          mapper_messages[mappable->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(mappable->map_id, messages);
@@ -1883,9 +1961,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
         mapper_objects[task->map_id]->notify_profiling_info(task);
-        messages = mapper_messages[task->map_id];
-        mapper_messages[task->map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(task->map_id, messages);
@@ -1906,9 +1990,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[map_id]);
+        inside_mapper_call[map_id] = true;
         result = mapper_objects[map_id]->map_must_epoch(tasks,constraints,tag);
-        messages = mapper_messages[map_id];
-        mapper_messages[map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[map_id] = false;
+        if (!mapper_messages[map_id].empty())
+        {
+          messages = mapper_messages[map_id];
+          mapper_messages[map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
@@ -1930,9 +2020,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[map_id]);
+        inside_mapper_call[map_id] = true;
         result = mapper_objects[map_id]->get_tunable_value(task, tid, tag);
-        messages = mapper_messages[map_id];
-        mapper_messages[map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[map_id] = false;
+        if (!mapper_messages[map_id].empty())
+        {
+          messages = mapper_messages[map_id];
+          mapper_messages[map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
@@ -1953,9 +2049,15 @@ namespace LegionRuntime {
       std::vector<MapperMessage> messages;
       {
         AutoLock m_lock(mapper_locks[map_id]);
+        inside_mapper_call[map_id] = true;
         mapper_objects[map_id]->handle_message(source, message, length);
-        messages = mapper_messages[map_id];
-        mapper_messages[map_id].clear();
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[map_id] = false;
+        if (!mapper_messages[map_id].empty())
+        {
+          messages = mapper_messages[map_id];
+          mapper_messages[map_id].clear();
+        }
       }
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
@@ -1966,16 +2068,28 @@ namespace LegionRuntime {
                             MapperID map_id, const void *message, size_t length)
     //--------------------------------------------------------------------------
     {
-      // No need to take the lock as this can only be called inside of a
-      // mapper call which means we already hold the lock
 #ifdef DEBUG_HIGH_LEVEL
       assert(map_id < mapper_messages.size());
 #endif
-      // Need to make a copy here of the message
-      void *copy = malloc(length);
-      memcpy(copy, message, length);
-      // save the message
-      mapper_messages[map_id].push_back(MapperMessage(target, copy, length));
+      // Take the message lock
+      AutoLock g_lock(message_lock);
+      // Check to see if we are inside of a mapper call
+      if (inside_mapper_call[map_id])
+      {
+        // Need to make a copy here of the message
+        void *copy = malloc(length);
+        memcpy(copy, message, length);
+        // save the message
+        mapper_messages[map_id].push_back(MapperMessage(target, copy, length));
+      }
+      else
+      {
+        // Otherwise the application has explicitly invoked one
+        // of its mapper calls, so we can safely send the message now
+        // without needing to worry about deadlock 
+        runtime->invoke_mapper_handle_message(target, map_id, local_proc,
+                                              message, length);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -5382,7 +5382,7 @@ namespace LegionRuntime {
         // Check to make sure they selected the same instance 
         if (inst1 != inst2)
         {
-          log_run(LEVEL_ERROR,"MUST EPOCH ERROR: failed constrain! "
+          log_run(LEVEL_ERROR,"MUST EPOCH ERROR: failed constraint! "
               "Task %s (ID %lld) mapped region %d to instance " IDFMT " in "
               "memory " IDFMT " , but task %s (ID %lld) mapped region %d to "
               "instance " IDFMT " in memory " IDFMT ".",

@@ -1107,6 +1107,7 @@ namespace LegionRuntime {
       std::map<InstanceView*,FieldMask> valid_views;
       std::map<ReductionView*,FieldMask> reduction_views;
       std::set<Color> complete_children;
+      std::map<InstanceView*,std::map<Event,FieldMask> > pending_updates;
     public:
       // These are used for managing access to the physical state
       unsigned acquired_count;
@@ -1449,6 +1450,10 @@ namespace LegionRuntime {
                                 const std::set<ReductionView*> &valid_views);
       void pull_valid_instance_views(PhysicalState &state,
                                      const FieldMask &mask);
+      void find_pending_updates(PhysicalState &state, 
+                                InstanceView *target,
+                                FieldMask &needed_fields,
+                                std::set<Event> &pending_events);
       // Since figuring out how to issue copies is expensive, try not
       // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
@@ -2445,6 +2450,8 @@ namespace LegionRuntime {
     public:
       Memory get_location(void) const;
       size_t get_blocking_factor(void) const;
+      bool has_parent_view(void) const;
+      InstanceView* get_parent_view(void) const;
       InstanceView* get_subview(Color c);
       bool add_subview(InstanceView *view, Color c);
       void add_alias_did(DistributedID did);

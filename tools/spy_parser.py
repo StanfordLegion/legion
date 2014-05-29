@@ -240,7 +240,7 @@ def parse_log_file(file_name, state):
             continue
         m = physical_reduc_pat.match(line)
         if m <> None:
-            if not state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index')), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
+            if not state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
                 replay_lines.append(line)
             continue
         m = op_user_pat.match(line)

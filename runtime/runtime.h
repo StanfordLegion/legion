@@ -475,6 +475,9 @@ namespace LegionRuntime {
       // Reservation for protecting the ready queues and
       // the other ready queue
       Reservation queue_lock;
+      // Reservation for protecting the list of messages that
+      // need to be sent
+      Reservation message_lock;
       // A list of operations needing dependence analysis.  We keep
       // a seperate list for each depth.  This allows us to pull
       // from deeper lists first which is a performance optimization
@@ -492,6 +495,8 @@ namespace LegionRuntime {
       std::vector<Reservation> mapper_locks;
       // Pending mapper messages
       std::vector<std::vector<MapperMessage> > mapper_messages;
+      // Keep track of whether we are inside of a mapper call
+      std::vector<bool> inside_mapper_call;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;

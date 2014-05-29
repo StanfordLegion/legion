@@ -2513,7 +2513,7 @@ namespace LegionRuntime {
         TraceCompleteOp *complete_op = runtime->get_available_trace_op();
         complete_op->initialize_complete(this);
 #ifdef INORDER_EXECUTION
-        Event term_event = capture_op->get_completion_event();
+        Event term_event = complete_op->get_completion_event();
 #endif
         runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
 #ifdef INORDER_EXECUTION
