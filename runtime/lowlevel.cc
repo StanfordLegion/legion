@@ -3058,6 +3058,7 @@ namespace LegionRuntime {
 	}
 
       case Memory::Impl::MKIND_ZEROCOPY:
+#ifdef USE_CUDA
       case Memory::Impl::MKIND_GPUFB:
 	{
 	  impl->put_bytes(args.offset, data, datalen);
@@ -3067,7 +3068,7 @@ namespace LegionRuntime {
 				       gasnet_mynode());
 	  break;
 	}
-
+#endif
       default:
 	assert(0);
       }
@@ -6729,7 +6730,9 @@ namespace LegionRuntime {
       switch(impl->kind) {
       case Memory::Impl::MKIND_SYSMEM:
       case Memory::Impl::MKIND_ZEROCOPY:
+#ifdef USE_CUDA
       case Memory::Impl::MKIND_GPUFB:
+#endif
       default:
 	assert(0);
 
