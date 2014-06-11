@@ -24,9 +24,15 @@ ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
-# defaults for GASNet
+# defaults for GASNet if they have not been supplied by some other source. this
+# is done because a user's configuration (in their project's Makefile, for
+# example) may be unconditionally overwritten :-\.
+ifndef CONDUIT
 CONDUIT = udp
+endif
+ifndef GASNET
 GASNET = $(LG_RT_DIR)/gasnet/release
+endif
 
 # Handle some of the common machines we frequent
 
