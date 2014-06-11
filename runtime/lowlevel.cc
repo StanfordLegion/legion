@@ -4691,10 +4691,15 @@ namespace LegionRuntime {
 	    Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
 	    if(it != task_id_table.end()) {
 	      log_task(LEVEL_INFO, "calling processor shutdown task: proc=" IDFMT "", proc->me.id);
+              proc->active_thread_count++;
+              state = STATE_RUN;
 
 	      al.release();
 	      (it->second)(0, 0, proc->me);
 	      al.reacquire();
+
+              proc->active_thread_count--;
+              state = STATE_IDLE;
 
 	      log_task(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", proc->me.id);
 	    }

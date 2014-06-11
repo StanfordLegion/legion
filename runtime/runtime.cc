@@ -1477,6 +1477,7 @@ namespace LegionRuntime {
         idle_task_enabled(true),
 #endif
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
+        pending_gc_ops(0),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
             std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION)),
@@ -1492,10 +1493,10 @@ namespace LegionRuntime {
       this->idle_lock = Reservation::create_reservation();
       this->dependence_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
+      this->gc_lock = Reservation::create_reservation();
       this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
-      this->gc_epoch_event = Event::NO_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1539,6 +1540,8 @@ namespace LegionRuntime {
       dependence_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
       queue_lock = Reservation::NO_RESERVATION;
+      gc_lock.destroy_reservation();
+      gc_lock = Reservation::NO_RESERVATION;
       message_lock.destroy_reservation();
       message_lock = Reservation::NO_RESERVATION;
       stealing_lock.destroy_reservation();
@@ -2131,8 +2134,11 @@ namespace LegionRuntime {
       // Do any other operations next
       bool more_ops = perform_other_operations();
       disable = disable && !more_ops;
-      // Finally do any mapping operations
+      // Perform any mapping operations
       perform_mapping_operations();
+      // Issue any garbage collection operations
+      bool more_gc = perform_gc_epoch();
+      disable = disable && !more_gc;
 
       // Lastly we need to check to see if we should
       // disable the idle task.  Hold the idle lock
@@ -2145,6 +2151,8 @@ namespace LegionRuntime {
         // The condition for shutting down the idle task
         // is as follows:
         // We have no dependence analyses to perform
+        //   AND
+        // We have nothing left in our gc epoch queue
         //   AND
         // We have nothing in our local ready queue
         //   AND
@@ -2167,30 +2175,35 @@ namespace LegionRuntime {
         }
         if (all_empty)
         {
-          if (local_ready_queue.empty())
+          AutoLock gc(gc_lock);
+          if (gc_epoch_events.empty())
           {
-            // Now check to see either we have enough pending
-            // or if we have nothing in our ready queues
-            if (current_executing && (current_pending >= min_outstanding))
+            AutoLock q_lock(queue_lock);
+            if (local_ready_queue.empty())
             {
-              idle_task_enabled = false;
-              Processor copy = local_proc;
-              copy.disable_idle_task();
-            }
-            else
-            {
-              // Check to see if the ready queues are empty 
-              for (unsigned idx = 0; all_empty &&
-                    (idx < ready_queues.size()); idx++)
-              {
-                if (!ready_queues[idx].empty())
-                  all_empty = false;
-              }
-              if (all_empty)
+              // Now check to see either we have enough pending
+              // or if we have nothing in our ready queues
+              if (current_executing && (current_pending >= min_outstanding))
               {
                 idle_task_enabled = false;
                 Processor copy = local_proc;
                 copy.disable_idle_task();
+              }
+              else
+              {
+                // Check to see if the ready queues are empty 
+                for (unsigned idx = 0; all_empty &&
+                      (idx < ready_queues.size()); idx++)
+                {
+                  if (!ready_queues[idx].empty())
+                    all_empty = false;
+                }
+                if (all_empty)
+                {
+                  idle_task_enabled = false;
+                  Processor copy = local_proc;
+                  copy.disable_idle_task();
+                }
               }
             }
           }
@@ -2410,12 +2423,6 @@ namespace LegionRuntime {
         assert(depth < dependence_queues.size());
 #endif
         dependence_queues[depth].queue.push_back(op);
-        // See if we need to start a new garbage collection epoch
-        if (!gc_epoch_event.exists())
-        {
-          gc_epoch_trigger = UserEvent::create_user_event();
-          gc_epoch_event = gc_epoch_trigger;
-        }
       }
       {
         AutoLock i_lock(idle_lock);
@@ -2486,8 +2493,46 @@ namespace LegionRuntime {
     Event ProcessorManager::find_gc_epoch_event(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock d_lock(dependence_lock);
-      return gc_epoch_event;
+      Event result = Event::NO_EVENT;
+      if (!pending_shutdown)
+      {
+        AutoLock gc(gc_lock);
+        // See if we need to start a new GC epoch
+        if (gc_epoch_events.empty() || (pending_gc_ops == superscalar_width))
+        {
+          gc_epoch_events.push_back(UserEvent::create_user_event());
+          pending_gc_ops = 0;
+        }
+        pending_gc_ops++;
+        result = gc_epoch_events.back();
+      }
+      AutoLock i_lock(idle_lock);
+      if (!idle_task_enabled)
+      {
+        idle_task_enabled = true;
+        Processor copy = local_proc;
+        copy.enable_idle_task();
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::notify_pending_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger all our pending gc epochs
+      std::deque<UserEvent> to_trigger;
+      {
+        pending_shutdown = true;
+        AutoLock gc(gc_lock);
+        to_trigger = gc_epoch_events;
+        gc_epoch_events.clear();
+      }
+      for (std::deque<UserEvent>::const_iterator it = to_trigger.begin();
+            it != to_trigger.end(); it++)
+      {
+        it->trigger();
+      }
     }
 
 #ifdef HANG_TRACE
@@ -2521,56 +2566,36 @@ namespace LegionRuntime {
     {
 #ifndef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
       bool remaining_ops = false;
-      UserEvent trigger_event;
-      bool needs_trigger = false;
       // Quick check without holding the lock
+      AutoLock d_lock(dependence_lock);
+      // An important optimization here is that we always pull
+      // elements off the deeper queues first which optimizes
+      // for a depth-first traversal of the task/operation tree.
+      unsigned handled_ops = 0;
+      for (int idx = int(dependence_queues.size())-1;
+            idx >= 0; idx--)
       {
-        AutoLock d_lock(dependence_lock);
-        // An important optimization here is that we always pull
-        // elements off the deeper queues first which optimizes
-        // for a depth-first traversal of the task/operation tree.
-        unsigned handled_ops = 0;
-        for (int idx = int(dependence_queues.size())-1;
-              idx >= 0; idx--)
+        Event prev_event = dependence_queues[idx].last_event;
+        std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
+        while ((handled_ops < superscalar_width) &&
+                !current_queue.empty())
         {
-          Event prev_event = dependence_queues[idx].last_event;
-          std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
-          while ((handled_ops < superscalar_width) &&
-                  !current_queue.empty())
-          {
-            prev_event = utility_proc.spawn(TRIGGER_DEPENDENCE_ID,
-                &current_queue.front(), sizeof(Operation*), prev_event);
-            current_queue.pop_front();
-            handled_ops++;
-          }
-          dependence_queues[idx].last_event = prev_event;
-          remaining_ops = remaining_ops || !current_queue.empty();
-          // If we know we have remaining ops and we've
-          // got all the ops we need, then we can break
-          if ((handled_ops == superscalar_width) && remaining_ops)
-            break;
+          prev_event = utility_proc.spawn(TRIGGER_DEPENDENCE_ID,
+              &current_queue.front(), sizeof(Operation*), prev_event);
+          current_queue.pop_front();
+          handled_ops++;
         }
-        // If we no longer have any remaining dependence analyses
-        // to do, then see if we have a garbage collection
-        // epoch that we can trigger.
-        if (!remaining_ops && gc_epoch_event.exists())
-        {
-          trigger_event = gc_epoch_trigger;
-          needs_trigger = true;
-          gc_epoch_event = Event::NO_EVENT;
-        }
+        dependence_queues[idx].last_event = prev_event;
+        remaining_ops = remaining_ops || !current_queue.empty();
+        // If we know we have remaining ops and we've
+        // got all the ops we need, then we can break
+        if ((handled_ops == superscalar_width) && remaining_ops)
+          break;
       }
-      // Don't trigger the event while holding the lock
-      // You never know what the low-level runtime might decide to do
-      if (needs_trigger)
-        trigger_event.trigger();
-
       return remaining_ops;
 #else
       std::vector<Operation*> ops;
       bool remaining_ops = false;
-      UserEvent trigger_event;
-      bool needs_trigger = false;
       bool return_analysis_hold = false;
       // Quick check without holding the lock
       if (!pending_dependence_analysis)
@@ -2606,15 +2631,6 @@ namespace LegionRuntime {
             if ((handled_ops == superscalar_width) && remaining_ops)
               break;
           }
-          // If we no longer have any remaining dependence analyses
-          // to do, then see if we have a garbage collection
-          // epoch that we can trigger.
-          if (!remaining_ops && gc_epoch_event.exists())
-          {
-            trigger_event = gc_epoch_trigger;
-            needs_trigger = true;
-            gc_epoch_event = Event::NO_EVENT;
-          }
         }
       }
       else
@@ -2633,10 +2649,6 @@ namespace LegionRuntime {
       {
         ops[idx]->trigger_dependence_analysis();
       }
-      // Don't trigger the event while holding the lock
-      // You never know what the low-level runtime might decide to do
-      if (needs_trigger)
-        trigger_event.trigger();
       if (return_analysis_hold)
       {
         AutoLock d_lock(dependence_lock);
@@ -2833,6 +2845,48 @@ namespace LegionRuntime {
       // Finally issue any steal requeusts
       if (!stealing_disabled && !stealing_targets.empty())
         runtime->send_steal_request(stealing_targets, local_proc);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProcessorManager::perform_gc_epoch(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(idle_lock);
+      AutoLock gc(gc_lock);
+      // Handle the quick out
+      if (gc_epoch_events.empty())
+        return false;
+      // Only issue a garbage collection epoch if we have enough
+      // tasks in flight on our processor
+      bool trigger_gc_epoch = false;
+      if (current_executing && (current_pending >= min_outstanding))
+      {
+        trigger_gc_epoch = true;
+      }
+      else
+      {
+        AutoLock q_lock(queue_lock);
+        if (local_ready_queue.empty())
+        {
+          bool all_empty = true;
+          for (unsigned idx = 0; idx < ready_queues.size(); idx++)
+          {
+            if (!ready_queues[idx].empty())
+            {
+              all_empty = false;
+              break;
+            }
+          }
+          trigger_gc_epoch = all_empty;
+        }
+      }
+      if (trigger_gc_epoch && !gc_epoch_events.empty())
+      {
+        UserEvent gc_epoch_event = gc_epoch_events.front();
+        gc_epoch_event.trigger();
+        gc_epoch_events.pop_front();
+      }
+      return !gc_epoch_events.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -4078,6 +4132,9 @@ namespace LegionRuntime {
                                     stealing_disabled,
                                     machine->get_all_processors().size()-1);
         proc_managers[*it] = manager;
+        // See if we have a utility processor for this manager
+        if (manager->explicit_utility_proc)
+          utility_managers[manager->utility_proc] = manager;
         manager->add_mapper(0, new DefaultMapper(machine, high_level, *it),
                             false/*needs check*/);
       }
@@ -4599,6 +4656,107 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space(Context ctx, 
+                                           const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the convex hull of all the domains
+      Domain hull = *(domains.begin());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!domains.empty());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal index space creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (hull.get_dim() == 0)
+      {
+        log_index(LEVEL_ERROR,"Create index space with multiple domains "
+                              "must be created with domains for non-zero "
+                              "dimension in task %s (ID %lld)",
+                              ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_DOMAIN_DIM_MISMATCH);
+      }
+      for (std::set<Domain>::const_iterator it = domains.begin();
+            it != domains.end(); it++)
+      {
+        assert(it->exists());
+        if (hull.get_dim() != it->get_dim())
+        {
+          log_index(LEVEL_ERROR,"A set of domains passed to create_index_space "
+                                "must all have the same dimensions in task "
+                                "%s (ID %lld)",
+                                ctx->variants->name, ctx->get_unique_task_id());
+          assert(false);
+          exit(ERROR_DOMAIN_DIM_MISMATCH);
+        }
+      }
+#endif
+      switch (hull.get_dim())
+      {
+        case 1:
+          {
+            Rect<1> base = hull.get_rect<1>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              Rect<1> next = it->get_rect<1>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<1>(base);
+            break;
+          }
+        case 2:
+          {
+            Rect<2> base = hull.get_rect<2>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              Rect<2> next = it->get_rect<2>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<2>(base);
+            break;
+          }
+        case 3:
+          {
+            Rect<3> base = hull.get_rect<3>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              Rect<3> next = it->get_rect<3>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<3>(base);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      IndexSpace space = hull.get_index_space(true/*create if needed*/);
+#ifdef DEBUG_HIGH_LEVEL
+      log_index(LEVEL_DEBUG,"Creating dummy index space " IDFMT " in task %s "
+                            "(ID %lld) for domain", 
+                            space.id, ctx->variants->name,
+                            ctx->get_unique_task_id());
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_top_index_space(ctx->get_executing_processor(),
+                                         space);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_top_index_space(space.id);
+#endif
+      forest->create_index_space(hull, domains);
+      ctx->register_index_space_creation(space);
+      return space;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4891,7 +5049,168 @@ namespace LegionRuntime {
                                           pid, subspace,
                                           it->first);
       }
+#endif 
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_index_partition(
+                                          Context ctx, IndexSpace parent,
+                                          Domain color_space,
+                                          const MultiDomainColoring &coloring,
+                                          bool disjoint,
+                                          int part_color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid = get_unique_partition_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(pid > 0);
+      log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal index partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (disjoint && verify_disjointness)
+      {
+        std::set<Color> current_colors;
+        for (std::map<Color,std::set<Domain> >::const_iterator it1 = 
+              coloring.begin(); it1 != coloring.end(); it1++)
+        {
+          current_colors.insert(it1->first);
+          for (std::map<Color,std::set<Domain> >::const_iterator it2 = 
+                coloring.begin(); it2 != coloring.end(); it2++)
+          {
+            if (current_colors.find(it2->first) != current_colors.end())
+              continue;
+            bool overlaps = false;
+            for (std::set<Domain>::const_iterator it3 = it1->second.begin();
+                  !overlaps && (it3 != it1->second.end()); it3++)
+            {
+              for (std::set<Domain>::const_iterator it4 = it2->second.begin();
+                    !overlaps && (it4 != it2->second.end()); it4++)
+              {
+                assert(it3->get_dim() == it4->get_dim());
+                switch (it3->get_dim())
+                {
+                  case 1:
+                    {
+                      Rect<1> d1 = it3->get_rect<1>();
+                      Rect<1> d2 = it4->get_rect<1>();
+                      overlaps = d1.overlaps(d2);
+                      break;
+                    }
+                  case 2:
+                    {
+                      Rect<2> d1 = it3->get_rect<2>();
+                      Rect<2> d2 = it4->get_rect<2>();
+                      overlaps = d1.overlaps(d2);
+                      break;
+                    }
+                  case 3:
+                    {
+                      Rect<3> d1 = it3->get_rect<3>();
+                      Rect<3> d2 = it4->get_rect<3>();
+                      break;
+                    }
+                  default:
+                    assert(false);
+                }
+              }
+            }
+            if (overlaps)
+            {
+              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of multi-domain "
+                              "partition %d are not disjoint when they are "
+                              "claimed to be!", it1->first, it2->first, pid);
+              assert(false);
+              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+            }
+          }
+        }
+      }
 #endif
+      // Build all the convex hulls
+      std::map<Color,Domain> convex_hulls;
+      for (std::map<Color,std::set<Domain> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        Domain hull = *(it->second.begin());
+        switch (hull.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> base = hull.get_rect<1>();
+              for (std::set<Domain>::const_iterator dom_it =
+                    it->second.begin(); dom_it != it->second.end(); dom_it++)
+              {
+#ifdef DEBUG_HIGH_LEVEL
+                assert(dom_it->get_dim() == 1);
+#endif
+                Rect<1> next = dom_it->get_rect<1>();
+                base = base.convex_hull(next);
+              }
+              hull = Domain::from_rect<1>(base);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> base = hull.get_rect<2>();
+              for (std::set<Domain>::const_iterator dom_it =
+                    it->second.begin(); dom_it != it->second.end(); dom_it++)
+              {
+#ifdef DEBUG_HIGH_LEVEL
+                assert(dom_it->get_dim() == 2);
+#endif
+                Rect<2> next = dom_it->get_rect<2>();
+                base = base.convex_hull(next);
+              }
+              hull = Domain::from_rect<2>(base);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> base = hull.get_rect<3>();
+              for (std::set<Domain>::const_iterator dom_it =
+                    it->second.begin(); dom_it != it->second.end(); dom_it++)
+              {
+#ifdef DEBUG_HIGH_LEVEL
+                assert(dom_it->get_dim() == 3);
+#endif
+                Rect<3> next = dom_it->get_rect<3>();
+                base = base.convex_hull(next);
+              }
+              hull = Domain::from_rect<3>(base);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        convex_hulls[it->first] = hull;
+      }
+      forest->create_index_partition(pid, parent, disjoint, 
+                                     part_color, convex_hulls, 
+                                     color_space, coloring);
+#ifdef LEGION_LOGGING
+      part_color = forest->get_index_partition_color(pid);
+      LegionLogging::log_index_partition(ctx->get_executing_processor(),
+                                         parent, pid, disjoint,
+                                         part_color);
+      for (std::map<Color,std::set<Domain> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        IndexSpace subspace = get_index_subspace(ctx, pid, it->first);
+        LegionLogging::log_index_subspace(ctx->get_executing_processor(),
+                                          pid, subspace,
+                                          it->first);
+      }
+#endif 
       return pid;
     }
 
@@ -9046,10 +9365,35 @@ namespace LegionRuntime {
     Event Runtime::find_gc_epoch_event(Processor local_proc)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(local_proc) != proc_managers.end());
+      // There are some special cases here with this call because
+      // the processor that is passed in here might not be a normal
+      // processor. They can also be utility processors or the explicit
+      // garbage collection processor.
+#ifdef SPECIALIZED_UTIL_PROCS
+      // We should never be here if there is a dedicated gc processor
+      assert(false);
 #endif
-      return proc_managers[local_proc]->find_gc_epoch_event();
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(local_proc);
+      if (finder != proc_managers.end())
+        return finder->second->find_gc_epoch_event();
+      finder = utility_managers.find(local_proc);
+      if (finder != utility_managers.end())
+        return finder->second->find_gc_epoch_event();
+      // This should never happen
+      assert(false);
+      return Event::NO_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::notify_pending_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->notify_pending_shutdown();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10140,6 +10484,7 @@ namespace LegionRuntime {
                                       DEFAULT_MAX_MESSAGE_SIZE;
     /*static*/ unsigned Runtime::max_filter_size = 
                                       DEFAULT_MAX_FILTER_SIZE;
+    /*static*/ bool Runtime::enable_imprecise_filter = false;
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
@@ -10246,6 +10591,7 @@ namespace LegionRuntime {
 #endif
         for (int i = 1; i < argc; i++)
         {
+          BOOL_ARG("-hl:imprecise",enable_imprecise_filter);
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:nosteal",stealing_disabled);
           BOOL_ARG("-hl:resilient",resilient_mode);
@@ -11167,6 +11513,7 @@ namespace LegionRuntime {
         delete get_runtime(p);
       else
       {
+        Runtime::get_runtime(p)->notify_pending_shutdown();
         unsigned result = __sync_sub_and_fetch(&Runtime::shutdown_counter, 1);
         // Only delete the runtime if we're the last one to use it
         if (result == 0)
@@ -11228,7 +11575,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Deserializer derez(args, arglen);
-      PhysicalView::handle_deferred_collect(derez);
+      Runtime *rt = Runtime::get_runtime(p);
+      PhysicalView::handle_deferred_collect(derez, p, rt->forest);
     }
 
     //--------------------------------------------------------------------------

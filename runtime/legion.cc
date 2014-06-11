@@ -2027,6 +2027,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space(Context ctx, 
+                                                const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space(ctx, domains);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -2051,6 +2059,19 @@ namespace LegionRuntime {
                                           Domain color_space,
                                           const DomainColoring &coloring,
                                           bool disjoint, 
+                                          int part_color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_partition(ctx, parent, color_space, coloring,
+                                             disjoint, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_index_partition(
+                                          Context ctx, IndexSpace parent,
+                                          Domain color_space,
+                                          const MultiDomainColoring &coloring,
+                                          bool disjoint,
                                           int part_color)
     //--------------------------------------------------------------------------
     {

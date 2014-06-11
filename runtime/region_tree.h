@@ -56,9 +56,15 @@ namespace LegionRuntime {
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
       void create_index_space(const Domain &domain);
+      void create_index_space(const Domain &hull,
+                              const std::set<Domain> &domains);
       void create_index_partition(IndexPartition pid, IndexSpace parent,
           bool disjoint, int part_color,
           const std::map<Color,Domain> &subspaces, Domain color_space);
+      void create_index_partition(IndexPartition pid, IndexSpace parent,
+          bool disjoint, int part_color,
+          const std::map<Color,Domain> &hulls, Domain color_space,
+          const std::map<Color,std::set<Domain> > &components);
       bool destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
@@ -351,23 +357,25 @@ namespace LegionRuntime {
     public:
       class DynamicSpaceTest {
       public:
-        DynamicSpaceTest(IndexPartNode *parent, Color c1, 
-              IndexSpace left, Color c2, IndexSpace right);
+        DynamicSpaceTest(IndexPartNode *parent, 
+                         IndexSpaceNode *left, 
+                         IndexSpaceNode *right);
         void perform_test(void) const;
       public:
         IndexPartNode *parent;
-        Color c1, c2;
-        IndexSpace left, right;
+        IndexSpaceNode *left, *right;
       };
       class DynamicPartTest {
       public:
-        DynamicPartTest(IndexSpaceNode *parent, Color c1, Color c2);
-        void add_child_space(bool left, IndexSpace space);
+        DynamicPartTest(IndexSpaceNode *parent, 
+                        IndexPartNode *left, 
+                        IndexPartNode *right);
+        void add_child_space(bool left, IndexSpaceNode *node);
         void perform_test(void) const;
       public:
         IndexSpaceNode *parent;
-        Color c1, c2;
-        std::vector<IndexSpace> left, right;
+        IndexPartNode *left, *right;
+        std::vector<IndexSpaceNode*> left_spaces, right_spaces;
       };
     private:
       Reservation dynamic_lock;
@@ -376,6 +384,10 @@ namespace LegionRuntime {
     public:
       bool perform_dynamic_tests(unsigned num_tests);
       void add_disjointness_test(const DynamicPartTest &test);
+      static bool are_disjoint(const Domain &left,
+                               const Domain &right);
+      static bool are_disjoint(IndexSpaceNode *left,
+                               IndexSpaceNode *right);
 #endif
 #ifdef DEBUG_PERF
     public:
@@ -591,7 +603,12 @@ namespace LegionRuntime {
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
       void destroy_node(AddressSpaceID source);
+    public:
+      bool has_component_domains(void) const;
+      void update_component_domains(const std::set<Domain> &domains);
+      const std::set<Domain>& get_component_domains(void) const;
 #ifdef DYNAMIC_TESTS
+    public:
       void add_disjointness_tests(IndexPartNode *child,
                 const std::vector<IndexSpaceNode*> &children);
 #endif
@@ -615,6 +632,8 @@ namespace LegionRuntime {
       std::map<Color,IndexPartNode*> valid_map;
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<Color,Color> > disjoint_subsets;
+      // If we have component domains keep track of those as well
+      std::set<Domain> component_domains;
     private:
       IndexSpaceAllocator *allocator;
     };
@@ -1354,6 +1373,16 @@ namespace LegionRuntime {
      */
     class RegionTreeNode {
     public:
+      struct PreconditionSet {
+      public:
+        PreconditionSet(void) { }
+        PreconditionSet(const FieldMask &m)
+          : pre_mask(m) { }
+      public:
+        FieldMask pre_mask;
+        std::set<Event> preconditions;
+      };
+    public:
       RegionTreeNode(RegionTreeForest *ctx);
       virtual ~RegionTreeNode(void);
     public:
@@ -1499,6 +1528,8 @@ namespace LegionRuntime {
       virtual bool is_region(void) const = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
+      virtual bool has_component_domains(void) const = 0;
+      virtual const std::set<Domain>& get_component_domains(void) const = 0;
       virtual Domain get_domain(void) const = 0;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
@@ -1598,6 +1629,8 @@ namespace LegionRuntime {
       virtual bool is_region(void) const;
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual bool has_component_domains(void) const;
+      virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
@@ -1703,6 +1736,8 @@ namespace LegionRuntime {
       virtual bool is_region(void) const;
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual bool has_component_domains(void) const;
+      virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
       virtual InstanceView* create_instance(Memory target_mem,
                                             const std::set<FieldID> &fields,
@@ -2168,6 +2203,17 @@ namespace LegionRuntime {
      */
     class InstanceManager : public PhysicalManager {
     public:
+      struct OffsetEntry {
+      public:
+        OffsetEntry(void) { }
+        OffsetEntry(const FieldMask &m,
+                    const std::vector<Domain::CopySrcDstField> &f)
+          : offset_mask(m), offsets(f) { }
+      public:
+        FieldMask offset_mask;
+        std::vector<Domain::CopySrcDstField> offsets;
+      };
+    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       Memory mem, PhysicalInstance inst, RegionNode *node,
@@ -2249,6 +2295,9 @@ namespace LegionRuntime {
       // being collected before the context in which it was created
       // is destroyed.
       bool persistent;
+    protected:
+      Reservation offset_lock;
+      std::map<FIELD_TYPE,std::vector<OffsetEntry> > memoized_offsets;
     };
 
     /**
@@ -2390,10 +2439,12 @@ namespace LegionRuntime {
       virtual ReductionView* as_reduction_view(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                 std::map<Event,FieldMask> &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc,
-                                 std::set<Event> &preconditions) = 0;
+                                 Processor exec_proc) = 0;
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
@@ -2406,10 +2457,12 @@ namespace LegionRuntime {
       virtual void notify_invalid(void) = 0;
     public:
       void defer_collect_user(Event term_event, const FieldMask &mask,
-                              Processor p, bool gc_epoch);
+                              Processor p);
       virtual void collect_user(Event term_event,
                                 const FieldMask &term_mask) = 0;
-      static void handle_deferred_collect(Deserializer &derez);
+      static void handle_deferred_collect(Deserializer &derez,
+                                          Processor gc_proc,
+                                          RegionTreeForest *context);
     public:
       void send_back_user(const PhysicalUser &user);
       virtual void process_send_back_user(AddressSpaceID source,
@@ -2472,10 +2525,12 @@ namespace LegionRuntime {
       virtual ReductionView* as_reduction_view(void) const;
       virtual PhysicalManager* get_manager(void) const;
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                   std::map<Event,FieldMask> &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc,
-                                 std::set<Event> &preconditions);
+                                 Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
     public:
@@ -2494,21 +2549,17 @@ namespace LegionRuntime {
       template<bool ABOVE>
       void add_local_user(std::set<Event> &wait_on, 
                           const PhysicalUser &user);
-    protected:
-#if 0
-      void find_copy_preconditions(std::set<Event> &wait_on, 
-                                   bool writing, ReductionOpID redop, 
-                                   const FieldMask &mask);
+      void add_copy_user_above(PhysicalUser &user);
+    protected: 
       void find_copy_preconditions_above(Color child_color,
-                                   std::set<Event> &wait_on,
-                                   bool writing, ReductionOpID redop,
-                                   const FieldMask &copy_mask);
-      template<bool ABOVE>
-      void find_local_copy_preconditions(std::set<Event> &wait_on,
-                                   bool writing, ReductionOpID redop,
+                                   ReductionOpID redop, bool reading,
                                    const FieldMask &copy_mask,
-                                   int local_color);
-#endif
+                                   std::map<Event,FieldMask> &preconditions);
+      template<bool ABOVE>
+      void find_local_copy_preconditions(int local_color,
+                                   ReductionOpID redop, bool reading,
+                                   const FieldMask &copy_mask,
+                                   std::map<Event,FieldMask> &preconditions);
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     Color child_color);
@@ -2593,10 +2644,12 @@ namespace LegionRuntime {
       virtual ReductionView* as_reduction_view(void) const;
       virtual PhysicalManager* get_manager(void) const;
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                   std::map<Event,FieldMask> &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
-                                 Processor exec_proc,
-                                 std::set<Event> &preconditions);
+                                 Processor exec_proc);
       virtual InstanceRef add_user(PhysicalUser &user,
                                    Processor exec_proc);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,

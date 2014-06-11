@@ -1509,6 +1509,9 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 	   total_lmb_size >> 20, srcdatapool_size >> 20,
 	   attach_size >> 20);
 
+  // Don't bother checking this here.  Some GASNet conduits lie if 
+  // the GASNET_PHYSMEM_MAX variable is not set.
+#if 0
   if (attach_size > gasnet_getMaxLocalSegmentSize())
   {
     fprintf(stderr,"ERROR: Legion exceeded maximum GASNet segment size. "
@@ -1517,6 +1520,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
                    attach_size, gasnet_getMaxLocalSegmentSize());
     assert(false);
   }
+#endif
 
 #if 0
   handlers[hcount].index = MSGID_LONG_EXTENSION;

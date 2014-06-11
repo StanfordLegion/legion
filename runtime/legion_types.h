@@ -90,7 +90,7 @@
 #endif
 // How many tasks to group together for runtime operations
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
-#define DEFAULT_MIN_TASKS_TO_SCHEDULE   1
+#define DEFAULT_MIN_TASKS_TO_SCHEDULE   4
 #endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline
@@ -255,6 +255,7 @@ namespace LegionRuntime {
       ERROR_NESTED_MUST_EPOCH = 105,
       ERROR_UNMATCHED_MUST_EPOCH = 106,
       ERROR_MUST_EPOCH_FAILURE = 107,
+      ERROR_DOMAIN_DIM_MISMATCH = 108,
     };
 
     // enum and namepsaces don't really get along well
@@ -533,6 +534,7 @@ namespace LegionRuntime {
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine *machine, 
         HighLevelRuntime *rt, const std::set<Processor> &local_procs);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 

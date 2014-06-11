@@ -779,6 +779,19 @@ namespace LegionRuntime {
 	return true;
       }
 
+      bool operator<(const Domain &rhs) const
+      {
+        if(is_id < rhs.is_id) return true;
+        if(is_id > rhs.is_id) return false;
+        if(dim < rhs.dim) return true;
+        if(dim > rhs.dim) return false;
+        for(int i = 0; i < 2*dim; i++) {
+          if(rect_data[i] < rhs.rect_data[i]) return true;
+          if(rect_data[i] > rhs.rect_data[i]) return false;
+        }
+        return false; // otherwise they are equal
+      }
+
       bool operator!=(const Domain &rhs) const { return !(*this == rhs); }
 
       static const Domain NO_DOMAIN;
@@ -793,6 +806,17 @@ namespace LegionRuntime {
 	d.dim = DIM;
 	r.to_array(d.rect_data);
 	return d;
+      }
+
+      template<int DIM>
+      static Domain from_point(typename Arrays::Point<DIM> p)
+      {
+        Domain d;
+        assert(DIM <= MAX_RECT_DIM);
+        d.dim = DIM;
+        p.to_array(d.rect_data);
+        p.to_array(d.rect_data+DIM);
+        return d;
       }
 
       IDType *serialize(IDType *data) const

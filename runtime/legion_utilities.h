@@ -67,7 +67,7 @@ namespace LegionRuntime {
 
     // The following two methods define the dependence analysis
     // for all of Legion.  Modifying them can have enormous
-    // consequences to the how a program executes.
+    // consequences on how programs execute.
 
     //--------------------------------------------------------------------------
     static inline DependenceType check_for_anti_dependence(
@@ -444,6 +444,8 @@ namespace LegionRuntime {
       inline BitMask& operator<<=(unsigned shift);
       inline BitMask& operator>>=(unsigned shift);
     public:
+      inline T get_hash_key(void) const;
+    public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
@@ -510,6 +512,8 @@ namespace LegionRuntime {
     public:
       inline TLBitMask& operator<<=(unsigned shift);
       inline TLBitMask& operator>>=(unsigned shift);
+    public:
+      inline T get_hash_key(void) const;
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -1480,6 +1484,19 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
+    inline T BitMask<T,MAX,SHIFT,MASK>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      T result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result |= bit_vector[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
     inline char* BitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -2052,6 +2069,14 @@ namespace LegionRuntime {
           bit_vector[idx] = 0;
       }
       return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline T TLBitMask<T,MAX,SHIFT,MASK>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      return sum_mask;
     }
 
     //-------------------------------------------------------------------------

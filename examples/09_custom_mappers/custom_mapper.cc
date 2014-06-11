@@ -47,6 +47,14 @@ enum FieldIDs {
   FID_Z,
 };
 
+enum {
+  SUBREGION_TUNABLE,
+};
+
+enum {
+  PARTITIONING_MAPPER_ID = 1,
+};
+
 /*
  * One of the primary goals of Legion is
  * to make it easy to remap applications
@@ -113,6 +121,16 @@ public:
   virtual void notify_mapping_result(const Mappable *mappable);
 };
 
+class PartitioningMapper : public DefaultMapper {
+public:
+  PartitioningMapper(Machine *machine,
+      HighLevelRuntime *rt, Processor local);
+public:
+  virtual int get_tunable_value(const Task *task,
+                                TunableID tid,
+                                MappingTagID tag);
+};
+
 // Mappers are created after the Legion runtime
 // starts but before the application begins 
 // executing.  To create mappers the application
@@ -157,6 +175,8 @@ void mapper_registration(Machine *machine, HighLevelRuntime *rt,
   {
     rt->replace_default_mapper(
         new AdversarialMapper(machine, rt, *it), *it);
+    rt->add_mapper(PARTITIONING_MAPPER_ID,
+        new PartitioningMapper(machine, rt, *it), *it);
   }
 }
 
@@ -506,27 +526,51 @@ void AdversarialMapper::notify_mapping_result(const Mappable *mappable)
   }
 }
 
+PartitioningMapper::PartitioningMapper(Machine *m,
+                                       HighLevelRuntime *rt,
+                                       Processor p)
+  : DefaultMapper(m, rt, p)
+{
+}
+
+int PartitioningMapper::get_tunable_value(const Task *task,
+                                          TunableID tid,
+                                          MappingTagID tag)
+{
+  if (tid == SUBREGION_TUNABLE)
+  {
+    const std::set<Processor> &cpu_procs = 
+      machine_interface.filter_processors(Processor::LOC_PROC);
+    return cpu_procs.size();
+  }
+  // Should never get here
+  assert(false);
+  return 0;
+}
+
 /*
  * Everything below here is the standard daxpy example
  * except for the registration of the callback function
- * for creating custom mappers which is explicitly commented.
+ * for creating custom mappers which is explicitly commented
+ * and the call to get_tunable_value to determine the number
+ * of sub-regions.
  */
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, HighLevelRuntime *runtime)
 {
   int num_elements = 1024; 
-  int num_subregions = 4;
   {
     const InputArgs &command_args = HighLevelRuntime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
     {
       if (!strcmp(command_args.argv[i],"-n"))
         num_elements = atoi(command_args.argv[++i]);
-      if (!strcmp(command_args.argv[i],"-b"))
-        num_subregions = atoi(command_args.argv[++i]);
     }
   }
+  int num_subregions = runtime->get_tunable_value(ctx, SUBREGION_TUNABLE, 
+                                                  PARTITIONING_MAPPER_ID);
+
   printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
 

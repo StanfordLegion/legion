@@ -932,18 +932,16 @@ namespace LegionRuntime {
      * copies between two regions including regions that are
      * not of the same region tree.  Copy operations specify
      * an arbitrary number of pairs of source and destination 
-     * region requirements.  Each region requirement must have 
-     * exactly one field with fields of a pair being the same
-     * size (unless a reduction copy is being performed).  The
-     * source region requirements must be READ_ONLY, while the
-     * destination requirements must be either READ_WRITE,
-     * WRITE_ONLY, or REDUCE with a reduction function.  While
-     * the regions in a source and a destination pair do not have
-     * to be in the same region tree, they must share an index space
-     * tree.  Furthermore, the index space of the destination region
+     * region requirements.  The source region requirements 
+     * must be READ_ONLY, while the destination requirements 
+     * must be either READ_WRITE, WRITE_ONLY, or REDUCE with 
+     * a reduction function.  While the regions in a source 
+     * and a destination pair do not have to be in the same 
+     * region tree, they must share an index space tree.  
+     * Furthermore, the index space of the destination region
      * requirement will determine the data copied, and therefore
-     * the destination index space must be the same or a sub-space of
-     * the source index space.
+     * the destination index space must be the same or a 
+     * sub-space of the source index space.
      * @see HighLevelRuntime
      */
     struct CopyLauncher {
@@ -2439,19 +2437,27 @@ namespace LegionRuntime {
       // Index Space Operations
       //------------------------------------------------------------------------
       /**
-       * Create a new index space
+       * Create a new unstructured index space
        * @param ctx the enclosing task context
        * @param max_num_elmts maximum number of elements in the index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       /**
-       * Create a new index space based on a domain
+       * Create a new structured index space based on a domain
        * @param ctx the enclosing task context
        * @param domain the domain for the new index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, Domain domain);
+      /**
+       * Create a new structured index space based on a set of domains
+       * @param ctx the enclosing task context
+       * @param domains the set of domains
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, 
+                                    const std::set<Domain> &domains);
       /**
        * Destroy an existing index space
        * @param ctx the enclosing task context
@@ -2490,6 +2496,24 @@ namespace LegionRuntime {
 					    Domain color_space, 
                                             const DomainColoring &coloring,
 					    bool disjoint,
+                                            int part_color = -1);
+
+      /**
+       * Create an index partitiong from a domain color space and
+       * a multi-domain coloring which allows multiple domains to
+       * be associated with each color.
+       * @param ctx the enclosing task context
+       * @param parent index space being partitioned
+       * @param color_space the domain of colors
+       * @param coloring the multi-domain coloring
+       * @param disjoint whether the partitioning is disjoint or not
+       * @param part_color optional color name for the partition
+       * @return handle for the next index partition
+       */
+      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
+                                            Domain color_space,
+                                            const MultiDomainColoring &coloring,
+                                            bool disjoint,
                                             int part_color = -1);
 
       /**
@@ -3321,7 +3345,7 @@ namespace LegionRuntime {
        * cases for other types we would be interested in knowing about them.
        */
       int get_tunable_value(Context ctx, TunableID tid, 
-                            MapperID mapper, MappingTagID tag);
+                            MapperID mapper = 0, MappingTagID tag = 0);
     public:
       //------------------------------------------------------------------------
       // Miscellaneous Operations
@@ -3449,6 +3473,11 @@ namespace LegionRuntime {
        * ---------------------
        * -hl:filter <int> Maximum number of tasks allowed in logical
        *              or physical epochs.  Default value is 32.
+       * -hl:imprecise Enable imprecise filtering. This improves the
+       *              effectiveness of the previous flag at the cost that
+       *              it may add imprecision to the analysis and introduce
+       *              additional dependences. It is unsafe to use this flag
+       *              with applications that use phase barriers.
        * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.

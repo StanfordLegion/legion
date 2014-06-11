@@ -420,6 +420,7 @@ namespace LegionRuntime {
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
       Event find_gc_epoch_event(void);
+      void notify_pending_shutdown(void);
 #ifdef HANG_TRACE
     public:
       void dump_state(FILE *target);
@@ -428,8 +429,9 @@ namespace LegionRuntime {
       bool perform_dependence_checks(void);
       bool perform_other_operations(void);
       void perform_mapping_operations(void);
+      bool perform_gc_epoch(void);
       void issue_advertisements(MapperID mid);
-    protected:
+    public:
       // Immutable state
       Runtime *const runtime;
       const Processor local_proc;
@@ -454,19 +456,6 @@ namespace LegionRuntime {
       bool pending_dependence_analysis;
 #endif
     protected:
-      // Since dependence analysis is usually on the critical path,
-      // we allow the processor managers to create garbage collection
-      // epoch events which ensure garbage collections will only be
-      // done when there are no dependence analyses to perform.  While
-      // this works for dependence analysis, it is generally unsafe for
-      // the garbage collector to wait on mapping analyses to be done
-      // since some mapping analyses may require the garbage collector
-      // to run and free-up valuable memory resources in order for 
-      // mappings to succeed.  These values are protected by the 
-      // dependence lock.
-      UserEvent gc_epoch_trigger;
-      Event gc_epoch_event;
-    protected:
       // Note locks are declaraed in the order in which they
       // must be taken 
       Reservation idle_lock;
@@ -475,6 +464,8 @@ namespace LegionRuntime {
       // Reservation for protecting the ready queues and
       // the other ready queue
       Reservation queue_lock;
+      // Reservation for managing the list of garbage collection events
+      Reservation gc_lock;
       // Reservation for protecting the list of messages that
       // need to be sent
       Reservation message_lock;
@@ -489,6 +480,13 @@ namespace LegionRuntime {
       // All the local operations that are ready to be performed
       // which we will do in batches as they become ready
       std::list<Operation*> local_ready_queue;
+      // List of garbage collection epoch events to trigger
+      std::deque<UserEvent> gc_epoch_events;
+      // The pending number of garbage collection operations 
+      // pending on the last epoch event
+      unsigned pending_gc_ops;
+      // Know when we should stop issuing gc epoch events
+      bool pending_shutdown;
       // Mapper objects
       std::vector<Mapper*> mapper_objects;
       // Mapper locks
@@ -778,6 +776,8 @@ namespace LegionRuntime {
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
+      IndexSpace create_index_space(Context ctx, 
+                                    const std::set<Domain> &domains);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
       bool finalize_index_space_destroy(IndexSpace handle);
@@ -790,6 +790,11 @@ namespace LegionRuntime {
                                             Domain color_space,
                                             const DomainColoring &coloring,
                                             bool disjoint,
+                                            int part_color);
+      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
+                                            Domain color_space,
+                                            const MultiDomainColoring &coloring,
+                                            bool disjoint, 
                                             int part_color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
@@ -1207,7 +1212,8 @@ namespace LegionRuntime {
       bool has_future(DistributedID did);
       Future::Impl* find_future(DistributedID did);
     public:
-      Event find_gc_epoch_event(Processor local_proc);
+      Event find_gc_epoch_event(Processor gc_proc);
+      void notify_pending_shutdown(void);
     public:
       IndividualTask*  get_available_individual_task(void);
       PointTask*       get_available_point_task(void);
@@ -1332,6 +1338,12 @@ namespace LegionRuntime {
       std::map<AddressSpaceID,MessageManager*> message_managers;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
+      // Map from utility processors to managers, note that this
+      // just stores a processor manager for each utility processor
+      // even though there might be multiple managers that map
+      // to each utility processor. This reverse lookup is used
+      // for handling garbage collection operation.
+      std::map<Processor,ProcessorManager*> utility_managers;
     protected:
       struct MapperInfo {
         MapperInfo(void)
@@ -1506,6 +1518,7 @@ namespace LegionRuntime {
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;
+      static bool enable_imprecise_filter;
       static bool separate_runtime_instances;
       static bool stealing_disabled;
       static bool resilient_mode;

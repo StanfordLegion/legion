@@ -120,6 +120,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::create_index_space(const Domain &hull,
+                                              const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      // Note that it is safe that we do this in two passes
+      // because we haven't given back the handle yet for
+      // the index space so no one actually knows it exists yet.
+      IndexSpaceNode *node = create_node(hull, NULL/*parent*/, 0/*color*/);
+      node->update_component_domains(domains);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_partition(IndexPartition pid,
         IndexSpace parent, bool disjoint, 
         int color, const std::map<Color,Domain> &coloring, Domain color_space)
@@ -181,8 +193,78 @@ namespace LegionRuntime {
                   children.begin(); it2 != it1; it2++)
             {
               dynamic_space_tests.push_back(
-                  DynamicSpaceTest(new_part, (*it1)->color, (*it1)->handle, 
-                                   (*it2)->color, (*it2)->handle));
+                  DynamicSpaceTest(new_part, *it1, *it2));
+            }
+          }
+        }
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_index_partition(IndexPartition pid,
+        IndexSpace parent, bool disjoint, int color,
+        const std::map<Color,Domain> &convex_hulls, Domain color_space,
+        const std::map<Color,std::set<Domain> > &component_domains)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *parent_node = get_node(parent);
+      Color part_color;
+      if (color < 0)
+        part_color = parent_node->generate_color();
+      else
+        part_color = unsigned(color);
+      IndexPartNode *new_part = create_node(pid, parent_node, part_color,
+                                    color_space, disjoint);
+#ifdef LEGION_SPY
+      LegionSpy::log_index_partition(parent.id, pid, disjoint, part_color);
+#endif
+#ifdef DYNAMIC_TESTS
+      std::vector<IndexSpaceNode*> children; 
+#endif
+      // Now do all the child nodes
+      std::map<Color,std::set<Domain> >::const_iterator comp_it = 
+        component_domains.begin();
+      for (std::map<Color,Domain>::const_iterator it = convex_hulls.begin();
+            it != convex_hulls.end(); it++, comp_it++)
+      {
+        if (it->first == UINT_MAX)
+        {
+          log_index(LEVEL_ERROR,"Invalid child color UINT_MAX specified "
+                                "for create index partition.  All colors "
+                                "must be between 0 and UINT_MAX-1");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_PARTITION_COLOR);
+        }
+        Domain hull = it->second;
+        hull.get_index_space(true/*create if necessary*/);
+        IndexSpaceNode *child = create_node(hull, new_part, it->first);
+        child->update_component_domains(comp_it->second);
+#ifdef DYNAMIC_TESTS
+        children.push_back(child);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_index_subspace(pid, 
+            hull.get_index_space().id, it->first);
+#endif
+      }
+#ifdef DYNAMIC_TESTS
+      if (Runtime::dynamic_independence_tests)
+      {
+        parent_node->add_disjointness_tests(new_part, children); 
+        AutoLock d_lock(dynamic_lock);
+        if (!disjoint && (children.size() > 1))
+        {
+          for (std::vector<IndexSpaceNode*>::const_iterator it1 = 
+              children.begin(); it1 != children.end(); it1++)
+          {
+            for (std::vector<IndexSpaceNode*>::const_iterator it2 = 
+                  children.begin(); it2 != it1; it2++)
+            {
+              dynamic_space_tests.push_back(
+                  DynamicSpaceTest(new_part, *it1, *it2));
             }
           }
         }
@@ -1295,8 +1377,26 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependence(precondition, copy_pre);
 #endif
       RegionNode *dst_node = get_node(dst_req.region);
-      Domain copy_domain = dst_node->get_domain();
-      Event result = copy_domain.copy(src_fields, dst_fields, copy_pre);
+      // See if we have component domains or whether there is only
+      // one domain for which the copy needs to be issued
+      Event result;
+      if (dst_node->has_component_domains())
+      {
+        const std::set<Domain> &component_domains = 
+                                  dst_node->get_component_domains();
+        std::set<Event> result_events;
+        for (std::set<Domain>::const_iterator it = component_domains.begin();
+              it != component_domains.end(); it++)
+        {
+          result_events.insert(it->copy(src_fields, dst_fields, copy_pre));
+        }
+        result = Event::merge_events(result_events);
+      }
+      else
+      {
+        Domain copy_domain = dst_node->get_domain();
+        result = copy_domain.copy(src_fields, dst_fields, copy_pre);  
+      }
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
 #ifdef LEGION_SPY
@@ -2535,9 +2635,119 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool RegionTreeForest::are_disjoint(const Domain &left,
+                                                   const Domain &right)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(left.get_dim() == right.get_dim());
+#endif
+      bool disjoint = true;
+      switch (left.get_dim())
+      {
+        case 0:
+          {
+            const LowLevel::ElementMask &left_mask = 
+                                       left.get_index_space().get_valid_mask();
+            const LowLevel::ElementMask &right_mask = 
+                                       right.get_index_space().get_valid_mask();
+            LowLevel::ElementMask::OverlapResult result = 
+                                            left_mask.overlaps_with(right_mask);
+            if (result != LowLevel::ElementMask::OVERLAP_NO)
+              disjoint = false;
+            break;
+          }
+        case 1:
+          {
+            Rect<1> leftr = left.get_rect<1>();
+            Rect<1> rightr = right.get_rect<1>();
+            if (leftr.overlaps(rightr))
+              disjoint = false;
+            break;
+          }
+        case 2:
+          {
+            Rect<2> leftr = left.get_rect<2>();
+            Rect<2> rightr = right.get_rect<2>();
+            if (leftr.overlaps(rightr))
+              disjoint = false;
+            break;
+          }
+        case 3:
+          {
+            Rect<3> leftr = left.get_rect<3>();
+            Rect<3> rightr = right.get_rect<3>();
+            if (leftr.overlaps(rightr))
+              disjoint = false;
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return disjoint;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool RegionTreeForest::are_disjoint(IndexSpaceNode *left,
+                                                   IndexSpaceNode *right)
+    //--------------------------------------------------------------------------
+    {
+      bool disjoint = true;
+      if (left->has_component_domains())
+      {
+        const std::set<Domain> &left_domains = left->get_component_domains();
+        if (right->has_component_domains())
+        {
+          const std::set<Domain> &right_domains = 
+                                              right->get_component_domains();
+          // Double Loop
+          for (std::set<Domain>::const_iterator lit = left_domains.begin();
+                disjoint && (lit != left_domains.end()); lit++)
+          {
+            for (std::set<Domain>::const_iterator rit = right_domains.begin();
+                  disjoint && (rit != right_domains.end()); rit++)
+            {
+              disjoint = RegionTreeForest::are_disjoint(*lit, *rit);
+            }
+          }
+        }
+        else
+        {
+          // Loop over left components
+          for (std::set<Domain>::const_iterator it = left_domains.begin();
+                disjoint && (it != left_domains.end()); it++)
+          {
+            disjoint = RegionTreeForest::are_disjoint(*it, right->domain);
+          }
+        }
+      }
+      else
+      {
+        if (right->has_component_domains())
+        {
+          const std::set<Domain> &right_domains = 
+                                              right->get_component_domains();
+          // Loop over right components
+          for (std::set<Domain>::const_iterator it = right_domains.begin();
+                disjoint && (it != right_domains.end()); it++)
+          {
+            disjoint = RegionTreeForest::are_disjoint(left->domain, *it);
+          }
+        }
+        else
+        {
+          // No Loops
+          disjoint = RegionTreeForest::are_disjoint(left->domain,right->domain);
+        }
+      }
+      return disjoint;
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeForest::DynamicSpaceTest::DynamicSpaceTest(IndexPartNode *par,
-        Color one, IndexSpace l, Color two, IndexSpace r)
-      : parent(par), c1(one), c2(two), left(l), right(r)
+                                                         IndexSpaceNode *l, 
+                                                         IndexSpaceNode *r)
+      : parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
     }
@@ -2546,58 +2756,46 @@ namespace LegionRuntime {
     void RegionTreeForest::DynamicSpaceTest::perform_test(void) const
     //--------------------------------------------------------------------------
     {
-      const LowLevel::ElementMask &left_mask = left.get_valid_mask();
-      const LowLevel::ElementMask &right_mask = right.get_valid_mask();
-      LowLevel::ElementMask::OverlapResult result = 
-        left_mask.overlaps_with(right_mask);
-      if (result == LowLevel::ElementMask::OVERLAP_NO)
-        parent->add_disjoint(c1,c2);
+      if (RegionTreeForest::are_disjoint(left, right))
+        parent->add_disjoint(left->color, right->color);
     }
 
     //--------------------------------------------------------------------------
     RegionTreeForest::DynamicPartTest::DynamicPartTest(IndexSpaceNode *par,
-        Color one, Color two)
-      : parent(par), c1(one), c2(two)
+                                                       IndexPartNode *l, 
+                                                       IndexPartNode *r)
+      : parent(par), left(l), right(r)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::DynamicPartTest::add_child_space(bool l, 
-                                                            IndexSpace space) 
+                                                           IndexSpaceNode *node) 
     //--------------------------------------------------------------------------
     {
       if (l)
-        left.push_back(space);
+        left_spaces.push_back(node);
       else
-        right.push_back(space);
+        right_spaces.push_back(node);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::DynamicPartTest::perform_test(void) const
     //--------------------------------------------------------------------------
     {
-      // TODO: A Better way to do this is to bitwise-union everything on
-      // the left and the right, and then do a intersection between left
-      // and right to test for non-empty.
-      for (std::vector<IndexSpace>::const_iterator lit = left.begin();
-            lit != left.end(); lit++)
+      for (std::vector<IndexSpaceNode*>::const_iterator lit = 
+            left_spaces.begin(); lit != left_spaces.end(); lit++)
       {
-        const LowLevel::ElementMask &left_mask = lit->get_valid_mask();
-        for (std::vector<IndexSpace>::const_iterator rit = right.begin();
-              rit != right.end(); rit++)
+        for (std::vector<IndexSpaceNode*>::const_iterator rit = 
+              right_spaces.begin(); rit != right_spaces.end(); rit++)
         {
-          const LowLevel::ElementMask &right_mask = rit->get_valid_mask();
-          LowLevel::ElementMask::OverlapResult result = 
-            left_mask.overlaps_with(right_mask);
-          // If it's anything other than overlap-no, then we don't know
-          // that it is disjoint
-          if (result != LowLevel::ElementMask::OVERLAP_NO)
+          if (!RegionTreeForest::are_disjoint(*lit, *rit))
             return;
         }
       }
-      // If we make it here then they are disjoint
-      parent->add_disjoint(c1,c2);
+      // If we made it here then they are disjoint
+      parent->add_disjoint(left->color, right->color);
     }
 #endif // DYNAMIC_TESTS
 
@@ -3307,6 +3505,27 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::has_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !component_domains.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::update_component_domains(const std::set<Domain> &doms)
+    //--------------------------------------------------------------------------
+    {
+      component_domains.insert(doms.begin(), doms.end());
+    }
+
+    //--------------------------------------------------------------------------
+    const std::set<Domain>& IndexSpaceNode::get_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+      return component_domains;
+    }
+
 #ifdef DYNAMIC_TESTS
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_disjointness_tests(IndexPartNode *child,
@@ -3346,6 +3565,13 @@ namespace LegionRuntime {
             else
               rez.serialize(0);
             rez.serialize(color);
+            rez.serialize(component_domains.size());
+            for (std::set<Domain>::const_iterator it = 
+                  component_domains.begin(); it != 
+                  component_domains.end(); it++)
+            {
+              rez.serialize(*it);
+            }
           }
           context->runtime->send_index_space_node(target, rez); 
           creation_set.insert(target);
@@ -3383,6 +3609,15 @@ namespace LegionRuntime {
       derez.deserialize(parent);
       Color color;
       derez.deserialize(color);
+      size_t components;
+      derez.deserialize(components);
+      std::set<Domain> component_domains;
+      for (unsigned idx = 0; idx < components; idx++)
+      {
+        Domain component;
+        derez.deserialize(component);
+        component_domains.insert(component);
+      }
       IndexPartNode *parent_node = NULL;
       if (parent > 0)
       {
@@ -3396,6 +3631,8 @@ namespace LegionRuntime {
       assert(node != NULL);
 #endif
       node->add_creation_source(source);
+      if (components > 0)
+        node->update_component_domains(component_domains);
     }
 
     //--------------------------------------------------------------------------
@@ -3583,18 +3820,18 @@ namespace LegionRuntime {
                                   const std::vector<IndexSpaceNode*> &children)
     //--------------------------------------------------------------------------
     {
-      RegionTreeForest::DynamicPartTest test(parent, child->color, color);
+      RegionTreeForest::DynamicPartTest test(parent, child, this);
       for (std::vector<IndexSpaceNode*>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
-        test.add_child_space(true/*left*/,(*it)->handle);
+        test.add_child_space(true/*left*/, *it);
       }
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         for (std::map<Color,IndexSpaceNode*>::const_iterator it =
               valid_map.begin(); it != valid_map.end(); it++)
         {
-          test.add_child_space(false/*left*/,it->second->handle); 
+          test.add_child_space(false/*left*/, it->second); 
         }
       }
       context->add_disjointness_test(test);
@@ -8714,11 +8951,14 @@ namespace LegionRuntime {
           {
             log_region(LEVEL_WARNING,"WARNING: memory " IDFMT " was specified "
                                      "to be reused in rank_copy_targets "
-                                     "when closing mappable operation ID %lld."
-                                     "Memory " IDFMT 
-                                     " will be ignored.", it->id,
+                                     "when closing mappable operation ID %lld, "
+                                     "but no instance exists in that memory."
+                                     "Memory " IDFMT " is being added to the "
+                                     "set of create memories.", it->id,
                                closer.info->mappable->get_unique_mappable_id(),
                                it->id);
+            // Add it to the list of memories to try creating
+            to_create.push_back(*it);
             to_delete.push_back(*it);
           }
         }
@@ -9198,8 +9438,6 @@ namespace LegionRuntime {
       // we gather all the information needed to issue gather copies 
       // from multiple instances into the data structures below, we then 
       // issue the copy when we're done and update the destination instance.
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
       std::map<InstanceView*,FieldMask> src_instances;
 
       // No need to call the mapper if there is only one valid instance
@@ -9221,8 +9459,6 @@ namespace LegionRuntime {
             assert(src->manager->get_instance() !=
                    dst->manager->get_instance());
 #endif
-            src->copy_from(op_mask, src_fields);
-            dst->copy_to(  op_mask, dst_fields);
             src_instances[src] = op_mask;
           }
         }
@@ -9271,8 +9507,6 @@ namespace LegionRuntime {
                 assert(it->first->manager->get_instance() !=
                        dst->manager->get_instance());
 #endif
-                it->first->copy_from(op_mask, src_fields);
-                dst->copy_to(op_mask, dst_fields);
                 std::map<InstanceView*,FieldMask>::iterator finder = 
                   src_instances.find(it->first);
                 if (finder == src_instances.end())
@@ -9314,8 +9548,6 @@ namespace LegionRuntime {
               // No need to do anything if they are the same instance
               if (dst != it->first)
               {
-                it->first->copy_from(op_mask, src_fields);
-                dst->copy_to(op_mask, dst_fields);
                 std::map<InstanceView*,FieldMask>::iterator finder = 
                   src_instances.find(it->first);
                 if (finder == src_instances.end())
@@ -9344,18 +9576,8 @@ namespace LegionRuntime {
       // Now we can issue the copy operation to the low-level runtime
       if (!src_instances.empty())
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!src_fields.empty());
-        assert(!dst_fields.empty());
-        assert(src_fields.size() == dst_fields.size());
-#endif
-        // Create a user event that will be our event for
-        // indicating that the copy is finished.  We make 
-        // this here so we only need to traverse the 
-        // epoch lists a single time and in the process will
-        // find all the preconditions and add the copy user.
-        UserEvent copy_term = UserEvent::create_user_event();
-        std::set<Event> preconditions;
+        // Get all the preconditions for each of the different instances
+        std::map<Event,FieldMask> preconditions;
         FieldMask update_mask; 
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
               src_instances.begin(); it != src_instances.end(); it++)
@@ -9363,80 +9585,294 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!!it->second);
 #endif
-          it->first->add_copy_user(0/*redop*/, copy_term,
-                                   it->second, true/*reading*/,
-                                   info->local_proc, preconditions);
+          it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                             it->second, preconditions);
           update_mask |= it->second;
         }
         // Now do the destination
-        dst->add_copy_user(0/*redop*/, copy_term,
-                           update_mask, false/*reading*/,
-                           info->local_proc, preconditions);
-        Event copy_pre = Event::merge_events(preconditions);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-        if (!copy_pre.exists())
+        dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                     update_mask, preconditions);
+
+        // Now let's build maximal sets of fields which have
+        // identical event preconditions. Use a list so our
+        // iterators remain valid under insertion and push back
+        std::list<PreconditionSet> precondition_sets;
+        for (std::map<Event,FieldMask>::iterator pit = 
+              preconditions.begin(); pit != preconditions.end(); pit++)
         {
-          UserEvent new_copy_pre = UserEvent::create_user_event();
-          new_copy_pre.trigger();
-          copy_pre = new_copy_pre;
-        }
-#endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependences(
-            Machine::get_executing_processor(), preconditions, copy_pre);
-#endif
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependences(preconditions, copy_pre);
-#endif
-        Domain copy_domain = get_domain();
-#ifdef DEBUG_PERF
-        Event copy_post;
-        {
-          PerfTracer tracer(context, PERFORM_COPY_DOMAIN_CALL);
-          copy_post = copy_domain.copy(src_fields, dst_fields, copy_pre);
-        }
-#else
-        Event copy_post = copy_domain.copy(src_fields, dst_fields, copy_pre);
-#endif
-        // Finally chain the copy termination user event trigger
-        // off the low-level copy post event
-        copy_term.trigger(copy_post);
-        // Log some information for legion spy or legion logging if necessary
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-        for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              src_instances.begin(); it != src_instances.end(); it++)
-        {
-#ifdef LEGION_LOGGING
+          bool inserted = false;
+          // Also keep track of which fields have updates
+          // but don't have any preconditions
+          update_mask -= pit->second;
+          // Insert this event into the precondition sets 
+          for (std::list<PreconditionSet>::iterator it = 
+                precondition_sets.begin(); it != precondition_sets.end(); it++)
           {
-            std::set<FieldID> copy_fields;
-            RegionNode *manager_node = dst->manager->region_node;
-            manager_node->column_source->to_field_set(it->second,
-                                                      copy_fields);
-            LegionLogging::log_lowlevel_copy(
-                Machine::get_executing_processor(),
-                it->first->manager->get_instance(),
-                dst->manager->get_instance(),
-                copy_domain.get_index_space(),
-                manager_node->column_source->handle,
-                manager_node->handle.tree_id,
-                copy_pre, copy_term, copy_fields, 0/*redop*/);
+            // Easy case, check for equality
+            if (pit->second == it->pre_mask)
+            {
+              it->preconditions.insert(pit->first);
+              inserted = true;
+              break;
+            }
+            FieldMask overlap = pit->second & it->pre_mask;
+            // Easy case, they are disjoint so keep going
+            if (!overlap)
+              continue;
+            // Moderate case, we are dominated, split into two sets
+            // reusing existing set and making a new set
+            if (overlap == pit->second)
+            {
+              // Leave the existing set and make it the difference 
+              it->pre_mask -= overlap;
+              precondition_sets.push_back(PreconditionSet(overlap));
+              PreconditionSet &last = precondition_sets.back();
+              last.preconditions = it->preconditions;
+              last.preconditions.insert(pit->first);
+              inserted = true;
+              break;
+            }
+            // Moderate case, we dominate the existing set
+            if (overlap == it->pre_mask)
+            {
+              // Add ourselves to the existing set and then
+              // keep going for the remaining fields
+              it->preconditions.insert(pit->first);
+              pit->second -= overlap;
+              // Can't consider ourselves added yet
+              continue;
+            }
+            // Hard case, neither dominates, compute three
+            // distinct sets of fields, keep left one in
+            // place and reduce scope, add new one at the
+            // end for overlap, continue iterating for right one
+            it->pre_mask -= overlap;
+            const std::set<Event> &temp_preconditions = it->preconditions;
+            it = precondition_sets.insert(it, PreconditionSet(overlap));
+            it->preconditions = temp_preconditions;
+            it->preconditions.insert(pit->first);
+            pit->second -= overlap;
+            continue;
           }
+          if (!inserted)
+          {
+            precondition_sets.push_back(PreconditionSet(pit->second));
+            PreconditionSet &last = precondition_sets.back();
+            last.preconditions.insert(pit->first);
+          }
+        }
+        // For any fields which need copies but don't have
+        // any preconditions, but them in their own set
+        if (!!update_mask)
+          precondition_sets.push_back(PreconditionSet(update_mask));
+        // Now that we have our precondition sets, it's time
+        // to issue the distinct copies to the low-level runtime
+        // Issue a copy for each of the different precondition sets
+        // if we have them, otherwise a single copy for each set suffices
+        if (has_component_domains())
+        {
+          const std::set<Domain> &component_domains = get_component_domains();
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+          Domain copy_domain = get_domain();
+          IndexSpace copy_index_space = copy_domain.get_index_space();
+#endif
+          for (std::list<PreconditionSet>::iterator pit = 
+                precondition_sets.begin(); pit != 
+                precondition_sets.end(); pit++)
+          {
+            PreconditionSet &pre_set = *pit;
+            // Build the src and dst fields vectors
+            std::vector<Domain::CopySrcDstField> src_fields;
+            std::vector<Domain::CopySrcDstField> dst_fields;
+            std::map<InstanceView*,FieldMask> update_views;
+            for (std::map<InstanceView*,FieldMask>::const_iterator it =
+                  src_instances.begin(); it != src_instances.end(); it++)
+            {
+              FieldMask op_mask = pre_set.pre_mask & it->second;
+              if (!!op_mask)
+              {
+                it->first->copy_from(op_mask, src_fields);
+                dst->copy_to(op_mask, dst_fields);
+                update_views[it->first] = op_mask;
+              }
+            }
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!src_fields.empty());
+            assert(!dst_fields.empty());
+            assert(src_fields.size() == dst_fields.size());
+#endif
+            // Now that we've got our offsets ready, we
+            // can now issue the copy to the low-level runtime
+            Event copy_pre = Event::merge_events(pre_set.preconditions);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+            if (!copy_pre.exists())
+            {
+              UserEvent new_copy_pre = UserEvent::create_user_event();
+              new_copy_pre.trigger();
+              copy_pre = new_copy_pre;
+            }
+#endif
+#ifdef LEGION_LOGGING
+            LegionLogging::log_event_dependences(
+                Machine::get_executing_processor(), 
+                pre_set.preconditions, copy_pre);
 #endif
 #ifdef LEGION_SPY
-          RegionNode *manager_node = dst->manager->region_node;
-          char *string_mask = 
-            manager_node->column_source->to_string(it->second);
-          LegionSpy::log_copy_operation(
-              it->first->manager->get_instance().id, 
-              dst->manager->get_instance().id,
-              copy_domain.get_index_space().id,
-              manager_node->column_source->handle.id,
-              manager_node->handle.tree_id, copy_pre, copy_term,
-              0/*redop*/, string_mask);
-          free(string_mask);
+            LegionSpy::log_event_dependences(pre_set.preconditions, copy_pre);
 #endif
+            std::set<Event> post_events;
+            for (std::set<Domain>::const_iterator it = 
+                  component_domains.begin(); it != 
+                  component_domains.end(); it++)
+            {
+              post_events.insert(it->copy(src_fields, dst_fields, copy_pre));  
+            }
+            Event copy_post = Event::merge_events(post_events);
+            // Register copy post with the source views and the destination
+            for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                  update_views.begin(); it != update_views.end(); it++)
+            {
+              it->first->add_copy_user(0/*redop*/, copy_post,
+                                       it->second, true/*reading*/,
+                                       info->local_proc);
+            }
+            dst->add_copy_user(0/*redop*/, copy_post, 
+                               pre_set.pre_mask, false/*reading*/,
+                               info->local_proc);
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+            for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                  update_views.begin(); it != update_views.end(); it++)
+            {
+#ifdef LEGION_LOGGING
+              {
+                std::set<FieldID> copy_fields;
+                RegionNode *manager_node = dst->manager->region_node;
+                manager_node->column_source->to_field_set(it->second,
+                                                          copy_fields);
+                LegionLogging::log_lowlevel_copy(
+                    Machine::get_executing_processor(),
+                    it->first->manager->get_instance(),
+                    dst->manager->get_instance(),
+                    copy_index_space,
+                    manager_node->column_source->handle,
+                    manager_node->handle.tree_id,
+                    copy_pre, copy_post, copy_fields, 0/*redop*/);
+              }
+#endif
+#ifdef LEGION_SPY
+              RegionNode *manager_node = dst->manager->region_node;
+              char *string_mask = 
+                manager_node->column_source->to_string(it->second);
+              LegionSpy::log_copy_operation(
+                  it->first->manager->get_instance().id, 
+                  dst->manager->get_instance().id,
+                  copy_index_space.id,
+                  manager_node->column_source->handle.id,
+                  manager_node->handle.tree_id, copy_pre, copy_post,
+                  0/*redop*/, string_mask);
+              free(string_mask);
+#endif
+            }
+#endif
+          }
         }
+        else /* not component compies */
+        {
+          Domain copy_domain = get_domain();
+          for (std::list<PreconditionSet>::iterator pit = 
+                precondition_sets.begin(); pit !=
+                precondition_sets.end(); pit++)
+          {
+            PreconditionSet &pre_set = *pit;
+            // Build the src and dst fields vectors
+            std::vector<Domain::CopySrcDstField> src_fields;
+            std::vector<Domain::CopySrcDstField> dst_fields;
+            std::map<InstanceView*,FieldMask> update_views;
+            for (std::map<InstanceView*,FieldMask>::const_iterator it =
+                  src_instances.begin(); it != src_instances.end(); it++)
+            {
+              FieldMask op_mask = pre_set.pre_mask & it->second;
+              if (!!op_mask)
+              {
+                it->first->copy_from(op_mask, src_fields);
+                dst->copy_to(op_mask, dst_fields);
+                update_views[it->first] = op_mask;
+              }
+            }
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!src_fields.empty());
+            assert(!dst_fields.empty());
+            assert(src_fields.size() == dst_fields.size());
 #endif
+            // Now that we've got our offsets ready, we
+            // can now issue the copy to the low-level runtime
+            Event copy_pre = Event::merge_events(pre_set.preconditions);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+            if (!copy_pre.exists())
+            {
+              UserEvent new_copy_pre = UserEvent::create_user_event();
+              new_copy_pre.trigger();
+              copy_pre = new_copy_pre;
+            }
+#endif
+#ifdef LEGION_LOGGING
+            LegionLogging::log_event_dependences(
+                Machine::get_executing_processor(), 
+                pre_set.preconditions, copy_pre);
+#endif
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependences(pre_set.preconditions, copy_pre);
+#endif
+            Event copy_post = copy_domain.copy(src_fields,dst_fields,copy_pre);
+            // Register copy post with the source views and the destination
+            for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                  update_views.begin(); it != update_views.end(); it++)
+            {
+              it->first->add_copy_user(0/*redop*/, copy_post,
+                                       it->second, true/*reading*/,
+                                       info->local_proc);
+            }
+            dst->add_copy_user(0/*redop*/, copy_post,
+                               pre_set.pre_mask, false/*reading*/,
+                               info->local_proc);
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+            IndexSpace copy_index_space = copy_domain.get_index_space();
+            for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                  update_views.begin(); it != update_views.end(); it++)
+            {
+#ifdef LEGION_LOGGING
+              {
+                std::set<FieldID> copy_fields;
+                RegionNode *manager_node = dst->manager->region_node;
+                manager_node->column_source->to_field_set(it->second,
+                                                          copy_fields);
+                LegionLogging::log_lowlevel_copy(
+                    Machine::get_executing_processor(),
+                    it->first->manager->get_instance(),
+                    dst->manager->get_instance(),
+                    copy_index_space,
+                    manager_node->column_source->handle,
+                    manager_node->handle.tree_id,
+                    copy_pre, copy_post, copy_fields, 0/*redop*/);
+              }
+#endif
+#ifdef LEGION_SPY
+              RegionNode *manager_node = dst->manager->region_node;
+              char *string_mask = 
+                manager_node->column_source->to_string(it->second);
+              LegionSpy::log_copy_operation(
+                  it->first->manager->get_instance().id, 
+                  dst->manager->get_instance().id,
+                  copy_index_space.id,
+                  manager_node->column_source->handle.id,
+                  manager_node->handle.tree_id, copy_pre, copy_post,
+                  0/*redop*/, string_mask);
+              free(string_mask);
+#endif
+            }
+#endif
+          }
+        }
       }
     }
 
@@ -10550,6 +10986,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionNode::has_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source->has_component_domains();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::set<Domain>& RegionNode::get_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source->get_component_domains();
+    }
+
+    //--------------------------------------------------------------------------
     Domain RegionNode::get_domain(void) const
     //--------------------------------------------------------------------------
     {
@@ -11543,6 +11993,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PartitionNode::has_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      return parent->has_component_domains();    
+    }
+
+    //--------------------------------------------------------------------------
+    const std::set<Domain>& PartitionNode::get_component_domains(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      return parent->get_component_domains();
+    }
+
+    //--------------------------------------------------------------------------
     Domain PartitionNode::get_domain(void) const
     //--------------------------------------------------------------------------
     {
@@ -12193,7 +12663,8 @@ namespace LegionRuntime {
       : PhysicalManager(ctx, did, owner_space, local_space, mem, inst), 
         region_node(node), allocated_fields(mask), blocking_factor(bf), 
         use_event(u_event), field_infos(infos), field_indexes(indexes), 
-        depth(dep), recycled(false), persistent(persist)
+        depth(dep), recycled(false), persistent(persist),
+        offset_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -12221,6 +12692,8 @@ namespace LegionRuntime {
       // garbage collected the physical instance
       if (!owner)
         context->runtime->free_physical_instance(this);
+      offset_lock.destroy_reservation();
+      offset_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -12445,6 +12918,25 @@ namespace LegionRuntime {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+      FIELD_TYPE hash_key = copy_mask.get_hash_key();
+      // First check to see if we've memoized this result 
+      {
+        AutoLock o_lock(offset_lock,1,false/*exclusive*/);
+        std::map<FIELD_TYPE,std::vector<OffsetEntry> >::const_iterator
+          finder = memoized_offsets.find(hash_key);
+        if (finder != memoized_offsets.end())
+        {
+          for (std::vector<OffsetEntry>::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if (it->offset_mask == copy_mask)
+            {
+              fields.insert(fields.end(),it->offsets.begin(),it->offsets.end());
+              return;
+            }
+          }
+        }
+      }
       // It is absolutely imperative that these infos be added in
       // the order in which they appear in the field mask so that 
       // they line up in the same order with the source/destination infos
@@ -12452,6 +12944,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       int pop_count = 0;
 #endif
+      std::vector<Domain::CopySrcDstField> local;
       for (std::map<unsigned,FieldID>::const_iterator it = 
             field_indexes.begin(); it != field_indexes.end(); it++)
       {
@@ -12464,6 +12957,7 @@ namespace LegionRuntime {
           pop_count++;
 #endif
           fields.push_back(finder->second);
+          local.push_back(finder->second);
         }
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -12471,6 +12965,14 @@ namespace LegionRuntime {
       // there were fields set in the bit mask
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
+      // Add this to the results
+      AutoLock o_lock(offset_lock);
+      std::map<FIELD_TYPE,std::vector<OffsetEntry> >::iterator
+        finder = memoized_offsets.find(hash_key);
+      if (finder == memoized_offsets.end())
+        memoized_offsets[hash_key].push_back(OffsetEntry(copy_mask,local));
+      else
+        finder->second.push_back(OffsetEntry(copy_mask,local));
     }
 
     //--------------------------------------------------------------------------
@@ -13248,16 +13750,26 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PhysicalView::defer_collect_user(Event term_event, 
-                                          const FieldMask &mask, 
-                                          Processor p, bool gc_epoch)
+                                          const FieldMask &mask, Processor p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, DEFER_COLLECT_USER_CALL);
 #endif
       Serializer rez;
+      // Indicate that this is the first deferred collect pass.
+      // Garbage collection gets deferred twice: once until the
+      // termination event has triggered and then again until
+      // the processor manager gives permission for the collection to occur.
+      // Note we don't need to do this if we have an explicit garbage
+      // collection processor.
       {
         RezCheck z(rez);
+#ifdef SPECIALIZED_UTIL_PROCS
+        rez.serialize<bool>(false);
+#else
+        rez.serialize<bool>(true);
+#endif
         PhysicalView *proxy_this = this;
         rez.serialize(proxy_this);
         rez.serialize(term_event);
@@ -13265,17 +13777,6 @@ namespace LegionRuntime {
       }
       // Add a gc reference onto the object
       add_gc_reference();
-      // If we're doing garbage collection in epochs based on when
-      // a processor is busy or not, then get the event from the
-      // runtime for this processor.
-      if (gc_epoch)
-      {
-        Event epoch_event = context->runtime->find_gc_epoch_event(p);
-        // If it exists merge it with the term event and
-        // use that as the start condition for the collection
-        if (epoch_event.exists())
-          term_event = Event::merge_events(term_event, epoch_event);
-      }
 #ifdef SPECIALIZED_UTIL_PROCS
       Processor util_proc = context->runtime->get_gc_proc(p);
 #else
@@ -13287,37 +13788,63 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void PhysicalView::handle_deferred_collect(Deserializer &derez)
+    /*static*/ void PhysicalView::handle_deferred_collect(Deserializer &derez,
+                                                          Processor gc_proc,
+                                                      RegionTreeForest *context)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF
-      LegionProf::register_event(0, PROF_BEGIN_GC);
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
-                                      0 /* no unique id */,
-                                      BEGIN_GC);
-#endif
+
       DerezCheck z(derez);
+      bool first_pass;
+      derez.deserialize(first_pass);
       PhysicalView *view;
       derez.deserialize(view);
       Event term_event;
       derez.deserialize(term_event);
       FieldMask term_mask;
       derez.deserialize(term_mask);
-      // Remove the user
-      view->collect_user(term_event, term_mask);
-      // Then remove the gc reference on the object
-      if (view->remove_gc_reference())
-        delete view;
+      if (first_pass)
+      {
+        // If this is the first pass, then tell the instance
+        // manager that we have a garbage collection operation and
+        // receive back an event to use for doing the second deferral
+        Event defer_event = context->runtime->find_gc_epoch_event(gc_proc);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<bool>(false); // no longer the first pass
+          rez.serialize(view);
+          rez.serialize(term_event);
+          rez.serialize(term_mask);
+        }
+        Processor util_proc = gc_proc.get_utility_processor();
+        util_proc.spawn(DEFERRED_COLLECT_ID,
+                        rez.get_buffer(), rez.get_used_bytes(), defer_event);
+      }
+      else
+      {
 #ifdef LEGION_PROF
-      LegionProf::register_event(0, PROF_END_GC);
+        LegionProf::register_event(0, PROF_BEGIN_GC);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
-                                      0 /* no unique id */,
-                                      END_GC);
+        LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                        0 /* no unique id */,
+                                        BEGIN_GC);
 #endif
+        // Remove the user
+        view->collect_user(term_event, term_mask);
+        // Then remove the gc reference on the object
+        if (view->remove_gc_reference())
+          delete view;
+#ifdef LEGION_PROF
+        LegionProf::register_event(0, PROF_END_GC);
+#endif
+#ifdef LEGION_LOGGING
+        LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                        0 /* no unique id */,
+                                        END_GC);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13600,9 +14127,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, COPY_TO_CALL);
 #endif
-      //preconditions.insert(manager->get_use_event());
-      //find_copy_preconditions(preconditions, true/*writing*/, 
-      //                        0/*redop*/, copy_mask);
       manager->compute_copy_offsets(copy_mask, dst_fields);
     }
 
@@ -13614,9 +14138,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, COPY_FROM_CALL);
 #endif
-      //preconditions.insert(manager->get_use_event());
-      //find_copy_preconditions(preconditions, false/*writing*/,
-      //                        0/*redop*/, copy_mask);
       manager->compute_copy_offsets(copy_mask, src_fields);
     }
 
@@ -13629,9 +14150,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REDUCE_TO_CALL);
 #endif
-      //preconditions.insert(manager->get_use_event());
-      //find_copy_preconditions(preconditions, true/*writing*/,
-      //                        redop, copy_mask);
       manager->compute_copy_offsets(copy_mask, dst_fields);
       return false; // not a fold
     }
@@ -13712,8 +14230,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void InstanceView::add_copy_user(ReductionOpID redop, Event copy_term,
                                      const FieldMask &copy_mask, bool reading,
-                                     Processor exec_proc,
-                                     std::set<Event> &preconditions)
+                                     Processor exec_proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -13729,26 +14246,30 @@ namespace LegionRuntime {
       else
         usage.privilege = READ_WRITE;
       PhysicalUser user(usage, copy_mask, copy_term);
-      Event start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        preconditions.insert(start_use_event);
       if (parent != NULL)
       {
         // Save our color
         user.child = logical_node->get_color();
-        parent->add_user_above(preconditions, user);
+        parent->add_copy_user_above(user);
         // Restore the color
         user.child = -1;
       }
-      add_local_user<false>(preconditions, user);
       // Note we can ignore the wait on set here since we are just
       // registering the user and filtering previous users
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, copy_mask, 
-                         exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, copy_mask, exec_proc);
       // Have to do this part holding the view lock
       std::set<AddressSpaceID> notified;
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      AutoLock v_lock(view_lock);
+      // Add ourselves to the list of current epoch users, this
+      // is safe to do because we previously filtered the 
+      // previous epoch users for these fields in the
+      // find_copy_preconditions call
+#ifndef PHYSICAL_FIELD_TREE
+      curr_epoch_users.push_back(user);
+#else
+      curr_epoch_users->insert(user);
+#endif
       // If we're remote, send back the user to the owner 
       if (owner_did != did)
         send_back_user(user);
@@ -13777,8 +14298,7 @@ namespace LegionRuntime {
       }
       add_local_user<false>(wait_on_events, user);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, user.field_mask,
-                         exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, user.field_mask, exec_proc);
       // Have to do this part holding the view lock
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -13914,7 +14434,7 @@ namespace LegionRuntime {
       add_local_user<true>(dummy_wait_on, user);
       // The launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask, 
-                         Machine::get_executing_processor(), false/*gc epoch*/);
+                         Machine::get_executing_processor());
     }
 
     //--------------------------------------------------------------------------
@@ -13940,7 +14460,7 @@ namespace LegionRuntime {
       add_local_user<true>(dummy_wait_on, user);
       // Then launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask,
-                         Machine::get_executing_processor(), false/*gc epoch*/);
+                         Machine::get_executing_processor());
     } 
 
     //--------------------------------------------------------------------------
@@ -13965,6 +14485,36 @@ namespace LegionRuntime {
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       if (owner_did != did)
         send_back_user(user);
+      notify_subscribers(notified, user);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::add_copy_user_above(PhysicalUser &user)
+    //--------------------------------------------------------------------------
+    {
+      if (parent != NULL)
+      {
+        // Save the child and replace with our child 
+        int local_child = user.child;
+        user.child = logical_node->get_color();
+        parent->add_copy_user_above(user);
+        // Restore the child
+        user.child = local_child;
+      }
+      std::set<AddressSpaceID> notified;
+      AutoLock v_lock(view_lock);
+      // Add this to the list of current epoch users,
+      // this is safe to do because we previously filtered
+      // the previous epoch usrs for these fields in the find
+      // copy preconditions call
+#ifndef PHYSICAL_FIELD_TREE
+      curr_epoch_users.push_back(user);
+#else
+      curr_epoch_users->insert(user);
+#endif
+      if (owner_did != did)
+        send_back_user(user);
+      // Notify any subscribers
       notify_subscribers(notified, user);
     }
  
@@ -14095,7 +14645,8 @@ namespace LegionRuntime {
       if (ABOVE || !!non_dominated)
       {
         for (std::list<PhysicalUser>::iterator it = 
-              prev_epoch_users.begin(); it != prev_epoch_users.end(); /*nothing*/)
+              prev_epoch_users.begin(); it != 
+              prev_epoch_users.end(); /*nothing*/)
         { 
           if (user.term_event == it->term_event)
           {
@@ -14210,6 +14761,239 @@ namespace LegionRuntime {
       event_references.insert(user.term_event);
     }
  
+    //--------------------------------------------------------------------------
+    void InstanceView::find_copy_preconditions(ReductionOpID redop, 
+                                               bool reading, 
+                                               const FieldMask &copy_mask,
+                                       std::map<Event,FieldMask> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_CALL);
+#endif
+      Event start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+      {
+        std::map<Event,FieldMask>::iterator finder = 
+          preconditions.find(start_use_event);
+        if (finder == preconditions.end())
+          preconditions[start_use_event] = copy_mask;
+        else
+          finder->second |= copy_mask;
+      }
+      if (parent != NULL)
+        parent->find_copy_preconditions_above(logical_node->get_color(),
+                                              redop, reading, copy_mask,
+                                              preconditions);
+      find_local_copy_preconditions<false>(-1/*child color*/, redop, reading,
+                                           copy_mask, preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::find_copy_preconditions_above(Color child_color,
+                                                     ReductionOpID redop,
+                                                     bool reading,
+                                                     const FieldMask &copy_mask, 
+                                       std::map<Event,FieldMask> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_ABOVE_CALL);
+#endif
+      if (parent != NULL)
+        parent->find_copy_preconditions_above(logical_node->get_color(),
+                                              redop, reading, copy_mask,
+                                              preconditions);
+      find_local_copy_preconditions<true>(child_color, redop, reading,
+                                          copy_mask, preconditions);
+    }
+    
+    //--------------------------------------------------------------------------
+    template<bool ABOVE>
+    void InstanceView::find_local_copy_preconditions(int local_color,
+                                                     ReductionOpID redop,
+                                                     bool reading,
+                                                     const FieldMask &copy_mask,
+                                       std::map<Event,FieldMask> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+#endif
+      // Need the lock when doing this analysis
+      AutoLock v_lock(view_lock);
+#ifndef PHYSICAL_FIELD_TREE
+      FieldMask non_dominated;
+      FieldMask observed;
+      std::deque<PhysicalUser> new_prev_users;
+      for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
+            it != curr_epoch_users.end(); /*nothing*/)
+      {
+        if (!ABOVE)
+          observed |= it->field_mask;
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+        // We're about to do a bunch of expensive tests,
+        // so first do something cheap to see if we can
+        // prune the user out of the list.
+        if (it->term_event.has_triggered())
+        {
+          it = curr_epoch_users.erase(it);
+          continue;
+        }
+#endif
+        if (ABOVE && (local_color >= 0))
+        {
+          // Same child, already done the analysis
+          if (local_color == it->child)
+          {
+            it++;
+            continue;
+          }
+          // Disjoint children, keep going
+          if ((it->child >= 0) &&
+              logical_node->are_children_disjoint(unsigned(local_color),
+                                                  unsigned(it->child)))
+          {
+            it++;
+            continue;
+          }
+        }
+        FieldMask overlap = copy_mask & it->field_mask;
+        // Disjoint fields, keep going
+        if (!overlap)
+        {
+          it++;
+          continue;
+        }
+        // Now we need to do a dependence analysis
+        if (reading && IS_READ_ONLY(it->usage))
+        {
+          non_dominated |= overlap;
+          it++;
+          continue;
+        }
+        else if ((redop > 0) && IS_REDUCE(it->usage) && 
+                 (it->usage.redop == redop))
+        {
+          non_dominated |= overlap;
+          it++; 
+          continue;
+        }
+        // If we get here then we have a dependence so record it
+        std::map<Event,FieldMask>::iterator finder = 
+          preconditions.find(it->term_event);
+        if (finder == preconditions.end())
+          preconditions[it->term_event] = overlap;
+        else
+          finder->second |= overlap;
+        new_prev_users.push_back(*it);
+        new_prev_users.back().field_mask = overlap;
+        it->field_mask -= overlap;
+        if (!it->field_mask)
+          it = curr_epoch_users.erase(it);
+        else
+          it++;
+      }
+      // It's only safe to dominate fields that we observed
+      FieldMask dominated = (observed & (copy_mask - non_dominated));
+      // Update the non-dominated mask with what we
+      // we're actually not-dominated by
+      if (!ABOVE)
+        non_dominated = copy_mask - dominated;
+      // Filter any dominated users
+      if (!ABOVE && !!dominated)
+      {
+        for (std::list<PhysicalUser>::iterator it = prev_epoch_users.begin();
+              it != prev_epoch_users.end(); /*nothing*/)
+        {
+          it->field_mask -= dominated;
+          if (!it->field_mask)
+            it = prev_epoch_users.erase(it);
+          else
+            it++;
+        }
+        // If this is not read-only then update the versions of
+        // the dominated fields.
+        //if (!IS_READ_ONLY(user.usage))
+        //  update_versions(dominated);
+      }
+      if (ABOVE || !!non_dominated)
+      {
+        for (std::list<PhysicalUser>::iterator it = 
+              prev_epoch_users.begin(); it != 
+              prev_epoch_users.end(); /*nothing*/)
+        {
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+          // Before we do a bunch of expensive operations,
+          // do something cheap and check to see if the
+          // event has already triggered.
+          if (it->term_event.has_triggered())
+          {
+            it = prev_epoch_users.erase(it);
+            continue;
+          }
+#endif
+          if (ABOVE && (local_color >= 0))
+          {
+            if (local_color == it->child)
+            {
+              it++;
+              continue;
+            }
+            if ((it->child >= 0) &&
+                logical_node->are_children_disjoint(unsigned(local_color),
+                                                    unsigned(it->child)))
+            {
+              it++;
+              continue;
+            }
+          }
+          FieldMask overlap = it->field_mask & 
+                                      (ABOVE ? copy_mask : non_dominated);
+          if (!overlap)
+          {
+            it++;
+            continue;
+          }
+          if (reading && IS_READ_ONLY(it->usage))
+          {
+            it++;
+            continue;
+          }
+          else if ((redop > 0) && IS_REDUCE(it->usage) &&
+                   (it->usage.redop == redop))
+          {
+            it++;
+            continue;
+          }
+          // Otherwise record the dependence
+          std::map<Event,FieldMask>::iterator finder = 
+            preconditions.find(it->term_event);
+          if (finder == preconditions.end())
+            preconditions[it->term_event] = overlap;
+          else
+            finder->second |= overlap;
+          it++;
+        }
+      }
+      // Add the new previous users to previous epoch list
+      for (unsigned idx = 0; idx < new_prev_users.size(); idx++)
+        prev_epoch_users.push_back(new_prev_users[idx]);
+      // See if we need to compress the lists
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+      if (Runtime::max_filter_size > 0)
+      {
+        if (prev_epoch_users.size() >= Runtime::max_filter_size)
+          condense_user_list(prev_epoch_users);
+        if (curr_epoch_users.size() >= Runtime::max_filter_size)
+          condense_user_list(curr_epoch_users);
+      }
+#endif
+#else // PHYSICAL_FIELD_TREE
+      assert(false); // TODO: Implement this for physical field tree
+#endif
+    }
+    
 #if 0
     //--------------------------------------------------------------------------
     void InstanceView::find_copy_preconditions(std::set<Event> &wait_on,
@@ -14625,7 +15409,8 @@ namespace LegionRuntime {
       // very much precision because anyone who was waiting on us from 
       // below will still get precise waiters, and everyone checking from
       // this level would have registered on all the same children anyway.
-      if ((users.size() > (Runtime::max_filter_size/2)) && !children.empty())
+      if (Runtime::enable_imprecise_filter &&
+          (users.size() > (Runtime::max_filter_size/2)) && !children.empty())
       {
         for (std::list<PhysicalUser>::iterator it = users.begin();
               it != users.end(); it++)
@@ -14661,8 +15446,7 @@ namespace LegionRuntime {
               // Add a garbage collection task
               event_references.insert(it->term_event);
               defer_collect_user(it->term_event, it->field_mask,
-                                 Machine::get_executing_processor(),
-                                 false/*gc epoch*/);
+                                 Machine::get_executing_processor());
             }
           }
         }
@@ -14673,7 +15457,8 @@ namespace LegionRuntime {
       // which all shared the same privileges, regardless of mask or child.
       // To avoid merging things over and over again, we'll put the
       // results of the merge back at the end of the list.
-      if (users.size() > (Runtime::max_filter_size/2))
+      if (Runtime::enable_imprecise_filter &&
+          (users.size() > (Runtime::max_filter_size/2)))
       {
         // Find the first element we won't let anyone merge
         std::list<PhysicalUser>::iterator end_user = users.begin();
@@ -14708,8 +15493,7 @@ namespace LegionRuntime {
             // Add a garbage collection task
             event_references.insert(it->term_event);
             defer_collect_user(it->term_event, it->field_mask,
-                               Machine::get_executing_processor(),
-                               false/*gc epoch*/);
+                               Machine::get_executing_processor());
             // Put the new item at the back of the list and
             // remove it from its current location.
             users.push_back(*it);
@@ -14968,7 +15752,7 @@ namespace LegionRuntime {
       for (std::map<Event,FieldMask>::const_iterator it = 
             deferred_events.begin(); it != deferred_events.end(); it++)
       {
-        defer_collect_user(it->first, it->second, gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->first, it->second, gc_proc);
       }
     }
 
@@ -15195,15 +15979,18 @@ namespace LegionRuntime {
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
       this->reduce_from(manager->redop, reduce_mask, src_fields);
 
-      UserEvent reduce_term = UserEvent::create_user_event();
-      std::set<Event> preconditions;
-      target->add_copy_user(manager->redop, reduce_term,
-                            reduce_mask, false/*reading*/,
-                            local_proc, preconditions);
-      this->add_copy_user(manager->redop, reduce_term,
-                          reduce_mask, true/*reading*/,
-                          local_proc, preconditions);
-      Event reduce_pre = Event::merge_events(preconditions); 
+      std::map<Event,FieldMask> preconditions;
+      target->find_copy_preconditions(manager->redop, false/*reading*/, 
+                                      reduce_mask, preconditions); 
+      this->find_copy_preconditions(manager->redop, true/*reading*/, 
+                                    reduce_mask, preconditions);
+      std::set<Event> event_preconds;
+      for (std::map<Event,FieldMask>::const_iterator it = preconditions.begin();
+            it != preconditions.end(); it++)
+      {
+        event_preconds.insert(it->first);
+      }
+      Event reduce_pre = Event::merge_events(event_preconds); 
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       if (!reduce_pre.exists())
       {
@@ -15211,20 +15998,47 @@ namespace LegionRuntime {
         new_reduce_pre.trigger();
         reduce_pre = new_reduce_pre;
       }
+      IndexSpace reduce_index_space;
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), preconditions, reduce_pre);
+          Machine::get_executing_processor(), event_preconds, reduce_pre);
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependences(preconditions, reduce_pre);
+      LegionSpy::log_event_dependences(event_preconds, reduce_pre);
 #endif
-      Domain domain = logical_node->get_domain();
-      Event reduce_post = manager->issue_reduction(src_fields, dst_fields,
-                                                   domain, reduce_pre, fold);
-      // Chain the reduction termination trigger off the 
-      // low-level event for when the reduction triggers
-      reduce_term.trigger(reduce_post);
+      Event reduce_post; 
+      if (logical_node->has_component_domains())
+      {
+        std::set<Event> post_events;
+        const std::set<Domain> &component_domains = 
+          logical_node->get_component_domains();
+        for (std::set<Domain>::const_iterator it = 
+              component_domains.begin(); it != component_domains.end(); it++)
+        {
+          Event post = manager->issue_reduction(src_fields, dst_fields,
+                                                *it, reduce_pre, fold);
+          post_events.insert(post);
+        }
+        reduce_post = Event::merge_events(post_events);
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+        Domain domain = logical_node->get_domain();
+        reduce_index_space = domain.get_index_space();
+#endif
+      }
+      else
+      {
+        Domain domain = logical_node->get_domain();
+        reduce_post = manager->issue_reduction(src_fields, dst_fields,
+                                               domain, reduce_pre, fold);
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+        reduce_index_space = domain.get_index_space();
+#endif
+      }
+      target->add_copy_user(manager->redop, reduce_post,
+                            reduce_mask, false/*reading*/, local_proc);
+      this->add_copy_user(manager->redop, reduce_post,
+                          reduce_mask, true/*reading*/, local_proc);
 #ifdef LEGION_LOGGING
       {
         std::set<FieldID> reduce_fields;
@@ -15234,19 +16048,19 @@ namespace LegionRuntime {
             Machine::get_executing_processor(),
             manager->get_instance(),
             target->get_manager()->get_instance(),
-            domain.get_index_space(),
+            reduce_index_space,
             manager->region_node->column_source->handle,
             manager->region_node->handle.tree_id,
-            reduce_pre, reduce_term, reduce_fields, manager->redop);
+            reduce_pre, reduce_post, reduce_fields, manager->redop);
       }
 #endif
 #ifdef LEGION_SPY
       char *string_mask = 
         manager->region_node->column_source->to_string(reduce_mask);
       LegionSpy::log_copy_operation(manager->get_instance().id,
-          target->get_manager()->get_instance().id, domain.get_index_space().id,
+          target->get_manager()->get_instance().id, reduce_index_space.id,
           manager->region_node->column_source->handle.id,
-          manager->region_node->handle.tree_id, reduce_pre, reduce_term,
+          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
           manager->redop, string_mask);
 #endif
     } 
@@ -15280,10 +16094,47 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ReductionView::find_copy_preconditions(ReductionOpID redop,
+                                                bool reading,
+                                                const FieldMask &copy_mask,
+                                      std::map<Event,FieldMask> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock,1,false/*exclusive*/);
+      if (reading)
+      {
+        // Register dependences on any reducers
+        for (std::list<PhysicalUser>::const_iterator it = 
+              reduction_users.begin(); it != reduction_users.end(); it++)
+        {
+          std::map<Event,FieldMask>::iterator finder = 
+            preconditions.find(it->term_event);
+          if (finder == preconditions.end())
+            preconditions[it->term_event] = copy_mask;
+          else
+            finder->second |= copy_mask;
+        }
+      }
+      else
+      {
+        // Register dependences on any readers
+        for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
+              it != reading_users.end(); it++)
+        {
+          std::map<Event,FieldMask>::iterator finder = 
+            preconditions.find(it->term_event);
+          if (finder == preconditions.end())
+            preconditions[it->term_event] = copy_mask;
+          else
+            finder->second |= copy_mask;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReductionView::add_copy_user(ReductionOpID redop, Event copy_term,
                                       const FieldMask &mask, bool reading,
-                                      Processor exec_proc,
-                                      std::set<Event> &preconditions)
+                                      Processor exec_proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15294,13 +16145,7 @@ namespace LegionRuntime {
 #endif
       AutoLock v_lock(view_lock);
       if (reading)
-      {
-        // Register dependences on any reducers
-        for (std::list<PhysicalUser>::const_iterator it = 
-              reduction_users.begin(); it != reduction_users.end(); it++)
-        {
-          preconditions.insert(it->term_event);
-        }
+      { 
         PhysicalUser user(RegionUsage(READ_ONLY,EXCLUSIVE,0),mask,copy_term);
         reading_users.push_back(user);
         if (owner_did != did)
@@ -15309,13 +16154,7 @@ namespace LegionRuntime {
         notify_subscribers(user);
       }
       else
-      {
-        // Register dependences on any readers
-        for (std::list<PhysicalUser>::const_iterator it = reading_users.begin();
-              it != reading_users.end(); it++)
-        {
-          preconditions.insert(it->term_event);
-        }
+      { 
         PhysicalUser user(RegionUsage(REDUCE,EXCLUSIVE,redop),mask,copy_term);
         reduction_users.push_back(user);
         if (owner_did != did)
@@ -15325,7 +16164,7 @@ namespace LegionRuntime {
       // Update the reference users
       event_references.insert(copy_term);
       // Launch the garbage collection task
-      defer_collect_user(copy_term, mask, exec_proc, true/*gc epoch*/);
+      defer_collect_user(copy_term, mask, exec_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -15351,8 +16190,7 @@ namespace LegionRuntime {
       // Update the reference users
       event_references.insert(user.term_event);
       // Launch the garbage collection task
-      defer_collect_user(user.term_event, user.field_mask,
-                         exec_proc, true/*gc epoch*/);
+      defer_collect_user(user.term_event, user.field_mask, exec_proc);
       if (owner_did != did)
         send_back_user(user);
       notify_subscribers(user);
@@ -15530,7 +16368,7 @@ namespace LegionRuntime {
       event_references.insert(user.term_event);
       // Launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask,
-                         Machine::get_executing_processor(), false/*gc epoch*/);
+                         Machine::get_executing_processor());
     }
 
     //--------------------------------------------------------------------------
@@ -15559,7 +16397,7 @@ namespace LegionRuntime {
       event_references.insert(user.term_event);
       // Launch the garbage collection task
       defer_collect_user(user.term_event, user.field_mask,
-                         Machine::get_executing_processor(), false/*gc epoch*/);
+                         Machine::get_executing_processor());
     }
 
     //--------------------------------------------------------------------------
@@ -15719,14 +16557,12 @@ namespace LegionRuntime {
       for (std::list<PhysicalUser>::const_iterator it = 
             reduction_users.begin(); it != reduction_users.end(); it++)
       {
-        defer_collect_user(it->term_event, it->field_mask,
-                           gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->term_event, it->field_mask, gc_proc);
       }
       for (std::list<PhysicalUser>::const_iterator it = 
             reading_users.begin(); it != reading_users.end(); it++)
       {
-        defer_collect_user(it->term_event, it->field_mask,
-                           gc_proc, false/*gc epoch*/);
+        defer_collect_user(it->term_event, it->field_mask, gc_proc);
       }
     }
 

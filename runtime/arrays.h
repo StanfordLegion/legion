@@ -125,6 +125,38 @@ namespace LegionRuntime {
 	  res.x[i] = x[i] / other.x[i];
 	return res;
       }
+
+      static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+	  res.x[i] = a.x[i] + b.x[i];
+	return res;
+      }
+
+      static Point<DIM> min(const Point<DIM> a, const Point<DIM> b)
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+	  res.x[i] = imin(a.x[i], b.x[i]);
+	return res;
+      }
+
+      static Point<DIM> max(const Point<DIM> a, const Point<DIM> b)
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+	  res.x[i] = imax(a.x[i], b.x[i]);
+	return res;
+      }
+
+      static int dot(const Point<DIM> a, const Point<DIM> b)
+      {
+	int v = 0;
+        for(unsigned i = 0; i < DIM; i++)
+	  v += a.x[i] * b.x[i];
+	return v;
+      }
   
       int dot(const Point<DIM> other) const
       {
@@ -275,6 +307,12 @@ namespace LegionRuntime {
       {
 	return Rect<DIM>(Point<DIM>::max(lo, other.lo),
 			 Point<DIM>::min(hi, other.hi));
+      }
+
+      Rect<DIM> convex_hull(const Rect<DIM>& other)
+      {
+        return Rect<DIM>(Point<DIM>::min(lo, other.lo),
+                         Point<DIM>::max(hi, other.hi));
       }
   
       Point<DIM> lo, hi;
