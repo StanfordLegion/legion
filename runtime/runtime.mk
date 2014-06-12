@@ -16,17 +16,17 @@
 
 # If using the general low-level runtime
 # select a target GPU architecture
-GPU_ARCH = fermi
-#GPU_ARCH = kepler
-#GPU_ARCH = k20
+GPU_ARCH ?= fermi
+#GPU_ARCH ?= kepler
+#GPU_ARCH ?= k20
 
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 # defaults for GASNet
-CONDUIT = udp
-GASNET = $(LG_RT_DIR)/gasnet/release
+CONDUIT ?= udp
+GASNET ?= $(LG_RT_DIR)/gasnet/release
 
 # Handle some of the common machines we frequent
 

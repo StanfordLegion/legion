@@ -9662,9 +9662,11 @@ namespace LegionRuntime {
           }
         }
         // For any fields which need copies but don't have
-        // any preconditions, but them in their own set
+        // any preconditions, but them in their own set.
+        // Put it on the front because it is the copy with
+        // no preconditions so it can start right away!
         if (!!update_mask)
-          precondition_sets.push_back(PreconditionSet(update_mask));
+          precondition_sets.push_front(PreconditionSet(update_mask));
         // Now that we have our precondition sets, it's time
         // to issue the distinct copies to the low-level runtime
         // Issue a copy for each of the different precondition sets
