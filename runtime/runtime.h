@@ -421,6 +421,11 @@ namespace LegionRuntime {
     public:
       Event find_gc_epoch_event(void);
       void notify_pending_shutdown(void);
+    public:
+      // Mapper introspection methods
+      bool sample_current_executing(void);
+      unsigned sample_current_pending(void);
+      unsigned sample_unmapped_tasks(MapperID map_id);
 #ifdef HANG_TRACE
     public:
       void dump_state(FILE *target);
@@ -536,6 +541,11 @@ namespace LegionRuntime {
                           const std::vector<size_t> &field_sizes,
                           const Domain &dom, const size_t blocking_factor,
                           const unsigned depth, Event &use_event);
+    public:
+      // Method for mapper introspection
+      size_t sample_allocated_space(void);
+      size_t sample_free_space(void);
+      unsigned sample_allocated_instances(void);
     protected:
       // The memory that we are managing
       const Memory memory;
@@ -605,8 +615,8 @@ namespace LegionRuntime {
         SEND_BACK_USER,
         SEND_USER,
         SEND_SUBSCRIBER,
-        SEND_INSTANCE_VIEW,
-        SEND_BACK_INSTANCE_VIEW,
+        SEND_MATERIALIZED_VIEW,
+        SEND_BACK_MATERIALIZED_VIEW,
         SEND_REDUCTION_VIEW,
         SEND_BACK_REDUCTION_VIEW,
         SEND_INSTANCE_MANAGER,
@@ -672,8 +682,8 @@ namespace LegionRuntime {
       void send_back_user(Serializer &rez, bool flush);
       void send_user(Serializer &rez, bool flush);
       void send_subscriber(Serializer &rez, bool flush);
-      void send_instance_view(Serializer &rez, bool flush);
-      void send_back_instance_view(Serializer &rez, bool flush);
+      void send_materialized_view(Serializer &rez, bool flush);
+      void send_back_materialized_view(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
       void send_back_reduction_view(Serializer &rez, bool flush);
       void send_instance_manager(Serializer &rez, bool flush);
@@ -805,18 +815,30 @@ namespace LegionRuntime {
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
+      IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
+      IndexSpace get_index_subspace(IndexPartition p, Color c);
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
+      Domain get_index_space_domain(IndexSpace handle);
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
-      void get_index_space_partition_colors(Context ctx, IndexSpace sp,
+      Domain get_index_partition_color_space(IndexPartition p);
+      void get_index_space_partition_colors(Context ctx, IndexSpace handle,
+                                            std::set<Color> &colors);
+      void get_index_space_partition_colors(IndexSpace handle,
                                             std::set<Color> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
+      bool is_index_partition_disjoint(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
+      Color get_index_space_color(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
+      Color get_index_partition_color(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
+      IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
+      bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
+      IndexPartition get_parent_index_partition(IndexSpace handle);
     public:
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       DomainPoint safe_cast(Context ctx, DomainPoint point, 
@@ -825,6 +847,7 @@ namespace LegionRuntime {
       FieldSpace create_field_space(Context ctx);
       void destroy_field_space(Context ctx, FieldSpace handle);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
+      size_t get_field_size(FieldSpace handle, FieldID fid);
       // Called from deletion op
       void finalize_field_space_destroy(FieldSpace handle);
       void finalize_field_destroy(FieldSpace handle, FieldID fid);
@@ -841,29 +864,48 @@ namespace LegionRuntime {
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
+      LogicalPartition get_logical_partition(LogicalRegion parent,
+                                             IndexPartition handle);
       LogicalPartition get_logical_partition_by_color(Context ctx, 
                                                       LogicalRegion parent, 
+                                                      Color c);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
                                                      FieldSpace fspace, 
                                                      RegionTreeID tid); 
+      LogicalPartition get_logical_partition_by_tree(IndexPartition handle,
+                                                     FieldSpace fspace,
+                                                     RegionTreeID tid);
       LogicalRegion get_logical_subregion(Context ctx, LogicalPartition parent, 
+                                          IndexSpace handle);
+      LogicalRegion get_logical_subregion(LogicalPartition parent,
                                           IndexSpace handle);
       LogicalRegion get_logical_subregion_by_color(Context ctx, 
                                                    LogicalPartition parent, 
+                                                   Color c);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
                                                   FieldSpace fspace, 
                                                   RegionTreeID tid);
+      LogicalRegion get_logical_subregion_by_tree(IndexSpace handle,
+                                                  FieldSpace fspace,
+                                                  RegionTreeID tid);
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
+      Color get_logical_region_color(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
+      Color get_logical_partition_color(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
+      LogicalRegion get_parent_logical_region(LogicalPartition handle);
       bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
+      bool has_parent_logical_partition(LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(Context ctx, 
                                                     LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
@@ -987,6 +1029,14 @@ namespace LegionRuntime {
                                      const unsigned depth,
                                      Event &use_event);
     public:
+      // Mapper introspection methods
+      size_t sample_allocated_space(Memory mem);
+      size_t sample_free_space(Memory mem);
+      unsigned sample_allocated_instances(Memory mem);
+      bool sample_current_executing(Processor proc);
+      unsigned sample_current_pending(Processor proc);
+      unsigned sample_unmapped_tasks(Processor proc, Mapper *mapper);
+    public:
       // Messaging functions
       MessageManager* find_messenger(AddressSpaceID sid) const;
       MessageManager* find_messenger(Processor target) const;
@@ -1035,8 +1085,8 @@ namespace LegionRuntime {
       void send_back_user(AddressSpaceID target, Serializer &rez);
       void send_user(AddressSpaceID target, Serializer &rez);
       void send_subscriber(AddressSpaceID target, Serializer &rez);
-      void send_instance_view(AddressSpaceID target, Serializer &rez);
-      void send_back_instance_view(AddressSpaceID target, Serializer &rez);
+      void send_materialized_view(AddressSpaceID target, Serializer &rez);
+      void send_back_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
@@ -1092,10 +1142,10 @@ namespace LegionRuntime {
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
-      void handle_send_instance_view(Deserializer &derez, 
-                                     AddressSpaceID source);
-      void handle_send_back_instance_view(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_send_materialized_view(Deserializer &derez, 
+                                         AddressSpaceID source);
+      void handle_send_back_materialized_view(Deserializer &derez,
+                                              AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_back_reduction_view(Deserializer &derez,
@@ -1471,9 +1521,18 @@ namespace LegionRuntime {
                       LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
                       TaskID uid, Processor::Kind proc_kind, 
                       bool single_task, bool index_space_task,
-                      VariantID vid, size_t return_size,
+                      VariantID &vid, size_t return_size,
                       const TaskConfigOptions &options,
                       const char *name);
+      static TaskID update_collection_table(
+                      LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
+                      TaskID uid, Processor::Kind proc_kind, 
+                      bool single_task, bool index_space_task,
+                      VariantID vid, size_t return_size,
+                      const TaskConfigOptions &options,
+                      const char *name, 
+                      const void *user_data, size_t user_data_size);
+      static const void* find_user_data(TaskID tid, VariantID vid);
       static TaskVariantCollection* get_variant_collection(
                       Processor::TaskFuncID tid);
       static PartitionProjectionFnptr 
@@ -1497,6 +1556,8 @@ namespace LegionRuntime {
                                             get_inline_table(void);
       static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
                                             get_collection_table(void);
+      static std::map<std::pair<TaskID,VariantID>,const void*>&
+                                            get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static void register_runtime_tasks(Processor::TaskIDTable &table);

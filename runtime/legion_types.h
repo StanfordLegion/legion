@@ -450,10 +450,13 @@ namespace LegionRuntime {
     class DistributedCollectable;
     class HierarchicalCollectable;
     class PhysicalManager; // base class for instance and reduction
-    class PhysicalView; // base class for instance and reduciton
+    class LogicalView; // base class for instance and reduction
     class InstanceManager;
     class InstanceKey;
     class InstanceView;
+    class MaterializedView;
+    class CompositeView;
+    class CompositeNode;
     class MappingRef;
     class InstanceRef;
     class InnerTaskView;
@@ -592,9 +595,11 @@ namespace LegionRuntime {
     friend class RegionTreeNode;                  \
     friend class RegionNode;                      \
     friend class PartitionNode;                   \
-    friend class PhysicalView;                    \
+    friend class LogicalView;                     \
     friend class InstanceView;                    \
     friend class ReductionView;                   \
+    friend class MaterializedView;                \
+    friend class CompositeView;                   \
     friend class PhysicalManager;                 \
     friend class InstanceManager;                 \
     friend class ReductionManager;                \

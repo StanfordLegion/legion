@@ -162,7 +162,8 @@ namespace LegionRuntime {
       static inline void register_task_variant(unsigned task_id, 
                                                const char *name)
       {
-        log_prof(LEVEL_INFO,"Prof Task Variant %u %s", task_id, name);
+        if (profiling_enabled)
+          log_prof(LEVEL_INFO,"Prof Task Variant %u %s", task_id, name);
       }
 
       static inline void initialize_processor(Processor proc, 
@@ -178,7 +179,8 @@ namespace LegionRuntime {
 
       static inline void initialize_memory(Memory mem, Memory::Kind kind)
       {
-        log_prof(LEVEL_INFO,"Prof Memory " IDFMT " %u", mem.id, kind);
+        if (profiling_enabled)
+          log_prof(LEVEL_INFO,"Prof Memory " IDFMT " %u", mem.id, kind);
       }
 
       static inline void finalize_processor(Processor proc)
@@ -188,8 +190,9 @@ namespace LegionRuntime {
         // Someone else has already dumped this processor
         if (perform_dump > 0)
           return;
-        log_prof(LEVEL_INFO,"Prof Processor " IDFMT " %u %u", 
-                  proc.id, prof.utility, prof.kind);
+        if (profiling_enabled)
+          log_prof(LEVEL_INFO,"Prof Processor " IDFMT " %u %u", 
+                    proc.id, prof.utility, prof.kind);
         for (unsigned idx = 0; idx < prof.tasks.size(); idx++)
         {
           const TaskInstance &inst = prof.tasks[idx];

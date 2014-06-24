@@ -347,6 +347,11 @@ namespace LegionRuntime {
     {
       bool need_resolution = false;
       bool need_complete = false;
+      // Tell our parent context that we are done mapping
+      // It's important that this is done before we mark that we
+      // are executed to avoid race conditions
+      if (track_parent)
+        parent_ctx->register_child_executed(this);
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -367,9 +372,6 @@ namespace LegionRuntime {
           need_complete = true;
         }
       }
-      // Tell our parent context that we are done mapping
-      if (track_parent)
-        parent_ctx->register_child_executed(this);
       if (need_resolution)
         trigger_resolution();
       if (need_complete)
@@ -430,6 +432,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool need_trigger = false;
+      // Tell our parent that we are complete
+      // It's important that we do this before we mark ourselves
+      // completed in order to avoid race conditions
+      if (track_parent)
+        parent_ctx->register_child_complete(this);
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -450,10 +457,7 @@ namespace LegionRuntime {
         }
       }
       if (need_completion_trigger)
-        completion_event.trigger();
-      // Tell our parent that we are complete
-      if (track_parent)
-        parent_ctx->register_child_complete(this); 
+        completion_event.trigger(); 
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
       // finally notify all the operations we dependended on
@@ -482,6 +486,10 @@ namespace LegionRuntime {
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       unique_op_id, COMMIT_OPERATION);
 #endif
+      // Tell our parent context that we are committed
+      // Do this before actually committing to avoid race conditions
+      if (track_parent)
+        parent_ctx->register_child_commit(this);
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);
@@ -493,10 +501,7 @@ namespace LegionRuntime {
         assert(!committed);
 #endif
         committed = true;
-      }
-      // Tell our parent context that we are committed
-      if (track_parent)
-        parent_ctx->register_child_commit(this);
+      } 
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
       // Finally tell any incoming edges that we've now committed

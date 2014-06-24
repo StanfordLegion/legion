@@ -718,8 +718,10 @@ class Processor(object):
     def emit_svg(self, printer):
         # First figure out the max number of levels + 1 for padding
         max_levels = self.full_range.max_levels() + 1
-        printer.init_processor(max_levels)
-        self.full_range.emit_svg_range(printer)
+        # Skip any empty processors
+        if max_levels > 1:
+            printer.init_processor(max_levels)
+            self.full_range.emit_svg_range(printer)
 
     def update_task_stats(self, stat):
         self.full_range.update_task_stats(stat)
@@ -1565,7 +1567,7 @@ def usage():
     print '  -c : perform cummulative analysis'
     print '  -p : generate HTML and SVG files for pictures'
     print '  -v : print verbose profiling information'
-    print '  -m <ppm> : set the pixels per micro-second for images'
+    print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
     print '  -i : generate HTML and SVG files for memory pictures'
     sys.exit(1)
 

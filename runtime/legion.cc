@@ -61,7 +61,7 @@ namespace LegionRuntime {
       Logger::Category log_prof("legion_prof");
       ProcessorProfiler *legion_prof_table = 
         new ProcessorProfiler[MAX_NUM_PROCS + 1];
-      bool profiling_enabled = true;
+      bool profiling_enabled;
     };
 #endif
 
@@ -1791,7 +1791,7 @@ namespace LegionRuntime {
                                             Processor::Kind kind, 
                                             bool single, bool index,
                                             bool inner, bool leaf,
-                                            VariantID vid)
+                                            VariantID &vid)
     //--------------------------------------------------------------------------
     {
       if (vid == AUTO_GENERATE_ID)
@@ -2839,6 +2839,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ TaskID HighLevelRuntime::update_collection_table(
+        LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
+        Processor::Kind proc_kind, bool single_task, bool index_space_task,
+        VariantID vid, size_t return_size, 
+        const TaskConfigOptions &options, const char *name,
+        const void *user_data, size_t user_data_size)
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::update_collection_table(low_level_ptr,inline_ptr,
+                                                    uid,proc_kind,single_task, 
+                                                    index_space_task,vid,
+                                                    return_size,options,name,
+                                                    user_data, user_data_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const void* HighLevelRuntime::find_user_data(TaskID tid,
+                                                            VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::find_user_data(tid, vid);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void HighLevelRuntime::enable_profiling(void)
     //--------------------------------------------------------------------------
     {
@@ -2876,6 +2900,220 @@ namespace LegionRuntime {
     {
       runtime->runtime->handle_mapper_send_message(this, target, 
                                                    message, length);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Mapper::get_index_partition(IndexSpace parent, 
+                                               Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_index_subspace(IndexPartition p, Color c) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_subspace(p, c);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Mapper::get_index_space_domain(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Mapper::get_index_partition_color_space(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition_color_space(p);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_index_space_partition_colors(IndexSpace handle,
+                                                  std::set<Color> &colors) const
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->get_index_space_partition_colors(handle, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::is_index_partition_disjoint(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_index_space_color(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_index_partition_color(IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_parent_index_space(IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::has_parent_index_partition(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Mapper::get_parent_index_partition(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::get_field_size(FieldSpace handle, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition(LogicalRegion parent,
+                                                   IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition_by_color(LogicalRegion par,
+                                                            Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition_by_tree(IndexPartition part,
+                                     FieldSpace fspace, RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_by_tree(part, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion(LogicalPartition parent,
+                                                IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion_by_color(LogicalPartition par,
+                                                         Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion_by_tree(IndexSpace handle,
+                                                        FieldSpace fspace,
+                                                        RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion_by_tree(handle, 
+                                                             fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_logical_region_color(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_region_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_logical_partition_color(LogicalPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_parent_logical_region(LogicalPartition part) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_logical_region(part);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool Mapper::has_parent_logical_partition(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_parent_logical_partition(LogicalRegion r) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_logical_partition(r);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::sample_allocated_space(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_allocated_space(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::sample_free_space(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_free_space(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Mapper::sample_allocated_instances(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_allocated_instances(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::sample_current_executing(Processor proc) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_current_executing(proc);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Mapper::sample_current_pending(Processor proc) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_current_pending(proc);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Mapper::sample_unmapped_tasks(Processor proc) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_unmapped_tasks(proc, 
+                                                     const_cast<Mapper*>(this));
     }
 
   }; // namespace HighLevel

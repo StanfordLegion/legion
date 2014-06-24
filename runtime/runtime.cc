@@ -2535,6 +2535,28 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool ProcessorManager::sample_current_executing(void)
+    //--------------------------------------------------------------------------
+    {
+      return current_executing;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ProcessorManager::sample_current_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      return current_pending;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ProcessorManager::sample_unmapped_tasks(MapperID map_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock q_lock(queue_lock, 1, false/*exclusive*/);
+      return ready_queues[map_id].size();
+    }
+
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
     void ProcessorManager::dump_state(FILE *target)
@@ -3118,6 +3140,28 @@ namespace LegionRuntime {
       return PhysicalInstance::NO_INST;
     } 
 
+    //--------------------------------------------------------------------------
+    size_t MemoryManager::sample_allocated_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return (capacity - remaining_capacity); 
+    }
+
+    //--------------------------------------------------------------------------
+    size_t MemoryManager::sample_free_space(void)
+    //--------------------------------------------------------------------------
+    {
+      return remaining_capacity;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned MemoryManager::sample_allocated_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+      return (physical_instances.size() + reduction_instances.size());
+    }
+
     /////////////////////////////////////////////////////////////
     // Message Manager 
     /////////////////////////////////////////////////////////////
@@ -3431,17 +3475,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_instance_view(Serializer &rez, bool flush)
+    void MessageManager::send_materialized_view(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, SEND_INSTANCE_VIEW, flush);
+      package_message(rez, SEND_MATERIALIZED_VIEW, flush);
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_back_instance_view(Serializer &rez, bool flush)
+    void MessageManager::send_back_materialized_view(Serializer &rez,bool flush)
     //--------------------------------------------------------------------------
     {
-      package_message(rez, SEND_BACK_INSTANCE_VIEW, flush);
+      package_message(rez, SEND_BACK_MATERIALIZED_VIEW, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3872,14 +3916,15 @@ namespace LegionRuntime {
               runtime->handle_send_subscriber(derez, remote_address_space);
               break;
             }
-          case SEND_INSTANCE_VIEW:
+          case SEND_MATERIALIZED_VIEW:
             {
-              runtime->handle_send_instance_view(derez, remote_address_space);
+              runtime->handle_send_materialized_view(derez, 
+                                                     remote_address_space);
               break;
             }
-          case SEND_BACK_INSTANCE_VIEW:
+          case SEND_BACK_MATERIALIZED_VIEW:
             {
-              runtime->handle_send_back_instance_view(derez, 
+              runtime->handle_send_back_materialized_view(derez, 
                                                       remote_address_space);
               break;
             }
@@ -4074,6 +4119,34 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_PROF
       {
+        // See if we should disable profiling on this node
+        if (Runtime::num_profiling_nodes == 0)
+          LegionProf::disable_profiling();
+        else if (Runtime::num_profiling_nodes > 0)
+        {
+          unsigned address_space_idx = 0;
+          for (std::set<AddressSpaceID>::const_iterator it = 
+                address_spaces.begin(); it != address_spaces.end(); it++)
+          {
+            if (address_space == (*it))
+              break;
+            address_space_idx++;
+          }
+          if (address_space_idx >= unsigned(Runtime::num_profiling_nodes))
+            LegionProf::disable_profiling();
+          else
+            LegionProf::enable_profiling();
+        }
+        // If it's less than zero, then they are all enabled by default
+        else
+          LegionProf::enable_profiling();
+        const std::map<Processor::TaskFuncID,TaskVariantCollection*>& table =
+          Runtime::get_collection_table();
+        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
+              const_iterator it = table.begin(); it != table.end(); it++)
+        {
+          LegionProf::register_task_variant(it->first, it->second->name);
+        }
         std::set<Processor> handled_util_procs;
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
@@ -4096,24 +4169,7 @@ namespace LegionRuntime {
         {
           Memory::Kind kind = machine->get_memory_kind(*it);
           LegionProf::initialize_memory(*it, kind);
-        }
-        // Now see if we should disable profiling on this node
-        if (Runtime::num_profiling_nodes == 0)
-          LegionProf::enable_profiling();
-        else if (Runtime::num_profiling_nodes > 0)
-        {
-          unsigned address_space_idx = 0;
-          for (std::set<AddressSpaceID>::const_iterator it = 
-                address_spaces.begin(); it != address_spaces.end(); it++)
-          {
-            if (address_space == (*it))
-              break;
-            address_space_idx++;
-          }
-          if (address_space_idx >= unsigned(Runtime::num_profiling_nodes))
-            LegionProf::disable_profiling();
-        }
-        // If it's less than zero, then they are all enabled by default
+        } 
       }
 #endif
  
@@ -5384,6 +5440,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace Runtime::get_index_subspace(Context ctx, 
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
@@ -5407,6 +5470,13 @@ namespace LegionRuntime {
       }
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_subspace(p, c);
     }
 
     //--------------------------------------------------------------------------
@@ -5437,6 +5507,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Domain Runtime::get_index_space_domain(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
     Domain Runtime::get_index_partition_color_space(Context ctx, 
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
@@ -5463,6 +5540,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Domain Runtime::get_index_partition_color_space(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color_space(p);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
@@ -5478,6 +5562,14 @@ namespace LegionRuntime {
       }
 #endif
       forest->get_index_space_partition_colors(sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(IndexSpace handle,
+                                                   std::set<Color> &colors)
+    //--------------------------------------------------------------------------
+    {
+      forest->get_index_space_partition_colors(handle, colors);
     }
 
     //--------------------------------------------------------------------------
@@ -5498,6 +5590,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_disjoint(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -5511,6 +5610,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_index_space_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Runtime::get_index_space_color(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_index_space_color(handle);
     }
 
@@ -5533,6 +5639,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Color Runtime::get_index_partition_color(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace Runtime::get_parent_index_space(Context ctx,   
                                                IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -5547,6 +5660,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_parent_index_space(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_parent_index_space(handle);
     }
 
@@ -5568,6 +5688,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_parent_index_partition(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::get_parent_index_partition(Context ctx,
                                                        IndexSpace handle)
     //--------------------------------------------------------------------------
@@ -5582,6 +5709,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_parent_index_partition(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_parent_index_partition(handle);
     }
 
@@ -5709,6 +5843,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::get_field_size(FieldSpace handle, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_field_size(handle, fid);
     }
 
@@ -5875,6 +6016,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition(LogicalRegion parent,
+                                                    IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition_by_color(
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
@@ -5890,6 +6039,14 @@ namespace LegionRuntime {
       }
 #endif
       return forest->get_logical_partition_by_color(parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_color(LogicalRegion par,
+                                                             Color c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_by_color(par, c);
     }
 
     //--------------------------------------------------------------------------
@@ -5912,6 +6069,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_tree(IndexPartition part,
+                                                            FieldSpace fspace,
+                                                            RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_by_tree(part, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion(Context ctx, 
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
@@ -5926,6 +6092,14 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_logical_subregion(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion(LogicalPartition parent,
+                                                 IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_logical_subregion(parent, handle);
     }
 
@@ -5948,6 +6122,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
+                                                          Color c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_subregion_by_color(par, c);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion_by_tree(Context ctx, 
                         IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
@@ -5966,8 +6148,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_tree(IndexSpace handle,
+                                                         FieldSpace fspace,
+                                                         RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_subregion_by_tree(handle, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_logical_region_color(Context ctx, 
                                                   LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get logical region color in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->get_logical_region_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Runtime::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_region_color(handle);
@@ -5992,6 +6200,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Color Runtime::get_logical_partition_color(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_parent_logical_region(Context ctx, 
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
@@ -6006,6 +6221,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_parent_logical_region(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_parent_logical_region(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_parent_logical_region(handle);
     }
 
@@ -6028,6 +6250,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
@@ -6042,6 +6271,13 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      return forest->get_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
       return forest->get_parent_logical_partition(handle);
     }
 
@@ -7684,6 +7920,79 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t Runtime::sample_allocated_space(Memory mem)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory(mem);
+      return manager->sample_allocated_space();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::sample_free_space(Memory mem)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory(mem);
+      return manager->sample_free_space();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::sample_allocated_instances(Memory mem)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory(mem);
+      return manager->sample_allocated_instances();
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::sample_current_executing(Processor proc)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+        return finder->second->sample_current_executing();
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::sample_current_pending(Processor proc)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+        return finder->second->sample_current_pending();
+      else
+        return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::sample_unmapped_tasks(Processor proc, Mapper *mapper)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+      {
+        MapperID map_id;
+        // Find the ID of the mapper requesting the information
+        {
+          AutoLock m_lock(mapper_info_lock,1,false/*exclusive*/);
+          std::map<Mapper*,MapperInfo>::const_iterator finder = 
+            mapper_infos.find(mapper);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != mapper_infos.end());
+#endif
+          map_id = finder->second.map_id;
+        }
+        return finder->second->sample_unmapped_tasks(map_id);
+      }
+      else
+        return 0;
+    }
+
+    //--------------------------------------------------------------------------
     MessageManager* Runtime::find_messenger(AddressSpaceID sid) const
     //--------------------------------------------------------------------------
     {
@@ -8104,18 +8413,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_instance_view(AddressSpaceID target, Serializer &rez)
+    void Runtime::send_materialized_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_instance_view(rez, false/*flush*/);
+      find_messenger(target)->send_materialized_view(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_instance_view(AddressSpaceID target, 
-                                          Serializer &rez)
+    void Runtime::send_back_materialized_view(AddressSpaceID target, 
+                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_back_instance_view(rez, false/*flush*/);
+      find_messenger(target)->send_back_materialized_view(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8485,14 +8794,14 @@ namespace LegionRuntime {
                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalView::handle_send_back_user(forest, derez, source);
+      LogicalView::handle_send_back_user(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_send_user(Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalView::handle_send_user(forest, derez, source);
+      LogicalView::handle_send_user(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -8500,23 +8809,24 @@ namespace LegionRuntime {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_subscriber(forest, derez, source);
+      MaterializedView::handle_send_subscriber(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_instance_view(Deserializer &derez, 
-                                            AddressSpaceID source)
+    void Runtime::handle_send_materialized_view(Deserializer &derez, 
+                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_instance_view(forest, derez, source); 
+      MaterializedView::handle_send_materialized_view(forest, derez, source); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_instance_view(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_send_back_materialized_view(Deserializer &derez,
+                                                     AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_send_back_instance_view(forest, derez, source);
+      MaterializedView::handle_send_back_materialized_view(forest, derez, 
+                                                           source);
     }
 
     //--------------------------------------------------------------------------
@@ -10538,6 +10848,16 @@ namespace LegionRuntime {
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
     //--------------------------------------------------------------------------
     {
+      // Some static asserts that need to hold true for the runtime to work
+      LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
+      LEGION_STATIC_ASSERT((1 << FIELD_LOG2) == MAX_FIELDS);
+      LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
+      LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
+      LEGION_STATIC_ASSERT(MAX_CONTEXTS > 0);
+      LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
+      LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
+      LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
+      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0);
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -10650,17 +10970,6 @@ namespace LegionRuntime {
         assert(max_task_window_per_context > 0);
 #endif
       }
-#ifdef LEGION_PROF
-      {
-        const std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = 
-          Runtime::get_collection_table();
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator it = table.begin(); it != table.end(); it++)
-        {
-          LegionProf::register_task_variant(it->first, it->second->name);
-        }
-      }
-#endif
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
@@ -10847,7 +11156,7 @@ namespace LegionRuntime {
                           InlineFnptr inline_ptr,
                           TaskID uid, Processor::Kind proc_kind, 
                           bool single_task, bool index_space_task,
-                          VariantID vid, size_t return_size,
+                          VariantID &vid, size_t return_size,
                           const TaskConfigOptions &options,
                           const char *name)
     //--------------------------------------------------------------------------
@@ -10970,6 +11279,44 @@ namespace LegionRuntime {
                                 vid);
       }
       return uid;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TaskID Runtime::update_collection_table(
+                          LowLevelFnptr low_level_ptr,
+                          InlineFnptr inline_ptr,
+                          TaskID tid, Processor::Kind proc_kind, 
+                          bool single_task, bool index_space_task,
+                          VariantID vid, size_t return_size,
+                          const TaskConfigOptions &options,
+                          const char *name,
+                          const void *user_data, size_t user_data_size)
+    //--------------------------------------------------------------------------
+    {
+      TaskID result = update_collection_table(low_level_ptr, inline_ptr,
+                                              tid, proc_kind, 
+                                              single_task, index_space_task,
+                                              vid, return_size, options, name);
+      std::pair<TaskID,VariantID> key(tid,vid);
+      void *buffer = malloc(user_data_size);
+      memcpy(buffer, user_data, user_data_size);
+      get_user_data_table()[key] = buffer;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const void* Runtime::find_user_data(TaskID tid, VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<TaskID,VariantID> key(tid,vid);
+      const std::map<std::pair<TaskID,VariantID>,const void*> 
+        &user_data_table = get_user_data_table();
+      std::map<std::pair<TaskID,VariantID>,const void*>::const_iterator
+        finder = user_data_table.find(key);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != user_data_table.end());
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -11139,6 +11486,15 @@ namespace LegionRuntime {
       static std::map<Processor::TaskFuncID,TaskVariantCollection*> 
                                                             collection_table;
       return collection_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<std::pair<TaskID,VariantID>,const void*>&
+                                      Runtime::get_user_data_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<std::pair<TaskID,VariantID>,const void*> user_data_table;
+      return user_data_table;
     }
 
     //--------------------------------------------------------------------------
@@ -11576,7 +11932,7 @@ namespace LegionRuntime {
     {
       Deserializer derez(args, arglen);
       Runtime *rt = Runtime::get_runtime(p);
-      PhysicalView::handle_deferred_collect(derez, p, rt->forest);
+      LogicalView::handle_deferred_collect(derez, p, rt->forest);
     }
 
     //--------------------------------------------------------------------------

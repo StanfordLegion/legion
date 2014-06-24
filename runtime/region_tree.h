@@ -217,7 +217,7 @@ namespace LegionRuntime {
       InstanceRef initialize_physical_context(RegionTreeContext ctx,
                     const RegionRequirement &req, PhysicalManager *manager,
                     Event term_event, Processor local_proc, unsigned depth,
-                    std::map<PhysicalManager*,PhysicalView*> &top_views);
+                    std::map<PhysicalManager*,LogicalView*> &top_views);
       void invalidate_physical_context(RegionTreeContext ctx,
                                        LogicalRegion handle);
       Event close_physical_context(RegionTreeContext ctx,
@@ -245,7 +245,7 @@ namespace LegionRuntime {
                                const RegionRequirement &req,
                                UniqueID unique_id,
                                AddressSpaceID target,
-                               std::set<PhysicalView*> &needed_views,
+                               std::set<LogicalView*> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void send_tree_shape(const IndexSpaceRequirement &req,
                            AddressSpaceID target);
@@ -263,7 +263,7 @@ namespace LegionRuntime {
       void send_remote_references(
           const std::set<PhysicalManager*> &needed_managers,
           AddressSpaceID target);
-      void send_remote_references(const std::set<PhysicalView*> &needed_views,
+      void send_remote_references(const std::set<LogicalView*> &needed_views,
           const std::set<PhysicalManager*> &needed_managers, 
           AddressSpaceID target);
       void handle_remote_references(Deserializer &derez);
@@ -312,13 +312,13 @@ namespace LegionRuntime {
     public:
       void register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(DistributedID did);
-      void register_physical_view(DistributedID did, PhysicalView *view);
-      void unregister_physical_view(DistributedID did);
+      void register_logical_view(DistributedID did, LogicalView *view);
+      void unregister_logical_view(DistributedID did);
     public:
       bool has_manager(DistributedID did) const;
       bool has_view(DistributedID did) const;
       PhysicalManager* find_manager(DistributedID did);
-      PhysicalView* find_view(DistributedID did);
+      LogicalView* find_view(DistributedID did);
     protected:
       void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
                            RegionTreePath &path);
@@ -352,7 +352,7 @@ namespace LegionRuntime {
     private:
       // References to objects stored in the region forest
       std::map<DistributedID,PhysicalManager*> managers;
-      std::map<DistributedID,PhysicalView*> views;
+      std::map<DistributedID,LogicalView*> views;
 #ifdef DYNAMIC_TESTS
     public:
       class DynamicSpaceTest {
@@ -1125,8 +1125,7 @@ namespace LegionRuntime {
       ChildState children;
       std::map<InstanceView*,FieldMask> valid_views;
       std::map<ReductionView*,FieldMask> reduction_views;
-      std::set<Color> complete_children;
-      std::map<InstanceView*,std::map<Event,FieldMask> > pending_updates;
+      std::map<MaterializedView*,std::map<Event,FieldMask> > pending_updates;
     public:
       // These are used for managing access to the physical state
       unsigned acquired_count;
@@ -1154,11 +1153,11 @@ namespace LegionRuntime {
       PhysicalCloser& operator=(const PhysicalCloser &rhs);
     public:
       bool needs_targets(void) const;
-      void add_target(InstanceView *target);
+      void add_target(MaterializedView *target);
       void close_tree_node(RegionTreeNode *node, 
                            const FieldMask &closing_mask);
-      const std::vector<InstanceView*>& get_upper_targets(void) const;
-      const std::vector<InstanceView*>& get_lower_targets(void) const;
+      const std::vector<MaterializedView*>& get_upper_targets(void) const;
+      const std::vector<MaterializedView*>& get_lower_targets(void) const;
     public:
       void update_dirty_mask(const FieldMask &mask);
       const FieldMask& get_dirty_mask(void) const;
@@ -1170,8 +1169,8 @@ namespace LegionRuntime {
     protected:
       bool targets_selected;
       FieldMask dirty_mask;
-      std::vector<InstanceView*> upper_targets;
-      std::vector<InstanceView*> lower_targets;
+      std::vector<MaterializedView*> upper_targets;
+      std::vector<MaterializedView*> lower_targets;
     }; 
 
     /**
@@ -1453,7 +1452,7 @@ namespace LegionRuntime {
                                 const FieldMask &closing_mask,
                                 bool complete,
                           const std::map<InstanceView*,FieldMask> &valid_views,
-                          std::map<InstanceView*,FieldMask> &update_views);
+                          std::map<MaterializedView*,FieldMask> &update_views);
       bool siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState &state,
                                     const FieldMask &closing_mask,
@@ -1480,7 +1479,7 @@ namespace LegionRuntime {
       void pull_valid_instance_views(PhysicalState &state,
                                      const FieldMask &mask);
       void find_pending_updates(PhysicalState &state, 
-                                InstanceView *target,
+                                MaterializedView *target,
                                 FieldMask &needed_fields,
                                 std::set<Event> &pending_events);
       // Since figuring out how to issue copies is expensive, try not
@@ -1488,10 +1487,10 @@ namespace LegionRuntime {
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
       // 'TRUE' TO THE find_valid_instance_views METHOD!!!!!!!!
       void issue_update_copies(MappableInfo *info,
-                               InstanceView *target, 
+                               MaterializedView *target, 
                                FieldMask copy_mask,
                       const std::map<InstanceView*,FieldMask> &valid_instances);
-      void issue_update_reductions(PhysicalView *target,
+      void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    Processor local_proc,
                     const std::map<ReductionView*,FieldMask> &valid_reductions);
@@ -1505,6 +1504,10 @@ namespace LegionRuntime {
       void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
                               const FieldMask &dirty_mask, 
                               const std::vector<InstanceView*> &new_views);
+      // I hate the container problem, somebody solve it please
+      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+                              const FieldMask &dirty,
+                              const std::vector<MaterializedView*> &new_views);
       void update_reduction_views(PhysicalState &state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
@@ -1531,10 +1534,10 @@ namespace LegionRuntime {
       virtual bool has_component_domains(void) const = 0;
       virtual const std::set<Domain>& get_component_domains(void) const = 0;
       virtual Domain get_domain(void) const = 0;
-      virtual InstanceView* create_instance(Memory target_mem,
-                                            const std::set<FieldID> &fields,
-                                            size_t blocking_factor,
-                                            unsigned depth) = 0;
+      virtual MaterializedView * create_instance(Memory target_mem,
+                                                const std::set<FieldID> &fields,
+                                                size_t blocking_factor,
+                                                unsigned depth) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
@@ -1560,7 +1563,7 @@ namespace LegionRuntime {
       bool pack_send_state(ContextID ctx, Serializer &rez, 
                            AddressSpaceID target,
                            const FieldMask &send_mask,
-                           std::set<PhysicalView*> &needed_views,
+                           std::set<LogicalView*> &needed_views,
                            std::set<PhysicalManager*> &needed_managers);
       bool pack_send_back_state(ContextID ctx, Serializer &rez,
                                 AddressSpaceID target, const FieldMask &send_mask,
@@ -1632,10 +1635,10 @@ namespace LegionRuntime {
       virtual bool has_component_domains(void) const;
       virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
-      virtual InstanceView* create_instance(Memory target_mem,
-                                            const std::set<FieldID> &fields,
-                                            size_t blocking_factor,
-                                            unsigned depth);
+      virtual MaterializedView* create_instance(Memory target_mem,
+                                                const std::set<FieldID> &fields,
+                                                size_t blocking_factor,
+                                                unsigned depth);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
@@ -1670,21 +1673,21 @@ namespace LegionRuntime {
                                          const FieldMask &mask);
 #endif
     public:
-      void remap_region(ContextID ctx, InstanceView *view, 
+      void remap_region(ContextID ctx, MaterializedView *view, 
                         const FieldMask &user_mask, FieldMask &needed_mask);
       InstanceRef register_region(MappableInfo *info, 
                                   PhysicalUser &user,
-                                  PhysicalView *view,
+                                  LogicalView *view,
                                   const FieldMask &needed_fields);
       InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
-                             PhysicalView *new_view,
+                             LogicalView *new_view,
                              Processor local_proc);
       Event close_state(MappableInfo *info, PhysicalUser &user,
                         const InstanceRef &target);
     public:
       bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::set<PhysicalView*> &needed_views,
+                      std::set<LogicalView*> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -1739,10 +1742,10 @@ namespace LegionRuntime {
       virtual bool has_component_domains(void) const;
       virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
-      virtual InstanceView* create_instance(Memory target_mem,
-                                            const std::set<FieldID> &fields,
-                                            size_t blocking_factor,
-                                            unsigned depth);
+      virtual MaterializedView* create_instance(Memory target_mem,
+                                                const std::set<FieldID> &fields,
+                                                size_t blocking_factor,
+                                                unsigned depth);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
@@ -1777,7 +1780,7 @@ namespace LegionRuntime {
     public:
       bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::set<PhysicalView*> &needed_views,
+                      std::set<LogicalView*> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -2080,7 +2083,7 @@ namespace LegionRuntime {
     class StateSender : public NodeTraverser {
     public:
       StateSender(ContextID ctx, UniqueID uid, AddressSpaceID target,
-                  std::set<PhysicalView*> &needed_views,
+                  std::set<LogicalView*> &needed_views,
                   std::set<PhysicalManager*> &needed_managers,
                   const FieldMask &send_mask, bool invalidate);
       StateSender(const StateSender &rhs);
@@ -2095,7 +2098,7 @@ namespace LegionRuntime {
       const ContextID ctx;
       const UniqueID uid;
       const AddressSpaceID target;
-      std::set<PhysicalView*> &needed_views;
+      std::set<LogicalView*> &needed_views;
       std::set<PhysicalManager*> &needed_managers;
       const FieldMask send_mask;
       const bool invalidate;
@@ -2241,7 +2244,7 @@ namespace LegionRuntime {
       inline Event get_use_event(void) const { return use_event; }
       Event get_recycle_event(void);
     public:
-      InstanceView* create_top_view(unsigned depth);
+      MaterializedView* create_top_view(unsigned depth);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
@@ -2259,8 +2262,8 @@ namespace LegionRuntime {
                                              DistributedID did,
                                              bool make = true);
     public:
-      void add_valid_view(InstanceView *view);
-      void remove_valid_view(InstanceView *view);
+      void add_valid_view(MaterializedView *view);
+      void remove_valid_view(MaterializedView *view);
       bool match_instance(size_t field_size, const Domain &dom) const;
       bool match_instance(const std::vector<size_t> &fields_sizes,
                           const Domain &dom, const size_t bf) const;
@@ -2287,7 +2290,7 @@ namespace LegionRuntime {
       // Keep track of whether we've recycled this instance or not
       bool recycled;
       // Keep a set of the views we need to see when recycling
-      std::set<InstanceView*> valid_views;
+      std::set<MaterializedView*> valid_views;
     protected:
       // This is monotonic variable that once it becomes true
       // will remain true for the duration of the instance lifetime.
@@ -2421,18 +2424,19 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class PhysicalView
-     * This class abstracts a view on a physical instance
-     * in memory.  Physical views are reference counted
+     * \class Logicalview 
+     * This class is the abstract base class for representing
+     * the logical view onto one or more physical instances
+     * in memory.  Logical views are reference counted
      * and will delete themselves once they no longer have
      * any valid handles.
      */
-    class PhysicalView : public HierarchicalCollectable {
+    class LogicalView : public HierarchicalCollectable {
     public:
-      PhysicalView(RegionTreeForest *ctx, DistributedID did,
-                   AddressSpaceID owner_proc, DistributedID own_did,
-                   RegionTreeNode *node);
-      virtual ~PhysicalView(void);
+      LogicalView(RegionTreeForest *ctx, DistributedID did,
+                  AddressSpaceID owner_proc, DistributedID own_did,
+                  RegionTreeNode *node);
+      virtual ~LogicalView(void);
     public:
       virtual bool is_reduction_view(void) const = 0;
       virtual InstanceView* as_instance_view(void) const = 0;
@@ -2486,43 +2490,118 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class InstanceView
-     * The InstanceView class is used for providing views
-     * onto instance managers from a given logical perspective.
+     * \class InstanceView 
+     * The InstanceView class is used for managing the meta-data
+     * for one or more physical instances which represent the
+     * up-to-date version from a logical region's perspective.
+     * The InstaceView class has two sub-classes: materialized
+     * views which represent a single physical instance, or
+     * composite views which contain multiple physical instances.
      */
-    class InstanceView : public PhysicalView {
+    class InstanceView : public LogicalView {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, DistributedID own_did,
-                   RegionTreeNode *node, InstanceManager *manager,
-                   InstanceView *parent, unsigned depth);
-      InstanceView(const InstanceView &rhs);
+                   RegionTreeNode *node);
       virtual ~InstanceView(void);
-    public:
-      InstanceView& operator=(const InstanceView &rhs);
-    public:
-      Memory get_location(void) const;
-      size_t get_blocking_factor(void) const;
-      bool has_parent_view(void) const;
-      InstanceView* get_parent_view(void) const;
-      InstanceView* get_subview(Color c);
-      bool add_subview(InstanceView *view, Color c);
-      void add_alias_did(DistributedID did);
-      const FieldMask& get_physical_mask(void) const;
-    public:
-      void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields);
-      void copy_from(const FieldMask &copy_mask, 
-                     std::vector<Domain::CopySrcDstField> &src_fields);
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields);
-      bool has_war_dependence(const RegionUsage &usage, 
-                              const FieldMask &user_mask);
-      void accumulate_events(std::set<Event> &all_events);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+      virtual PhysicalManager* get_manager(void) const = 0;
+      virtual bool is_persistent(void) const = 0;
+    public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                 std::map<Event,FieldMask> &preconditions) = 0;
+      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const FieldMask &mask, bool reading,
+                                 Processor exec_proc) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc) = 0;
+      virtual bool reduce_to(ReductionOpID redop, 
+                             const FieldMask &reduce_mask,
+                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+    public:
+      virtual void notify_activate(void) = 0;
+      virtual void garbage_collect(void) = 0;
+      virtual void notify_valid(void) = 0;
+      virtual void notify_invalid(void) = 0;
+    public:
+      virtual void collect_user(Event term_event,
+                                const FieldMask &term_mask) = 0;
+    public:
+      virtual void process_send_back_user(AddressSpaceID source,
+                                          PhysicalUser &user) = 0;
+    public:
+      virtual void process_send_user(AddressSpaceID source,
+                                     PhysicalUser &user) = 0;
+    public: // Virtual methods specific to InstanceView start here
+      virtual bool is_composite_view(void) const = 0;
+      virtual MaterializedView* as_materialized_view(void) const = 0;
+      virtual CompositeView* as_composite_view(void) const = 0;
+    public:
+      virtual bool has_parent_view(void) const = 0;
+      virtual InstanceView* get_parent_view(void) const = 0;
+      virtual InstanceView* get_subview(Color c) = 0;
+    public:
+      virtual void copy_to(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
+      virtual void copy_from(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+      virtual bool has_war_dependence(const RegionUsage &usage, 
+                                      const FieldMask &user_mask) = 0;
+    public:
+      virtual DistributedID send_state(AddressSpaceID target,
+                            std::set<LogicalView*> &needed_views,
+                            std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual DistributedID send_back_state(AddressSpaceID target,
+                            std::set<PhysicalManager*> &needed_managers) = 0;
+    };
+
+    /**
+     * \class MaterializedView 
+     * The MaterializedView class is used for representing a given
+     * logical view onto a single physical instance.
+     */
+    class MaterializedView : public InstanceView {
+    public:
+      MaterializedView(RegionTreeForest *ctx, DistributedID did,
+                       AddressSpaceID owner_proc, DistributedID own_did,
+                       RegionTreeNode *node, InstanceManager *manager,
+                       MaterializedView *parent, unsigned depth);
+      MaterializedView(const MaterializedView &rhs);
+      virtual ~MaterializedView(void);
+    public:
+      MaterializedView& operator=(const MaterializedView &rhs);
+    public:
+      Memory get_location(void) const;
+      size_t get_blocking_factor(void) const;
+      void add_alias_did(DistributedID did);
+      const FieldMask& get_physical_mask(void) const;
+    public:
+      virtual bool is_composite_view(void) const;
+      virtual MaterializedView* as_materialized_view(void) const;
+      virtual CompositeView* as_composite_view(void) const;
+    public:
+      virtual bool has_parent_view(void) const;
+      virtual InstanceView* get_parent_view(void) const;
+      virtual InstanceView* get_subview(Color c);
+      bool add_subview(MaterializedView *view, Color c);
+      MaterializedView* get_materialized_subview(Color c);
+      MaterializedView* get_materialized_parent_view(void) const;
+    public:
+      virtual void copy_to(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual void copy_from(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
+                     std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual bool has_war_dependence(const RegionUsage &usage, 
+                              const FieldMask &user_mask);
+    public:
+      void accumulate_events(std::set<Event> &all_events);
+    public:
       virtual PhysicalManager* get_manager(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -2570,22 +2649,22 @@ namespace LegionRuntime {
                               const PhysicalUser &user);
       void condense_user_list(std::list<PhysicalUser> &users);
     public:
-      DistributedID send_state(AddressSpaceID target,
-                      std::set<PhysicalView*> &needed_views,
-                      std::set<PhysicalManager*> &needed_managers);
-      DistributedID send_back_state(AddressSpaceID target,
-                      std::set<PhysicalManager*> &needed_managers);
+      virtual DistributedID send_state(AddressSpaceID target,
+                            std::set<LogicalView*> &needed_views,
+                            std::set<PhysicalManager*> &needed_managers);
+      virtual DistributedID send_back_state(AddressSpaceID target,
+                            std::set<PhysicalManager*> &needed_managers);
     public:
-      bool is_persistent(void) const;
+      virtual bool is_persistent(void) const;
       void make_persistent(void);
     protected:
-      void pack_instance_view(Serializer &rez);
-      void unpack_instance_view(Deserializer &derez, AddressSpaceID source);
+      void pack_materialized_view(Serializer &rez);
+      void unpack_materialized_view(Deserializer &derez, AddressSpaceID source);
     public:
-      static void handle_send_instance_view(RegionTreeForest *context, 
-                                            Deserializer &derez,
-                                            AddressSpaceID source);
-      static void handle_send_back_instance_view(
+      static void handle_send_materialized_view(RegionTreeForest *context, 
+                                                Deserializer &derez,
+                                                AddressSpaceID source);
+      static void handle_send_back_materialized_view(
                       RegionTreeForest *context, Deserializer &derez,
                       AddressSpaceID source);
       static void handle_send_subscriber(RegionTreeForest *context,
@@ -2593,7 +2672,7 @@ namespace LegionRuntime {
                                          AddressSpaceID source);
     public:
       InstanceManager *const manager;
-      InstanceView *const parent;
+      MaterializedView *const parent;
       const unsigned depth;
     protected:
       // The lock for the instance shared between all views
@@ -2602,7 +2681,7 @@ namespace LegionRuntime {
       // when it is reclaimed.
       Reservation inst_lock;
       // Keep track of the child views
-      std::map<Color,InstanceView*> children;
+      std::map<Color,MaterializedView*> children;
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
 #ifndef PHYSICAL_FIELD_TREE
@@ -2622,11 +2701,114 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class CompositeView
+     * The CompositeView class is used for deferring close
+     * operations by representing a valid version of a single
+     * logical region with a bunch of different instances.
+     */
+    class CompositeView : public InstanceView {
+    public:
+      CompositeView(RegionTreeForest *ctx, DistributedID did,
+                    AddressSpaceID owner_proc, DistributedID own_did,
+                    RegionTreeNode *node);
+      CompositeView(const CompositeView &rhs);
+      virtual ~CompositeView(void);
+    public:
+      CompositeView& operator=(const CompositeView &rhs);
+    public:
+      virtual PhysicalManager* get_manager(void) const;
+      virtual bool is_persistent(void) const;
+    public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                 std::map<Event,FieldMask> &preconditions);
+      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                                 const FieldMask &mask, bool reading,
+                                 Processor exec_proc);
+      virtual InstanceRef add_user(PhysicalUser &user,
+                                   Processor exec_proc);
+      virtual bool reduce_to(ReductionOpID redop, 
+                             const FieldMask &reduce_mask,
+                     std::vector<Domain::CopySrcDstField> &src_fields);
+    public:
+      virtual void notify_activate(void);
+      virtual void garbage_collect(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
+    public:
+      virtual void collect_user(Event term_event,
+                                const FieldMask &term_mask);
+    public:
+      virtual void process_send_back_user(AddressSpaceID source,
+                                          PhysicalUser &user);
+    public:
+      virtual void process_send_user(AddressSpaceID source,
+                                     PhysicalUser &user);
+    public:
+      virtual bool is_composite_view(void) const;
+      virtual MaterializedView* as_materialized_view(void) const;
+      virtual CompositeView* as_composite_view(void) const;
+    public:
+      virtual bool has_parent_view(void) const;
+      virtual InstanceView* get_parent_view(void) const;
+      virtual InstanceView* get_subview(Color c);
+    public:
+      virtual void copy_to(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &dst_fields);
+      virtual void copy_from(const FieldMask &copy_mask, 
+                   std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual bool has_war_dependence(const RegionUsage &usage, 
+                                      const FieldMask &user_mask);
+    public:
+      virtual DistributedID send_state(AddressSpaceID target,
+                            std::set<LogicalView*> &needed_views,
+                            std::set<PhysicalManager*> &needed_managers);
+      virtual DistributedID send_back_state(AddressSpaceID target,
+                            std::set<PhysicalManager*> &needed_managers);
+    public:
+      void issue_composite_copies(MappableInfo *info,
+                                  MaterializedView *dst,
+                                  FieldMask copy_mask,
+                                  std::map<Event,FieldMask> &preconditions);
+    protected:
+      CompositeNode *root;
+    };
+
+    /**
+     * \class CompositeNode
+     * A helper class for representing the frozen state of a region
+     * tree as part of one or more composite views.
+     */
+    class CompositeNode {
+    public:
+      struct ChildInfo {
+      public:
+        ChildInfo(void)
+          : complete(false) { }
+        ChildInfo(bool c, const FieldMask &m)
+          : complete(c), open_fields(m) { }
+      public:
+        bool complete;
+        FieldMask open_fields;
+      };
+    public:
+
+    protected:
+      RegionTreeNode *const logical_node;
+    protected:
+      FieldMask dirty_mask;
+      FieldMask reduction_mask;
+      std::map<CompositeNode*,ChildInfo> open_children;
+      std::map<MaterializedView*,FieldMask> valid_views;
+      std::map<ReductionView*,FieldMask> reduction_views;
+    };
+
+    /**
      * \class ReductionView
      * The ReductionView class is used for providing a view
      * onto reduction physical instances from any logical perspective.
      */
-    class ReductionView : public PhysicalView {
+    class ReductionView : public LogicalView {
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, DistributedID own_did,
@@ -2636,7 +2818,7 @@ namespace LegionRuntime {
     public:
       ReductionView& operator=(const ReductionView&rhs);
     public:
-      void perform_reduction(PhysicalView *target, 
+      void perform_reduction(LogicalView *target, 
                              const FieldMask &copy_mask, Processor local_proc);
     public:
       virtual bool is_reduction_view(void) const;
@@ -2672,7 +2854,7 @@ namespace LegionRuntime {
                                      PhysicalUser &user);
     public:
       DistributedID send_state(AddressSpaceID target,
-                               std::set<PhysicalView*> &needed_views,
+                               std::set<LogicalView*> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       DistributedID send_back_state(AddressSpaceID target,
                                std::set<PhysicalManager*> &needed_managers);
@@ -2704,14 +2886,14 @@ namespace LegionRuntime {
     class ViewHandle {
     public:
       ViewHandle(void);
-      ViewHandle(PhysicalView *v);
+      ViewHandle(LogicalView *v);
       ViewHandle(const ViewHandle &rhs);
       ~ViewHandle(void);
     public:
       ViewHandle& operator=(const ViewHandle &rhs);
     public:
       inline bool has_view(void) const { return (view != NULL); }
-      inline PhysicalView* get_view(void) const { return view; }
+      inline LogicalView* get_view(void) const { return view; }
       inline bool is_reduction_view(void) const
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2727,7 +2909,7 @@ namespace LegionRuntime {
         return view->get_manager();
       }
     private:
-      PhysicalView *view;
+      LogicalView *view;
     };
 
     /**
@@ -2742,17 +2924,17 @@ namespace LegionRuntime {
     class MappingRef {
     public:
       MappingRef(void);
-      MappingRef(PhysicalView *view, const FieldMask &needed_mask);
+      MappingRef(LogicalView *view, const FieldMask &needed_mask);
       MappingRef(const MappingRef &rhs);
       ~MappingRef(void);
     public:
       MappingRef& operator=(const MappingRef &rhs);
     public:
       inline bool has_ref(void) const { return (view != NULL); }
-      inline PhysicalView* get_view(void) const { return view; } 
+      inline LogicalView* get_view(void) const { return view; } 
       inline const FieldMask& get_mask(void) const { return needed_fields; }
     private:
-      PhysicalView *view;
+      LogicalView *view;
       FieldMask needed_fields;
     };
 

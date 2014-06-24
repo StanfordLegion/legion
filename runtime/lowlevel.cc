@@ -8064,6 +8064,30 @@ namespace LegionRuntime {
       }
       CHECK_GASNET( gasnet_init(argc, argv) );
 
+      // Check that we have enough resources for the number of nodes we are using
+      if (gasnet_nodes() > MAX_NUM_NODES)
+      {
+        fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
+                       "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
+                       "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
+        gasnet_exit(1);
+      }
+      if (gasnet_nodes() > (1 << ID::NODE_BITS))
+      {
+#ifdef LEGION_IDS_ARE_64BIT
+        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
+                       "configured for at most %d nodes. Update the allocation "
+                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS));
+#else
+        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
+                       "configured for at most %d nodes.  Update the allocation "
+                       "of bits in ID or switch to 64-bit IDs with the "
+                       "-DLEGION_IDS_ARE_64BIT compile-time flag",
+                       gasnet_nodes(), (1 << ID::NODE_BITS));
+#endif
+        gasnet_exit(1);
+      }
+
       // initialize barrier timestamp
       barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 

@@ -3889,7 +3889,7 @@ namespace LegionRuntime {
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
       local_instances.resize(regions.size(), InstanceRef());
-      std::map<PhysicalManager*,PhysicalView*> top_views;
+      std::map<PhysicalManager*,LogicalView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -5830,7 +5830,7 @@ namespace LegionRuntime {
     {
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::set<PhysicalView*> needed_views;
+      std::set<LogicalView*> needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());
@@ -7786,7 +7786,7 @@ namespace LegionRuntime {
     {
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::set<PhysicalView*> needed_views;
+      std::set<LogicalView*> needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());
