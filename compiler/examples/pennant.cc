@@ -3011,10 +3011,7 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
 
 Color PennantMapper::get_task_color_by_region(Task *task, LogicalRegion region)
 {
-  Context ctx = dynamic_cast<Context>(task);
-  assert(ctx);
-
-  return runtime->get_logical_region_color(ctx, region);
+  return get_logical_region_color(region);
 }
 
 void create_mappers(Machine *machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
