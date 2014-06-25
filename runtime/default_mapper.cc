@@ -574,7 +574,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       log_mapper(LEVEL_SPEW,"Map must epoch in default mapper for processor"
-                            " "IDFMT" ",
+                            " " IDFMT " ",
                             local_proc.id);
       // First fixup any target processors to ensure that they are all
       // pointed at different processors.  We know for now that all must epoch
