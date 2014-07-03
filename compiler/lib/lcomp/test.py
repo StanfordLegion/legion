@@ -32,6 +32,30 @@ red = "\033[1;31m"
 green = "\033[1;32m"
 clear = "\033[0m"
 
+class environment_variable:
+    def __init__(self, variable, value, optional):
+        self.variable = variable
+        self.value = value
+        self.optional = optional
+        self.cleanup = None
+    def __enter__(self):
+        if self.variable in os.environ:
+            if not self.optional:
+                raise Exception('Environment variable %s already defined' % (
+                    self.variable))
+            return self
+        self.cleanup = True
+        os.environ[self.variable] = self.value
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.cleanup:
+            del os.environ[self.variable]
+        return False
+
+default_runtime_dir = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)),
+    '..', '..', 'runtime')
+
 def precompile_runtime(thread_count, clean_first, verbose):
     if 'LG_RT_DIR' not in os.environ:
         return
@@ -98,40 +122,33 @@ def test_style_fail(filename, verbose):
         raise Exception('Expecting failure, style checker returned successfully')
 
 def test_compile_pass(filename, verbose, flags):
-    env_needs_cleanup = False
-    if 'LG_RT_DIR' not in os.environ:
-        os.environ['LG_RT_DIR'] = os.path.join(
-            os.path.dirname(os.path.realpath(__file__)),
-            '..', '..', 'runtime')
-        env_needs_cleanup = True
+    with environment_variable('LG_RT_DIR', default_runtime_dir, True):
 
-    if verbose:
-        stdout, stderr = None, None
-    else:
-        stdout, stderr = subprocess.PIPE, subprocess.STDOUT
+        if verbose:
+            stdout, stderr = None, None
+        else:
+            stdout, stderr = subprocess.PIPE, subprocess.STDOUT
 
-    (fd, temp_obj) = tempfile.mkstemp(suffix = '.lg.o')
-    try:
-        os.close(fd)
-        saved_temps = driver.driver(
-            ['./driver.py', '-g', '-c', filename, '-o', temp_obj, '--save-temps'] +
-            (['-v'] if verbose else ['-q']) +
-            flags)
-    except:
-        # On failure, keep saved temporaries so that the user can
-        # inspect the failure.
-        raise
-    else:
-        # On success, clean up the saved temporaries.
-        for saved_temp in saved_temps:
-            shutil.rmtree(saved_temp)
-    finally:
-        # Always remove the output file, as it will not be valid on
-        # failure anyway.
-        os.remove(options.with_ext(temp_obj, '.h'))
-        os.remove(temp_obj)
-        if env_needs_cleanup:
-            del os.environ['LG_RT_DIR']
+        (fd, temp_obj) = tempfile.mkstemp(suffix = '.lg.o')
+        try:
+            os.close(fd)
+            saved_temps = driver.driver(
+                ['./driver.py', '-g', '-c', filename, '-o', temp_obj, '--save-temps'] +
+                (['-v'] if verbose else ['-q']) +
+                flags)
+        except:
+            # On failure, keep saved temporaries so that the user can
+            # inspect the failure.
+            raise
+        else:
+            # On success, clean up the saved temporaries.
+            for saved_temp in saved_temps:
+                shutil.rmtree(saved_temp)
+        finally:
+            # Always remove the output file, as it will not be valid on
+            # failure anyway.
+            os.remove(options.with_ext(temp_obj, '.h'))
+            os.remove(temp_obj)
 
 def test_compile_fail(filename, verbose):
     # Search for the expected failure in the program
