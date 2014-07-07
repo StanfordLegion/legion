@@ -76,23 +76,113 @@ void deferred_free(void *ptr)
   }
 }
 
+class PayloadSource {
+public:
+  virtual void copy_data(void *dest) = 0;
+  virtual void *get_contig_pointer(void) { return 0; }
+};
+
+class ContiguousPayload : public PayloadSource {
+public:
+  ContiguousPayload(void *_srcptr, size_t _size, int _mode);
+  virtual void copy_data(void *dest);
+  virtual void *get_contig_pointer(void) { return srcptr; }
+protected:
+  void *srcptr;
+  size_t size;
+  int mode;
+};
+
+class TwoDPayload : public PayloadSource {
+public:
+  TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
+	      ptrdiff_t _line_stride, int _mode);
+  virtual void copy_data(void *dest);
+protected:
+  const void *srcptr;
+  size_t line_size, line_count;
+  ptrdiff_t line_stride;
+  int mode;
+};
+
+class SpanPayload : public PayloadSource {
+public:
+  SpanPayload(const SpanList& _spans, size_t _size, int _mode);
+  virtual void copy_data(void *dest);
+protected:
+  SpanList spans;
+  size_t size;
+  int mode;
+};
+
+struct OutgoingMessage {
+  OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args);
+  ~OutgoingMessage(void);
+
+  void set_payload(PayloadSource *_payload, size_t _payload_size,
+		   int _payload_mode, void *_dstptr = 0);
+  void reserve_srcdata(void);
+#if 0
+  void set_payload(void *_payload, size_t _payload_size,
+		   int _payload_mode, void *_dstptr = 0);
+  void set_payload(void *_payload, size_t _line_size,
+		   off_t _line_stride, size_t _line_count,
+		   int _payload_mode, void *_dstptr = 0);
+  void set_payload(const SpanList& spans, size_t _payload_size,
+		   int _payload_mode, void *_dstptr = 0);
+#endif
+
+  void assign_srcdata_pointer(void *ptr);
+
+  unsigned msgid;
+  unsigned num_args;
+  void *payload;
+  size_t payload_size;
+  int payload_mode;
+  void *dstptr;
+  PayloadSource *payload_src;
+  int args[16];
+#ifdef DEBUG_MEM_REUSE
+  int payload_num;
+#endif
+};
+
+LegionRuntime::Logger::Category log_sdp("srcdatapool");
+
 class SrcDataPool {
 public:
   SrcDataPool(void *base, size_t size);
   ~SrcDataPool(void);
 
-  // debug
-  void record_srcptr(void *ptr);
-  void *alloc_srcptr(size_t size_needed);
+  class Lock {
+  public:
+    Lock(SrcDataPool& _sdp) : sdp(_sdp) { gasnet_hsl_lock(&sdp.mutex); }
+    ~Lock(void) { gasnet_hsl_unlock(&sdp.mutex); }
+  protected:
+    SrcDataPool& sdp;
+  };
+
+  // allocators must already hold the lock - prove it by passing a reference
+  void *alloc_srcptr(size_t size_needed, Lock& held_lock);
+
+  // enqueuing a pending message must also hold the lock
+  void add_pending(OutgoingMessage *msg, Lock& held_lock);
+
+  // releasing memory will take the lock itself
   void release_srcptr(void *srcptr);
 
   static void release_srcptr_handler(gasnet_token_t token, gasnet_handlerarg_t arg0, gasnet_handlerarg_t arg1);
 
 protected:
+  size_t round_up_size(size_t size);
+
+  friend class SrcDataPool::Lock;
   gasnet_hsl_t mutex;
+  size_t total_size;
   std::map<char *, size_t> free_list;
-  std::map<char *, size_t> in_use;
+  std::queue<OutgoingMessage *> pending_allocations;
   // debug
+  std::map<char *, size_t> in_use;
   std::map<void *, off_t> alloc_counts;
 };
 
@@ -109,6 +199,7 @@ SrcDataPool::SrcDataPool(void *base, size_t size)
 {
   gasnet_hsl_init(&mutex);
   free_list[(char *)base] = size;
+  total_size = size;
 }
 
 SrcDataPool::~SrcDataPool(void)
@@ -125,25 +216,30 @@ SrcDataPool::~SrcDataPool(void)
   printf("SrcDataPool:  node %d: %zd total srcptrs, %zd nonzero\n", gasnet_mynode(), total, nonzero);
 }
 
-void SrcDataPool::record_srcptr(void *srcptr)
+size_t SrcDataPool::round_up_size(size_t size)
 {
-#ifdef DEBUG_SRCPTRPOOL
-  printf("recording srcptr = %p (node %d)\n", srcptr, gasnet_mynode());
-#endif
-  gasnet_hsl_lock(&mutex);
-  alloc_counts[srcptr]++;
-  gasnet_hsl_unlock(&mutex);
+  const size_t BLOCK_SIZE = 64;
+  size_t remainder = size % BLOCK_SIZE;
+  if(remainder)
+    return size + (BLOCK_SIZE - remainder);
+  else
+    return size;
 }
 
-void *SrcDataPool::alloc_srcptr(size_t size_needed)
+void *SrcDataPool::alloc_srcptr(size_t size_needed, Lock& held_lock)
 {
-  // round up size to something reasonable
-  const size_t BLOCK_SIZE = 64;
-  if(size_needed % BLOCK_SIZE) {
-    size_needed = BLOCK_SIZE * ((size_needed / BLOCK_SIZE) + 1);
-  }
+  // sanity check - if the requested size is larger than will ever fit, fail
+  if(size_needed > total_size)
+    return 0;
 
-  gasnet_hsl_lock(&mutex);
+  // early out - if our pending allocation queue is non-empty, they're
+  //  first in line, so fail this allocation
+  if(!pending_allocations.empty())
+    return 0;
+
+  // round up size to something reasonable
+  size_needed = round_up_size(size_needed);
+
   // walk the free list until we find something big enough
   // only use the a bigger chunk if we absolutely have to 
   // in order to avoid segmentation problems.
@@ -153,21 +249,17 @@ void *SrcDataPool::alloc_srcptr(size_t size_needed)
   while(it != free_list.end()) {
     if(it->second == size_needed) {
       // exact match
-#ifdef DEBUG_SRCPTRPOOL
-      printf("found %p + %zd - exact\n", it->first, it->second);
-#endif
+      log_sdp.debug("found %p + %zd - exact", it->first, it->second);
+
       char *srcptr = it->first;
       free_list.erase(it);
       in_use[srcptr] = size_needed;
-      gasnet_hsl_unlock(&mutex);
+
       return srcptr;
     }
 
     if(it->second > size_needed) {
       // match with some left over
-#ifdef DEBUG_SRCPTRPOOL
-      printf("found %p + %zd > %zd\n", it->first, it->second, size_needed);
-#endif
       // Check to see if it is smaller
       // than the largest upper bound
       if (smallest_upper_bound == 0) {
@@ -187,127 +279,156 @@ void *SrcDataPool::alloc_srcptr(size_t size_needed)
     char *srcptr = it->first + (it->second - size_needed);
     it->second -= size_needed;
     in_use[srcptr] = size_needed;
-    gasnet_hsl_unlock(&mutex);
+
+    log_sdp.debug("found %p + %zd > %zd", it->first, it->second, size_needed);
+
     return srcptr;
   }
-  gasnet_hsl_unlock(&mutex);
+
+  // allocation failed - let caller decide what to do (probably add it as a
+  //   pending allocation after maybe moving data)
   return 0;
+}
+
+void SrcDataPool::add_pending(OutgoingMessage *msg, Lock& held_lock)
+{
+  // simple - just add to our queue
+  log_sdp.debug("pending allocation: %zd for %p", msg->payload_size, msg);
+
+  // sanity check - if the requested size is larger than will ever fit, 
+  //  we're just dead
+  if(msg->payload_size > total_size) {
+    log_sdp.error("allocation of %zd can never be satisfied! (max = %zd)",
+		  msg->payload_size, total_size);
+    assert(0);
+  }
+
+  pending_allocations.push(msg);
 }
 
 void SrcDataPool::release_srcptr(void *srcptr)
 {
   char *srcptr_c = (char *)srcptr;
-#ifdef DEBUG_SRCPTRPOOL
-  printf("releasing srcptr = %p (node %d)\n", srcptr, gasnet_mynode());
-#endif
-  gasnet_hsl_lock(&mutex);
-  // look up the pointer to find its size
-  std::map<char *, size_t>::iterator it = in_use.find(srcptr_c);
-  assert(it != in_use.end());
-  size_t size = it->second;
-  in_use.erase(it);  // remove from in use list
 
-  // we'd better not be in the free list ourselves
-  assert(free_list.find(srcptr_c) == free_list.end());
+  log_sdp.debug("releasing srcptr = %p", srcptr);
 
-  // now add to the free list
-  if(free_list.size() == 0) {
-    // no free entries, so just add ourselves
-    free_list[srcptr_c] = size;
-  } else {
-    // find the ranges above and below us to see if we can merge
-    std::map<char *, size_t>::iterator below = free_list.lower_bound(srcptr_c);
-    if(below == free_list.end()) {
-      // nothing below us
-      std::map<char *, size_t>::iterator above = free_list.begin();
-#ifdef DEBUG_SRCPTRPOOL
-      printf("merge?  NONE %p+%zd %p+%zd\n", srcptr, size, above->first, above->second);
-#endif
-      if(above->first == (srcptr_c + size)) {
-	// yes, remove the above entry and add its size to ours
-	size += above->second;
-	free_list.erase(above);
+  // releasing a srcptr span may result in some pending allocations being
+  //   satisfied - keep a list so their actual copies can happen without
+  //   holding the SDP lock
+  std::vector<std::pair<OutgoingMessage *, void *> > satisfied;
+  {
+    Lock held_lock(*this);
+
+    // look up the pointer to find its size
+    std::map<char *, size_t>::iterator it = in_use.find(srcptr_c);
+    assert(it != in_use.end());
+    size_t size = it->second;
+    in_use.erase(it);  // remove from in use list
+
+    // we'd better not be in the free list ourselves
+    assert(free_list.find(srcptr_c) == free_list.end());
+
+    // see if we can absorb any adjacent ranges
+    if(!free_list.empty()) {
+      std::map<char *, size_t>::iterator above = free_list.lower_bound(srcptr_c);
+      
+      // look below first
+      while(above != free_list.begin()) {
+	std::map<char *, size_t>::iterator below = above;  below--;
+	
+	log_sdp.spew("merge?  %p+%zd %p+%zd NONE", below->first, below->second, srcptr_c, size);
+
+	if((below->first + below->second) != srcptr_c)
+	  break;
+
+	srcptr_c = below->first;
+	size += below->second;
+	free_list.erase(below);
       }
-      // either way, insert ourselves now
-      free_list[srcptr_c] = size;
-    } else {
-      std::map<char *, size_t>::iterator above = below;  above++;
-      if(above == free_list.end()) {
-	// nothing above us
-#ifdef DEBUG_SRCPTRPOOL
-	printf("merge?  %p+%zd %p+%zd NONE\n", below->first, below->second, srcptr, size);
-#endif
-	if(srcptr_c == (below->first + below->second)) {
-	  // yes, change the below entry instead of adding ourselves
-	  below->second += size;
-	} else {
-	  free_list[srcptr_c] = size;
-	}
-      } else {
-#ifdef DEBUG_SRCPTRPOOL
-	printf("merge?  %p+%zd %p+%zd %p+%zd\n", below->first, below->second, srcptr, size, above->first, above->second);
-#endif
-	// first check the above
-	if(above->first == (srcptr_c + size)) {
-	  // yes, remove the above entry and add its size to ours
-	  size += above->second;
-	  free_list.erase(above);
-	}
-	// now check the below
-	if(srcptr_c == (below->first + below->second)) {
-	  // yes, change the below entry instead of adding ourselves
-	  below->second += size;
-	} else {
-	  free_list[srcptr_c] = size;
-	}
+
+      // now look above
+      while(above != free_list.end()) {
+	log_sdp.spew("merge?  NONE %p+%zd %p+%zd", srcptr_c, size, above->first, above->second);
+
+	if((srcptr_c + size) != above->first)
+	  break;
+
+	size += above->second;
+	std::map<char *, size_t>::iterator to_nuke(above++);
+	free_list.erase(to_nuke);
       }
     }
+
+    // is this possibly-merged span large enough to satisfy the first pending
+    //  allocation (if any)?
+    if(!pending_allocations.empty() && 
+       (size >= pending_allocations.front()->payload_size)) {
+      OutgoingMessage *msg = pending_allocations.front();
+      pending_allocations.pop();
+      size_t act_size = round_up_size(msg->payload_size);
+      in_use[srcptr_c] = act_size;
+      satisfied.push_back(std::make_pair(msg, srcptr_c));
+
+      // was anything left?  if so, add it to the list of free spans
+      if(size > act_size)
+	free_list[srcptr_c + act_size] = size - act_size;
+
+      // now see if we can satisfy any other pending allocations - use the
+      //  normal allocator routine here because there might be better choices
+      //  to use than the span we just freed (assuming any of it is left)
+      while(!pending_allocations.empty()) {
+	OutgoingMessage *msg = pending_allocations.front();
+	void *ptr = alloc_srcptr(msg->payload_size, held_lock);
+	if(!ptr) break;
+
+	satisfied.push_back(std::make_pair(msg, ptr));
+	pending_allocations.pop();
+      }
+    } else {
+      // no?  then no other span will either, so just add this to the free list
+      //  and return
+      free_list[srcptr_c] = size;
+    }
   }
-  gasnet_hsl_unlock(&mutex);
+
+  // with the lock released, tell any messages that got srcptr's so they can
+  //   do their copies
+  if(!satisfied.empty())
+    for(std::vector<std::pair<OutgoingMessage *, void *> >::iterator it = satisfied.begin();
+	it != satisfied.end();
+	it++) {
+      log_sdp.debug("satisfying pending allocation: %p for %p",
+		    it->second, it->first);
+      it->first->assign_srcdata_pointer(it->second);
+    }
 }
 
-struct OutgoingMessage {
-  OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args)
-    : msgid(_msgid), num_args(_num_args),
-      payload(0), payload_size(0), payload_mode(PAYLOAD_NONE), dstptr(0)
-  {
-    for(unsigned i = 0; i < _num_args; i++)
-      args[i] = ((const int *)_args)[i];
-  }
-
-  ~OutgoingMessage(void)
-  {
-    if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
-      if(payload_size > 0) {
+OutgoingMessage::OutgoingMessage(unsigned _msgid, unsigned _num_args,
+				 const void *_args)
+  : msgid(_msgid), num_args(_num_args),
+    payload(0), payload_size(0), payload_mode(PAYLOAD_NONE), dstptr(0),
+    payload_src(0)
+{
+  for(unsigned i = 0; i < _num_args; i++)
+    args[i] = ((const int *)_args)[i];
+}
+    
+OutgoingMessage::~OutgoingMessage(void)
+{
+  if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
+    if(payload_size > 0) {
 #ifdef DEBUG_MEM_REUSE
-	for(size_t i = 0; i < payload_size >> 2; i++)
-	  ((unsigned *)payload)[i] = ((0xdc + gasnet_mynode()) << 24) + payload_num;
-	//memset(payload, 0xdc+gasnet_mynode(), payload_size);
-	printf("%d: freeing payload %x = [%p, %p)\n",
-	       gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size);
+      for(size_t i = 0; i < payload_size >> 2; i++)
+	((unsigned *)payload)[i] = ((0xdc + gasnet_mynode()) << 24) + payload_num;
+      //memset(payload, 0xdc+gasnet_mynode(), payload_size);
+      printf("%d: freeing payload %x = [%p, %p)\n",
+	     gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size);
 #endif
-	deferred_free(payload);
-      }
+      deferred_free(payload);
     }
   }
+}
 
-  void set_payload(void *_payload, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
-  void set_payload(void *_payload, size_t _line_size, off_t _line_stride, size_t _line_count,
-		   int _payload_mode, void *_dstptr = 0);
-  void set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode, void *_dstptr = 0);
-
-  unsigned msgid;
-  unsigned num_args;
-  void *payload;
-  size_t payload_size;
-  int payload_mode;
-  void *dstptr;
-  int args[16];
-#ifdef DEBUG_MEM_REUSE
-  int payload_num;
-#endif
-};
-    
 // these values can be overridden by command-line parameters
 static int num_lmbs = 2;
 static size_t lmb_size = 1 << 20; // 1 MB
@@ -374,7 +495,7 @@ public:
     delete[] lmb_w_avail;
   }
 
-void record_message(bool sent_reply) 
+  void record_message(bool sent_reply) 
   {
 #ifdef TRACE_MESSAGES
     __sync_fetch_and_add(&received_messages, 1);
@@ -407,6 +528,12 @@ void record_message(bool sent_reply)
 	  delete hdr;
 	  count++;
 	  continue;
+	}
+
+	// is the message still waiting on space in the srcdatapool?
+	if(hdr->payload_mode == PAYLOAD_PENDING) {
+	  gasnet_hsl_unlock(&mutex);
+	  break;
 	}
 
 	// do we have a known destination pointer on the target?  if so, no need to use LMB
@@ -505,6 +632,10 @@ void record_message(bool sent_reply)
     // need to hold the mutex in order to push onto one of the queues
     gasnet_hsl_lock(&mutex);
 
+    // once we have the lock, we can safely move the message's payload to
+    //  srcdatapool
+    hdr->reserve_srcdata();
+
     // messages that don't need space in the LMB can progress when the LMB is full
     //  (unless they need to maintain ordering with long packets)
     if(!in_order && (hdr->payload_size <= gasnet_AMMaxMedium()))
@@ -560,45 +691,6 @@ void record_message(bool sent_reply)
     return message_added;
   }
 
-#if 0
-  size_t adjust_long_msgsize(void *ptr, size_t orig_size)
-  {
-    // can figure out which buffer it is without holding lock
-    int r_buffer = -1;
-    for(int i = 0; i < num_lmbs; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
-      r_buffer = i;
-      break;
-    }
-    if(r_buffer < 0) {
-      // probably a medium message?
-      return orig_size;
-    }
-
-    // need to hold the lock
-    gasnet_hsl_lock(&mutex);
-    size_t adjusted_size = orig_size;
-
-    if(cur_long_ptr != 0) {
-      // pointer had better match and we must have received all the chunks
-      assert(cur_long_ptr == ptr);
-      assert(cur_long_chunk_idx == 1);
-
-      adjusted_size += cur_long_size;
-
-      // printf("%d: adjusting long message size (%p, %d, %zd): %zd -> %zd\n",
-      // 	     gasnet_mynode(), cur_long_ptr, cur_long_chunk_idx, cur_long_size, orig_size, adjusted_size);
-
-      cur_long_ptr = 0;
-      cur_long_chunk_idx = 0;
-      cur_long_size = 0;
-    }
-    gasnet_hsl_unlock(&mutex);
-
-    return adjusted_size;
-  }
-#endif
-
   bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, 
                            int message_id, int chunks)
   {
@@ -640,40 +732,6 @@ void record_message(bool sent_reply)
     gasnet_hsl_unlock(&mutex);
     return ready;
   }
-
-#if 0
-  void handle_long_extension(void *ptr, int chunk_idx, int size)
-  {
-    // can figure out which buffer it is without holding lock
-    int r_buffer = -1;
-    for(int i = 0; i < num_lmbs; i++)
-      if((ptr >= lmb_r_bases[i]) && (ptr < (lmb_r_bases[i] + lmb_size))) {
-      r_buffer = i;
-      break;
-    }
-    // not ok for this to be outside an LMB
-    assert(r_buffer >= 0);
-
-    // need to hold the lock
-    gasnet_hsl_lock(&mutex);
-
-    if(cur_long_ptr != 0) {
-      // continuing an extension - this had better be the next index down
-      assert(ptr == cur_long_ptr);
-      assert(chunk_idx == (cur_long_chunk_idx - 1));
-      
-      cur_long_chunk_idx = chunk_idx;
-      cur_long_size += size;
-    } else {
-      // starting a new extension
-      cur_long_ptr = ptr;
-      cur_long_chunk_idx = chunk_idx;
-      cur_long_size = size;
-    }
-
-    gasnet_hsl_unlock(&mutex);
-  }
-#endif
 
   // called when the remote side tells us that there will be no more
   //  messages sent for a given buffer - as soon as we've received them all,
@@ -922,27 +980,6 @@ protected:
       hdr->args[message_id_start + 3] = 0;
     }
       
-
-#if 0
-    size_t msg_size = hdr->payload_size;
-    if(msg_size > max_long_req) {
-      size_t chunks = (hdr->payload_size + max_long_req - 1) / max_long_req;
-
-      gasnet_handlerarg_t dest_ptr_lo = ((uint64_t)dest_ptr) & 0x0FFFFFFFFULL;
-      gasnet_handlerarg_t dest_ptr_hi = ((uint64_t)dest_ptr) >> 32;
-
-      for(unsigned i = chunks-1; i > 0; i--) {
-	size_t size = ((i == (chunks-1)) ? (hdr->payload_size % max_long_req) : max_long_req);
-	gasnet_AMRequestLongAsync3(peer, MSGID_LONG_EXTENSION, 
-			      ((char *)(hdr->payload))+(i * max_long_req), size, 
-			      ((char *)dest_ptr)+(i * max_long_req),
-			      dest_ptr_lo, dest_ptr_hi, i);
-      }
-
-      msg_size = max_long_req;
-    }
-#endif
-
     for (int i = (chunks-1); i >= 0; i--)
     {
       // every chunk but the last is the max size - the last one is whatever
@@ -1135,7 +1172,8 @@ public:
 #endif
 };
 
-void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _payload_mode,
+void OutgoingMessage::set_payload(PayloadSource *_payload_src,
+				  size_t _payload_size, int _payload_mode,
 				  void *_dstptr)
 {
   // die if a payload has already been attached
@@ -1146,173 +1184,108 @@ void OutgoingMessage::set_payload(void *_payload, size_t _payload_size, int _pay
     return;
 
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
+  log_sdp.info("setting payload (%zd, %d)", _payload_size, _payload_mode);
   assert(_payload_size > 0);
   assert((_dstptr != 0) || (_payload_size <= lmb_size));
 
-  // copy the destination pointer through
+  // just copy down everything - we won't attempt to grab a srcptr until
+  //  we have reserved our spot in an outgoing queue
   dstptr = _dstptr;
+  payload = 0;
+  payload_size = _payload_size;
+  payload_mode = _payload_mode;
+  payload_src = _payload_src;
+}
+
+// called once we have reserved a space in a given outgoing queue so that
+//  we can't get put behind somebody who failed a srcptr allocation (and might
+//  need us to go out the door to remove the blockage)
+void OutgoingMessage::reserve_srcdata(void)
+{
+  // no payload case is easy
+  if(payload_mode == PAYLOAD_NONE) return;
+
+  // if the payload is stable and in registered memory AND contiguous, we can
+  //  just use it
+  if((payload_mode == PAYLOAD_KEEPREG) && payload_src->get_contig_pointer()) {
+    payload = payload_src->get_contig_pointer();
+    return;
+  }
 
   // do we need to place this data in the srcdata pool?
-  // for now, yes, unless it's KEEP and in already-registered memory
-  bool need_srcdata;
-  if(_payload_mode == PAYLOAD_KEEP) {
-    bool is_reg = is_registered(_payload);
-    //printf("KEEP payload registration: %p %d\n", _payload, is_reg ? 1 : 0);
-    need_srcdata = !is_reg;
-  } else {
-    need_srcdata = true;
-  }
-  // if we don't have a srcdata pool, obviously don't try to use it
-  if(!srcdatapool)
-    need_srcdata = false;
+  // for now, yes, unless we don't have a srcdata pool at all
+  bool need_srcdata = (srcdatapool != 0);
   
   if(need_srcdata) {
     // try to get the needed space in the srcdata pool
     assert(srcdatapool);
-    void *srcptr = srcdatapool->alloc_srcptr(_payload_size);
-    if(srcptr != 0) {
-      // printf("%d: copying payload to srcdatapool: %p -> %p (%zd)\n", 
-      // 	     gasnet_mynode(), _payload, srcptr, _payload_size);
-      memcpy(srcptr, _payload, _payload_size);
 
-      if(_payload_mode == PAYLOAD_FREE) {
-	// done with the requestor's data - free it now
-	free(_payload);
+    void *srcptr = 0;
+    {
+      // take the SDP lock
+      SrcDataPool::Lock held_lock(*srcdatapool);
+
+      srcptr = srcdatapool->alloc_srcptr(payload_size, held_lock);
+      log_sdp.info("got %p (%d)", srcptr, payload_mode);
+
+      if(srcptr != 0) {
+	// allocation succeeded - update state, but do copy below, after
+	//  we've released the lock
+	payload_mode = PAYLOAD_SRCPTR;
+	payload = srcptr;
+      } else {
+	// if the allocation fails, we have to queue ourselves up
+
+	// if we've been instructed to copy the data, that has to happen now
+	if(payload_mode == PAYLOAD_COPY) {
+	  void *copy_ptr = malloc(payload_size);
+	  assert(copy_ptr != 0);
+	  payload_src->copy_data(copy_ptr);
+	  delete payload_src;
+	  payload_src = new ContiguousPayload(copy_ptr, payload_size,
+					      PAYLOAD_FREE);
+	}
+
+	payload_mode = PAYLOAD_PENDING;
+	srcdatapool->add_pending(this, held_lock);
       }
-
-      payload_mode = PAYLOAD_SRCPTR;
-      payload = srcptr;
-      payload_size = _payload_size;
-      return;
     }
 
-    // fall through or die?
-    assert(0);
-  }
-
-  // use data where it is or copy to non-registered memory
-  payload_mode = _payload_mode;
-  payload_size = _payload_size;
-  // make a copy if we were asked to
-  if(_payload_mode == PAYLOAD_COPY) {
-    payload = malloc(payload_size);
-    assert(payload != 0);
-#ifdef DEBUG_MEM_REUSE
-#ifdef __GNUC__
-    payload_num = __sync_add_and_fetch(&payload_count, 1);
-#else
-    payload_num = LegionRuntime::LowLevel::__sync_add_and_fetch(&payload_count, 1);
-#endif
-    printf("%d: copying payload %x = [%p, %p) (%zd)\n",
-	   gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size,
-	   payload_size);
-#endif
-    memcpy(payload, _payload, payload_size);
-  } else
-    payload = _payload;
-}
-
-static void gather_2d(void *dst, const void *src, size_t line_size, off_t line_stride, size_t line_count)
-{
-  char *dst_c = (char *)dst;
-  const char *src_c = (const char *)src;
-
-  while(line_count-- > 0) {
-    memcpy(dst_c, src_c, line_size);
-    dst_c += line_size;
-    src_c += line_stride;
-  }
-}
-
-static void gather_spans(const SpanList& spans, void *dst, size_t expected_size)
-{
-  char *dst_c = (char *)dst;
-  off_t bytes_left = expected_size;
-  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
-    assert(it->second <= bytes_left);
-    memcpy(dst_c, it->first, it->second);
-    dst_c += it->second;
-    bytes_left -= it->second;
-  }
-  assert(bytes_left == 0);
-}
-
-void OutgoingMessage::set_payload(void *_payload, size_t _line_size, off_t _line_stride, size_t _line_count,
-				  int _payload_mode, void *_dstptr )
-{
-  // die if a payload has already been attached
-  assert(payload_mode == PAYLOAD_NONE);
-
-  // no payload?  easy case
-  if(_payload_mode == PAYLOAD_NONE)
-    return;
-
-  // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
-  payload_size = _line_size * _line_count;
-  assert(payload_size > 0);
-  assert((_dstptr != 0) || (payload_size <= lmb_size));
-
-  // copy the destination pointer through
-  dstptr = _dstptr;
-
-  // we always need to allocate some memory to gather the data for sending - prefer to get this
-  //  from srcdata pool
-  if(srcdatapool) {
-    payload = srcdatapool->alloc_srcptr(payload_size);
-    if(payload) {
-      payload_mode = PAYLOAD_SRCPTR;
+    // do the copy now if the allocation succeeded
+    if(srcptr != 0) {
+      payload_src->copy_data(srcptr);
+      delete payload_src;
+      payload_src = 0;
+    }
+  } else {
+    // no srcdatapool needed, but might still have to copy
+    if(payload_src->get_contig_pointer() &&
+       (payload_mode != PAYLOAD_COPY)) {
+      payload = payload_src->get_contig_pointer();
+      delete payload_src;
+      payload_src = 0;
     } else {
-      assert(0);
+      // make a copy
+      payload = malloc(payload_size);
+      assert(payload != 0);
+      payload_src->copy_data(payload);
+      delete payload_src;
+      payload_src = 0;
+      payload_mode = PAYLOAD_FREE;
     }
   }
-  if(!payload) {
-    payload = malloc(payload_size);
-    assert(payload != 0);
-    payload_mode = PAYLOAD_COPY;
-  }
-
-  gather_2d(payload, _payload, _line_size, _line_stride, _line_count);
-  // doesn't really make sense to call this one with PAYLOAD_FREE
-  assert(_payload_mode != PAYLOAD_FREE);
 }
 
-void OutgoingMessage::set_payload(const SpanList& spans, size_t _payload_size, int _payload_mode,
-				  void *_dstptr)
+void OutgoingMessage::assign_srcdata_pointer(void *ptr)
 {
-  // die if a payload has already been attached
-  assert(payload_mode == PAYLOAD_NONE);
+  assert(payload_mode == PAYLOAD_PENDING);
+  assert(payload_src != 0);
+  payload_src->copy_data(ptr);
+  delete payload_src;
+  payload_src = 0;
 
-  // no payload?  easy case
-  if(_payload_mode == PAYLOAD_NONE)
-    return;
-
-  // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
-  assert(_payload_size > 0);
-  assert((_dstptr != 0) || (_payload_size <= lmb_size));
-
-  // copy the destination pointer through
-  dstptr = _dstptr;
-
-  // we always need to allocate some memory to gather the data for sending - prefer to get this
-  //  from srcdata pool
-  payload_size = _payload_size;
-  if(srcdatapool) {
-    payload = srcdatapool->alloc_srcptr(_payload_size);
-    if(payload) {
-      payload_mode = PAYLOAD_SRCPTR;
-    } else {
-      assert(0);
-    }
-  }
-  if(!payload) {
-    payload = malloc(_payload_size);
-    assert(payload != 0);
-    payload_mode = PAYLOAD_COPY;
-  }
-
-  gather_spans(spans, payload, payload_size);
-  // doesn't really make sense to call this one with PAYLOAD_FREE
-  assert(_payload_mode != PAYLOAD_FREE);
+  payload = ptr;
+  payload_mode = PAYLOAD_SRCPTR;
 }
 
 class EndpointManager {
@@ -1522,11 +1495,6 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   }
 #endif
 
-#if 0
-  handlers[hcount].index = MSGID_LONG_EXTENSION;
-  handlers[hcount].fnptr = (void (*)())handle_long_extension;
-  hcount++;
-#endif
   handlers[hcount].index = MSGID_FLIP_REQ;
   handlers[hcount].fnptr = (void (*)())handle_flip_req;
   hcount++;
@@ -1670,7 +1638,14 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
 					     args);
 
-  hdr->set_payload((void *)payload, payload_size, payload_mode, dstptr);
+  // if we have a contiguous payload that is in the KEEP mode, and in
+  //  registered memory, we may be able to avoid a copy
+  if((payload_mode == PAYLOAD_KEEP) && is_registered((void *)payload))
+    payload_mode = PAYLOAD_KEEPREG;
+
+  hdr->set_payload(new ContiguousPayload((void *)payload, payload_size, payload_mode),
+		   payload_size, payload_mode,
+		   dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1687,8 +1662,10 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
 					     args);
 
-  hdr->set_payload((void *)payload, line_size, line_stride, line_count,
-		   payload_mode, dstptr);
+  hdr->set_payload(new TwoDPayload(payload, line_size, 
+				   line_count, line_stride, payload_mode),
+		   line_size * line_count, payload_mode,
+		   dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1704,7 +1681,9 @@ void enqueue_message(gasnet_node_t target, int msgid,
   					     (arg_size + sizeof(int) - 1) / sizeof(int),
   					     args);
 
-  hdr->set_payload(spans, payload_size, payload_mode, dstptr);
+  hdr->set_payload(new SpanPayload(spans, payload_size, payload_mode),
+		   payload_size, payload_mode,
+		   dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1730,6 +1709,54 @@ void handle_long_msgptr(gasnet_node_t source, void *ptr)
   CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
   endpoint_manager->record_message(src, false/*sent reply*/);
 #endif
+}
+
+ContiguousPayload::ContiguousPayload(void *_srcptr, size_t _size, int _mode)
+  : srcptr(_srcptr), size(_size), mode(_mode)
+{}
+
+void ContiguousPayload::copy_data(void *dest)
+{
+  log_sdp.info("contig copy %p <- %p (%zd bytes)", dest, srcptr, size);
+  memcpy(dest, srcptr, size);
+  if(mode == PAYLOAD_FREE)
+    free(srcptr);
+}
+
+TwoDPayload::TwoDPayload(const void *_srcptr, size_t _line_size,
+			 size_t _line_count,
+			 ptrdiff_t _line_stride, int _mode)
+  : srcptr(_srcptr), line_size(_line_size), line_count(_line_count),
+    line_stride(_line_stride), mode(_mode)
+{}
+
+void TwoDPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  const char *src_c = (const char *)srcptr;
+
+  for(size_t i = 0; i < line_count; i++) {
+    memcpy(dst_c, src_c, line_size);
+    dst_c += line_size;
+    src_c += line_stride;
+  }
+}
+
+SpanPayload::SpanPayload(const SpanList&_spans, size_t _size, int _mode)
+  : spans(_spans), size(_size), mode(_mode)
+{}
+
+void SpanPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  off_t bytes_left = size;
+  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
+    assert(it->second <= bytes_left);
+    memcpy(dst_c, it->first, it->second);
+    dst_c += it->second;
+    bytes_left -= it->second;
+  }
+  assert(bytes_left == 0);
 }
 
 extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,

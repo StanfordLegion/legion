@@ -144,6 +144,7 @@ namespace LegionRuntime {
       EventImpl*           get_free_event(void);
       ReservationImpl*     get_free_reservation(size_t data_size = 0);
       IndexSpace::Impl*  get_free_metadata(size_t num_elmts);
+      IndexSpace::Impl*  get_free_metadata(const ElementMask &mask);
       IndexSpace::Impl*  get_free_metadata(IndexSpace::Impl *par, const ElementMask &mask);
       RegionInstance::Impl*  get_free_instance(IndexSpace is, Memory m, 
                                                size_t num_elmts, size_t alloc_size, 
@@ -2182,6 +2183,15 @@ namespace LegionRuntime {
       }
     }
 
+    ElementMask::~ElementMask(void)
+    {
+      if (raw_data != 0)
+      {
+        free(raw_data);
+        raw_data = NULL;
+      }
+    }
+
     ElementMask& ElementMask::operator=(const ElementMask &rhs)
     {
       first_element = rhs.first_element;
@@ -2297,7 +2307,7 @@ namespace LegionRuntime {
       size_t count = 0;
       if (raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-        int max_full = (num_elements >> 5);
+        const int max_full = (num_elements >> 5);
         bool remainder = (num_elements % 32) != 0;
         for (int index = 0; index < max_full; index++)
           count += __builtin_popcount(impl->bits[index]);
@@ -2309,6 +2319,135 @@ namespace LegionRuntime {
         assert(0);
       }
       return count;
+    }
+
+    bool ElementMask::operator!(void) const
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++) {
+          if (impl->bits[index])
+            return false;
+        }
+      } else {
+        assert(false);
+      }
+      return true;
+    }
+
+    ElementMask ElementMask::operator|(const ElementMask &other) const
+    {
+      ElementMask result(num_elements); 
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          target->bits[index] = impl->bits[index] | other_impl->bits[index];
+        }
+      } else {
+        assert(false);
+      }
+      return result;
+    }
+
+    ElementMask ElementMask::operator&(const ElementMask &other) const
+    {
+      ElementMask result(num_elements);
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          target->bits[index] = impl->bits[index] & other_impl->bits[index];
+        }
+      } else {
+        assert(false);
+      }
+      return result;
+    }
+
+    ElementMask ElementMask::operator-(const ElementMask &other) const
+    {
+      ElementMask result(num_elements);
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          target->bits[index] = impl->bits[index] & ~(other_impl->bits[index]);  
+        }
+      } else {
+        assert(false);
+      }
+      return result;
+    }
+
+    ElementMask& ElementMask::operator|=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          impl->bits[index] |= other_impl->bits[index];
+        }
+      } else {
+        assert(false);
+      }
+      return *this;
+    }
+
+    ElementMask& ElementMask::operator&=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          impl->bits[index] &= other_impl->bits[index];
+        }
+      } else {
+        assert(false);
+      }
+      return *this;
+    }
+
+    ElementMask& ElementMask::operator-=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        assert(num_elements == other.num_elements);
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          impl->bits[index] &= ~(other_impl->bits[index]);
+        }
+      } else {
+        assert(false);
+      }
+      return *this;
     }
 
     size_t ElementMask::raw_size(void) const
@@ -2448,6 +2587,7 @@ namespace LegionRuntime {
         }
     public:
 	bool activate(size_t num_elmts);
+        bool activate(const ElementMask &m);
         bool activate(IndexSpace::Impl *par, const ElementMask &m);
 	void deactivate(void);	
 	IndexSpace get_metadata(void);
@@ -3393,6 +3533,13 @@ namespace LegionRuntime {
 	return r->get_metadata();
     }
 
+    IndexSpace IndexSpace::create_index_space(const ElementMask &mask)
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      IndexSpace::Impl *r = Runtime::get_runtime()->get_free_metadata(mask);
+      return r->get_metadata();
+    }
+
     IndexSpace IndexSpace::create_index_space(IndexSpace parent, const ElementMask &mask)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -3607,6 +3754,23 @@ namespace LegionRuntime {
 	}
 	PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
 	return result;
+    }
+
+    bool IndexSpace::Impl::activate(const ElementMask &m)
+    {
+      bool result = false;
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      if (!active)
+      {
+        active = true;
+        result = true;
+        num_elmts = m.get_num_elmts();
+        reservation = Runtime::get_runtime()->get_free_reservation();
+        mask = m;
+        parent = NULL;
+      }
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      return result;
     }
 
     bool IndexSpace::Impl::activate(IndexSpace::Impl *par, const ElementMask &m)
@@ -4904,6 +5068,37 @@ namespace LegionRuntime {
         }
 	PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&metadata_lock));
         PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
+	return result;
+    }
+
+    IndexSpace::Impl* Runtime::get_free_metadata(const ElementMask &mask)
+    {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&free_metas_lock));
+        if (!free_metas.empty())
+        {
+          IndexSpace::Impl *result = free_metas.front();
+          free_metas.pop_front();
+          PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
+          bool activated = result->activate(mask);
+#ifdef DEBUG_LOW_LEVEL
+          assert(activated);
+#endif
+          return result;
+        }
+        // Otherwise there are no free metadata so make a new one
+	PTHREAD_SAFE_CALL(pthread_rwlock_wrlock(&metadata_lock));
+	unsigned int index = metadatas.size();
+	metadatas.push_back(new IndexSpace::Impl(index,0,false));
+	IndexSpace::Impl *result = metadatas[index];
+        // Create a whole bunch of other metas too while we're here
+        for (unsigned idx=1; idx < BASE_METAS; idx++)
+        {
+          metadatas.push_back(new IndexSpace::Impl(index+idx,0,false));
+          free_metas.push_back(metadatas.back());
+        }
+	PTHREAD_SAFE_CALL(pthread_rwlock_unlock(&metadata_lock));
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
+        result->activate(mask);
 	return result;
     }
 

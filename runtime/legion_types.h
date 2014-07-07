@@ -33,6 +33,12 @@
 #include <deque>
 #include <vector>
 
+// Pull in any vector instruction flags
+// Except for Apple which can screw itself
+#ifndef __MACH__
+#include <x86intrin.h>
+#endif
+
 // If we enable field tree acceleration
 // then enable it for both the logical and
 // physical tree analyses.
@@ -491,6 +497,14 @@ namespace LegionRuntime {
              unsigned SHIFT, unsigned MASK> class BitMask;
     template<typename T, unsigned int MAX,
              unsigned SHIFT, unsigned MASK> class TLBitMask;
+#ifdef __SSE2__
+    template<unsigned int MAX> class SSEBitMask;
+    template<unsigned int MAX> class SSETLBitMask;
+#endif
+#ifdef __AVX__
+    template<unsigned int MAX> class AVXBitMask;
+    template<unsigned int MAX> class AVXTLBitMask;
+#endif
     template<typename T, unsigned LOG2MAX> class BitPermutation;
 
     // legion_logging.h
@@ -553,8 +567,33 @@ namespace LegionRuntime {
     typedef void (*LowLevelFnptr)(const void*,size_t,Processor);
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
       Context,HighLevelRuntime*,void*&,size_t&);
+    // A little bit of logic here to figure out the 
+    // kind of bit mask to use for FieldMask
+#if defined(__AVX__)
+#if (MAX_FIELDS > 256)
+    typedef AVXTLBitMask<MAX_FEILDS> FieldMask;
+#elif (MAX_FIELDS > 128)
+    typedef AVXBitMask<MAX_FIELDS> FieldMask;
+#elif (MAX_FIELDS > 64)
+    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#else
     typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-    // typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#endif
+#elif defined(__SSE2__)
+#if (MAX_FIELDS > 128)
+    typedef SSETLBitMask<MAX_FIELDS> FieldMask;
+#elif (MAX_FIELDS > 64)
+    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#else
+    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#endif
+#else
+#if (MAX_FIELDS > 64)
+    typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#else
+    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#endif
+#endif
     typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;
 
@@ -600,6 +639,7 @@ namespace LegionRuntime {
     friend class ReductionView;                   \
     friend class MaterializedView;                \
     friend class CompositeView;                   \
+    friend class CompositeNode;                   \
     friend class PhysicalManager;                 \
     friend class InstanceManager;                 \
     friend class ReductionManager;                \

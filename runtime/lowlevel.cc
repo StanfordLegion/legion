@@ -5879,6 +5879,20 @@ namespace LegionRuntime {
       return impl->me;
     }
 
+    /*static*/ IndexSpace IndexSpace::create_index_space(const ElementMask &mask)
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+      IndexSpace::Impl *impl = Runtime::runtime->local_index_space_free_list->alloc_entry();
+      
+      // TODO: actually decide when to safely consider a subregion frozen
+      impl->init(impl->me, NO_SPACE, mask.get_num_elmts(), &mask, true);
+      
+      log_meta(LEVEL_INFO, "index space created: id=" IDFMT " num_elmts=%d",
+	       impl->me.id, mask.get_num_elmts());
+      return impl->me;
+    }
+
     /*static*/ IndexSpace IndexSpace::create_index_space(IndexSpace parent, const ElementMask &mask)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -6199,6 +6213,14 @@ namespace LegionRuntime {
       }
     }
 
+    ElementMask::~ElementMask(void)
+    {
+      if (raw_data) {
+        free(raw_data);
+        raw_data = 0;
+      }
+    }
+
     ElementMask& ElementMask::operator=(const ElementMask &rhs)
     {
       first_element = rhs.first_element;
@@ -6406,18 +6428,178 @@ namespace LegionRuntime {
       return count;
     }
 
+    bool ElementMask::operator!(void) const
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        const int max_full = ((num_elements+63) >> 6);
+        for (int index = 0; index < max_full; index++) {
+          if (impl->bits[index])
+            return false;
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return true;
+    }
+
+    ElementMask ElementMask::operator|(const ElementMask &other) const
+    {
+      ElementMask result(num_elements);
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            target->bits[index] = impl->bits[index] | other_impl->bits[index]; 
+          }
+        } else {
+          // TODO implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return result;
+    }
+
+    ElementMask ElementMask::operator&(const ElementMask &other) const
+    {
+      ElementMask result(num_elements);
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            target->bits[index] = impl->bits[index] & other_impl->bits[index];
+          }
+        } else {
+          // TODO: implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return result;
+    }
+
+    ElementMask ElementMask::operator-(const ElementMask &other) const
+    {
+      ElementMask result(num_elements);
+      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            target->bits[index] = impl->bits[index] & ~(other_impl->bits[index]);
+          }
+        } else {
+          // TODO: implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return result;
+    }
+
+    ElementMask& ElementMask::operator|=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            impl->bits[index] |= other_impl->bits[index];
+          }
+        } else {
+          // TODO: implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return *this;
+    }
+
+    ElementMask& ElementMask::operator&=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            impl->bits[index] &= other_impl->bits[index];
+          }
+        } else {
+          // TODO: implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return *this;
+    }
+
+    ElementMask& ElementMask::operator-=(const ElementMask &other)
+    {
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+          assert(num_elements == other.num_elements);
+          const int max_full = ((num_elements+63) >> 6);
+          for (int index = 0; index < max_full; index++) {
+            impl->bits[index] &= ~(other_impl->bits[index]);
+          }
+        } else {
+          // TODO: implement this
+          assert(0);
+        }
+      } else {
+        // TODO: implement this
+        assert(0);
+      }
+      return *this;
+    }
+
     ElementMask::OverlapResult ElementMask::overlaps_with(const ElementMask& other,
 							  off_t max_effort /*= -1*/) const
     {
-      ElementMaskImpl *i1 = (ElementMaskImpl *)raw_data;
-      ElementMaskImpl *i2 = (ElementMaskImpl *)(other.raw_data);
-      assert(i1 && i2);
-      assert(num_elements == other.num_elements);
-      for(int i = 0; i < (num_elements + 63) >> 6; i++)
-	if((i1->bits[i] & i2->bits[i]) != 0)
-	  return ElementMask::OVERLAP_YES;
-
-      return ElementMask::OVERLAP_NO;
+      if (raw_data != 0) {
+        ElementMaskImpl *i1 = (ElementMaskImpl *)raw_data;
+        if (other.raw_data != 0) {
+          ElementMaskImpl *i2 = (ElementMaskImpl *)(other.raw_data);
+          assert(num_elements == other.num_elements);
+          for(int i = 0; i < (num_elements + 63) >> 6; i++)
+            if((i1->bits[i] & i2->bits[i]) != 0)
+              return ElementMask::OVERLAP_YES;
+          return ElementMask::OVERLAP_NO;
+        } else {
+          return ElementMask::OVERLAP_MAYBE;
+        }
+      } else {
+        return ElementMask::OVERLAP_MAYBE;
+      }
     }
 
     ElementMask::Enumerator *ElementMask::enumerate_enabled(int start /*= 0*/) const

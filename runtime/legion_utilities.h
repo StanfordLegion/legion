@@ -24,6 +24,18 @@
 #include "legion.h"
 #include "legion_profiling.h"
 
+// Apple can go screw itself
+#ifndef __MACH__
+#include <x86intrin.h>
+#else
+#ifdef __SSE2__
+#include <emmintrin.h>
+#endif
+#ifdef __AVX__
+#include <immintrin.h>
+#endif
+#endif
+
 namespace LegionRuntime {
   namespace HighLevel {
 
@@ -421,7 +433,7 @@ namespace LegionRuntime {
       inline T& operator[](const unsigned &idx);
       inline BitMask& operator=(const BitMask &rhs);
     public:
-      inline BitMask operator~(void) const;
+      inline BitMask operator~(void) const; 
       inline BitMask operator|(const BitMask &rhs) const;
       inline BitMask operator&(const BitMask &rhs) const;
       inline BitMask operator^(const BitMask &rhs) const;
@@ -460,7 +472,7 @@ namespace LegionRuntime {
     };
 
     /////////////////////////////////////////////////////////////
-    // Two-Level Bit Permutation 
+    // Two-Level Bit Mask 
     /////////////////////////////////////////////////////////////
     /*
      * This class is a two-level bit mask which makes the 
@@ -528,6 +540,265 @@ namespace LegionRuntime {
       T bit_vector[MAX/(8*sizeof(T))];
       T sum_mask;
     };
+
+#ifdef __SSE2__
+    /////////////////////////////////////////////////////////////
+    // SSE Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class SSEBitMask {
+    public:
+      SSEBitMask(uint64_t init = 0);
+      SSEBitMask(const SSEBitMask &rhs);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+    public:
+      inline bool operator==(const SSEBitMask &rhs) const;
+      inline bool operator<(const SSEBitMask &rhs) const;
+      inline bool operator!=(const SSEBitMask &rhs) const;
+    public:
+      inline const __m128i& operator()(const unsigned &idx) const;
+      inline __m128i& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline SSEBitMask& operator=(const SSEBitMask &rhs);
+    public:
+      inline SSEBitMask operator~(void) const;
+      inline SSEBitMask operator|(const SSEBitMask &rhs) const;
+      inline SSEBitMask operator&(const SSEBitMask &rhs) const;
+      inline SSEBitMask operator^(const SSEBitMask &rhs) const;
+    public:
+      inline SSEBitMask& operator|=(const SSEBitMask &rhs);
+      inline SSEBitMask& operator&=(const SSEBitMask &rhs);
+      inline SSEBitMask& operator^=(const SSEBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const SSEBitMask &rhs) const;
+      // Set difference
+      inline SSEBitMask operator-(const SSEBitMask &rhs) const;
+      inline SSEBitMask& operator-=(const SSEBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline SSEBitMask operator<<(unsigned shift) const;
+      inline SSEBitMask operator>>(unsigned shift) const;
+    public:
+      inline SSEBitMask& operator<<=(unsigned shift);
+      inline SSEBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const SSEBitMask<MAX> &mask);
+    protected:
+      union {
+        __m128i sse_vector[MAX/128];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // SSE Two-Level Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class SSETLBitMask {
+    public:
+      SSETLBitMask(uint64_t init = 0);
+      SSETLBitMask(const SSETLBitMask &rhs);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+    public:
+      inline bool operator==(const SSETLBitMask &rhs) const;
+      inline bool operator<(const SSETLBitMask &rhs) const;
+      inline bool operator!=(const SSETLBitMask &rhs) const;
+    public:
+      inline const __m128i& operator()(const unsigned &idx) const;
+      inline __m128i& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline SSETLBitMask& operator=(const SSETLBitMask &rhs);
+    public:
+      inline SSETLBitMask operator~(void) const;
+      inline SSETLBitMask operator|(const SSETLBitMask &rhs) const;
+      inline SSETLBitMask operator&(const SSETLBitMask &rhs) const;
+      inline SSETLBitMask operator^(const SSETLBitMask &rhs) const;
+    public:
+      inline SSETLBitMask& operator|=(const SSETLBitMask &rhs);
+      inline SSETLBitMask& operator&=(const SSETLBitMask &rhs);
+      inline SSETLBitMask& operator^=(const SSETLBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const SSETLBitMask &rhs) const;
+      // Set difference
+      inline SSETLBitMask operator-(const SSETLBitMask &rhs) const;
+      inline SSETLBitMask& operator-=(const SSETLBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline SSETLBitMask operator<<(unsigned shift) const;
+      inline SSETLBitMask operator>>(unsigned shift) const;
+    public:
+      inline SSETLBitMask& operator<<=(unsigned shift);
+      inline SSETLBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const SSETLBitMask<MAX> &mask);
+      static inline uint64_t extract_mask(__m128i value);
+    protected:
+      union {
+        __m128i sse_vector[MAX/128];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+      uint64_t sum_mask;
+    };
+#endif // __SSE2__
+
+#ifdef __AVX__
+    /////////////////////////////////////////////////////////////
+    // AVX Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class AVXBitMask {
+    public:
+      AVXBitMask(uint64_t init = 0);
+      AVXBitMask(const AVXBitMask &rhs);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+    public:
+      inline bool operator==(const AVXBitMask &rhs) const;
+      inline bool operator<(const AVXBitMask &rhs) const;
+      inline bool operator!=(const AVXBitMask &rhs) const;
+    public:
+      inline const __m256i& operator()(const unsigned &idx) const;
+      inline __m256i& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline AVXBitMask& operator=(const AVXBitMask &rhs);
+      inline const __m256d& elem(const unsigned &idx) const;
+      inline __m256d& elem(const unsigned &idx);
+    public:
+      inline AVXBitMask operator~(void) const;
+      inline AVXBitMask operator|(const AVXBitMask &rhs) const;
+      inline AVXBitMask operator&(const AVXBitMask &rhs) const;
+      inline AVXBitMask operator^(const AVXBitMask &rhs) const;
+    public:
+      inline AVXBitMask& operator|=(const AVXBitMask &rhs);
+      inline AVXBitMask& operator&=(const AVXBitMask &rhs);
+      inline AVXBitMask& operator^=(const AVXBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const AVXBitMask &rhs) const;
+      // Set difference
+      inline AVXBitMask operator-(const AVXBitMask &rhs) const;
+      inline AVXBitMask& operator-=(const AVXBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline AVXBitMask operator<<(unsigned shift) const;
+      inline AVXBitMask operator>>(unsigned shift) const;
+    public:
+      inline AVXBitMask& operator<<=(unsigned shift);
+      inline AVXBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const AVXBitMask<MAX> &mask);
+    protected:
+      union {
+        __m256i avx_vector[MAX/256];
+        __m256d avx_double[MAX/256];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+    };
+    
+    /////////////////////////////////////////////////////////////
+    // AVX Two-Level Bit Mask  
+    /////////////////////////////////////////////////////////////
+    template<unsigned int MAX>
+    class AVXTLBitMask {
+    public:
+      AVXTLBitMask(uint64_t init = 0);
+      AVXTLBitMask(const AVXTLBitMask &rhs);
+    public:
+      inline void set_bit(unsigned bit);
+      inline void unset_bit(unsigned bit);
+      inline void assign_bit(unsigned bit, bool val);
+      inline bool is_set(unsigned bit) const;
+      inline int find_first_set(void) const;
+    public:
+      inline bool operator==(const AVXTLBitMask &rhs) const;
+      inline bool operator<(const AVXTLBitMask &rhs) const;
+      inline bool operator!=(const AVXTLBitMask &rhs) const;
+    public:
+      inline const __m256i& operator()(const unsigned &idx) const;
+      inline __m256i& operator()(const unsigned &idx);
+      inline const uint64_t& operator[](const unsigned &idx) const;
+      inline uint64_t& operator[](const unsigned &idx);
+      inline AVXTLBitMask& operator=(const AVXTLBitMask &rhs);
+      inline const __m256d& elem(const unsigned &idx) const;
+      inline __m256d& elem(const unsigned &idx);
+    public:
+      inline AVXTLBitMask operator~(void) const;
+      inline AVXTLBitMask operator|(const AVXTLBitMask &rhs) const;
+      inline AVXTLBitMask operator&(const AVXTLBitMask &rhs) const;
+      inline AVXTLBitMask operator^(const AVXTLBitMask &rhs) const;
+    public:
+      inline AVXTLBitMask& operator|=(const AVXTLBitMask &rhs);
+      inline AVXTLBitMask& operator&=(const AVXTLBitMask &rhs);
+      inline AVXTLBitMask& operator^=(const AVXTLBitMask &rhs);
+    public:
+      // Use * for disjointness testing
+      inline bool operator*(const AVXTLBitMask &rhs) const;
+      // Set difference
+      inline AVXTLBitMask operator-(const AVXTLBitMask &rhs) const;
+      inline AVXTLBitMask& operator-=(const AVXTLBitMask &rhs);
+      // Test to see if everything is zeros
+      inline bool operator!(void) const;
+    public:
+      inline AVXTLBitMask operator<<(unsigned shift) const;
+      inline AVXTLBitMask operator>>(unsigned shift) const;
+    public:
+      inline AVXTLBitMask& operator<<=(unsigned shift);
+      inline AVXTLBitMask& operator>>=(unsigned shift);
+    public:
+      inline uint64_t get_hash_key(void) const;
+    public:
+      // Allocates memory that becomes owned by the caller
+      inline char* to_string(void) const;
+    public:
+      static inline int pop_count(const AVXTLBitMask<MAX> &mask);
+      static inline uint64_t extract_mask(__m256i value);
+      static inline uint64_t extract_mask(__m256d value);
+    protected:
+      union {
+        __m256i avx_vector[MAX/256];
+        __m256d avx_double[MAX/256];
+        uint64_t bit_vector[MAX/64];
+      } bits;
+      uint64_t sum_mask;
+    };
+#endif // __AVX__
 
     /////////////////////////////////////////////////////////////
     // Bit Permutation 
@@ -1026,6 +1297,7 @@ namespace LegionRuntime {
     BitMask<T,MAX,SHIFT,MASK>::BitMask(T init /*= 0*/)
     //-------------------------------------------------------------------------
     {
+      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = init;
@@ -1037,6 +1309,7 @@ namespace LegionRuntime {
     BitMask<T,MAX,SHIFT,MASK>::BitMask(const BitMask &rhs)
     //-------------------------------------------------------------------------
     {
+      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -1563,6 +1836,7 @@ namespace LegionRuntime {
       : sum_mask(init)
     //-------------------------------------------------------------------------
     {
+      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
         bit_vector[idx] = init;
     }
@@ -1570,9 +1844,10 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     TLBitMask<T,MAX,SHIFT,MASK>::TLBitMask(const TLBitMask &rhs)
+      : sum_mask(rhs.sum_mask)
     //-------------------------------------------------------------------------
     {
-      sum_mask = rhs.sum_mask;
+      LEGION_STATIC_ASSERT((MAX % (8*sizeof(T))) == 0);
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bit_vector[idx] = rhs[idx];
@@ -1607,8 +1882,8 @@ namespace LegionRuntime {
       bit_vector[idx] &= unset_mask;
       // Unset the summary mask and then reset if necessary
       sum_mask &= unset_mask;
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
-        sum_mask |= (bit_vector[idx] & set_mask);
+      for (unsigned i = 0; i < BIT_ELMTS; i++)
+        sum_mask |= bit_vector[i];
     }
 
     //-------------------------------------------------------------------------
@@ -1843,6 +2118,7 @@ namespace LegionRuntime {
         bit_vector[idx] ^= rhs[idx];
         sum_mask |= bit_vector[idx];
       }
+      return *this;
     }
 
     //-------------------------------------------------------------------------
@@ -2147,6 +2423,2439 @@ namespace LegionRuntime {
       return result;
     }
 #undef BIT_ELMTS
+
+#ifdef __SSE2__
+#define SSE_ELMTS (MAX/128)
+#define BIT_ELMTS (MAX/64)
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSEBitMask<MAX>::SSEBitMask(uint64_t init /*= 0*/)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSEBitMask<MAX>::SSEBitMask(const SSEBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] |= (1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] &= ~(1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 64; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*64 + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m128i& SSEBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.sse_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m128i& SSEBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.sse_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& SSEBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& SSEBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator==(const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != rhs[idx]) 
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator<(const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator!=(const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator=(const SSEBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      SSEBitMask<MAX> result;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result[idx] = ~(bits.bit_vector[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator|(
+                                                   const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSEBitMask<MAX> result;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator&(
+                                                   const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSEBitMask<MAX> result;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator^(
+                                                   const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSEBitMask<MAX> result;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator|=(const SSEBitMask &rhs) 
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator&=(const SSEBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator^=(const SSEBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator*(const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] & rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator-(
+                                                   const SSEBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSEBitMask<MAX> result;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator-=(const SSEBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSEBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != 0)
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator<<(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      SSEBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX> SSEBitMask<MAX>::operator>>(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      SSEBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                      bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t SSEBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      uint64_t result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result |= bits.bit_vector[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* SSEBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc((MAX+1)*sizeof(char));
+      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
+      {
+        if (idx == (BIT_ELMTS-1))
+          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+        else
+        {
+          char temp[65];
+          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          strcat(result,temp);
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int SSEBitMask<MAX>::pop_count(
+                                                   const SSEBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(mask[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSETLBitMask<MAX>::SSETLBitMask(uint64_t init /*= 0*/)
+      : sum_mask(init)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSETLBitMask<MAX>::SSETLBitMask(const SSETLBitMask &rhs)
+      : sum_mask(rhs.sum_mask)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 128) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      bits.bit_vector[idx] |= set_mask;
+      sum_mask |= set_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      const uint64_t unset_mask = ~set_mask;
+      bits.bit_vector[idx] &= unset_mask;
+      // Unset the summary mask and then reset if necessary
+      sum_mask &= unset_mask;
+      for (unsigned i = 0; i < BIT_ELMTS; i++)
+        sum_mask |= bits.bit_vector[i];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 64; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*64 + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m128i& SSETLBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.sse_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m128i& SSETLBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.sse_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& SSETLBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& SSETLBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator==(const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask != rhs.sum_mask)
+        return false;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != rhs[idx]) 
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator<(const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator!=(const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator=(
+                                                       const SSETLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask = rhs.sum_mask;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      SSETLBitMask<MAX> result;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result[idx] = ~(bits.bit_vector[idx]);
+        result.sum_mask |= result[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator|(
+                                                 const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSETLBitMask<MAX> result;
+      result.sum_mask = sum_mask | rhs.sum_mask;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator&(
+                                                 const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSETLBitMask<MAX> result;
+      // If they are independent then we are done
+      if (sum_mask & rhs.sum_mask)
+      {
+        __m128i temp_sum = _mm_set1_epi32(0);
+        for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+        {
+          result(idx) = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+          temp_sum = _mm_or_si128(temp_sum, result(idx));
+        }
+        result.sum_mask = extract_mask(temp_sum); 
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator^(
+                                                 const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSETLBitMask<MAX> result;
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+        temp_sum = _mm_or_si128(temp_sum, result(idx));
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator|=(
+                                                       const SSETLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask |= rhs.sum_mask;
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_or_si128(bits.sse_vector[idx], rhs(idx));
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator&=(
+                                                       const SSETLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        __m128i temp_sum = _mm_set1_epi32(0);
+        for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+        {
+          bits.sse_vector[idx] = _mm_and_si128(bits.sse_vector[idx], rhs(idx));
+          temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+        }
+        sum_mask = extract_mask(temp_sum); 
+      }
+      else
+      {
+        sum_mask = 0;
+        for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+          bits.sse_vector[idx] = _mm_set1_epi32(0);
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator^=(
+                                                       const SSETLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_xor_si128(bits.sse_vector[idx], rhs(idx));
+        temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator*(const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+        {
+          if (bits.bit_vector[idx] & rhs[idx])
+            return false;
+        }
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator-(
+                                                 const SSETLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      SSETLBitMask<MAX> result;
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        result(idx) = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+        temp_sum = _mm_or_si128(temp_sum, result(idx));
+      }
+      result.sum_mask = extract_mask(temp_sum);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator-=(
+                                                       const SSETLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_andnot_si128(rhs(idx), bits.sse_vector[idx]);
+        temp_sum = _mm_or_si128(temp_sum, bits.sse_vector[idx]);
+      }
+      sum_mask = extract_mask(temp_sum);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool SSETLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      // A great reason to have a summary mask
+      return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator<<(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      SSETLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+          result.sum_mask |= result[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        result.sum_mask |= result[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX> SSETLBitMask<MAX>::operator>>(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      SSETLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+          result.sum_mask |= result[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        result.sum_mask |= result[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        sum_mask |= bits.bit_vector[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline SSETLBitMask<MAX>& SSETLBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                        bits.bit_vector[BIT_ELMTS-1] >> local;
+        sum_mask |= bits.bit_vector[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t SSETLBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      return sum_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* SSETLBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc((MAX+1)*sizeof(char));
+      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
+      {
+        if (idx == (BIT_ELMTS-1))
+          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+        else
+        {
+          char temp[65];
+          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          strcat(result,temp);
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int SSETLBitMask<MAX>::pop_count(
+                                                 const SSETLBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(mask[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline uint64_t SSETLBitMask<MAX>::extract_mask(__m128i value)
+    //-------------------------------------------------------------------------
+    {
+      uint64_t left, right;
+      right = _mm_cvtsi128_si32(value);
+      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 1));
+      uint64_t result = (left << 32) | right;
+      right = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 2));
+      left = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 3));
+      result |= (left << 32) | right;
+      return result;
+    }
+#undef BIT_ELMTS
+#undef SSE_ELMTS
+#endif // __SSE2__
+
+#ifdef __AVX__
+#define AVX_ELMTS (MAX/256)
+#define BIT_ELMTS (MAX/64)
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXBitMask<MAX>::AVXBitMask(uint64_t init /*= 0*/)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXBitMask<MAX>::AVXBitMask(const AVXBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] |= (1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      bits.bit_vector[idx] &= ~(1UL << (bit & 0x3F));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 64; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*64 + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m256i& AVXBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m256i& AVXBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& AVXBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& AVXBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_double[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_double[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator==(const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != rhs[idx]) 
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator<(const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator!=(const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator=(const AVXBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      AVXBitMask<MAX> result;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result[idx] = ~(bits.bit_vector[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator|(
+                                                   const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXBitMask<MAX> result;
+#ifdef __AVX2__
+      // If we have this instruction use it because it has higher throughput
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_or_pd(bits.avx_double[idx],
+                                        rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator&(
+                                                   const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXBitMask<MAX> result;
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_and_pd(bits.avx_double[idx],
+                                         rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator^(
+                                                   const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXBitMask<MAX> result;
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_xor_pd(bits.avx_double[idx],
+                                         rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator|=(const AVXBitMask &rhs) 
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_or_pd(bits.avx_double[idx],rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator&=(const AVXBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_and_pd(bits.avx_double[idx],
+                                             rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator^=(const AVXBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_xor_pd(bits.avx_double[idx], 
+                                             rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator*(const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] & rhs[idx])
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator-(
+                                                   const AVXBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXBitMask<MAX> result;
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_andnot_pd(rhs.elem(idx),
+                                            bits.avx_double[idx]);
+      }
+#endif
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator-=(const AVXBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_andnot_si256(rhs(idx), 
+                                                   bits.avx_vector[idx]);
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_andnot_pd(rhs.elem(idx),
+                                                bits.avx_double[idx]);
+      }
+#endif
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != 0)
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator<<(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      AVXBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX> AVXBitMask<MAX>::operator>>(unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      AVXBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                      bits.bit_vector[BIT_ELMTS-1] >> local;
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t AVXBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      uint64_t result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result |= bits.bit_vector[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* AVXBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc((MAX+1)*sizeof(char));
+      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
+      {
+        if (idx == (BIT_ELMTS-1))
+          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+        else
+        {
+          char temp[65];
+          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          strcat(result,temp);
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int AVXBitMask<MAX>::pop_count(
+                                                   const AVXBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(mask[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXTLBitMask<MAX>::AVXTLBitMask(uint64_t init /*= 0*/)
+      : sum_mask(init)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = init;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXTLBitMask<MAX>::AVXTLBitMask(const AVXTLBitMask &rhs)
+      : sum_mask(rhs.sum_mask)
+    //-------------------------------------------------------------------------
+    {
+      LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::set_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      bits.bit_vector[idx] |= set_mask;
+      sum_mask |= set_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::unset_bit(unsigned bit)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      const uint64_t set_mask = (1UL << (bit & 0x3F));
+      const uint64_t unset_mask = ~set_mask;
+      bits.bit_vector[idx] &= unset_mask;
+      // Unset the summary mask and then reset if necessary
+      sum_mask &= unset_mask;
+      for (unsigned i = 0; i < BIT_ELMTS; i++)
+        sum_mask |= bits.bit_vector[i];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::assign_bit(unsigned bit, bool val)
+    //-------------------------------------------------------------------------
+    {
+      if (val)
+        set_bit(bit);
+      else
+        unset_bit(bit);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::is_set(unsigned bit) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bit < MAX);
+#endif
+      unsigned idx = bit >> 6;
+      return (bits.bit_vector[idx] & (1UL << (bit & 0x3F)));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::find_first_set(void) const
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx])
+        {
+          for (unsigned j = 0; j < 64; j++)
+          {
+            if (bits.bit_vector[idx] & (1UL << j))
+            {
+              return (idx*64 + j);
+            }
+          }
+        }
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m256i& AVXTLBitMask<MAX>::operator()(
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m256i& AVXTLBitMask<MAX>::operator()(const unsigned int &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t& AVXTLBitMask<MAX>::operator[](
+                                                 const unsigned int &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t& AVXTLBitMask<MAX>::operator[](const unsigned int &idx) 
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector[idx]; 
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_double[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx)
+    //-------------------------------------------------------------------------
+    {
+      return bits.avx_double[idx];
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator==(const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask != rhs.sum_mask)
+        return false;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] != rhs[idx]) 
+          return false;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator<(const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Only be less than if the bits are a subset of the rhs bits
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] < rhs[idx])
+          return true;
+        else if (bits.bit_vector[idx] > rhs[idx])
+          return false;
+      }
+      // Otherwise they are equal so false
+      return false;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator!=(const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator=(
+                                                       const AVXTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask = rhs.sum_mask;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bits.bit_vector[idx] = rhs[idx];
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator~(void) const
+    //-------------------------------------------------------------------------
+    {
+      AVXTLBitMask<MAX> result;
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result[idx] = ~(bits.bit_vector[idx]);
+        result.sum_mask |= result[idx];
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator|(
+                                                 const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXTLBitMask<MAX> result;
+      result.sum_mask = sum_mask | rhs.sum_mask;
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_or_pd(bits.avx_double[idx], rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator&(
+                                                 const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXTLBitMask<MAX> result;
+      // If they are independent then we are done
+      if (sum_mask & rhs.sum_mask)
+      {
+#ifdef __AVX2__
+        __m256i temp_sum = _mm256_set1_epi32(0);
+        for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+        {
+          result(idx) = _mm256_and_si256(bits.avx_vector[idx], rhs(idx));
+          temp_sum = _mm256_or_si256(temp_sum, result(idx));
+        }
+#else
+        __m256d temp_sum = _mm256_set1_pd(0.0);
+        for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+        {
+          result.elem(idx) = _mm256_and_pd(bits.avx_double[idx],rhs.elem(idx));
+          temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+        }
+#endif
+        result.sum_mask = extract_mask(temp_sum); 
+        _mm256_zeroall();
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator^(
+                                                 const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXTLBitMask<MAX> result;
+#ifdef __AVX2__
+      __m256i temp_sum = _mm256_set1_epi32(0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+        temp_sum = _mm256_or_si256(temp_sum, result(idx));
+      }
+#else
+      __m256d temp_sum = _mm256_set1_pd(0.0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_xor_pd(bits.avx_double[idx], rhs.elem(idx));
+        temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+      }
+#endif
+      result.sum_mask = extract_mask(temp_sum);
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator|=(
+                                                       const AVXTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      sum_mask |= rhs.sum_mask;
+#ifdef __AVX2__
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_or_si256(bits.avx_vector[idx], rhs(idx));
+      }
+#else
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_or_pd(bits.avx_double[idx],rhs.elem(idx));
+      }
+#endif
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator&=(
+                                                       const AVXTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+#ifdef __AVX2__
+        __m128i temp_sum = _mm_set1_epi32(0);
+        for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+        {
+          bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], 
+                                                  rhs(idx));
+          temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+        }
+#else
+        __m256d temp_sum = _mm256_set1_pd(0.0);
+        for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+        {
+          bits.avx_double[idx] = _mm256_and_pd(bits.avx_double[idx], 
+                                               rhs.elem(idx));
+          temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+        }
+#endif
+        sum_mask = extract_mask(temp_sum); 
+      }
+      else
+      {
+        sum_mask = 0;
+        for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+          bits.avx_vector[idx] = _mm256_set1_epi32(0);
+      }
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator^=(
+                                                       const AVXTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
+        temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+      }
+#else
+      __m256d temp_sum = _mm256_set1_pd(0.0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_xor_pd(bits.avx_double[idx], 
+                                             rhs.elem(idx));
+        temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+      }
+#endif
+      sum_mask = extract_mask(temp_sum);
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator*(const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      if (sum_mask & rhs.sum_mask)
+      {
+        for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+        {
+          if (bits.bit_vector[idx] & rhs[idx])
+            return false;
+        }
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator-(
+                                                 const AVXTLBitMask &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      AVXTLBitMask<MAX> result;
+#ifdef __AVX2__
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_vector[idx]);
+        temp_sum = _mm256_or_si256(temp_sum, result(idx));
+      }
+#else
+      __m256d temp_sum = _mm256_set1_pd(0.0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        result.elem(idx) = _mm256_andnot_pd(rhs.elem(idx),bits.avx_double[idx]);
+        temp_sum = _mm256_or_pd(temp_sum, result.elem(idx));
+      }
+#endif
+      result.sum_mask = extract_mask(temp_sum);
+      _mm256_zeroall();
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator-=(
+                                                       const AVXTLBitMask &rhs)
+    //-------------------------------------------------------------------------
+    {
+#ifdef __AVX2__
+      __m128i temp_sum = _mm_set1_epi32(0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_andnot_si256(rhs(idx), 
+                                                   bits.avx_vector[idx]);
+        temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);
+      }
+#else
+      __m256d temp_sum = _mm256_set1_pd(0.0);
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_double[idx] = _mm256_andnot_pd(rhs.elem(idx),
+                                                bits.avx_double[idx]);
+        temp_sum = _mm256_or_pd(temp_sum, bits.avx_double[idx]);
+      }
+#endif
+      sum_mask = extract_mask(temp_sum);
+      _mm256_zeroall();
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline bool AVXTLBitMask<MAX>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      // A great reason to have a summary mask
+      return (sum_mask == 0);
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator<<(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      AVXTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          result[idx] = bits.bit_vector[idx-range]; 
+          result.sum_mask |= result[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[range] = bits.bit_vector[0] << local; 
+        result.sum_mask |= result[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX> AVXTLBitMask<MAX>::operator>>(
+                                                          unsigned shift) const
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      AVXTLBitMask<MAX> result;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          result[idx] = bits.bit_vector[idx+range];
+          result.sum_mask |= result[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          result[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          result[idx] = left | right;
+          result.sum_mask |= result[idx];
+        }
+        // Handle the last case
+        result[BIT_ELMTS-(range+1)] = bits.bit_vector[BIT_ELMTS-1] >> local;
+        result.sum_mask |= result[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          result[idx] = 0;
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator<<=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      // Find the range
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move the individual words
+        for (int idx = (BIT_ELMTS-1); idx >= int(range); idx--)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx-range]; 
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        for (int idx = (BIT_ELMTS-1); idx > int(range); idx--)
+        {
+          uint64_t left = bits.bit_vector[idx-range] << local;
+          uint64_t right = bits.bit_vector[idx-(range+1)] >> ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[range] = bits.bit_vector[0] << local; 
+        sum_mask |= bits.bit_vector[range];
+        // Fill in everything else with zeros
+        for (unsigned idx = 0; idx < range; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline AVXTLBitMask<MAX>& AVXTLBitMask<MAX>::operator>>=(unsigned shift)
+    //-------------------------------------------------------------------------
+    {
+      unsigned range = shift >> 6;
+      unsigned local = shift & 0x3F;
+      sum_mask = 0;
+      if (!local)
+      {
+        // Fast case where we just have to move individual words
+        for (unsigned idx = 0; idx < (BIT_ELMTS-range); idx++)
+        {
+          bits.bit_vector[idx] = bits.bit_vector[idx+range];
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      else
+      {
+        // Slow case with merging words
+        uint64_t carry_mask = 0;
+        for (unsigned idx = 0; idx < local; idx++)
+          carry_mask |= (1 << idx);
+        for (unsigned idx = 0; idx < (BIT_ELMTS-(range+1)); idx++)
+        {
+          uint64_t right = bits.bit_vector[idx+range] >> local;
+          uint64_t left = bits.bit_vector[idx+range+1] << ((1 << 6) - local);
+          bits.bit_vector[idx] = left | right;
+          sum_mask |= bits.bit_vector[idx];
+        }
+        // Handle the last case
+        bits.bit_vector[BIT_ELMTS-(range+1)] = 
+                                        bits.bit_vector[BIT_ELMTS-1] >> local;
+        sum_mask |= bits.bit_vector[BIT_ELMTS-(range+1)];
+        // Fill in everything else with zeros
+        for (unsigned idx = (BIT_ELMTS-range); idx < BIT_ELMTS; idx++)
+          bits.bit_vector[idx] = 0;
+      }
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline uint64_t AVXTLBitMask<MAX>::get_hash_key(void) const
+    //-------------------------------------------------------------------------
+    {
+      return sum_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline char* AVXTLBitMask<MAX>::to_string(void) const
+    //-------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc((MAX+1)*sizeof(char));
+      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
+      {
+        if (idx == (BIT_ELMTS-1))
+          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+        else
+        {
+          char temp[65];
+          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          strcat(result,temp);
+        }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline int AVXTLBitMask<MAX>::pop_count(
+                                                 const AVXTLBitMask<MAX> &mask)
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(mask[idx]);
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline uint64_t AVXTLBitMask<MAX>::extract_mask(__m256i value)
+    //-------------------------------------------------------------------------
+    {
+      __m128i left, right;
+      right = _mm256_extractf128_si256(value, 0);
+      left = _mm256_extractf128_si256(value, 1);
+      uint64_t result = _mm_extract_epi64(right, 0);
+      result |= _mm_extract_epi64(right, 1);
+      result |= _mm_extract_epi64(left, 0);
+      result |= _mm_extract_epi64(left, 1);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    /*static*/ inline uint64_t AVXTLBitMask<MAX>::extract_mask(__m256d value)
+    //-------------------------------------------------------------------------
+    {
+      __m256i temp = _mm256_castpd_si256(value);
+      return extract_mask(temp);
+    }
+#undef BIT_ELMTS
+#undef AVX_ELMTS
+#endif // __AVX__
 
     //-------------------------------------------------------------------------
     template<typename BITMASK, unsigned LOG2MAX>

@@ -249,6 +249,7 @@ namespace LegionRuntime {
       ElementMask(void);
       explicit ElementMask(int num_elements, int first_element = 0);
       ElementMask(const ElementMask &copy_from, int num_elements = -1, int first_element = 0);
+      ~ElementMask(void);
 
       void init(int _first_element, int _num_elements, Memory _memory, off_t _offset);
 
@@ -262,7 +263,15 @@ namespace LegionRuntime {
       
       bool is_set(int ptr) const;
       size_t pop_count(bool enabled = true) const;
+      bool operator!(void) const;
       // union/intersect/subtract?
+      ElementMask operator|(const ElementMask &other) const;
+      ElementMask operator&(const ElementMask &other) const;
+      ElementMask operator-(const ElementMask &other) const;
+
+      ElementMask& operator|=(const ElementMask &other);
+      ElementMask& operator&=(const ElementMask &other);
+      ElementMask& operator-=(const ElementMask &other);
 
       int first_enabled(void) const { return first_enabled_elmt; }
       int last_enabled(void) const { return last_enabled_elmt; }
@@ -273,6 +282,8 @@ namespace LegionRuntime {
 
       OverlapResult overlaps_with(const ElementMask& other,
 				  off_t max_effort = -1) const;
+
+      ElementMask intersect_with(const ElementMask &other);
 
       class Enumerator {
       public:
@@ -559,6 +570,7 @@ namespace LegionRuntime {
       bool exists(void) const { return id != 0; } 
 
       static IndexSpace create_index_space(size_t num_elmts);
+      static IndexSpace create_index_space(const ElementMask &mask);
       static IndexSpace create_index_space(IndexSpace parent,
 					   const ElementMask &mask);
 

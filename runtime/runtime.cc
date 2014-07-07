@@ -3489,6 +3489,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_composite_view(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_COMPOSITE_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_back_composite_view(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_BACK_COMPOSITE_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_reduction_view(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3925,7 +3939,18 @@ namespace LegionRuntime {
           case SEND_BACK_MATERIALIZED_VIEW:
             {
               runtime->handle_send_back_materialized_view(derez, 
-                                                      remote_address_space);
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_COMPOSITE_VIEW:
+            {
+              runtime->handle_send_composite_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_BACK_COMPOSITE_VIEW:
+            {
+              runtime->handle_send_back_composite_view(derez, 
+                                                       remote_address_space);
               break;
             }
           case SEND_REDUCTION_VIEW:
@@ -8428,6 +8453,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_composite_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_back_composite_view(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_back_composite_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -8827,6 +8867,22 @@ namespace LegionRuntime {
     {
       MaterializedView::handle_send_back_materialized_view(forest, derez, 
                                                            source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_composite_view(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView::handle_send_composite_view(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_back_composite_view(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView::handle_send_back_composite_view(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

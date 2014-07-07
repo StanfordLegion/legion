@@ -74,6 +74,8 @@ enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_FREE, // take ownership of payload, free when done
        PAYLOAD_COPY, // make a copy of the payload
        PAYLOAD_SRCPTR, // payload has been copied to the src data pool
+       PAYLOAD_PENDING, // payload needs to be copied, but hasn't yet
+       PAYLOAD_KEEPREG, // use payload pointer, AND it's registered!
 };
 
 /* Necessary base structure for all medium and long active messages */
