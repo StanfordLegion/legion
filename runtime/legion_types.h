@@ -569,30 +569,43 @@ namespace LegionRuntime {
       Context,HighLevelRuntime*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
+    // Disable this until we figure out WTF is going on with
+    // alignment when FieldMasks are used in STL data structures
+#if 0
 #if defined(__AVX__)
 #if (MAX_FIELDS > 256)
-    typedef AVXTLBitMask<MAX_FEILDS> FieldMask;
+    typedef __attribute__((aligned(32))) AVXTLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 128)
-    typedef AVXBitMask<MAX_FIELDS> FieldMask;
+    typedef __attribute__((aligned(32))) AVXBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+    typedef __attribute__((aligned(16))) SSEBitMask<MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef __attribute__((aligned(8))) 
+          BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
 #endif
 #elif defined(__SSE2__)
 #if (MAX_FIELDS > 128)
-    typedef SSETLBitMask<MAX_FIELDS> FieldMask;
+    typedef __attribute__((aligned(16))) SSETLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+    typedef __attribute__((aligned(16))) SSEBitMask<MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef __attribute__((aligned(8)))
+          BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
 #endif
 #else
+#if (MAX_FIELDS > 64)
+    typedef __attribute__((aligned(8)))
+        TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#else
+    typedef __attribute__((aligned(8)))
+          BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+#endif
+#endif
+#endif
 #if (MAX_FIELDS > 64)
     typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
 #else
     typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-#endif
 #endif
     typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;

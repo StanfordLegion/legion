@@ -889,6 +889,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    inline void Serializer::serialize<FieldMask>(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      serialize(&mask, sizeof(FieldMask));
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -983,6 +991,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       context_bytes += 4;
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Deserializer::deserialize<FieldMask>(FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(&mask, sizeof(FieldMask));
     }
       
     //--------------------------------------------------------------------------
@@ -4485,7 +4501,7 @@ namespace LegionRuntime {
       if (sum_mask & rhs.sum_mask)
       {
 #ifdef __AVX2__
-        __m128i temp_sum = _mm_set1_epi32(0);
+        __m256i temp_sum = _mm_set1_epi32(0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
           bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], 
@@ -4520,7 +4536,7 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
 #ifdef __AVX2__
-      __m128i temp_sum = _mm_set1_epi32(0);
+      __m256i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
         bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
