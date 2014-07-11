@@ -19,6 +19,8 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
+#include <malloc.h>
 
 #include "legion_types.h"
 #include "legion.h"
@@ -418,6 +420,7 @@ namespace LegionRuntime {
     public:
       BitMask(T init = 0);
       BitMask(const BitMask &rhs);
+      ~BitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -457,6 +460,8 @@ namespace LegionRuntime {
       inline BitMask& operator>>=(unsigned shift);
     public:
       inline T get_hash_key(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -487,6 +492,7 @@ namespace LegionRuntime {
     public:
       TLBitMask(T init = 0);
       TLBitMask(const TLBitMask &rhs);
+      ~TLBitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -526,6 +532,8 @@ namespace LegionRuntime {
       inline TLBitMask& operator>>=(unsigned shift);
     public:
       inline T get_hash_key(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -550,6 +558,7 @@ namespace LegionRuntime {
     public:
       SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
+      ~SSEBitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -591,6 +600,9 @@ namespace LegionRuntime {
       inline SSEBitMask& operator>>=(unsigned shift);
     public:
       inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -611,6 +623,7 @@ namespace LegionRuntime {
     public:
       SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
+      ~SSETLBitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -652,6 +665,9 @@ namespace LegionRuntime {
       inline SSETLBitMask& operator>>=(unsigned shift);
     public:
       inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -676,6 +692,7 @@ namespace LegionRuntime {
     public:
       AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
+      ~AVXBitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -719,6 +736,9 @@ namespace LegionRuntime {
       inline AVXBitMask& operator>>=(unsigned shift);
     public:
       inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -726,9 +746,9 @@ namespace LegionRuntime {
       static inline int pop_count(const AVXBitMask<MAX> &mask);
     protected:
       union {
-        __m256i avx_vector[MAX/256];
-        __m256d avx_double[MAX/256];
-        uint64_t bit_vector[MAX/64];
+        __m256i *avx_vector;
+        __m256d *avx_double;
+        uint64_t *bit_vector;
       } bits;
     };
     
@@ -740,6 +760,7 @@ namespace LegionRuntime {
     public:
       AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
+      ~AVXTLBitMask(void);
     public:
       inline void set_bit(unsigned bit);
       inline void unset_bit(unsigned bit);
@@ -783,6 +804,9 @@ namespace LegionRuntime {
       inline AVXTLBitMask& operator>>=(unsigned shift);
     public:
       inline uint64_t get_hash_key(void) const;
+      inline const uint64_t* base(void) const;
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
@@ -792,9 +816,9 @@ namespace LegionRuntime {
       static inline uint64_t extract_mask(__m256d value);
     protected:
       union {
-        __m256i avx_vector[MAX/256];
-        __m256d avx_double[MAX/256];
-        uint64_t bit_vector[MAX/64];
+        __m256i *avx_vector;
+        __m256d *avx_double;
+        uint64_t *bit_vector;
       } bits;
       uint64_t sum_mask;
     };
@@ -893,7 +917,7 @@ namespace LegionRuntime {
     inline void Serializer::serialize<FieldMask>(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      serialize(&mask, sizeof(FieldMask));
+      mask.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
@@ -998,7 +1022,7 @@ namespace LegionRuntime {
     inline void Deserializer::deserialize<FieldMask>(FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      deserialize(&mask, sizeof(FieldMask));
+      mask.deserialize(*this);
     }
       
     //--------------------------------------------------------------------------
@@ -1330,6 +1354,13 @@ namespace LegionRuntime {
       {
         bit_vector[idx] = rhs[idx];
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    BitMask<T,MAX,SHIFT,MASK>::~BitMask(void)
+    //-------------------------------------------------------------------------
+    {
     }
 
     //-------------------------------------------------------------------------
@@ -1786,6 +1817,22 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
+    inline void BitMask<T,MAX,SHIFT,MASK>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
+    inline void BitMask<T,MAX,SHIFT,MASK>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
     inline char* BitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -1868,6 +1915,13 @@ namespace LegionRuntime {
       {
         bit_vector[idx] = rhs[idx];
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    TLBitMask<T,MAX,SHIFT,MASK>::~TLBitMask(void)
+    //-------------------------------------------------------------------------
+    {
     }
 
     //-------------------------------------------------------------------------
@@ -2373,6 +2427,24 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.template serialize(sum_mask);
+      rez.serialize(bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.template deserialize(sum_mask);
+      derez.deserialize(bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     inline char* TLBitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -2461,10 +2533,17 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 128) == 0);
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.sse_vector[idx] = rhs(idx);
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSEBitMask<MAX>::~SSEBitMask(void)
+    //-------------------------------------------------------------------------
+    {
     }
 
     //-------------------------------------------------------------------------
@@ -2612,9 +2691,9 @@ namespace LegionRuntime {
     inline SSEBitMask<MAX>& SSEBitMask<MAX>::operator=(const SSEBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.sse_vector[idx] = rhs(idx);
       }
       return *this;
     }
@@ -2929,6 +3008,30 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline const uint64_t* SSEBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     inline char* SSEBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -2981,10 +3084,17 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 128) == 0);
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.sse_vector[idx] = rhs(idx);
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    SSETLBitMask<MAX>::~SSETLBitMask(void)
+    //-------------------------------------------------------------------------
+    {
     }
 
     //-------------------------------------------------------------------------
@@ -3144,9 +3254,9 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       sum_mask = rhs.sum_mask;
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.sse_vector[idx] = rhs(idx);
       }
       return *this;
     }
@@ -3509,6 +3619,32 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline const uint64_t* SSETLBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(sum_mask);
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(sum_mask);
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     inline char* SSETLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -3568,6 +3704,10 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3580,10 +3720,26 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.avx_vector[idx] = rhs(idx);
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXBitMask<MAX>::~AVXBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
+      free(bits.bit_vector);
+      bits.bit_vector = NULL;
     }
 
     //-------------------------------------------------------------------------
@@ -3660,6 +3816,9 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_vector != NULL);
+#endif
       return bits.avx_vector[idx];
     }
 
@@ -3668,6 +3827,9 @@ namespace LegionRuntime {
     inline __m256i& AVXBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_vector != NULL);
+#endif
       return bits.avx_vector[idx];
     }
 
@@ -3677,6 +3839,9 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       return bits.bit_vector[idx];
     }
 
@@ -3685,6 +3850,9 @@ namespace LegionRuntime {
     inline uint64_t& AVXBitMask<MAX>::operator[](const unsigned int &idx) 
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       return bits.bit_vector[idx]; 
     }
 
@@ -3693,6 +3861,9 @@ namespace LegionRuntime {
     inline const __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_double != NULL);
+#endif
       return bits.avx_double[idx];
     }
 
@@ -3701,6 +3872,9 @@ namespace LegionRuntime {
     inline __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_double != NULL);
+#endif
       return bits.avx_double[idx];
     }
 
@@ -3747,9 +3921,9 @@ namespace LegionRuntime {
     inline AVXBitMask<MAX>& AVXBitMask<MAX>::operator=(const AVXBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.avx_vector[idx] = rhs(idx);
       }
       return *this;
     }
@@ -4137,6 +4311,33 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline const uint64_t* AVXBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL); 
+#endif
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     inline char* AVXBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
@@ -4176,6 +4377,10 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
+      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4189,10 +4394,26 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.avx_vector[idx] = rhs(idx);
       }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    AVXTLBitMask<MAX>::~AVXTLBitMask(void)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
+      free(bits.bit_vector);
+      bits.bit_vector = NULL;
     }
 
     //-------------------------------------------------------------------------
@@ -4277,6 +4498,9 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_vector != NULL);
+#endif
       return bits.avx_vector[idx];
     }
 
@@ -4285,6 +4509,9 @@ namespace LegionRuntime {
     inline __m256i& AVXTLBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_vector != NULL);
+#endif
       return bits.avx_vector[idx];
     }
 
@@ -4294,6 +4521,9 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       return bits.bit_vector[idx];
     }
 
@@ -4302,6 +4532,9 @@ namespace LegionRuntime {
     inline uint64_t& AVXTLBitMask<MAX>::operator[](const unsigned int &idx) 
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
       return bits.bit_vector[idx]; 
     }
 
@@ -4310,6 +4543,9 @@ namespace LegionRuntime {
     inline const __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx) const
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_double != NULL);
+#endif
       return bits.avx_double[idx];
     }
 
@@ -4318,6 +4554,9 @@ namespace LegionRuntime {
     inline __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx)
     //-------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.avx_double != NULL);
+#endif
       return bits.avx_double[idx];
     }
 
@@ -4368,9 +4607,9 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       sum_mask = rhs.sum_mask;
-      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
-        bits.bit_vector[idx] = rhs[idx];
+        bits.avx_vector[idx] = rhs(idx);
       }
       return *this;
     }
@@ -4810,6 +5049,35 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       return sum_mask;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline const uint64_t* AVXTLBitMask<MAX>::base(void) const
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(bits.bit_vector != NULL);
+#endif
+      return bits.bit_vector;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize(sum_mask);
+      rez.serialize(bits.bit_vector, (MAX/8));
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      derez.deserialize(sum_mask);
+      derez.deserialize(bits.bit_vector, (MAX/8));
     }
 
     //-------------------------------------------------------------------------

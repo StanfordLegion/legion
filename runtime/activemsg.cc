@@ -470,10 +470,10 @@ public:
     //cur_long_size = 0;
     next_outgoing_message_id = 0;
 
-    lmb_w_bases = new char *[lmb_size];
-    lmb_r_bases = new char *[lmb_size];
-    lmb_r_counts = new int[lmb_size];
-    lmb_w_avail = new bool[lmb_size];
+    lmb_w_bases = new char *[num_lmbs];
+    lmb_r_bases = new char *[num_lmbs];
+    lmb_r_counts = new int[num_lmbs];
+    lmb_w_avail = new bool[num_lmbs];
 
     for(int i = 0; i < num_lmbs; i++) {
       lmb_w_bases[i] = ((char *)(segment_info[peer].addr)) + (segment_info[peer].size - lmb_size * (gasnet_mynode() * num_lmbs + i + 1));
@@ -1157,10 +1157,10 @@ public:
 
   int cur_write_lmb, cur_write_count;
   size_t cur_write_offset;
-  char **lmb_w_bases; // [lmb_size]
-  char **lmb_r_bases; // [lmb_size]
-  int *lmb_r_counts; // [lmb_size]
-  bool *lmb_w_avail; // [lmb_size]
+  char **lmb_w_bases; // [num_lmbs]
+  char **lmb_r_bases; // [num_lmbs]
+  int *lmb_r_counts; // [num_lmbs]
+  bool *lmb_w_avail; // [num_lmbs]
   //void *cur_long_ptr;
   //int cur_long_chunk_idx;
   //size_t cur_long_size;

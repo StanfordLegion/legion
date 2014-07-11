@@ -3568,14 +3568,58 @@ namespace LegionRuntime {
             }
           case 2:
             {
-              // TODO: Implement this
-              assert(false);
+              // TODO: Improve this terrible approximation
+              dominates = true;
+              for (std::set<Domain>::const_iterator rit = right_set.begin();
+                    (rit != right_set.end()) && dominates; rit++)
+              {
+                Rect<2> right_rect = rit->get_rect<2>();
+                bool has_dominator = false;
+                // See if any of the rectangles on the left dominate it
+                for (std::set<Domain>::const_iterator lit = left_set.begin();
+                      lit != left_set.end(); lit++)
+                {
+                  Rect<2> left_rect = lit->get_rect<2>();
+                  if (right_rect.intersection(left_rect) == right_rect)
+                  {
+                    has_dominator = true;
+                    break;
+                  }
+                }
+                if (!has_dominator)
+                {
+                  dominates = false;
+                  break;
+                }
+              }
               break;
             }
           case 3:
             {
-              // TODO: Implement this
-              assert(false);
+              // TODO: Improve this terrible approximation
+              dominates = true;
+              for (std::set<Domain>::const_iterator rit = right_set.begin();
+                    (rit != right_set.end()) && dominates; rit++)
+              {
+                Rect<3> right_rect = rit->get_rect<3>();
+                bool has_dominator = false;
+                // See if any of the rectangles on the left dominate it
+                for (std::set<Domain>::const_iterator lit = left_set.begin();
+                      lit != left_set.end(); lit++)
+                {
+                  Rect<3> left_rect = lit->get_rect<3>();
+                  if (right_rect.intersection(left_rect) == right_rect)
+                  {
+                    has_dominator = true;
+                    break;
+                  }
+                }
+                if (!has_dominator)
+                {
+                  dominates = false;
+                  break;
+                }
+              }
               break;
             }
           default:
@@ -15300,7 +15344,10 @@ namespace LegionRuntime {
       {
         RezCheck z(rez);
         rez.serialize(owner_did);
-        rez.serialize(user);
+        rez.serialize(user.usage);
+        rez.serialize(user.field_mask);
+        rez.serialize(user.term_event);
+        rez.serialize(user.child);
       }
       context->runtime->send_back_user(owner_addr, rez);
     }
@@ -15315,7 +15362,10 @@ namespace LegionRuntime {
       DistributedID did;
       derez.deserialize(did);
       PhysicalUser user;
-      derez.deserialize(user);
+      derez.deserialize(user.usage);
+      derez.deserialize(user.field_mask);
+      derez.deserialize(user.term_event);
+      derez.deserialize(user.child);
 
       LogicalView *target_view = ctx->find_view(did);
       target_view->process_send_back_user(source, user);
@@ -15331,7 +15381,10 @@ namespace LegionRuntime {
       {
         RezCheck z(rez);
         rez.serialize(target_did);
-        rez.serialize(user);
+        rez.serialize(user.usage);
+        rez.serialize(user.field_mask);
+        rez.serialize(user.term_event);
+        rez.serialize(user.child);
       }
       context->runtime->send_user(target, rez);
     }
@@ -15346,7 +15399,10 @@ namespace LegionRuntime {
       DistributedID did;
       derez.deserialize(did);
       PhysicalUser user;
-      derez.deserialize(user);
+      derez.deserialize(user.usage);
+      derez.deserialize(user.field_mask);
+      derez.deserialize(user.term_event);
+      derez.deserialize(user.child);
 
       LogicalView *target_view = context->find_view(did); 
       target_view->process_send_user(source, user);
@@ -17183,13 +17239,19 @@ namespace LegionRuntime {
       for (std::list<PhysicalUser>::const_iterator it = 
             curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
       {
-        rez.serialize(*it);
+        rez.serialize(it->usage);
+        rez.serialize(it->field_mask);
+        rez.serialize(it->term_event);
+        rez.serialize(it->child);
       }
       rez.serialize(prev_epoch_users.size());
       for (std::list<PhysicalUser>::const_iterator it = 
             prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
       {
-        rez.serialize(*it);
+        rez.serialize(it->usage);
+        rez.serialize(it->field_mask);
+        rez.serialize(it->term_event);
+        rez.serialize(it->child);
       }
 #else
       curr_epoch_users->pack_field_tree(rez);
@@ -17218,11 +17280,14 @@ namespace LegionRuntime {
       derez.deserialize(num_current);
       for (unsigned idx = 0; idx < num_current; idx++)
       {
-        PhysicalUser user;
-        derez.deserialize(user);
+        curr_epoch_users.push_back(PhysicalUser());
+        PhysicalUser &user = curr_epoch_users.back();
+        derez.deserialize(user.usage);
+        derez.deserialize(user.field_mask);
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
-        curr_epoch_users.push_back(user);
+        derez.deserialize(user.term_event);
+        derez.deserialize(user.child);
         // We only need to launch things once for each event
         event_references.insert(user.term_event);
         deferred_events[user.term_event] |= user.field_mask;
@@ -17231,11 +17296,14 @@ namespace LegionRuntime {
       derez.deserialize(num_previous);
       for (unsigned idx = 0; idx < num_previous; idx++)
       {
-        PhysicalUser user;
-        derez.deserialize(user);
+        prev_epoch_users.push_back(PhysicalUser());
+        PhysicalUser &user = prev_epoch_users.back();
+        derez.deserialize(user.usage);
+        derez.deserialize(user.field_mask);
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
-        prev_epoch_users.push_back(user);
+        derez.deserialize(user.term_event);
+        derez.deserialize(user.child);
         // We only need to have one reference for each event
         event_references.insert(user.term_event);
         deferred_events[user.term_event] |= user.field_mask;
@@ -19587,13 +19655,19 @@ namespace LegionRuntime {
       for (std::list<PhysicalUser>::const_iterator it = 
             reduction_users.begin(); it != reduction_users.end(); it++)
       {
-        rez.serialize(*it);
+        rez.serialize(it->usage);
+        rez.serialize(it->field_mask);
+        rez.serialize(it->term_event);
+        rez.serialize(it->child);
       }
       rez.serialize(reading_users.size());
       for (std::list<PhysicalUser>::const_iterator it = 
             reading_users.begin(); it != reading_users.end(); it++)
       {
-        rez.serialize(*it);
+        rez.serialize(it->usage);
+        rez.serialize(it->field_mask);
+        rez.serialize(it->term_event);
+        rez.serialize(it->child);
       }
     }
 
@@ -19608,22 +19682,28 @@ namespace LegionRuntime {
       FieldSpaceNode *field_node = manager->region_node->column_source;
       for (unsigned idx = 0; idx < num_reduction; idx++)
       {
-        PhysicalUser user;
-        derez.deserialize(user);
+        reduction_users.push_back(PhysicalUser());
+        PhysicalUser &user = reduction_users.back();
+        derez.deserialize(user.usage);
+        derez.deserialize(user.field_mask);
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
-        reduction_users.push_back(user);
+        derez.deserialize(user.term_event);
+        derez.deserialize(user.child);
         event_references.insert(user.term_event);
       }
       size_t num_reading;
       derez.deserialize(num_reading);
       for (unsigned idx = 0; idx < num_reading; idx++)
       {
-        PhysicalUser user;
-        derez.deserialize(user);
+        reading_users.push_back(PhysicalUser());
+        PhysicalUser &user = reading_users.back();
+        derez.deserialize(user.usage);
+        derez.deserialize(user.field_mask);
         // Transform the field mask
         field_node->transform_field_mask(user.field_mask, source);
-        reading_users.push_back(user);
+        derez.deserialize(user.term_event);
+        derez.deserialize(user.child);
         event_references.insert(user.term_event);
       }
       // Now launch the waiting deferred events.  We wait until
