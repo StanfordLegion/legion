@@ -2733,11 +2733,20 @@ namespace LegionRuntime {
         if (mapper_objects[map_id] == NULL)
           continue;
         std::list<TaskOp*> visible_tasks;
+        // We also need to capture the generations here
+        std::vector<GenerationID> visible_generations;
         // Pull out the current tasks for this mapping operation
         {
           AutoLock q_lock(queue_lock,1,false/*exclusive*/);
           visible_tasks.insert(visible_tasks.begin(),
                ready_queues[map_id].begin(), ready_queues[map_id].end());
+          visible_generations.resize(visible_tasks.size());
+          unsigned idx = 0;
+          for (std::list<TaskOp*>::const_iterator it = visible_tasks.begin();
+                it != visible_tasks.end(); it++, idx++)
+          {
+            visible_generations[idx] = (*it)->get_generation();
+          }
         }
         // Watch me stomp all over the C++ type system here
         const std::list<Task*> &ready_tasks = 
@@ -2782,8 +2791,9 @@ namespace LegionRuntime {
         {
           std::list<TaskOp*> &rqueue = ready_queues[map_id];
           AutoLock q_lock(queue_lock);
+          unsigned gen_idx = 0;
           for (std::list<TaskOp*>::iterator vis_it = visible_tasks.begin(); 
-                vis_it != visible_tasks.end(); /*nothing*/)
+                vis_it != visible_tasks.end(); gen_idx++)
           {
             if ((*vis_it)->schedule || 
                 ((*vis_it)->target_proc != local_proc))
@@ -2792,7 +2802,10 @@ namespace LegionRuntime {
               for (std::list<TaskOp*>::iterator it = rqueue.begin();
                     it != rqueue.end(); it++)
               {
-                if ((*it) == (*vis_it))
+                // In order to be the same task, they need to have the
+                // same pointer and have the same generation
+                if (((*it) == (*vis_it)) &&
+                    (visible_generations[gen_idx] == (*it)->get_generation()))
                 {
                   rqueue.erase(it);
                   found = true;

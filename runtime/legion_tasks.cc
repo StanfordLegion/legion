@@ -117,6 +117,7 @@ namespace LegionRuntime {
       children_complete_invoked = false;
       children_commit_invoked = false;
       needs_state = false;
+      arg_manager = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -132,7 +133,16 @@ namespace LegionRuntime {
       arrive_barriers.clear();
       if (args != NULL)
       {
-        free(args);
+        if (arg_manager != NULL)
+        {
+          // If the arg manager is not NULL then we delete the
+          // argument manager and just zero out the arguments
+          if (arg_manager->remove_reference())
+            delete arg_manager;
+          arg_manager = NULL;
+        }
+        else
+          free(args);
         args = NULL;
         arglen = 0;
       }
@@ -182,6 +192,7 @@ namespace LegionRuntime {
       rez.serialize(arrive_barriers.size());
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         pack_phase_barrier(arrive_barriers[idx], rez);
+      rez.serialize<bool>((arg_manager != NULL));
       rez.serialize(arglen);
       rez.serialize(args,arglen);
       rez.serialize(map_id);
@@ -266,10 +277,22 @@ namespace LegionRuntime {
       arrive_barriers.resize(num_arrive_barriers);
       for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
         unpack_phase_barrier(arrive_barriers[idx], derez);
+      bool has_arg_manager;
+      derez.deserialize(has_arg_manager);
       derez.deserialize(arglen);
       if (arglen > 0)
       {
-        args = malloc(arglen);
+        if (has_arg_manager)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(arg_manager == NULL);
+#endif
+          arg_manager = new AllocManager(arglen);
+          arg_manager->add_reference();
+          args = arg_manager->get_allocation();
+        }
+        else
+          args = malloc(arglen);
         derez.deserialize(args,arglen);
       }
       derez.deserialize(map_id);
@@ -1244,7 +1267,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::clone_task_op_from(TaskOp *rhs, Processor p, bool stealable)
+    void TaskOp::clone_task_op_from(TaskOp *rhs, Processor p, 
+                                    bool stealable, bool duplicate_args)
     //--------------------------------------------------------------------------
     {
       // From Operation
@@ -1260,8 +1284,29 @@ namespace LegionRuntime {
       this->wait_barriers = rhs->wait_barriers;
       this->arrive_barriers = rhs->arrive_barriers;
       this->arglen = rhs->arglen;
-      if (arglen > 0)
+      if (rhs->arg_manager != NULL)
       {
+        if (duplicate_args)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(arg_manager == NULL);
+#endif
+          this->arg_manager = new AllocManager(this->arglen); 
+          this->arg_manager->add_reference();
+          this->args = this->arg_manager->get_allocation();
+          memcpy(this->args, rhs->args, this->arglen);
+        }
+        else
+        {
+          // No need to actually do the copy in this case
+          this->arg_manager = rhs->arg_manager; 
+          this->arg_manager->add_reference();
+          this->args = arg_manager->get_allocation();
+        }
+      }
+      else if (arglen > 0)
+      {
+        // If there is no argument manager then we do the copy no matter what
         this->args = malloc(arglen);
         memcpy(args,rhs->args,arglen);
       }
@@ -4678,26 +4723,32 @@ namespace LegionRuntime {
       // Watch out for the cleanup race, make a copy of the slices
       bool is_slice = (get_task_kind() == SLICE_TASK_KIND);
       std::list<SliceTask*> local_slices = slices;
-      std::set<SliceTask*> to_erase;
+      std::set<SliceTask*> failed_slices;
       for (std::list<SliceTask*>::const_iterator it = local_slices.begin();
             it != local_slices.end(); it++)
       {
         bool slice_success = (*it)->trigger_execution();
         if (!slice_success)
+        {
           success = false;
-        else
-          to_erase.insert(*it);
+          failed_slices.insert(*it);
+        }
       }
-      // Remove all the slices we successfully launched
-      // otherwise this will get cleaned up when the operation is deactivated
-      // Note this is safe even if this object has been recycled.
-      if (to_erase.size() < local_slices.size())
+      // If there were some slices that didn't succeed, then we
+      // need to clean up the ones that did so we know when
+      // which ones to re-trigger when we try again later. Otherwise
+      // if all the slices succeeded, then the normal deactivation of
+      // this task will clean up the slices. Note that if we have
+      // at least one slice that didn't succeed then we know this
+      // task cannot be deactivated.
+      if (!success)
       {
-        AutoLock o_lock(op_lock); 
         for (std::list<SliceTask*>::iterator it = slices.begin();
               it != slices.end(); /*nothing*/)
         {
-          if (to_erase.find(*it) != to_erase.end())
+          // If we can't find it in the set of failed slices
+          // then it succeeded so we can remove it from the list
+          if (failed_slices.find(*it) == failed_slices.end())
             it = slices.erase(it);
           else
             it++;
@@ -4721,7 +4772,7 @@ namespace LegionRuntime {
                                      Processor p, bool recurse, bool stealable)
     //--------------------------------------------------------------------------
     {
-      this->clone_task_op_from(rhs, p, stealable);
+      this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = d;
       this->must_parallelism = rhs->must_parallelism;
       this->sliced = !recurse;
@@ -6902,7 +6953,12 @@ namespace LegionRuntime {
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(arg_manager == NULL);
+#endif
+        arg_manager = new AllocManager(arglen);
+        arg_manager->add_reference();
+        args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
       argument_map = ArgumentMap(launcher.argument_map.impl->freeze());
@@ -6970,7 +7026,12 @@ namespace LegionRuntime {
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(arg_manager == NULL);
+#endif
+        arg_manager = new AllocManager(arglen);
+        arg_manager->add_reference();
+        args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
       argument_map = ArgumentMap(launcher.argument_map.impl->freeze());
@@ -7052,7 +7113,12 @@ namespace LegionRuntime {
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(arg_manager == NULL);
+#endif
+        arg_manager = new AllocManager(arglen);
+        arg_manager->add_reference();
+        args = arg_manager->get_allocation();
         memcpy(args, global_arg.get_ptr(), arglen);
       }
       argument_map = ArgumentMap(arg_map.impl->freeze());
@@ -7123,7 +7189,12 @@ namespace LegionRuntime {
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(arg_manager == NULL);
+#endif
+        arg_manager = new AllocManager(arglen);
+        arg_manager->add_reference();
+        args = arg_manager->get_allocation();
         memcpy(args, global_arg.get_ptr(), arglen);
       }
       argument_map = ArgumentMap(arg_map.impl->freeze());
@@ -7325,7 +7396,7 @@ namespace LegionRuntime {
       }
       else
       {
-        if (target_proc != current_proc)
+        if (!is_sliced() && (target_proc != current_proc))
         {
           // Make a slice copy and send it away
           SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
@@ -8106,9 +8177,15 @@ namespace LegionRuntime {
 
       // Now try mapping and then launching all the points starting
       // at the index of the last known good index
+      // Copy the points onto the stack to avoid them being
+      // cleaned up while we are still iterating through the loop
+      std::vector<PointTask*> local_points(points.size()-mapping_index);
       for (unsigned idx = mapping_index; idx < points.size(); idx++)
+        local_points[idx-mapping_index] = points[idx];
+      for (std::vector<PointTask*>::const_iterator it = local_points.begin();
+            it != local_points.end(); it++)
       {
-        PointTask *next_point = points[idx];
+        PointTask *next_point = *it;
         bool point_success = next_point->perform_mapping();
         if (!point_success)
         {
@@ -8117,9 +8194,12 @@ namespace LegionRuntime {
         }
         else
         {
-          // Otherwise launch the point and update the mapping index
-          next_point->launch_task();
+          // Otherwise update the mapping index and then launch
+          // the point (it is imperative that these happen in this order!)
           mapping_index++;
+          // Once we call this function on the last point it
+          // is possible that this slice task object can be recycled
+          next_point->launch_task();
         }
       }
 
@@ -8389,7 +8469,8 @@ namespace LegionRuntime {
       result->initialize_base_task(parent_ctx,
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);
-      result->clone_task_op_from(this, this->target_proc, false/*stealable*/);
+      result->clone_task_op_from(this, this->target_proc, 
+                                 false/*stealable*/, true/*duplicate*/);
       result->enclosing_physical_contexts = this->enclosing_physical_contexts;
       result->is_index_space = true;
       result->must_parallelism = this->must_parallelism;

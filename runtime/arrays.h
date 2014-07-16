@@ -366,6 +366,11 @@ namespace LegionRuntime {
 
     template <unsigned IDIM_, unsigned ODIM_>
     class Mapping {
+    private:
+      unsigned references;
+    public:
+      Mapping(void)
+        : references(0) { }
     public:
       static const unsigned IDIM = IDIM_;
       static const unsigned ODIM = ODIM_;
@@ -408,6 +413,17 @@ namespace LegionRuntime {
 
       virtual Rect<IDIM> preimage(const Point<ODIM> p) const { assert(0); return Rect<IDIM>(); }//= 0;
       virtual bool preimage_is_dense(const Point<ODIM> p) const { assert(0); return false; }//= 0;
+      
+      inline void add_reference(void)
+      {
+        __sync_fetch_and_add(&references, 1);
+      }
+      inline bool remove_reference(void)
+      {
+        unsigned prev = __sync_fetch_and_sub(&references, 1);
+        assert(prev >= 1);
+        return (prev == 1);
+      }
     };
 
     template <typename T>

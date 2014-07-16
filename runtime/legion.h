@@ -5194,13 +5194,13 @@ namespace LegionRuntime {
       assert(arglen == sizeof(Context));
 #endif
       Task *task = reinterpret_cast<Task*>(ctx);
-      const UDT *user_data = 
-        HighLevelRuntime::find_user_data(task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)HighLevelRuntime::find_user_data(
+                                     task->task_id, task->selected_variant);
 
       const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
 
       // Invoke the task with the given context
-      T return_value = (*TASK_PTR)(task, regions, ctx, runtime *user_data);
+      T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
       // Send the return value back
       LegionSerialization::end_task<T>(runtime, ctx, &return_value);
@@ -5223,8 +5223,8 @@ namespace LegionRuntime {
       assert(arglen == sizeof(Context));
 #endif
       Task *task = reinterpret_cast<Task*>(ctx);
-      const UDT *user_data = 
-        HighLevelRuntime::find_user_data(task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)HighLevelRuntime::find_user_data(
+                                     task->task_id, task->selected_variant);
 
       const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
 
@@ -5416,8 +5416,8 @@ namespace LegionRuntime {
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
 
-      const UDT *user_data = 
-        HighLevelRuntime::find_user_data(task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)HighLevelRuntime::find_user_data(
+                                     task->task_id, task->selected_variant);
 
       T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
@@ -5437,8 +5437,8 @@ namespace LegionRuntime {
         void *&return_addr, size_t &return_size)
     //--------------------------------------------------------------------------
     {
-      const UDT *user_data = 
-        HighLevelRuntime::find_user_data(task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)HighLevelRuntime::find_user_data(
+                                      task->task_id, task->selected_variant);
 
       (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 

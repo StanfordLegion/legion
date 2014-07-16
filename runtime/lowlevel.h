@@ -661,14 +661,70 @@ namespace LegionRuntime {
     class DomainLinearization {
     public:
       DomainLinearization(void) : dim(-1), lptr(0) {}
-      DomainLinearization(const DomainLinearization& other) : dim(other.dim), lptr(other.lptr) {}
+      DomainLinearization(const DomainLinearization& other) 
+        : dim(other.dim), lptr(other.lptr) 
+      {
+        add_local_reference(); 
+      }
+      ~DomainLinearization(void)
+      {
+        remove_local_reference(); 
+      }
+
+      void add_local_reference(void)
+      {
+        if (lptr != NULL)
+        {
+          switch(dim) {
+          case 1: ((Arrays::Mapping<1, 1> *)lptr)->add_reference(); break;
+          case 2: ((Arrays::Mapping<2, 1> *)lptr)->add_reference(); break;
+          case 3: ((Arrays::Mapping<3, 1> *)lptr)->add_reference(); break;
+          default: assert(0);
+          }
+        }
+      }
+
+      void remove_local_reference(void)
+      {
+        if (lptr != NULL)
+        {
+          switch(dim)
+          {
+            case 1:
+              {
+                Arrays::Mapping<1, 1> *mapping = (Arrays::Mapping<1, 1>*)lptr;
+                if (mapping->remove_reference())
+                  delete mapping;
+                break;
+              }
+            case 2:
+              {
+                Arrays::Mapping<2, 1> *mapping = (Arrays::Mapping<2, 1>*)lptr;
+                if (mapping->remove_reference())
+                  delete mapping;
+                break;
+              }
+            case 3:
+              {
+                Arrays::Mapping<3, 1> *mapping = (Arrays::Mapping<3, 1>*)lptr;
+                if (mapping->remove_reference())
+                  delete mapping;
+                break;
+              }
+            default:
+              assert(0);
+          }
+        }
+      }
 
       bool valid(void) const { return(dim >= 0); }
 
       DomainLinearization& operator=(const DomainLinearization& other)
       {
+        remove_local_reference();
 	dim = other.dim;
 	lptr = other.lptr;
+        add_local_reference();
 	return *this;
       }
 
@@ -685,6 +741,7 @@ namespace LegionRuntime {
 	DomainLinearization l;
 	l.dim = DIM;
 	l.lptr = (void *)mapping;
+        l.add_local_reference();
 	return l;
       }
 
@@ -702,6 +759,7 @@ namespace LegionRuntime {
 
       void deserialize(const int *data)
       {
+        remove_local_reference();
 	dim = data[0];
 	switch(dim) {
 	case 0: break; // nothing to serialize
@@ -710,6 +768,7 @@ namespace LegionRuntime {
 	case 3: lptr = (void *)(Arrays::Mapping<3, 1>::deserialize_mapping(data + 1)); break;
 	default: assert(0);
 	}
+        add_local_reference();
       }
 
       int get_dim(void) const { return dim; }

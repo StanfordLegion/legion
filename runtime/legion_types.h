@@ -33,12 +33,6 @@
 #include <deque>
 #include <vector>
 
-// Pull in any vector instruction flags
-// Except for Apple which can screw itself
-#ifndef __MACH__
-#include <x86intrin.h>
-#endif
-
 // If we enable field tree acceleration
 // then enable it for both the logical and
 // physical tree analyses.
@@ -84,7 +78,7 @@
 // Default number of contexts made for each runtime instance
 // Ideally this is a power of 2 (better for performance)
 #ifndef DEFAULT_CONTEXTS
-#define DEFAULT_CONTEXTS                64 
+#define DEFAULT_CONTEXTS                8 
 #endif
 // Maximum number of allowed contexts ever in Legion runtime
 #ifndef MAX_CONTEXTS
@@ -570,9 +564,13 @@ namespace LegionRuntime {
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
     // Disable the use of AVX field masks for now since GCC doesn't
-    // know how to properly align them on the stack
-#if 0
-#if defined(__AVX__)
+    // know how to properly align them on the stack. If you want
+    // to try it, you can build with -DDYNAMIC_FIELD_MASKS which
+    // will cause all the AVXFieldMasks to allocate their own
+    // aligned backing store on the heap.  While correct, this
+    // will disable many compiler optimizations due to GCC and
+    // other C compilers being awful at alias analysis.
+#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
 #if (MAX_FIELDS > 256)
     typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 128)
@@ -583,22 +581,6 @@ namespace LegionRuntime {
     typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_FIELDS > 128)
-    typedef SSETLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
-#else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-#endif
-#else
-#if (MAX_FIELDS > 64)
-    typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-#else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
-#endif
-#endif
-#endif
-#if defined(__SSE2__)
 #if (MAX_FIELDS > 128)
     typedef SSETLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 64)

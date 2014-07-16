@@ -21,6 +21,7 @@
 #include "legion_ops.h"
 #include "region_tree.h"
 #include "runtime.h"
+#include "legion_utilities.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -134,7 +135,8 @@ namespace LegionRuntime {
     public:
       InstanceRef find_premapped_region(unsigned idx);
       RegionTreeContext get_enclosing_physical_context(unsigned idx);
-      void clone_task_op_from(TaskOp *rhs, Processor p, bool stealable);
+      void clone_task_op_from(TaskOp *rhs, Processor p, 
+                              bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
@@ -177,6 +179,8 @@ namespace LegionRuntime {
       bool children_commit_invoked;
     protected:
       bool needs_state;
+    protected:
+      AllocManager *arg_manager;
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
