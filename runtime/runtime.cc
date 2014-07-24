@@ -900,6 +900,23 @@ namespace LegionRuntime {
     Future FutureMap::Impl::get_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      // Check to make sure we are asking for something in the domain
+      if (valid_points.find(point) == valid_points.end())
+      {
+        bool is_valid_point = false;
+        for (std::vector<Domain>::const_iterator it = 
+              valid_domains.begin(); it != valid_domains.end(); it++)
+        {
+          if (it->contains(point))
+          {
+            is_valid_point = true;
+            break;
+          }
+        }
+        assert(is_valid_point);
+      }
+#endif
       if (valid)
       {
         Event lock_event = lock.acquire(0, true/*exclusive*/);
@@ -1003,6 +1020,22 @@ namespace LegionRuntime {
       }
       return result;
     }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    void FutureMap::Impl::add_valid_domain(const Domain &d)
+    //--------------------------------------------------------------------------
+    {
+      valid_domains.push_back(d);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureMap::Impl::add_valid_point(const DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      valid_points.insert(dp);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Physical Region Impl 
@@ -3516,6 +3549,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_composite_update(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_COMPOSITE_UPDATE, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_reduction_view(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3964,6 +4004,12 @@ namespace LegionRuntime {
             {
               runtime->handle_send_back_composite_view(derez, 
                                                        remote_address_space);
+              break;
+            }
+          case SEND_COMPOSITE_UPDATE:
+            {
+              runtime->handle_send_composite_update(derez, 
+                                                    remote_address_space);
               break;
             }
           case SEND_REDUCTION_VIEW:
@@ -5518,15 +5564,38 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(Context ctx, 
-                                                    IndexSpace handle)
+    bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal has multiple domains performed in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      return forest->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_multiple_domains(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       Domain result = forest->get_index_space_domain(handle);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal get index subspace performed in leaf "
+        log_task(LEVEL_ERROR,"Illegal get index space domain performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5549,6 +5618,32 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_domains(Context ctx, IndexSpace handle,
+                                          std::vector<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal get index space domains performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      forest->get_index_space_domains(handle, domains);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_domains(IndexSpace handle,
+                                          std::vector<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      forest->get_index_space_domains(handle, domains);
     }
 
     //--------------------------------------------------------------------------
@@ -7675,14 +7770,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Mapper* Runtime::get_mapper(Context ctx, MapperID id)
+    Mapper* Runtime::get_mapper(Context ctx, MapperID id, Processor target)
     //--------------------------------------------------------------------------
     {
-      Processor proc = ctx->get_executing_processor();
+      if (!target.exists())
+      {
+        Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
+        assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      return proc_managers[proc]->find_mapper(id);
+        return proc_managers[proc]->find_mapper(id);
+      }
+      else
+      {
+        std::map<Processor,ProcessorManager*>::const_iterator finder = 
+          proc_managers.find(target);
+        if (finder == proc_managers.end())
+        {
+          log_run(LEVEL_ERROR,"Invalid processor " IDFMT " passed to "
+                              "get mapper call.", target.id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_PROCESSOR_NAME);
+        }
+        return finder->second->find_mapper(id);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8470,7 +8583,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_composite_view(rez, false/*flush*/);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_back_composite_view(AddressSpaceID target,
@@ -8478,6 +8591,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_back_composite_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_composite_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_composite_update(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8862,7 +8982,7 @@ namespace LegionRuntime {
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_subscriber(forest, derez, source);
+      InstanceView::handle_send_subscriber(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -8896,6 +9016,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CompositeView::handle_send_back_composite_view(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_composite_update(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView::handle_send_composite_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

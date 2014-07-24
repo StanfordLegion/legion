@@ -3101,7 +3101,7 @@ namespace LegionRuntime {
       int result = 0;
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcount(mask[idx]);
+        result += __builtin_popcountl(mask[idx]);
       }
       return result;
     }
@@ -3714,7 +3714,7 @@ namespace LegionRuntime {
       int result = 0;
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcount(mask[idx]);
+        result += __builtin_popcountl(mask[idx]);
       }
       return result;
     }
@@ -4427,7 +4427,7 @@ namespace LegionRuntime {
       int result = 0;
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcount(mask[idx]);
+        result += __builtin_popcountl(mask[idx]);
       }
       return result;
     }
@@ -5191,7 +5191,7 @@ namespace LegionRuntime {
       int result = 0;
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
-        result += __builtin_popcount(mask[idx]);
+        result += __builtin_popcountl(mask[idx]);
       }
       return result;
     }

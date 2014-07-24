@@ -711,7 +711,8 @@ namespace LegionRuntime {
        * @param instance indicate whether to add to instance fields
        */
       inline RegionRequirement& add_field(FieldID fid, bool instance = true);
-      inline RegionRequirement& add_fields(const std::vector<FieldID>& fids, bool instance = true);
+      inline RegionRequirement& add_fields(const std::vector<FieldID>& fids, 
+                                           bool instance = true);
     public:
 #ifdef PRIVILEGE_CHECKS
       AccessorPrivilege get_accessor_privilege(void) const;
@@ -2361,7 +2362,12 @@ namespace LegionRuntime {
 
       IndexSpace get_index_subspace(IndexPartition p, Color c) const;
 
+      bool has_multiple_domains(IndexSpace handle) const;
+
       Domain get_index_space_domain(IndexSpace handle) const;
+
+      void get_index_space_domains(IndexSpace handle,
+                                   std::vector<Domain> &domains) const;
 
       Domain get_index_partition_color_space(IndexPartition p) const;
 
@@ -2708,6 +2714,17 @@ namespace LegionRuntime {
                                     Color color); 
 
       /**
+       * Return if the given index space is represented by 
+       * multiple domains or just a single one. If multiple
+       * domains represent the index space then 'get_index_space_domains'
+       * should be used for getting the set of domains.
+       * @param ctx enclosing task context
+       * @param handle index space handle
+       * @return true if the index space has multiple domains
+       */
+      bool has_multiple_domains(Context ctx, IndexSpace handle);
+
+      /**
        * Return the domain corresponding to the
        * specified index space if it exists
        * @param ctx enclosing task context
@@ -2715,6 +2732,18 @@ namespace LegionRuntime {
        * @return the domain corresponding to the index space
        */
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
+
+      /**
+       * Return the domains that represent the index space.
+       * While the previous call only works when there is a
+       * single domain for the index space, this call will
+       * work in all circumstances.
+       * @param ctx enclosing task context
+       * @param handle index space handle
+       * @param vector to populate with domains
+       */
+      void get_index_space_domains(Context ctx, IndexSpace handle,
+                                   std::vector<Domain> &domains);
 
       /**
        * Return a domain that represents the color space
@@ -3484,9 +3513,14 @@ namespace LegionRuntime {
        * application level information.
        * @param ctx the enclosing task context
        * @param id the mapper ID for which mapper to locate
+       * @param target processor if any, if none specified then
+       *               the executing processor for the current
+       *               context is used, if specified processor
+       *               must be local to the address space
        * @return a pointer to the specified mapper object
        */
-      Mapper* get_mapper(Context ctx, MapperID id);
+      Mapper* get_mapper(Context ctx, MapperID id, 
+                         Processor target = Processor::NO_PROC);
       
       /**
        * Return the processor on which the current task is
@@ -4480,8 +4514,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline RegionRequirement& RegionRequirement::add_fields(const std::vector<FieldID>& fids, 
-                                             bool instance/*= true*/)
+    inline RegionRequirement& RegionRequirement::add_fields(
+                      const std::vector<FieldID>& fids, bool instance/*= true*/)
     //--------------------------------------------------------------------------
     {
       privilege_fields.insert(fids.begin(), fids.end());

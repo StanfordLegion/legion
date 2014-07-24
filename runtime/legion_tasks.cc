@@ -1773,8 +1773,13 @@ namespace LegionRuntime {
     {
       RezCheck z(rez);
       rez.serialize(p.dim);
-      for (int idx = 0; idx < p.dim; idx++)
-        rez.serialize(p.point_data[idx]);
+      if (p.dim == 0)
+        rez.serialize(p.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < p.dim; idx++)
+          rez.serialize(p.point_data[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1783,8 +1788,13 @@ namespace LegionRuntime {
     {
       DerezCheck z(derez);
       derez.deserialize(p.dim);
-      for (int idx = 0; idx < p.dim; idx++)
-        derez.deserialize(p.point_data[idx]);
+      if (p.dim == 0)
+        derez.deserialize(p.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < p.dim; idx++)
+          derez.deserialize(p.point_data[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4654,11 +4664,24 @@ namespace LegionRuntime {
           switch (d.dim)
           {
             case 0:
-              break;
+              {
+                if (d.get_volume() <= 0)
+                {
+                  log_run(LEVEL_ERROR,
+                            "Invalid mapper domain slice result for mapper %d "
+                            "on processor " IDFMT " for task %s (ID %lld). "
+                            "Mapper returned an empty domain for split %d.",
+                            map_id, current_proc.id, variants->name,
+                            get_unique_task_id(), idx);
+                  assert(false);
+                  exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
+                }
+                break;
+              }
             case 1:
               {
                 Rect<1> rec = d.get_rect<1>();
-                if (rec.volume() == 0)
+                if (rec.volume() <= 0)
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
@@ -4674,7 +4697,7 @@ namespace LegionRuntime {
             case 2:
               {
                 Rect<2> rec = d.get_rect<2>();
-                if (rec.volume() == 0)
+                if (rec.volume() <= 0)
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
@@ -4690,7 +4713,7 @@ namespace LegionRuntime {
             case 3:
               {
                 Rect<3> rec = d.get_rect<3>();
-                if (rec.volume() == 0)
+                if (rec.volume() <= 0)
                 {
                   log_run(LEVEL_ERROR,
                             "Invalid mapper domain slice result for mapper %d "
@@ -6976,6 +6999,9 @@ namespace LegionRuntime {
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
+#ifdef DEBUG_HIGH_LEVEL
+      future_map.impl->add_valid_domain(index_domain);
+#endif
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -7136,6 +7162,9 @@ namespace LegionRuntime {
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
+#ifdef DEBUG_HIGH_LEVEL
+      future_map.impl->add_valid_domain(index_domain);
+#endif
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -8543,6 +8572,9 @@ namespace LegionRuntime {
         PointTask *next_point = clone_as_point_task(itr.p);
         points.push_back(next_point);
       }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index_domain.get_volume() == points.size());
+#endif
       mapping_index = 0;
       // Mark how many points we have
       num_unmapped_points = points.size();

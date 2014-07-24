@@ -2115,11 +2115,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool HighLevelRuntime::has_multiple_domains(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_multiple_domains(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     Domain HighLevelRuntime::get_index_space_domain(Context ctx, 
                                                     IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_domain(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::get_index_space_domains(Context ctx, 
+                                IndexSpace handle, std::vector<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_domains(ctx, handle, domains);
     }
 
     //--------------------------------------------------------------------------
@@ -2649,10 +2664,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Mapper* HighLevelRuntime::get_mapper(Context ctx, MapperID id)
+    Mapper* HighLevelRuntime::get_mapper(Context ctx, MapperID id,
+                                         Processor target)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_mapper(ctx, id);
+      return runtime->get_mapper(ctx, id, target);
     }
 
     //--------------------------------------------------------------------------
@@ -2918,10 +2934,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Mapper::has_multiple_domains(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
     Domain Mapper::get_index_space_domain(IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return runtime->runtime->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_index_space_domains(IndexSpace handle,
+                                         std::vector<Domain> &domains) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_domains(handle, domains);
     }
 
     //--------------------------------------------------------------------------

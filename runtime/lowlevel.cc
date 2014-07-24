@@ -3973,8 +3973,8 @@ namespace LegionRuntime {
       ReductionOpID redopid;
       int linearization_bits[RegionInstance::Impl::MAX_LINEARIZATION_LEN];
       size_t num_fields; // as long as it needs to be
-      const size_t &field_size(int idx) const { return *((&num_fields)+idx); }
-      size_t &field_size(int idx) { return *((&num_fields)+idx); }
+      const size_t &field_size(int idx) const { return *((&num_fields)+idx+1); }
+      size_t &field_size(int idx) { return *((&num_fields)+idx+1); }
     };
 
     struct CreateInstanceResp : public BaseReply {
@@ -6228,6 +6228,8 @@ namespace LegionRuntime {
       first_enabled_elmt = rhs.first_enabled_elmt;
       last_enabled_elmt = rhs.last_enabled_elmt;
       size_t bytes_needed = rhs.raw_size();
+      if (raw_data)
+        free(raw_data);
       raw_data = calloc(1, bytes_needed);
       if (rhs.raw_data)
         memcpy(raw_data, rhs.raw_data, bytes_needed);

@@ -177,6 +177,11 @@ namespace LegionRuntime {
       void wait_all_results(void);
       void complete_all_futures(void);
       bool reset_all_futures(void);
+#ifdef DEBUG_HIGH_LEVEL
+    public:
+      void add_valid_domain(const Domain &d);
+      void add_valid_point(const DomainPoint &dp);
+#endif
     public:
       SingleTask *const context;
       TaskOp *const task;
@@ -190,6 +195,11 @@ namespace LegionRuntime {
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
       Reservation lock;
+#ifdef DEBUG_HIGH_LEVEL
+    private:
+      std::vector<Domain> valid_domains;
+      std::set<DomainPoint,DomainPoint::STLComparator> valid_points;
+#endif
     };
 
     /**
@@ -619,6 +629,7 @@ namespace LegionRuntime {
         SEND_BACK_MATERIALIZED_VIEW,
         SEND_COMPOSITE_VIEW,
         SEND_BACK_COMPOSITE_VIEW,
+        SEND_COMPOSITE_UPDATE,
         SEND_REDUCTION_VIEW,
         SEND_BACK_REDUCTION_VIEW,
         SEND_INSTANCE_MANAGER,
@@ -687,6 +698,7 @@ namespace LegionRuntime {
       void send_materialized_view(Serializer &rez, bool flush);
       void send_back_materialized_view(Serializer &rez, bool flush);
       void send_composite_view(Serializer &rez, bool flush);
+      void send_composite_update(Serializer &rez, bool flush);
       void send_back_composite_view(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
       void send_back_reduction_view(Serializer &rez, bool flush);
@@ -823,8 +835,14 @@ namespace LegionRuntime {
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
       IndexSpace get_index_subspace(IndexPartition p, Color c);
+      bool has_multiple_domains(Context ctx, IndexSpace handle);
+      bool has_multiple_domains(IndexSpace handle);
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
       Domain get_index_space_domain(IndexSpace handle);
+      void get_index_space_domains(Context ctx, IndexSpace handle,
+                                   std::vector<Domain> &domains);
+      void get_index_space_domains(IndexSpace handle,
+                                   std::vector<Domain> &domains);
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       Domain get_index_partition_color_space(IndexPartition p);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
@@ -993,7 +1011,7 @@ namespace LegionRuntime {
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
     public:
-      Mapper* get_mapper(Context ctx, MapperID id);
+      Mapper* get_mapper(Context ctx, MapperID id, Processor target);
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
@@ -1092,6 +1110,7 @@ namespace LegionRuntime {
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_back_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
+      void send_composite_update(AddressSpaceID target, Serializer &rez);
       void send_back_composite_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -1154,6 +1173,8 @@ namespace LegionRuntime {
                                               AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
+      void handle_send_composite_update(Deserializer &derez,
+                                        AddressSpaceID source);
       void handle_send_back_composite_view(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,

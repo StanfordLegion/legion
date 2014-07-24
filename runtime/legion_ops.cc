@@ -5175,6 +5175,16 @@ namespace LegionRuntime {
       // Make a new future map for storing our results
       // We'll fill it in later
       result_map = new FutureMap::Impl(ctx, get_completion_event(), runtime);
+#ifdef DEBUG_HIGH_LEVEL
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+      {
+        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
+      }
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+      {
+        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
+      }
+#endif
       return result_map;
     }
 

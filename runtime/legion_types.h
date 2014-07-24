@@ -256,6 +256,7 @@ namespace LegionRuntime {
       ERROR_UNMATCHED_MUST_EPOCH = 106,
       ERROR_MUST_EPOCH_FAILURE = 107,
       ERROR_DOMAIN_DIM_MISMATCH = 108,
+      ERROR_INVALID_PROCESSOR_NAME = 109,
     };
 
     // enum and namepsaces don't really get along well

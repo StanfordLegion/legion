@@ -2199,6 +2199,8 @@ namespace LegionRuntime {
       first_enabled_elmt = rhs.first_enabled_elmt;
       last_enabled_elmt = rhs.last_enabled_elmt;
       size_t bytes_needed = rhs.raw_size();
+      if (raw_data)
+        free(raw_data);
       raw_data = calloc(1, bytes_needed);
       if (rhs.raw_data)
       {
