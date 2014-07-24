@@ -435,7 +435,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->domain.get_volume();
+      if (node->domain.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          node->domain.get_index_space().get_valid_mask();
+        return mask.get_num_elmts();
+      }
+      else
+        return node->domain.get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -726,7 +733,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
-      return node->get_domain().get_volume();
+      Domain d = node->get_domain();
+      if (d.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          d.get_index_space().get_valid_mask();
+        return mask.get_num_elmts();
+      }
+      else
+        return d.get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -6634,7 +6649,14 @@ namespace LegionRuntime {
         }
         // Also set the maximum blocking factor for this region
         Domain node_domain = node->get_domain();
-        info->req.max_blocking_factor = node_domain.get_volume();
+        if (node_domain.get_dim() == 0)
+        {
+          const LowLevel::ElementMask &mask = 
+            node_domain.get_index_space().get_valid_mask();
+          info->req.max_blocking_factor = mask.get_num_elmts();
+        }
+        else
+          info->req.max_blocking_factor = node_domain.get_volume();
       }
       // Release the state
       node->release_physical_state(state);
@@ -14291,7 +14313,15 @@ namespace LegionRuntime {
         result += (it->second.size); 
       }
       // Now multiply by the number of elements
-      result *= region_node->row_source->domain.get_volume();
+      const Domain &d = region_node->row_source->domain;
+      if (d.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          d.get_index_space().get_valid_mask();
+        result *= mask.get_num_elmts();
+      }
+      else
+        result *= d.get_volume();
       return result;
     }
 
@@ -15091,7 +15121,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       size_t result = op->sizeof_rhs;
-      result *= ptr_space.get_volume();
+      if (ptr_space.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          ptr_space.get_index_space().get_valid_mask();
+        result *= mask.get_num_elmts();
+      }
+      else
+        result *= ptr_space.get_volume();
       return result;
     }
     
@@ -15218,7 +15255,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       size_t result = op->sizeof_rhs;
-      result *= region_node->row_source->domain.get_volume();
+      const Domain &d = region_node->row_source->domain;
+      if (d.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          d.get_index_space().get_valid_mask();
+        result *= mask.get_num_elmts();
+      }
+      else
+        result *= d.get_volume();
       return result;
     }
     
