@@ -482,7 +482,7 @@ def _(node, cx):
         assert False
     regions = type_check_node(node.regions, cx)
     return [
-        types.Privilege(privilege, node.op, region, field_path)
+        types.Privilege(node, privilege, node.op, region, field_path)
         for region, field_path in regions]
 
 @type_check_node.register(ast.PrivilegeRegions)
@@ -699,8 +699,8 @@ def _(node, cx):
         raise types.TypeError(node, 'Let bound expression of type %s does not match declared type %s' % (
                 region_kind, declared_region_kind))
 
-    cx.privileges.add(types.Privilege(types.Privilege.READ, None, region_type, ()))
-    cx.privileges.add(types.Privilege(types.Privilege.WRITE, None, region_type, ()))
+    cx.privileges.add(types.Privilege(node, types.Privilege.READ, None, region_type, ()))
+    cx.privileges.add(types.Privilege(node, types.Privilege.WRITE, None, region_type, ()))
     return region_type
 
 @type_check_node.register(ast.StatementLetArray)
@@ -728,8 +728,8 @@ def _(node, cx):
         raise types.TypeError(node, 'Let bound expression of type %s does not match declared type %s' % (
                 region_kind, declared_region_kind))
 
-    cx.privileges.add(types.Privilege(types.Privilege.READ, None, region_type, ()))
-    cx.privileges.add(types.Privilege(types.Privilege.WRITE, None, region_type, ()))
+    cx.privileges.add(types.Privilege(node, types.Privilege.READ, None, region_type, ()))
+    cx.privileges.add(types.Privilege(node, types.Privilege.WRITE, None, region_type, ()))
     return region_type
 
 @type_check_node.register(ast.StatementLetIspace)
@@ -971,7 +971,7 @@ def _(node, cx):
                 pointer_type))
 
     privileges_requested = [
-        types.Privilege(types.Privilege.READ, None, region, ())
+        types.Privilege(node, types.Privilege.READ, None, region, ())
         for region in pointer_type.regions]
     success, failed_request = types.check_privileges(privileges_requested, cx)
     if not success:
@@ -992,7 +992,7 @@ def _(node, cx):
                 value_type, pointer_type.points_to_type))
 
     privileges_requested = [
-        types.Privilege(types.Privilege.WRITE, None, region, ())
+        types.Privilege(node, types.Privilege.WRITE, None, region, ())
         for region in pointer_type.regions]
     success, failed_request = types.check_privileges(privileges_requested, cx)
     if not success:
@@ -1018,7 +1018,7 @@ def _(node, cx):
                 value_type))
 
     privileges_requested = [
-        types.Privilege(types.Privilege.REDUCE, node.op, region, ())
+        types.Privilege(node, types.Privilege.REDUCE, node.op, region, ())
         for region in pointer_type.regions]
     success, failed_request = types.check_privileges(privileges_requested, cx)
     if not success:

@@ -144,21 +144,18 @@ task build_piece_node_list(rn: region<circuit_node>,
   , reads(rnl)
   , writes(rnl)
 {
-  if (isnull(all_nodes)) {
-    return null<node_list<rpn, rnl>@rnl>();
-  } else {
-    let tail = build_piece_node_list(rn, rpn, rnl, all_nodes->next);
-
+  var result = null<node_list<rpn, rnl>@rnl>();
+  while (!isnull(all_nodes)) {
     let node = downregion<rpn>(all_nodes->node);
-    if (isnull(node)) {
-      return tail;
-    } else {
+    if (!isnull(node)) {
       let head = new<node_list<rpn, rnl>@rnl>();
       head->node = node;
-      head->next = tail;
-      return head;
+      head->next = result;
+      result = head;
     }
+    all_nodes = all_nodes->next;
   }
+  return result;
 }
 
 task build_piece_wire_list(rn: region<circuit_node>,
@@ -172,15 +169,10 @@ task build_piece_wire_list(rn: region<circuit_node>,
   , reads(rw, rwl)
   , writes(rw, rwl)
 {
-  if (isnull(all_wires)) {
-    return null<wire_list<rpn, rpg, rpw, rwl>@rwl>();
-  } else {
-    let tail = build_piece_wire_list(rn, rw, rpn, rpg, rpw, rwl, all_wires->next);
-
+  var result = null<wire_list<rpn, rpg, rpw, rwl>@rwl>();
+  while (!isnull(all_wires)) {
     let wire = downregion<rpw>(all_wires->wire);
-    if (isnull(wire)) {
-      return tail;
-    } else {
+    if (!isnull(wire)) {
       let old_wire = all_wires->wire;
       let new_wire = new<circuit_wire<rpn, rpg>@rpw>();
       assert !isnull(downregion<rpn>(old_wire->in_node));
@@ -192,10 +184,12 @@ task build_piece_wire_list(rn: region<circuit_node>,
 
       let head = new<wire_list<rpn, rpg, rpw, rwl>@rwl>();
       head->wire = new_wire;
-      head->next = tail;
+      head->next = result;
       return head;
     }
+    all_wires = all_wires->next;
   }
+  return result;
 }
 
 task owned_node_coloring(rn: region<circuit_node>,

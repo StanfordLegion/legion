@@ -581,7 +581,7 @@ class Reference(Type):
         return self.as_read()
     def check_read(self, node, cx):
         privileges_requested = [
-            Privilege(Privilege.READ, None, region, self.field_path)
+            Privilege(node, Privilege.READ, None, region, self.field_path)
             for region in self.regions]
         success, failed_request = check_privileges(privileges_requested, cx)
         if not success:
@@ -589,7 +589,7 @@ class Reference(Type):
         return self.as_read()
     def check_write(self, node, cx):
         privileges_requested = [
-            Privilege(Privilege.WRITE, None, region, self.field_path)
+            Privilege(node, Privilege.WRITE, None, region, self.field_path)
             for region in self.regions]
         success, failed_request = check_privileges(privileges_requested, cx)
         if not success:
@@ -597,7 +597,7 @@ class Reference(Type):
         return self.as_write()
     def check_reduce(self, node, op, cx):
         privileges_requested = [
-            Privilege(Privilege.REDUCE, op, region, self.field_path)
+            Privilege(node, Privilege.REDUCE, op, region, self.field_path)
             for region in self.regions]
         success, failed_request = check_privileges(privileges_requested, cx)
         if not success:
@@ -1238,9 +1238,17 @@ class Privilege:
     WRITE = 'writes'
     REDUCE = 'reduce'
 
-    def __init__(self, privilege, op, region, field_path, allow_ispace = False):
+    def __init__(self, node, privilege, op, region, field_path, allow_ispace = False):
         assert (privilege == Privilege.REDUCE) == (op is not None)
-        assert (is_region(region) or (allow_ispace == True and is_ispace(region))) and isinstance(field_path, tuple)
+        if not (is_region(region) or (allow_ispace == True and is_ispace(region))):
+            if allow_ispace:
+                raise TypeError(node, "Type mismatch in privilege: expected region or ispace but got %s" % (
+                    region))
+            else:
+                raise TypeError(node, "Type mismatch in privilege: expected region but got %s" %(
+                    region))
+        assert isinstance(field_path, tuple)
+        self.node = node
         self.privilege = privilege
         self.op = op
         self.region = region
@@ -1262,11 +1270,11 @@ class Privilege:
         return '%s(%s)' % (self.privilege, '.'.join((self.region.name,) + self.field_path))
     def substitute_regions(self, region_map):
         if self.region in region_map:
-            return Privilege(self.privilege, self.op, region_map[self.region], self.field_path)
+            return Privilege(self.node, self.privilege, self.op, region_map[self.region], self.field_path)
         return self
     def as_ispace(self):
         if self.region.kind.ispace is not None:
-            return Privilege(self.privilege, self.op, self.region.kind.ispace, self.field_path, True)
+            return Privilege(self.node, self.privilege, self.op, self.region.kind.ispace, self.field_path, True)
         return self
 
 def is_privilege(p):
@@ -1279,7 +1287,7 @@ def search_constraints_for_privilege_helper(request, privileges_available,
 
     for prefix in reversed(xrange(len(request.field_path) + 1)):
         field_path = request.field_path[:prefix]
-        tentative_privilege = Privilege(request.privilege, request.op, region, field_path, True)
+        tentative_privilege = Privilege(request.node, request.privilege, request.op, region, field_path, True)
         if tentative_privilege in privileges_available:
             return True
     if region in constraint_graph:
@@ -1322,8 +1330,8 @@ def check_privileges(privileges_requested, cx):
 
             # If the initial search fails on a reduce request, search
             # again for read-write.
-            read_request = Privilege(Privilege.READ, None, request.region, request.field_path, True)
-            write_request = Privilege(Privilege.WRITE, None, request.region, request.field_path, True)
+            read_request = Privilege(request.node, Privilege.READ, None, request.region, request.field_path, True)
+            write_request = Privilege(request.node, Privilege.WRITE, None, request.region, request.field_path, True)
             if not (search_constraints_for_privilege(read_request, privileges_available, cx.constraints) and
                     search_constraints_for_privilege(write_request, privileges_available, cx.constraints)):
                 return (False, original_request)
