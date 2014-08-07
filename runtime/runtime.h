@@ -623,14 +623,15 @@ namespace LegionRuntime {
         HIERARCHICAL_REMOVE_RESOURCE,
         HIERARCHICAL_REMOVE_REMOTE,
         SEND_BACK_USER,
-        SEND_USER,
         SEND_SUBSCRIBER,
         SEND_MATERIALIZED_VIEW,
+        SEND_MATERIALIZED_UPDATE,
         SEND_BACK_MATERIALIZED_VIEW,
         SEND_COMPOSITE_VIEW,
         SEND_BACK_COMPOSITE_VIEW,
         SEND_COMPOSITE_UPDATE,
         SEND_REDUCTION_VIEW,
+        SEND_REDUCTION_UPDATE,
         SEND_BACK_REDUCTION_VIEW,
         SEND_INSTANCE_MANAGER,
         SEND_REDUCTION_MANAGER,
@@ -693,14 +694,15 @@ namespace LegionRuntime {
       void send_remove_hierarchical_resource(Serializer &rez, bool flush);
       void send_remove_hierarchical_remote(Serializer &rez, bool flush);
       void send_back_user(Serializer &rez, bool flush);
-      void send_user(Serializer &rez, bool flush);
       void send_subscriber(Serializer &rez, bool flush);
       void send_materialized_view(Serializer &rez, bool flush);
       void send_back_materialized_view(Serializer &rez, bool flush);
+      void send_materialized_update(Serializer &rez, bool flush);
       void send_composite_view(Serializer &rez, bool flush);
       void send_composite_update(Serializer &rez, bool flush);
       void send_back_composite_view(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
+      void send_reduction_update(Serializer &rez, bool flush);
       void send_back_reduction_view(Serializer &rez, bool flush);
       void send_instance_manager(Serializer &rez, bool flush);
       void send_reduction_manager(Serializer &rez, bool flush);
@@ -1105,14 +1107,15 @@ namespace LegionRuntime {
       void send_remove_hierarchical_remote(AddressSpaceID target, 
                                            Serializer &rez);
       void send_back_user(AddressSpaceID target, Serializer &rez);
-      void send_user(AddressSpaceID target, Serializer &rez);
       void send_subscriber(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
+      void send_materialized_update(AddressSpaceID target, Serializer &rez);
       void send_back_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_composite_update(AddressSpaceID target, Serializer &rez);
       void send_back_composite_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
+      void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
@@ -1165,10 +1168,11 @@ namespace LegionRuntime {
       void handle_hierarchical_remove_resource(Deserializer &derez);
       void handle_hierarchical_remove_remote(Deserializer &derez);
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
-      void handle_send_user(Deserializer &derez, AddressSpaceID source);
       void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
+      void handle_send_materialized_update(Deserializer &derez,
+                                           AddressSpaceID source);
       void handle_send_back_materialized_view(Deserializer &derez,
                                               AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
@@ -1179,6 +1183,8 @@ namespace LegionRuntime {
                                            AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
+      void handle_send_reduction_update(Deserializer &derez,
+                                        AddressSpaceID source);
       void handle_send_back_reduction_view(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,

@@ -5904,7 +5904,7 @@ namespace LegionRuntime {
     {
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::set<LogicalView*> needed_views;
+      std::map<LogicalView*,FieldMask> needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());
@@ -7886,7 +7886,7 @@ namespace LegionRuntime {
     {
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::set<LogicalView*> needed_views;
+      std::map<LogicalView*,FieldMask> needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());

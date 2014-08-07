@@ -3163,11 +3163,11 @@ namespace LegionRuntime {
       assert(lhs);
 
       if(red_fold)
-	redop->fold_strided(lhs, data, count,
-			    args.stride, redop->sizeof_rhs, false /*not exclusive*/);
+	redop->fold_strided(lhs, data,
+			    args.stride, redop->sizeof_rhs, count, false /*not exclusive*/);
       else
-	redop->apply_strided(lhs, data, count,
-			     args.stride, redop->sizeof_rhs, false /*not exclusive*/);
+	redop->apply_strided(lhs, data, 
+			     args.stride, redop->sizeof_rhs, count, false /*not exclusive*/);
 
       // track the sequence ID to know when the full RDMA is done
       if(args.sequence_id > 0) {

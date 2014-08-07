@@ -17,6 +17,9 @@
 #ifndef __LEGION_INTERVAL_TREE_H__
 #define __LEGION_INTERVAL_TREE_H__
 
+#include <cassert>
+#include <cstdlib>
+
 namespace LegionRuntime {
   namespace HighLevel {
 
@@ -27,7 +30,7 @@ namespace LegionRuntime {
      * represents a whole in the tree, otherwise if
      * it is a leaf then it represents an actual interval.
      */
-    template<typename T>
+    template<typename T, bool DISCRETE>
     class IntervalTreeNode {
     public:
       IntervalTreeNode(T left, T right);
@@ -36,15 +39,19 @@ namespace LegionRuntime {
     public:
       IntervalTreeNode& operator=(const IntervalTreeNode &rhs);
     public:
-      IntervalTreeNode<T>* insert(T left, T right);
+      IntervalTreeNode<T,DISCRETE>* insert(T left, T right);
+      IntervalTreeNode<T,DISCRETE>* insert_local(T left, T right);
       bool intersects(T left, T right) const;
       bool dominates(T left, T right) const;
       int count(void) const;
-      IntervalTreeNode<T>* reinsert(IntervalTreeNode<T> *target) const;
+      IntervalTreeNode<T,DISCRETE>* merge(void);
+      IntervalTreeNode<T,DISCRETE>* reinsert(
+                            IntervalTreeNode<T,DISCRETE> *target);
+    public:
+      void sanity_check(void);
     private:
-      bool intermediate;
       T left_bound, right_bound;
-      IntervalTreeNode<T> *left_node, *right_node;
+      IntervalTreeNode<T, DISCRETE> *left_node, *right_node;
     };
     
     /** 
@@ -54,7 +61,7 @@ namespace LegionRuntime {
      * intervals to help with testing for intersection
      * and domination.
      */
-    template<typename T>
+    template<typename T, bool DISCRETE>
     class IntervalTree {
     public:
       IntervalTree(void);
@@ -67,7 +74,7 @@ namespace LegionRuntime {
       bool intersects(T left, T right) const;
       bool dominates(T left, T right) const;
     private:
-      IntervalTreeNode<T> *root;
+      IntervalTreeNode<T, DISCRETE> *root;
     };
 
     /////////////////////////////////////////////////////////////
@@ -75,17 +82,16 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>::IntervalTreeNode(T left, T right)
-      : intermediate(false), left_bound(left), right_bound(right), 
-        left_node(NULL), right_node(NULL)
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>::IntervalTreeNode(T left, T right)
+      : left_bound(left), right_bound(right), left_node(NULL), right_node(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>::IntervalTreeNode(const IntervalTreeNode &rhs)
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>::IntervalTreeNode(const IntervalTreeNode &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -93,8 +99,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>::~IntervalTreeNode(void)
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>::~IntervalTreeNode(void)
     //--------------------------------------------------------------------------
     {
       if (left_node != NULL)
@@ -106,8 +112,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>& IntervalTreeNode<T>::operator=(
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>& IntervalTreeNode<T,DISCRETE>::operator=(
                                                     const IntervalTreeNode &rhs)
     //--------------------------------------------------------------------------
     {
@@ -117,120 +123,304 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>* IntervalTreeNode<T>::insert(T left, T right)
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>* IntervalTreeNode<T,DISCRETE>::insert(
+                                                                T left, T right)
     //--------------------------------------------------------------------------
     {
-      if (intermediate)
+      // Six cases here
+      // 1. Dominates
+      // 2. Contained within
+      // 3. Overlap to the left
+      // 4. Overlap to the right
+      // 5. All to the left
+      // 6. All to the right
+      if ((left_bound <= left) && (right <= right_bound))
       {
-        // Six cases here
-        // 1. All to the left
-        // 2. All to the right
-        // 3. Overlap to the left
-        // 4. Overlap to the right
-        // 5. Contained within
-        // 6. Dominates
-        if (right < left_bound)
-          left_node = left_node->insert(left, right);
-        else if (left > right_bound)
+        if (left_node != NULL)
+        {
+          // Insert in the side with fewer segments
+#ifdef DEBUG_HIGH_LEVEL
+          assert(right_node != NULL);
+#endif
+          return insert_local(left, right);
+        }
+        // Otherwise we are a base segment and since we
+        // dominate then we are done
+      }
+      else if ((left <= left_bound) && (right_bound <= right))
+      {
+        // No need to keep sub-segments anymore, we can delete them
+        if (left_node != NULL)
+        {
+          delete left_node;
+          left_node = NULL;
+        }
+        if (right_node != NULL)
+        {
+          delete right_node;
+          right_node = NULL;
+        }
+        left_bound = left;
+        right_bound = right;
+      }
+      else if ((left_bound <= right) && (right <= right_bound))
+      {
+        left_bound = left;
+        if (left_node != NULL)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(right_node != NULL);
+#endif
+          return insert_local(left, right);
+        }
+      }
+      else if ((left_bound <= left) && (left <= right_bound))
+      {
+        right_bound = right;
+        if (left_node != NULL)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(right_node != NULL);
+#endif
+          return insert_local(left, right);
+        }
+      }
+      else if (DISCRETE && (left == (right_bound+1)))
+      {
+        if (right_node != NULL)
           right_node = right_node->insert(left, right);
-        else if ((left > left_bound) && (right < right_bound))
-        {
-          // contained within
-          int left_size = left_node->count();
-          int right_size = right_node->count();
-          // Decide whether to insert left or right
-          if (left_size <= right_size)
-          {
-            left_bound = right;
-            left_node = left_node->insert(left, right);
-          }
-          else
-          {
-            right_bound = left;
-            right_node = right_node->insert(left, right);
-          }
-        }
-        else if ((left <= left_bound) && (right >= right_bound))
-        {
-          // dominates
-          int left_size = left_node->count();
-          int right_size = right_node->count();
-          if (left_size <= right_size)
-          {
-            // insert in the right side
-            // reinsert all the nodes in the left in the right
-            // return the right side after deleting ourselves
-            IntervalTreeNode<T> *result = right_node->insert(left, right);
-            result = left_node->reinsert(result);
-            // make sure we don't delete the new tree
-            right_node = NULL;
-            delete this;
-            return result;
-          }
-          else
-          {
-            IntervalTreeNode<T> *result = left_node->insert(left, right);
-            result = right_node->reinsert(result);
-            // make sure we don't delete the new tree
-            left_node = NULL;
-            delete this;
-            return result;
-          }
-        }
-        else if ((left <= left_bound) && (right < right_bound))
-        {
-          // overlap to the left
-          left_bound = right;
+        right_bound = right;
+      }
+      else if (DISCRETE && ((right+1) == left_bound))
+      {
+        if (left_node != NULL)
           left_node = left_node->insert(left, right);
-        }
-        else if ((right >= right_bound) && (left > left_bound))
+        left_bound = left;
+      }
+      else if (left > right_bound)
+      {
+        if (right_node != NULL)
         {
-          // overlap to the right
-          right_bound = left;
           right_node = right_node->insert(left, right);
         }
         else
-          assert(false); // should never get here
+        {
+          // Otherwise make ourselves a new intermedite node
+          left_node = 
+            new IntervalTreeNode<T,DISCRETE>(left_bound, right_bound);
+          right_node = 
+            new IntervalTreeNode<T,DISCRETE>(left, right);
+        }
+        right_bound = right;
+      }
+      else if (right < left_bound)
+      {
+        if (left_node != NULL)
+        {
+          left_node = left_node->insert(left, right);
+        }
+        else
+        {
+          left_node = 
+            new IntervalTreeNode<T,DISCRETE>(left, right);
+          right_node = 
+            new IntervalTreeNode<T,DISCRETE>(left_bound, right_bound);
+        }
+        left_bound = left;
+      }
+      else
+        assert(false); // should never hit this case
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check();
+#endif
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>* IntervalTreeNode<T,DISCRETE>::insert_local(
+                                                                T left, T right)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(left_node != NULL);
+      assert(right_node != NULL);
+#endif
+      bool intersect_left = left_node->intersects(left, right);
+      bool intersect_right = right_node->intersects(left, right);
+      if (intersect_left && intersect_right)
+      {
+        left_node = left_node->insert(left, right);
+        IntervalTreeNode<T,DISCRETE> *result = right_node->reinsert(left_node);
+        // make sure we don't delete the new tree
+        left_node = NULL;
+        delete this;
+#ifdef DEBUG_HIGH_LEVEL
+        result->sanity_check();
+#endif
+        return result;
+      }
+      else if (intersect_left)
+        left_node = left_node->insert(left, right);
+      else if (intersect_right)
+        right_node = right_node->insert(left, right);
+      else
+      {
+        int count_left = left_node->count();
+        int count_right = right_node->count();
+        if (count_left <= count_right)
+          left_node = left_node->insert(left, right);
+        else
+          right_node = right_node->insert(left, right);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check();
+#endif
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    bool IntervalTreeNode<T,DISCRETE>::intersects(T left, T right) const
+    //--------------------------------------------------------------------------
+    {
+      if (right < left_bound)
+        return false;
+      if (left > right_bound)
+        return false;
+      if (left_node != NULL)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(right_node != NULL);
+#endif
+        if (left_node->intersects(left, right))
+          return true;
+        if (right_node->intersects(left, right))
+          return true;
+        return false;
       }
       else
       {
-        // check to see if we should merge
-        bool merged = false;
-        if ((left < left_bound) && (right >= left_bound))
-        {
-          left_bound = left;
-          merged = true;
-        }
-        if ((right > right_bound) && (left <= right_bound))
-        {
-          right_bound = right;
-          merged = true;
-        }
-        if (!merged)
+        if ((left <= left_bound) && (right >= right_bound))
+          return true;
+        if ((left_bound <= left) && (left <= right_bound))
+          return true;
+        if ((left_bound <= right) && (right <= right_bound))
+          return true;
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    bool IntervalTreeNode<T,DISCRETE>::dominates(T left, T right) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we dominate it
+      if ((left_bound <= left) && (right <= right_bound))
+      {
+        // If we are an intermediate node, we need to see
+        // if any of our children dominate it
+        if (left_node != NULL)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert((left_bound > right) || (right_bound < left));
+          assert(right_node != NULL);
 #endif
-          // Make a new node for ourself and our new interval
-          IntervalTreeNode<T> *self = 
-                            new IntervalTreeNode<T>(left_bound, right_bound);
-          IntervalTreeNode<T> *other = new IntervalTreeNode<T>(left, right);
-          // Convert ourselves into an intermediate node
-          intermediate = true; 
-          if (left_bound > right)
+          if (left_node->dominates(left, right))
+            return true;
+          if (right_node->dominates(left, right))
+            return true;
+        }
+        else
+          return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    int IntervalTreeNode<T,DISCRETE>::count(void) const
+    //--------------------------------------------------------------------------
+    {
+      int result = 1;
+      if (left_node != NULL)
+        result += left_node->count();
+      if (right_node != NULL)
+        result += right_node->count();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>* IntervalTreeNode<T,DISCRETE>::merge(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(((left_node == NULL) && (right_node == NULL)) ||
+             ((left_node != NULL) && (right_node != NULL)));
+#endif
+      if (left_node == NULL)
+        return this;
+      if (DISCRETE)
+      {
+        if ((left_node->right_bound+1) == right_node->left_bound)
+        {
+          IntervalTreeNode<T,DISCRETE> *result = 
+                              right_node->reinsert(left_node);
+          left_node = NULL;
+          delete this;
+#ifdef DEBUG_HIGH_LEVEL
+          result->sanity_check();
+#endif
+          return result;
+        }
+        else
+        {
+          left_node = left_node->merge();
+          right_node = right_node->merge();
+          // Check again
+          if ((left_node->right_bound+1) == right_node->left_bound)
           {
-            left_node = other;
-            right_node = self;
-            right_bound = left_bound;
-            left_bound = right;
+            IntervalTreeNode<T,DISCRETE> *result = 
+              right_node->reinsert(left_node);
+            left_node = NULL;
+            delete this;
+#ifdef DEBUG_HIGH_LEVEL
+            result->sanity_check();
+#endif
+            return result;
           }
-          else
+        }
+      }
+      else
+      {
+        if (left_node->right_bound == right_node->left_bound)  
+        {
+          IntervalTreeNode<T,DISCRETE> *result = 
+                              right_node->reinsert(left_node);
+          left_node = NULL;
+          delete this;
+#ifdef DEBUG_HIGH_LEVEL
+          result->sanity_check();
+#endif
+          return result;
+        }
+        else
+        {
+          left_node = left_node->merge();
+          right_node = right_node->merge();
+          // Check again
+          if (left_node->right_bound == right_node->left_bound)
           {
-            left_node = self;
-            right_node = other;
-            left_bound = right_bound;
-            right_bound = left;
+            IntervalTreeNode<T,DISCRETE> *result = 
+                              right_node->reinsert(left_node);
+            left_node = NULL;
+            delete this;
+#ifdef DEBUG_HIGH_LEVEL
+            result->sanity_check();
+#endif
+            return result;
           }
         }
       }
@@ -238,74 +428,38 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    bool IntervalTreeNode<T>::intersects(T left, T right) const
+    template<typename T, bool DISCRETE>
+    IntervalTreeNode<T,DISCRETE>* IntervalTreeNode<T,DISCRETE>::reinsert(
+                                           IntervalTreeNode<T,DISCRETE> *target)
     //--------------------------------------------------------------------------
     {
-      if (intermediate)
+      if (left_node != NULL)
       {
-        if (right <= left_bound)
-          return left->intersects(left, right);
-        if (left >= right_bound)
-          return right->intersects(left, right);
-        return false;
-      }
-      else
-      {
-        if ((left >= left_bound) && (left <= right_bound))
-          return true;
-        if ((right >= left_bound) && (right <= right_bound))
-          return true;
-        return false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    bool IntervalTreeNode<T>::dominates(T left, T right) const
-    //--------------------------------------------------------------------------
-    {
-      if (intermediate)
-      {
-        if (right <= left_bound)
-          return left_node->dominates(left, right);
-        if (left >= right_bound)
-          return right_node->dominates(left, right);
-        return false;
-      }
-      else
-      {
-        if ((left >= left_bound) && (right <= right_bound))
-          return true;
-        return false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    int IntervalTreeNode<T>::count(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (intermediate)
-        return (left_node->count() + right_node->count());
-      else
-        return 1;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTreeNode<T>* IntervalTreeNode<T>::reinsert(
-                                              IntervalTreeNode<T> *target) const
-    //--------------------------------------------------------------------------
-    {
-      if (intermediate)
-      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(right_node != NULL);
+#endif
         target = left_node->reinsert(target);
         target = right_node->reinsert(target);
         return target;
       }
       else
+      {
         return target->insert(left_bound, right_bound);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, bool DISCRETE>
+    void IntervalTreeNode<T,DISCRETE>::sanity_check(void)
+    //--------------------------------------------------------------------------
+    {
+      if (left_node != NULL)
+      {
+        assert(right_node != NULL);
+        assert(left_node->right_bound < right_bound);
+        assert(right_node->left_bound > left_bound);
+        assert(left_node->right_bound <= left_node->right_bound);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -313,16 +467,16 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTree<T>::IntervalTree(void)
+    template<typename T, bool DISCRETE>
+    IntervalTree<T,DISCRETE>::IntervalTree(void)
       : root(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTree<T>::IntervalTree(const IntervalTree &rhs)
+    template<typename T, bool DISCRETE>
+    IntervalTree<T,DISCRETE>::IntervalTree(const IntervalTree &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -330,8 +484,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTree<T>::~IntervalTree(void)
+    template<typename T, bool DISCRETE>
+    IntervalTree<T,DISCRETE>::~IntervalTree(void)
     //--------------------------------------------------------------------------
     {
       if (root != NULL)
@@ -340,8 +494,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    IntervalTree<T>& IntervalTree<T>::operator=(const IntervalTree &rhs)
+    template<typename T, bool DISCRETE>
+    IntervalTree<T,DISCRETE>& IntervalTree<T,DISCRETE>::operator=(
+                                                        const IntervalTree &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -350,22 +505,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    void IntervalTree<T>::insert(T left, T right)
+    template<typename T, bool DISCRETE>
+    void IntervalTree<T,DISCRETE>::insert(T left, T right)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(left <= right);
 #endif
       if (root == NULL)
-        root = new IntervalTreeNode<T>(left, right);
+        root = new IntervalTreeNode<T,DISCRETE>(left, right);
       else
+      {
         root = root->insert(left, right);
+        root = root->merge();
+      }
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    bool IntervalTree<T>::intersects(T left, T right) const
+    template<typename T, bool DISCRETE>
+    bool IntervalTree<T,DISCRETE>::intersects(T left, T right) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -377,17 +535,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T>
-    bool IntervalTree<T>::dominates(T left, T right) const
+    template<typename T, bool DISCRETE>
+    bool IntervalTree<T,DISCRETE>::dominates(T left, T right) const
     //--------------------------------------------------------------------------
     {
       if (root == NULL)
         return false;
       return root->dominates(left, right);
     }
+
   };
 };
 
 #endif // __LEGION_INTERVAL_TREE_H__
 
 // EOF
+

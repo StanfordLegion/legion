@@ -37,6 +37,7 @@
 // then enable it for both the logical and
 // physical tree analyses.
 #ifdef FIELD_TREE
+#error "FIELD_TREE macro is no longer supported"
 #define LOGICAL_FIELD_TREE
 #define PHYSICAL_FIELD_TREE
 #endif
@@ -54,13 +55,6 @@
 #ifndef FIELD_LOG2
 #define FIELD_LOG2         7 // log2(MAX_FIELDS)
 #endif
-// The folowing macros are used in the FieldMask instantiation of BitMask
-// If you change one you probably have to change the others too
-#define FIELD_TYPE          uint64_t 
-#define FIELD_SHIFT         6
-#define FIELD_MASK          0x3F
-#define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
-
 // Some default values 
 
 // The maximum number of nodes to be run on
@@ -80,9 +74,11 @@
 #ifndef DEFAULT_CONTEXTS
 #define DEFAULT_CONTEXTS                8 
 #endif
-// Maximum number of allowed contexts ever in Legion runtime
+// Maximum number of allowed contexts that can be created
+// by a Legion runtime instance on a given node. Powers of
+// 2 are encouraged.
 #ifndef MAX_CONTEXTS
-#define MAX_CONTEXTS                    1024
+#define MAX_CONTEXTS                    128
 #endif
 // Maximum number of sub-tasks per task at a time
 #ifndef DEFAULT_MAX_TASK_WINDOW
@@ -450,6 +446,7 @@ namespace LegionRuntime {
 
     class DistributedCollectable;
     class HierarchicalCollectable;
+    class LayoutDescription;
     class PhysicalManager; // base class for instance and reduction
     class LogicalView; // base class for instance and reduction
     class InstanceManager;
@@ -571,6 +568,14 @@ namespace LegionRuntime {
     // aligned backing store on the heap.  While correct, this
     // will disable many compiler optimizations due to GCC and
     // other C compilers being awful at alias analysis.
+
+// The folowing macros are used in the FieldMask instantiation of BitMask
+// If you change one you probably have to change the others too
+#define FIELD_TYPE          uint64_t 
+#define FIELD_SHIFT         6
+#define FIELD_MASK          0x3F
+#define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
+
 #if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
 #if (MAX_FIELDS > 256)
     typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
@@ -598,6 +603,46 @@ namespace LegionRuntime {
 #endif
     typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;
+#undef FIELD_SHIFT
+#undef FIELD_MASK
+
+    // Similar logic as field masks for node masks
+
+// The following macros are used in the NodeMask instantiation of BitMask
+// If you change one you probably have to change the others too
+#define NODE_TYPE           uint64_t
+#define NODE_SHIFT          6
+#define NODE_MASK           0x3F
+#define NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
+
+#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
+#if (MAX_NUM_NODES > 256)
+    typedef AVXTLBitMask<MAX_NUM_NODES> NodeMask;
+#elif (MAX_NUM_NODES > 128)
+    typedef AVXBitMask<MAX_NUM_NODES> NodeMask;
+#elif (MAX_NUM_NODES > 64)
+    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#else
+    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+#endif
+#elif defined(__SSE2__)
+#if (MAX_NUM_NODES > 128)
+    typedef SSETLBitMask<MAX_NUM_NODES> NodeMask;
+#elif (MAX_NUM_NODES > 64)
+    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#else
+    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+#endif
+#else
+#if (MAX_NUM_NODES > 64)
+    typedef TLBitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+#else
+    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+#endif
+#endif
+
+#undef NODE_SHIFT
+#undef NODE_MASK
 
 #define FRIEND_ALL_RUNTIME_CLASSES                \
     friend class HighLevelRuntime;                \
@@ -642,6 +687,7 @@ namespace LegionRuntime {
     friend class MaterializedView;                \
     friend class CompositeView;                   \
     friend class CompositeNode;                   \
+    friend class LayoutDescription;               \
     friend class PhysicalManager;                 \
     friend class InstanceManager;                 \
     friend class ReductionManager;                \
@@ -716,7 +762,6 @@ namespace LegionRuntime {
       TIME_HIGH_LEVEL_FREE_FIELD = TIME_HIGH_LEVEL, 
 #endif
     };
-
 
   }; // HighLevel namespace
 }; // LegionRuntime namespace

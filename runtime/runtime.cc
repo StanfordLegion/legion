@@ -3507,13 +3507,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MessageManager::send_user(Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      package_message(rez, SEND_USER, flush);
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_subscriber(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3525,6 +3518,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_MATERIALIZED_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_materialized_update(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_MATERIALIZED_UPDATE, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3560,6 +3560,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_REDUCTION_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_reduction_update(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_REDUCTION_UPDATE, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -3973,11 +3980,6 @@ namespace LegionRuntime {
               runtime->handle_send_back_user(derez, remote_address_space);
               break;
             }
-          case SEND_USER:
-            {
-              runtime->handle_send_user(derez, remote_address_space);
-              break;
-            }
           case SEND_SUBSCRIBER:
             {
               runtime->handle_send_subscriber(derez, remote_address_space);
@@ -3987,6 +3989,12 @@ namespace LegionRuntime {
             {
               runtime->handle_send_materialized_view(derez, 
                                                      remote_address_space);
+              break;
+            }
+          case SEND_MATERIALIZED_UPDATE:
+            {
+              runtime->handle_send_materialized_update(derez,
+                                                       remote_address_space);
               break;
             }
           case SEND_BACK_MATERIALIZED_VIEW:
@@ -4015,6 +4023,12 @@ namespace LegionRuntime {
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_UPDATE:
+            {
+              runtime->handle_send_reduction_update(derez, 
+                                                    remote_address_space);
               break;
             }
           case SEND_BACK_REDUCTION_VIEW:
@@ -8548,15 +8562,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_user(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // I don't think flush needs to be true, but if we see trouble
-      // with the garbage collector we might need to revisit it.
-      find_messenger(target)->send_user(rez, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_subscriber(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -8568,6 +8573,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_materialized_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_materialized_update(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_materialized_update(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8605,6 +8618,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_reduction_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_reduction_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_reduction_update(rez, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8971,13 +8991,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_user(Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_send_user(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_subscriber(Deserializer &derez, 
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -8991,6 +9004,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       MaterializedView::handle_send_materialized_view(forest, derez, source); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_materialized_update(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_send_updates(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -9032,6 +9053,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ReductionView::handle_send_reduction_view(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_reduction_update(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ReductionView::handle_send_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -9673,12 +9702,17 @@ namespace LegionRuntime {
       // RegionTreeForest's resize method!
       unsigned current_contexts = total_contexts;
       __sync_fetch_and_add(&total_contexts,current_contexts);
-      if (total_contexts >= MAX_CONTEXTS)
+      if (total_contexts > MAX_CONTEXTS)
       {
         log_run(LEVEL_ERROR,"ERROR: Maximum number of allowed contexts %d "
-                            "exceeded.  Please change 'MAX_CONTEXTS' at top "
-                            "of legion_types.h and recompile.",
-                            MAX_CONTEXTS);
+                            "exceeded when initializing task %s (UID %lld). "
+                            "Please change 'MAX_CONTEXTS' at top "
+                            "of legion_types.h and recompile. It is also "
+                            "possible to reduce context usage by annotating "
+                            "task variants as leaf tasks since leaf tasks do "
+                            "not require context allocation.",
+                            MAX_CONTEXTS, task->variants->name,
+                            task->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9689,7 +9723,7 @@ namespace LegionRuntime {
 #endif
       // Tell the forest to resize the number of available contexts
       // on all the nodes
-      forest->resize_node_contexts(total_contexts);
+      forest->resize_node_contexts(current_contexts);
     }
 
     //--------------------------------------------------------------------------

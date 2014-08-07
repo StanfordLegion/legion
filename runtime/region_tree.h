@@ -248,7 +248,7 @@ namespace LegionRuntime {
                                const RegionRequirement &req,
                                UniqueID unique_id,
                                AddressSpaceID target,
-                               std::set<LogicalView*> &needed_views,
+                               std::map<LogicalView*,FieldMask> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void send_tree_shape(const IndexSpaceRequirement &req,
                            AddressSpaceID target);
@@ -266,7 +266,8 @@ namespace LegionRuntime {
       void send_remote_references(
           const std::set<PhysicalManager*> &needed_managers,
           AddressSpaceID target);
-      void send_remote_references(const std::set<LogicalView*> &needed_views,
+      void send_remote_references(
+          const std::map<LogicalView*,FieldMask> &needed_views,
           const std::set<PhysicalManager*> &needed_managers, 
           AddressSpaceID target);
       void handle_remote_references(Deserializer &derez);
@@ -597,8 +598,8 @@ namespace LegionRuntime {
       const Color color;
       RegionTreeForest *const context;
     public:
-      std::set<AddressSpaceID> creation_set;
-      std::set<AddressSpaceID> destruction_set;
+      NodeMask creation_set;
+      NodeMask destruction_set;
     protected:
       Reservation node_lock;
     protected:
@@ -793,6 +794,17 @@ namespace LegionRuntime {
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop);
     public:
+      LayoutDescription* find_layout_description(const FieldMask &mask,
+                                                 const Domain &domain,
+                                                 size_t blocking_factor);
+      LayoutDescription* create_layout_description(const FieldMask &mask,
+                                                   const Domain &domain,
+                                                   size_t blocking_factor,
+                                   const std::set<FieldID> &create_fields,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<unsigned> &indexes);
+      LayoutDescription* register_layout_description(LayoutDescription *desc);
+    public:
       void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
@@ -811,8 +823,8 @@ namespace LegionRuntime {
       const FieldSpace handle;
       RegionTreeForest *const context;
     public:
-      std::set<AddressSpaceID> creation_set;
-      std::set<AddressSpaceID> destruction_set;
+      NodeMask creation_set;
+      NodeMask destruction_set;
     private:
       Reservation node_lock;
       // Top nodes in the trees for which this field space is used
@@ -825,6 +837,11 @@ namespace LegionRuntime {
        * this node.
        */
       std::map<AddressSpaceID,FieldPermutation> transformers;
+    private:
+      // Keep track of the layouts associated with this field space
+      // Index them by their hash of their field mask to help
+      // differentiate them.
+      std::map<FIELD_TYPE,std::deque<LayoutDescription*> > layouts;
     };
  
     /**
@@ -1695,7 +1712,7 @@ namespace LegionRuntime {
       bool pack_send_state(ContextID ctx, Serializer &rez, 
                            AddressSpaceID target,
                            const FieldMask &send_mask,
-                           std::set<LogicalView*> &needed_views,
+                           std::map<LogicalView*,FieldMask> &needed_views,
                            std::set<PhysicalManager*> &needed_managers);
       bool pack_send_back_state(ContextID ctx, Serializer &rez,
                                 AddressSpaceID target, const FieldMask &send_mask,
@@ -1724,8 +1741,8 @@ namespace LegionRuntime {
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
     public:
-      std::set<AddressSpaceID> creation_set;
-      std::set<AddressSpaceID> destruction_set;
+      NodeMask creation_set;
+      NodeMask destruction_set;
     protected:
       Reservation node_lock;
       LegionStack<LogicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> logical_states;
@@ -1831,7 +1848,7 @@ namespace LegionRuntime {
     public:
       bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::set<LogicalView*> &needed_views,
+                      std::map<LogicalView*,FieldMask> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -1931,7 +1948,7 @@ namespace LegionRuntime {
     public:
       bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::set<LogicalView*> &needed_views,
+                      std::map<LogicalView*,FieldMask> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -2232,7 +2249,7 @@ namespace LegionRuntime {
     class StateSender : public NodeTraverser {
     public:
       StateSender(ContextID ctx, UniqueID uid, AddressSpaceID target,
-                  std::set<LogicalView*> &needed_views,
+                  std::map<LogicalView*,FieldMask> &needed_views,
                   std::set<PhysicalManager*> &needed_managers,
                   const FieldMask &send_mask, bool invalidate);
       StateSender(const StateSender &rhs);
@@ -2247,7 +2264,7 @@ namespace LegionRuntime {
       const ContextID ctx;
       const UniqueID uid;
       const AddressSpaceID target;
-      std::set<LogicalView*> &needed_views;
+      std::map<LogicalView*,FieldMask> &needed_views;
       std::set<PhysicalManager*> &needed_managers;
       const FieldMask send_mask;
       const bool invalidate;
@@ -2307,6 +2324,80 @@ namespace LegionRuntime {
       const bool invalidate;
       const FieldMask return_mask;
       std::set<PhysicalManager*> &needed_managers;
+    };
+
+    /**
+     * \class LayoutDescription
+     * This class is for deduplicating the meta-data
+     * associated with describing the layouts of physical
+     * instances. Often times this meta data is rather 
+     * large (~100K) and since we routinely create up
+     * to 100K instances, it is important to deduplicate
+     * the data.  Since many instances will have the
+     * same layout then they can all share the same
+     * description object.
+     */
+    class LayoutDescription {
+    public:
+      struct OffsetEntry {
+      public:
+        OffsetEntry(void) { }
+        OffsetEntry(const FieldMask &m,
+                    const std::vector<Domain::CopySrcDstField> &f)
+          : offset_mask(m), offsets(f) { }
+      public:
+        FieldMask offset_mask;
+        std::vector<Domain::CopySrcDstField> offsets;
+      };
+    public:
+      LayoutDescription(const FieldMask &mask,
+                        const Domain &domain,
+                        size_t blocking_factor,
+                        FieldSpaceNode *owner);
+      LayoutDescription(const LayoutDescription &rhs);
+      ~LayoutDescription(void);
+    public:
+      LayoutDescription& operator=(const LayoutDescription &rhs);
+    public:
+      void compute_copy_offsets(const FieldMask &copy_mask, 
+                                PhysicalInstance inst,
+                                std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
+                                PhysicalInstance inst,
+                                std::vector<Domain::CopySrcDstField> &fields);
+    public:
+      void add_field_info(FieldID fid, unsigned index,
+                          size_t offset, size_t field_size);
+      const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
+      size_t get_layout_size(void) const;
+    public:
+      bool match_layout(size_t field_size, const Domain &dom) const;
+      bool match_layout(const std::vector<size_t> &field_sizes, 
+                        const Domain &dom, size_t bf) const;
+      bool match_layout(const FieldMask &mask, 
+                        const Domain &dom, size_t bf) const;
+      bool match_layout(LayoutDescription *rhs) const;
+    public:
+      void pack_layout_description(Serializer &rez, AddressSpaceID target);
+      void unpack_layout_description(Deserializer &derez);
+      void update_known_nodes(AddressSpaceID target);
+      static LayoutDescription* handle_unpack_layout_description(
+          Deserializer &derez, AddressSpaceID source, RegionNode *node);
+    public:
+      const FieldMask allocated_fields;
+      const size_t blocking_factor;
+      const Domain domain; 
+      FieldSpaceNode *const owner;
+    protected:
+      std::map<FieldID,Domain::CopySrcDstField> field_infos;
+      // Remember these indexes are only good on the local node and
+      // have to be transformed when the manager is sent remotely
+      std::map<unsigned/*index*/,FieldID> field_indexes;
+    protected:
+      Reservation offset_lock; 
+      std::map<FIELD_TYPE,std::vector<OffsetEntry> > memoized_offsets;
+    protected:
+      NodeMask known_nodes;
     };
  
     /**
@@ -2369,10 +2460,8 @@ namespace LegionRuntime {
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       Memory mem, PhysicalInstance inst, RegionNode *node,
-                      const FieldMask &mask, size_t blocking_factor,
-                      const std::map<FieldID,Domain::CopySrcDstField> &infos,
-                      const std::map<unsigned,FieldID> &indexes,
-                      Event use_event, unsigned depth, bool persistent = false);
+                      LayoutDescription *desc, Event use_event, 
+                      unsigned depth, bool persistent = false);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -2405,10 +2494,11 @@ namespace LegionRuntime {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      void pack_manager(Serializer &rez);
+      void pack_manager(Serializer &rez, AddressSpaceID target);
       static InstanceManager* unpack_manager(Deserializer &derez,
                                              RegionTreeForest *context, 
                                              DistributedID did,
+                                             AddressSpaceID source,
                                              bool make = true);
     public:
       void add_valid_view(MaterializedView *view);
@@ -2424,17 +2514,11 @@ namespace LegionRuntime {
                                          AddressSpaceID source);
     public:
       RegionNode *const region_node;
-      const FieldMask allocated_fields;
-      const size_t blocking_factor;
+      LayoutDescription *const layout;
       // Event that needs to trigger before we can start using
       // this physical instance.
       const Event use_event;
       const unsigned depth;
-    protected:
-      const std::map<FieldID,Domain::CopySrcDstField> field_infos;
-      // Remember these indexes are only good on the local node and
-      // have to be transformed when the manager is sent remotely
-      const std::map<unsigned/*index*/,FieldID> field_indexes;
     protected:
       // Keep track of whether we've recycled this instance or not
       bool recycled;
@@ -2447,9 +2531,6 @@ namespace LegionRuntime {
       // being collected before the context in which it was created
       // is destroyed.
       bool persistent;
-    protected:
-      Reservation offset_lock;
-      std::map<FIELD_TYPE,std::vector<OffsetEntry> > memoized_offsets;
     };
 
     /**
@@ -2627,14 +2708,6 @@ namespace LegionRuntime {
                                         Deserializer &derez,
                                         AddressSpaceID source);
     public:
-      void send_user(AddressSpaceID target, DistributedID target_did,
-                     const PhysicalUser &user);
-      virtual void process_send_user(AddressSpaceID source,
-                                     PhysicalUser &user) = 0;
-      static void handle_send_user(RegionTreeForest *context,
-                                   Deserializer &derez,
-                                   AddressSpaceID source);
-    public:
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
     protected:
@@ -2685,9 +2758,6 @@ namespace LegionRuntime {
     public:
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user) = 0;
-    public:
-      virtual void process_send_user(AddressSpaceID source,
-                                     PhysicalUser &user) = 0;
     public: // Virtual methods specific to InstanceView start here
       virtual bool is_composite_view(void) const = 0;
       virtual MaterializedView* as_materialized_view(void) const = 0;
@@ -2706,7 +2776,7 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::set<LogicalView*> &needed_views,
+                            std::map<LogicalView*,FieldMask> &needed_views,
                             std::set<PhysicalManager*> &needed_managers) = 0;
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -2783,8 +2853,6 @@ namespace LegionRuntime {
                                 const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
-      virtual void process_send_user(AddressSpaceID source,
-                                     PhysicalUser &user); 
     protected:
       void add_user_above(std::set<Event> &wait_on, PhysicalUser &user);
       template<bool ABOVE>
@@ -2807,13 +2875,11 @@ namespace LegionRuntime {
       void update_versions(const FieldMask &update_mask);
       void filter_local_users(Event term_event,
                               const FieldMask &term_mask);
-      void notify_subscribers(std::set<AddressSpaceID> &notified, 
-                              const PhysicalUser &user);
       void condense_user_list(std::list<PhysicalUser> &users);
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::set<LogicalView*> &needed_views,
+                            std::map<LogicalView*,FieldMask> &needed_views,
                             std::set<PhysicalManager*> &needed_managers);
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -2823,7 +2889,11 @@ namespace LegionRuntime {
       void make_persistent(void);
     protected:
       void pack_materialized_view(Serializer &rez);
-      void unpack_materialized_view(Deserializer &derez, AddressSpaceID source);
+      void unpack_materialized_view(Deserializer &derez, 
+                                    AddressSpaceID source, bool need_lock);
+      void send_updates(DistributedID remote_did, AddressSpaceID target,
+                        const FieldMask &update_mask);
+      void process_updates(Deserializer &derez, AddressSpaceID source);
     public:
       static void handle_send_materialized_view(RegionTreeForest *context, 
                                                 Deserializer &derez,
@@ -2831,6 +2901,11 @@ namespace LegionRuntime {
       static void handle_send_back_materialized_view(
                       RegionTreeForest *context, Deserializer &derez,
                       AddressSpaceID source); 
+      static void handle_send_updates(RegionTreeForest *context,
+                                      Deserializer &derez,
+                                      AddressSpaceID source);
+      static void filter_list(std::list<PhysicalUser> &user_list,
+                              const FieldMask &filter_mask);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -2883,7 +2958,8 @@ namespace LegionRuntime {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    DistributedID owner_did, CompositeView *parent = NULL);
+                    DistributedID owner_did, const FieldMask &mask,
+                    CompositeView *parent = NULL);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -2915,9 +2991,6 @@ namespace LegionRuntime {
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
     public:
-      virtual void process_send_user(AddressSpaceID source,
-                                     PhysicalUser &user);
-    public:
       virtual bool is_composite_view(void) const;
       virtual MaterializedView* as_materialized_view(void) const;
       virtual CompositeView* as_composite_view(void) const;
@@ -2926,6 +2999,7 @@ namespace LegionRuntime {
       virtual InstanceView* get_parent_view(void) const;
       virtual InstanceView* get_subview(Color c);
       bool add_subview(CompositeView *view, Color c);
+      void update_valid_mask(const FieldMask &mask);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -2936,7 +3010,7 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::set<LogicalView*> &needed_views,
+                            std::map<LogicalView*,FieldMask> &needed_views,
                             std::set<PhysicalManager*> &needed_managers);
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -2963,14 +3037,14 @@ namespace LegionRuntime {
       void pack_composite_view(Serializer &rez, bool send_back,
                                AddressSpaceID target,
                                const FieldMask &pack_mask,
-                               std::set<LogicalView*> &needed_views,
+                               std::map<LogicalView*,FieldMask> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void unpack_composite_view(Deserializer &derez, 
                                  AddressSpaceID source,
-                                 bool send_back);
+                                 bool send_back, bool need_lock);
       void send_updates(DistributedID remote_did, AddressSpaceID target, 
                         FieldMask send_mask, 
-                        std::set<LogicalView*> &needed_views,
+                        std::map<LogicalView*,FieldMask> &needed_views,
                         std::set<PhysicalManager*> &needed_managers);
     public:
       static void handle_send_composite_view(RegionTreeForest *context, 
@@ -2985,6 +3059,8 @@ namespace LegionRuntime {
     public:
       CompositeView *const parent;
     protected:
+      // The set of fields represented by this composite view
+      FieldMask valid_mask;
       // Keep track of the roots and their field masks
       // There is exactly one root for every field
       std::map<CompositeNode*,FieldMask> roots;
@@ -3054,7 +3130,7 @@ namespace LegionRuntime {
       void pack_composite_node(Serializer &rez, bool send_back,
                                AddressSpaceID target,
                                const FieldMask &send_mask,
-                               std::set<LogicalView*> &needed_views,
+                               std::map<LogicalView*,FieldMask> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void unpack_composite_node(Deserializer &derez, AddressSpaceID source);
     public:
@@ -3108,8 +3184,6 @@ namespace LegionRuntime {
     public:
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
-      void notify_subscribers(const PhysicalUser &user, 
-                              int skip = -1);
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
@@ -3119,12 +3193,10 @@ namespace LegionRuntime {
                                 const FieldMask &term_mask);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
-      virtual void process_send_user(AddressSpaceID source,
-                                     PhysicalUser &user);
     public:
       DistributedID send_state(AddressSpaceID target,
                                const FieldMask &send_mask,
-                               std::set<LogicalView*> &needed_views,
+                               std::map<LogicalView*,FieldMask> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       DistributedID send_back_state(AddressSpaceID target,
                                     const FieldMask &send_mask,
@@ -3132,10 +3204,15 @@ namespace LegionRuntime {
     public:
       void pack_reduction_view(Serializer &rez);
       void unpack_reduction_view(Deserializer &derez, AddressSpaceID source);
+      void send_updates(DistributedID remote_did, AddressSpaceID target,
+                        const FieldMask &update_mask);
+      void process_updates(Deserializer &derez, AddressSpaceID source);
     public:
       static void handle_send_reduction_view(RegionTreeForest *context,
                                 Deserializer &derez, AddressSpaceID source);
       static void handle_send_back_reduction_view(RegionTreeForest *context,
+                                Deserializer &derez, AddressSpaceID source);
+      static void handle_send_update(RegionTreeForest *context,
                                 Deserializer &derez, AddressSpaceID source);
     public:
       Memory get_location(void) const;
