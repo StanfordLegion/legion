@@ -5136,6 +5136,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    unsigned FieldSpaceNode::get_field_index(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != fields.end());
+#endif
+      return finder->second.idx;
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::get_field_indexes(const std::set<FieldID> &needed,
                                      std::map<unsigned,FieldID> &indexes) const
     //--------------------------------------------------------------------------
@@ -14237,7 +14249,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const FieldMask &mask, const Domain &d,
                                          size_t bf, FieldSpaceNode *own)
-      : allocated_fields(mask), blocking_factor(bf), domain(d), owner(own)
+      : allocated_fields(mask), blocking_factor(bf), 
+        volume(compute_layout_volume(d)), owner(own)
     //--------------------------------------------------------------------------
     {
       offset_lock = Reservation::create_reservation();
@@ -14247,7 +14260,7 @@ namespace LegionRuntime {
     LayoutDescription::LayoutDescription(const LayoutDescription &rhs)
       : allocated_fields(rhs.allocated_fields), 
         blocking_factor(rhs.blocking_factor), 
-        domain(rhs.domain), owner(rhs.owner)
+        volume(rhs.volume), owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14419,26 +14432,15 @@ namespace LegionRuntime {
       {
         result += (it->second.size);
       }
-      // Now multiply by the number of elements
-      if (domain.get_dim() == 0)
-      {
-        const LowLevel::ElementMask &mask = 
-          domain.get_index_space().get_valid_mask();
-        result *= mask.get_num_elmts();
-      }
-      else
-        result *= domain.get_volume();
+      result *= volume;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(size_t field_size,
-                                         const Domain &dom) const
+    bool LayoutDescription::match_shape(const size_t field_size) const
     //--------------------------------------------------------------------------
     {
       if (field_infos.size() != 1)
-        return false;
-      if (domain != dom)
         return false;
       if (field_infos.begin()->second.size != field_size)
         return false;
@@ -14446,15 +14448,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(const std::vector<size_t> &field_sizes,
-                                         const Domain &dom, size_t bf) const
+    bool LayoutDescription::match_shape(const std::vector<size_t> &field_sizes,
+                                        const size_t bf) const
     //--------------------------------------------------------------------------
     {
       if (field_sizes.size() != field_infos.size())
         return false;
       if (blocking_factor != bf)
-        return false;
-      if (domain != dom)
         return false;
       for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
@@ -14479,12 +14479,12 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(const FieldMask &mask,
-                                         const Domain &dom, size_t bf) const
+                                         const size_t vl, const size_t bf) const
     //--------------------------------------------------------------------------
     {
       if (blocking_factor != bf)
         return false;
-      if (domain != dom)
+      if (volume != vl)
         return false;
       if (allocated_fields != mask)
         return false;
@@ -14492,10 +14492,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool LayoutDescription::match_layout(const FieldMask &mask, const Domain &d,
+                                         const size_t bf) const
+    //--------------------------------------------------------------------------
+    {
+      return match_layout(mask, compute_layout_volume(d), bf);
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(LayoutDescription *rhs) const
     //--------------------------------------------------------------------------
     {
-      return match_layout(rhs->allocated_fields, rhs->domain, 
+      return match_layout(rhs->allocated_fields, rhs->volume, 
                           rhs->blocking_factor);
     }
 
@@ -14534,7 +14542,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != field_infos.end());
 #endif
-          rez.serialize(it->first);
           rez.serialize(it->second);
           rez.serialize(finder->second.offset);
           rez.serialize(finder->second.size);
@@ -14550,10 +14557,9 @@ namespace LegionRuntime {
       derez.deserialize(num_fields);
       for (unsigned idx = 0; idx < num_fields; idx++)
       {
-        unsigned index;
-        derez.deserialize(index);
         FieldID fid;
         derez.deserialize(fid);
+        unsigned index = owner->get_field_index(fid);
         field_indexes[index] = fid;
         unsigned offset, size;
         derez.deserialize(offset);
@@ -14611,6 +14617,20 @@ namespace LegionRuntime {
       // Only do this after we've registered the instance
       result->update_known_nodes(source);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ size_t LayoutDescription::compute_layout_volume(const Domain &d)
+    //--------------------------------------------------------------------------
+    {
+      if (d.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &mask = 
+          d.get_index_space().get_valid_mask();
+        return mask.get_num_elmts();
+      }
+      else
+        return d.get_volume();
     }
 
     /////////////////////////////////////////////////////////////
@@ -15105,7 +15125,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
-      return layout->match_layout(field_size, dom);
+      // First check to see if the domains are the same
+      if (region_node->get_domain() != dom)
+        return false;
+      return layout->match_shape(field_size);
     }
 
     //--------------------------------------------------------------------------
@@ -15117,7 +15140,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
-      return layout->match_layout(field_sizes, dom, bf);
+      // First check to see if the domains are the same
+      if (region_node->get_domain() != dom)
+        return false;
+      return layout->match_shape(field_sizes, bf);
     }
 
     //--------------------------------------------------------------------------

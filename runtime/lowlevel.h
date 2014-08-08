@@ -264,6 +264,8 @@ namespace LegionRuntime {
       bool is_set(int ptr) const;
       size_t pop_count(bool enabled = true) const;
       bool operator!(void) const;
+      bool operator==(const ElementMask &other) const;
+      bool operator!=(const ElementMask &other) const;
       // union/intersect/subtract?
       ElementMask operator|(const ElementMask &other) const;
       ElementMask operator&(const ElementMask &other) const;

@@ -2338,6 +2338,31 @@ namespace LegionRuntime {
       return true;
     }
 
+    bool ElementMask::operator==(const ElementMask &other) const
+    {
+      if (num_elements != other.num_elements)
+        return false;
+      if (raw_data != 0) {
+        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
+        assert(other.raw_data != 0);
+        ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+        const int max_full = ((num_elements+31) >> 5);
+        for (int index = 0; index < max_full; index++)
+        {
+          if (impl->bits[index] != other_impl->bits[index])
+            return false;
+        }
+      } else {
+        assert(false);
+      }
+      return true;
+    }
+
+    bool ElementMask::operator!=(const ElementMask &other) const
+    {
+      return !((*this) == other);
+    }
+
     ElementMask ElementMask::operator|(const ElementMask &other) const
     {
       ElementMask result(num_elements); 

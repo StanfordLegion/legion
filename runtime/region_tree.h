@@ -783,6 +783,7 @@ namespace LegionRuntime {
     public:
       void transform_field_mask(FieldMask &mask, AddressSpaceID source);
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
+      unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::set<FieldID> &fields,
                              std::map<unsigned,FieldID> &indexes) const;
     public:
@@ -2371,11 +2372,14 @@ namespace LegionRuntime {
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_layout_size(void) const;
     public:
-      bool match_layout(size_t field_size, const Domain &dom) const;
-      bool match_layout(const std::vector<size_t> &field_sizes, 
-                        const Domain &dom, size_t bf) const;
+      bool match_shape(const size_t field_size) const;
+      bool match_shape(const std::vector<size_t> &field_sizes, 
+                       const size_t bf) const;
+    public:
       bool match_layout(const FieldMask &mask, 
-                        const Domain &dom, size_t bf) const;
+                        const size_t vol, const size_t bf) const;
+      bool match_layout(const FieldMask &mask,
+                        const Domain &d, const size_t bf) const;
       bool match_layout(LayoutDescription *rhs) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
@@ -2384,9 +2388,11 @@ namespace LegionRuntime {
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
+      static size_t compute_layout_volume(const Domain &d);
+    public:
       const FieldMask allocated_fields;
       const size_t blocking_factor;
-      const Domain domain; 
+      const size_t volume;
       FieldSpaceNode *const owner;
     protected:
       std::map<FieldID,Domain::CopySrcDstField> field_infos;

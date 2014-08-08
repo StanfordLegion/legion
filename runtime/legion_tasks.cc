@@ -4987,7 +4987,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void MultiTask::fold_reduction_future(const void *result, 
-                                          size_t result_size, bool owner)
+                                          size_t result_size, 
+                                          bool owner, bool exclusive)
     //--------------------------------------------------------------------------
     {
       // Apply the reduction operation
@@ -5004,7 +5005,7 @@ namespace LegionRuntime {
         reduction_op->init(reduction_state,1);
       }
       // Now do the fold operation
-      reduction_op->fold(reduction_state, result, 1, true/*exclusive*/);
+      reduction_op->fold(reduction_state, result, 1, exclusive);
 
       // If we're the owner, then free the memory
       if (owner)
@@ -7028,7 +7029,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Future IndexTask::initialize_task(SingleTask *ctx,
                                       const IndexLauncher &launcher,
-                                      ReductionOpID redop, 
+                                      ReductionOpID redop_id, 
                                       bool check_privileges,
                                       bool track /*= true*/)
     //--------------------------------------------------------------------------
@@ -7068,6 +7069,7 @@ namespace LegionRuntime {
       if (must_parallelism)
         must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
+      redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
       if (!reduction_op->is_foldable)
       {
@@ -7196,7 +7198,7 @@ namespace LegionRuntime {
             const std::vector<RegionRequirement> &region_requirements,
             const TaskArgument &global_arg,
             const ArgumentMap &arg_map,
-            ReductionOpID redop,
+            ReductionOpID redop_id,
             const TaskArgument &init_value,
             const Predicate &pred,
             bool must,
@@ -7234,6 +7236,7 @@ namespace LegionRuntime {
         if (must_parallelism)
         must_barrier = Barrier::create_barrier(1);
       index_domain = domain;
+      redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
       if (!reduction_op->is_foldable)
       {
@@ -7632,7 +7635,8 @@ namespace LegionRuntime {
           f.impl->set_result(result,result_size,true/*owner*/);
         }
         else
-          fold_reduction_future(result, result_size, true/*owner*/);
+          fold_reduction_future(result, result_size, 
+                                true/*owner*/, true/*exclusive*/);
       }
       if (redop == 0)
         future_map.impl->complete_all_futures();
@@ -7690,11 +7694,8 @@ namespace LegionRuntime {
     {
       // Need to hold the lock when doing this since it could
       // be going in parallel with other users
-      if (redop != 0)
-      {
-        AutoLock o_lock(op_lock);
-        fold_reduction_future(result, result_size, owner);
-      }
+      if (reduction_op != NULL)
+        fold_reduction_future(result, result_size, owner, false/*exclusive*/);
       else
       {
         AutoLock o_lock(op_lock);
@@ -8453,7 +8454,7 @@ namespace LegionRuntime {
       if (is_remote())
       {
         if (redop != 0)
-          fold_reduction_future(result, result_size, owner);
+          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
         else
         {
           // Store it in our temporary futures

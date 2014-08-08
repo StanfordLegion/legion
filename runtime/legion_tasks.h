@@ -534,7 +534,7 @@ namespace LegionRuntime {
       void unpack_multi_task(Deserializer &derez, bool unpack_args);
     public:
       void fold_reduction_future(const void *result, size_t result_size,
-                                 bool owner);
+                                 bool owner, bool exclusive);
     protected:
       bool sliced;
       Barrier must_barrier; // for must parallelism
