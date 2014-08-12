@@ -2310,6 +2310,8 @@ def trans_type(t, cx):
         return 'Coloring'
     if types.is_pointer(t) and len(t.regions) == 1:
         return 'ptr_t'
+    if types.is_reference(t):
+        return trans_type(t.as_read(), cx)
 
     # Translate foreign types:
     if types.is_foreign_coloring(t):
