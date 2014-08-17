@@ -2659,9 +2659,11 @@ namespace LegionRuntime {
 #else
           Processor util = local_proc.get_utility_processor();
 #endif
-          Operation *proxy_this = this;
-          util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
-                      sizeof(proxy_this), copy_complete_event);
+          DeferredCompleteArgs deferred_complete_args;
+          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+          deferred_complete_args.proxy_this = this;
+          util.spawn(HLR_TASK_ID, &deferred_complete_args, 
+                      sizeof(deferred_complete_args), copy_complete_event);
         }
         else
           deferred_complete();
@@ -3040,9 +3042,11 @@ namespace LegionRuntime {
           Processor util = parent_ctx->get_executing_processor().
                             get_utility_processor();
 #endif
-          Operation *proxy_this = this;
-          util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                     sizeof(proxy_this), wait_on);
+          DeferredCompleteArgs deferred_complete_args;
+          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+          deferred_complete_args.proxy_this = this;
+          util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                     sizeof(deferred_complete_args), wait_on);
         }
         else
           deferred_complete();
@@ -3612,7 +3616,6 @@ namespace LegionRuntime {
         // when we are complete.
         completion_event.trigger(close_event);
         need_completion_trigger = false;
-        CloseOp *proxy_this = this;
 #ifdef SPECIALIZED_UTIL_PROCS
         Processor util = runtime->get_cleanup_proc(
                           parent_ctx->get_executing_processor());
@@ -3620,8 +3623,11 @@ namespace LegionRuntime {
         Processor util = parent_ctx->get_executing_processor().
                           get_utility_processor();
 #endif
-        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this, 
-                   sizeof(proxy_this), close_event);
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args, 
+                   sizeof(deferred_complete_args), close_event);
       }
       else
         deferred_complete();
@@ -3875,9 +3881,11 @@ namespace LegionRuntime {
 #else
         Processor util = local_proc.get_utility_processor();
 #endif
-        Operation *proxy_this = this;
-        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                    sizeof(proxy_this), acquire_complete);
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                    sizeof(deferred_complete_args), acquire_complete);
       }
       else
         deferred_complete();
@@ -4296,9 +4304,11 @@ namespace LegionRuntime {
 #else
         Processor util = local_proc.get_utility_processor();
 #endif
-        Operation *proxy_this = this;
-        util.spawn(DEFERRED_COMPLETE_ID, &proxy_this,
-                   sizeof(proxy_this), release_complete);
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                   sizeof(deferred_complete_args), release_complete);
       }
       else
         deferred_complete();

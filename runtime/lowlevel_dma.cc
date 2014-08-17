@@ -2164,7 +2164,7 @@ namespace LegionRuntime {
 	  for (unsigned idx = 0; idx < oasvec.size(); idx++)
 	    ipc->copy_field(sstart, dstart, rlen, idx);
 	}
-
+        delete e;
 	delete ipc;
       }
     }
@@ -2951,6 +2951,7 @@ namespace LegionRuntime {
 
 	      // all done - we can trigger the event locally in this case
 	      after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
+              delete e;
 	      break;
 	    }
 
@@ -3026,6 +3027,7 @@ namespace LegionRuntime {
 	      } else {
 		after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
 	      }
+              delete e;
 	      break;
             }
 
@@ -3099,6 +3101,8 @@ namespace LegionRuntime {
 
 	      // also release the instance lock
 	      dst_impl->lock.release();
+
+              delete e;
 
 	      break;
 	    }

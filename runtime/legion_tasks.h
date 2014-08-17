@@ -235,6 +235,11 @@ namespace LegionRuntime {
         size_t     field_size;
         Event      reclaim_event;
       };
+      struct PostEndArgs {
+      public:
+        HLRTaskID hlr_id;
+        SingleTask *proxy_this;
+      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -486,6 +491,7 @@ namespace LegionRuntime {
     public:
       bool is_sliced(void) const;
       bool slice_index_space(void);
+      bool trigger_slices(void);
       void clone_multi_from(MultiTask *task, const Domain &d, Processor p,
                             bool recurse, bool stealable);
     public:

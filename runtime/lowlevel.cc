@@ -3914,6 +3914,18 @@ namespace LegionRuntime {
 	size_t zero = 0;
 	put_bytes(count_offset, &zero, sizeof(zero));
       }
+      else if (redopid > 0)
+      {
+        assert(field_sizes.size() == 1);
+        // Otherwise if this is a fold reduction instance then
+        // we need to initialize the memory with the identity
+        const ReductionOpUntyped *redop = reduce_op_table[redopid];
+        assert(redop->has_identity);
+        assert(element_size == redop->sizeof_rhs);
+        void *ptr = get_direct_ptr(inst_offset, bytes_needed); 
+        size_t num_elements = bytes_needed/element_size;
+        redop->init(ptr, num_elements);
+      }
 
       // SJT: think about this more to see if there are any race conditions
       //  with an allocator temporarily having the wrong ID
@@ -3921,6 +3933,7 @@ namespace LegionRuntime {
 				   ID(me).node(),
 				   ID(me).index_h(),
 				   0).convert<RegionInstance>();
+
 
       //RegionMetaDataImpl *r_impl = Runtime::runtime->get_metadata_impl(r);
       DomainLinearization linear;

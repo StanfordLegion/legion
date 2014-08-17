@@ -10475,7 +10475,7 @@ namespace LegionRuntime {
       // don't have complete data for below.
       FieldMask capture_mask = closing_mask - complete_below;
       if (!!capture_mask)
-        node->capture_physical_state(this, state, closing_mask - complete_below,
+        node->capture_physical_state(this, state, capture_mask,
                                      closer, dirty_mask, complete_mask);
       dirty_mask |= dirty_below;
       complete_mask |= complete_below;
@@ -15525,6 +15525,9 @@ namespace LegionRuntime {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(instance.exists());
+#endif
       // Assume that it's all the fields for right now
       // but offset by the pointer size
       fields.push_back(
@@ -15538,6 +15541,9 @@ namespace LegionRuntime {
         Domain space, Event precondition, bool reduction_fold, bool precise)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(instance.exists());
+#endif
       if (precise)
       {
         Domain::CopySrcDstField idx_field(instance, 0/*offset*/, sizeof(ptr_t));
@@ -15660,6 +15666,9 @@ namespace LegionRuntime {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(instance.exists());
+#endif
       // Assume that its all the fields for now
       // until we find a different way to do reductions on a subset of fields
       fields.push_back(
@@ -15673,6 +15682,9 @@ namespace LegionRuntime {
         Domain space, Event precondition, bool reduction_fold, bool precise)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(instance.exists());
+#endif
       // Doesn't matter if this one is precise or not
       return space.copy(src_fields, dst_fields, precondition, 
                         redop, reduction_fold);
@@ -15719,6 +15731,8 @@ namespace LegionRuntime {
       PerfTracer tracer(context, DEFER_COLLECT_USER_CALL);
 #endif
       Serializer rez;
+      // Do this before the check since it gets pulled off first
+      rez.serialize<HLRTaskID>(HLR_DEFERRED_COLLECT_ID);
       // Indicate that this is the first deferred collect pass.
       // Garbage collection gets deferred twice: once until the
       // termination event has triggered and then again until
@@ -15745,8 +15759,8 @@ namespace LegionRuntime {
       Processor util_proc = p.get_utility_processor();
 #endif
       // Now launch the task on the runtime's utility processor
-      util_proc.spawn(DEFERRED_COLLECT_ID,
-                      rez.get_buffer(), rez.get_used_bytes(), term_event);
+      util_proc.spawn(HLR_TASK_ID, rez.get_buffer(), 
+                      rez.get_used_bytes(), term_event);
     }
 
     //--------------------------------------------------------------------------
@@ -15772,6 +15786,8 @@ namespace LegionRuntime {
         // receive back an event to use for doing the second deferral
         Event defer_event = context->runtime->find_gc_epoch_event(gc_proc);
         Serializer rez;
+        // Do this before the check since it gets pulled off first
+        rez.serialize<HLRTaskID>(HLR_DEFERRED_COLLECT_ID);
         {
           RezCheck z(rez);
           rez.serialize<bool>(false); // no longer the first pass
@@ -15780,8 +15796,8 @@ namespace LegionRuntime {
           rez.serialize(term_mask);
         }
         Processor util_proc = gc_proc.get_utility_processor();
-        util_proc.spawn(DEFERRED_COLLECT_ID,
-                        rez.get_buffer(), rez.get_used_bytes(), defer_event);
+        util_proc.spawn(HLR_TASK_ID, rez.get_buffer(), 
+                        rez.get_used_bytes(), defer_event);
       }
       else
       {
@@ -18366,6 +18382,12 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!(valid - valid_mask));
+      // There should always be at most one root for each field
+      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
+            roots.begin(); it != roots.end(); it++)
+      {
+        assert(it->second * valid);
+      }
 #endif
       std::map<CompositeNode*,FieldMask>::iterator finder = roots.find(root);
       if (finder == roots.end())
@@ -18775,6 +18797,9 @@ namespace LegionRuntime {
       // Iterate over all the roots and issue copies to update the 
       // target instance from this particular view
       std::map<Event,FieldMask> postconditions;
+#ifdef DEBUG_HIGH_LEVEL
+      FieldMask accumulate_mask;
+#endif
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             roots.begin(); it != roots.end(); it++)
       {
@@ -18783,6 +18808,10 @@ namespace LegionRuntime {
           continue;
         it->first->issue_update_copies(info, dst, overlap, overlap,
                                        preconditions, postconditions);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(overlap * accumulate_mask);
+        accumulate_mask |= overlap;
+#endif
       }
       // Fun trick here, use the precondition set routine to get the
       // sets of fields which all have the same precondition events
@@ -18798,10 +18827,15 @@ namespace LegionRuntime {
       {
         PreconditionSet &post_set = *pit;
         // Go through and issue any reductions for this set
-        if (!valid_reductions.empty() &&
-            !(reduction_mask * post_set.pre_mask))
-          flush_reductions(info, dst, post_set.pre_mask, 
-                           preconditions, post_set.preconditions);
+        if (!valid_reductions.empty())
+        {
+          FieldMask reduce_overlap = reduction_mask & post_set.pre_mask;
+          if (!!reduce_overlap)
+          {
+            flush_reductions(info, dst, reduce_overlap,
+                             preconditions, post_set.preconditions);
+          }
+        }
         // If the set is empty, then we can skip it
         if (post_set.preconditions.empty())
           continue;
@@ -18825,6 +18859,9 @@ namespace LegionRuntime {
       assert(!(copy_mask - valid_mask));
 #endif
       std::map<Event,FieldMask> local_postconditions;
+#ifdef DEBUG_HIGH_LEVEL
+      FieldMask accumulate_mask;
+#endif
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             roots.begin(); it != roots.end(); it++)
       {
@@ -18833,6 +18870,10 @@ namespace LegionRuntime {
           continue;
         it->first->issue_update_copies(info, dst, overlap, overlap,
                                        preconditions, local_postconditions);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(overlap * accumulate_mask);
+        accumulate_mask |= overlap;
+#endif
       }
       // Fun trick here, use the precondition set routine to get the
       // sets of fields which all have the same precondition events
@@ -18848,10 +18889,15 @@ namespace LegionRuntime {
       {
         PreconditionSet &post_set = *pit;
         // Go through and issue any reductions for this set
-        if (!valid_reductions.empty() &&
-            !(reduction_mask * post_set.pre_mask))
-          flush_reductions(info, dst, post_set.pre_mask, 
-                           preconditions, post_set.preconditions);
+        if (!valid_reductions.empty())
+        {
+          FieldMask reduce_overlap = reduction_mask & post_set.pre_mask;
+          if (!!reduce_overlap)
+          {
+            flush_reductions(info, dst, reduce_overlap,
+                             preconditions, post_set.preconditions);
+          }
+        }
         // If the set is empty, then we can skip it
         if (post_set.preconditions.empty())
           continue;
@@ -18894,6 +18940,9 @@ namespace LegionRuntime {
       if (!overlap_reductions.empty())
       {
         // Compute the preconditions for these fields
+        // Make sure that all the events in the event_set are
+        // included in the reduction preconditions because they
+        // are copies are also writing to the fields.
         std::set<Event> reduce_preconditions = event_set;
         for (std::map<Event,FieldMask>::const_iterator it = 
               preconditions.begin(); it != preconditions.end(); it++)
@@ -19612,15 +19661,21 @@ namespace LegionRuntime {
     {
       // See if we can fields with exactly one child that dominates
       FieldMask single, multi;
+      std::map<CompositeNode*,FieldMask> dominators;
       for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second.open_fields & bounding_mask;
         if (!overlap)
           continue;
-        if (!it->second.complete && 
-            !it->first->dominates(target->logical_node))
+        if (!it->first->dominates(target->logical_node))
           continue;
+        std::map<CompositeNode*,FieldMask>::iterator finder = 
+          dominators.find(it->first);
+        if (finder == dominators.end())
+          dominators[it->first] = overlap;
+        else
+          finder->second |= overlap;
         // Update the multi mask first 
         multi |= (single & overlap);
         // Now update the single mask
@@ -19632,10 +19687,10 @@ namespace LegionRuntime {
       // If we still have any single fields then go and issue them
       if (!!single)
       {
-        for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
-              open_children.begin(); it != open_children.end(); it++)
+        for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
+              dominators.begin(); it != dominators.end(); it++)
         {
-          FieldMask overlap = single & it->second.open_fields;
+          FieldMask overlap = single & it->second;
           if (!overlap)
             continue;
           it->first->find_bounding_roots(target, overlap);

@@ -318,16 +318,21 @@ namespace LegionRuntime {
       INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
       SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       SCHEDULER_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
-      MESSAGE_TASK_ID       = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+0),
-      POST_END_TASK_ID      = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
-      DEFERRED_COMPLETE_ID  = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2),
-      RECLAIM_LOCAL_FID     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3),
-      DEFERRED_COLLECT_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+4),
-      TRIGGER_DEPENDENCE_ID = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+5),
-      TRIGGER_OP_ID         = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+6),
-      TRIGGER_TASK_ID       = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+7),
-      DEFERRED_RECYCLE_ID   = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+8),
-      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+9),
+      HLR_TASK_ID           = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
+      TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
+    };
+
+    // Enumeration of high-level runtime tasks
+    enum HLRTaskID {
+      HLR_MESSAGE_ID,
+      HLR_POST_END_ID,
+      HLR_DEFERRED_COMPLETE_ID,
+      HLR_RECLAIM_LOCAL_FIELD_ID,
+      HLR_DEFERRED_COLLECT_ID,
+      HLR_TRIGGER_DEPENDENCE_ID,
+      HLR_TRIGGER_OP_ID,
+      HLR_TRIGGER_TASK_ID,
+      HLR_DEFERRED_RECYCLE_ID,
     };
 
     // Forward declarations for user level objects

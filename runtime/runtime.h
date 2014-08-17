@@ -24,7 +24,7 @@
 
 namespace LegionRuntime {
   namespace HighLevel {
-    
+
     /**
      * \class ArgumentMap::Impl
      * An argument map implementation that provides
@@ -332,13 +332,20 @@ namespace LegionRuntime {
      */
     class ProcessorManager {
     public:
+      struct DeferredTriggerArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *op;
+      };
       struct TriggerOpArgs {
       public:
+        HLRTaskID hlr_id;
         Operation *op;
         ProcessorManager *manager;
       };
       struct TriggerTaskArgs {
       public:
+        HLRTaskID hlr_id;
         TaskOp *op;
         ProcessorManager *manager;
       };
@@ -788,6 +795,12 @@ namespace LegionRuntime {
      * is terrible and doesn't have mix-in classes.
      */
     class Runtime {
+    public:
+      struct DeferredRecycleArgs {
+      public:
+        HLRTaskID hlr_id;
+        DistributedID did;
+      };
     public:
       Runtime(Machine *m, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
@@ -1374,17 +1387,7 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void schedule_runtime(
                           const void *args, size_t arglen, Processor p);
-      static void message_task(
-                          const void *args, size_t arglen, Processor p);
-      static void post_end_task(
-                          const void *args, size_t arglen, Processor p);
-      static void deferred_complete_task(
-                          const void *args, size_t arglen, Processor p);
-      static void reclaim_local_field_task(
-                          const void *args, size_t arglen, Processor p);
-      static void deferred_collect_task(
-                          const void *args, size_t arglen, Processor p);
-      static void trigger_dependence_task(
+      static void high_level_runtime_task(
                           const void *args, size_t arglen, Processor p);
       static void trigger_op_task(
                           const void *args, size_t arglen, Processor p);

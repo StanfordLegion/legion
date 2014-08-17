@@ -2938,7 +2938,6 @@ namespace LegionRuntime {
       std::set<Event> event_references;
       // Version information for each of the fields
       std::map<VersionID,FieldMask> current_versions;
-      
     };
 
     /**

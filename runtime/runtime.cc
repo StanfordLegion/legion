@@ -1051,8 +1051,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef BOUNDS_CHECKS
-      bounds = runtime->get_index_space_domain(context, 
-                                               req.region.get_index_space());
+      bounds = runtime->get_index_space_domain(req.region.get_index_space());
 #endif
     }
 
@@ -2627,6 +2626,8 @@ namespace LegionRuntime {
       // elements off the deeper queues first which optimizes
       // for a depth-first traversal of the task/operation tree.
       unsigned handled_ops = 0;
+      DeferredTriggerArgs deferred_trigger_args;
+      deferred_trigger_args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
       for (int idx = int(dependence_queues.size())-1;
             idx >= 0; idx--)
       {
@@ -2635,8 +2636,9 @@ namespace LegionRuntime {
         while ((handled_ops < superscalar_width) &&
                 !current_queue.empty())
         {
-          prev_event = utility_proc.spawn(TRIGGER_DEPENDENCE_ID,
-              &current_queue.front(), sizeof(Operation*), prev_event);
+          deferred_trigger_args.op = current_queue.front(); 
+          prev_event = utility_proc.spawn(HLR_TASK_ID, &deferred_trigger_args,
+                                    sizeof(deferred_trigger_args), prev_event);
           current_queue.pop_front();
           handled_ops++;
         }
@@ -2738,9 +2740,10 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < ops.size(); idx++)
       {
         TriggerOpArgs args;
+        args.hlr_id = HLR_TRIGGER_OP_ID;
         args.op = ops[idx];
         args.manager = this;
-        utility_proc.spawn(TRIGGER_OP_ID, &args, sizeof(args));
+        utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
 #if 0
         bool mapped = ops[idx]->trigger_execution();
         if (!mapped)
@@ -2879,11 +2882,12 @@ namespace LegionRuntime {
             if (defer)
               continue;
             TriggerTaskArgs args;
+            args.hlr_id = HLR_TRIGGER_TASK_ID;
             args.op = *vis_it;
             args.manager = this;
             // Give priority to things which are getting sent remotely
             int priority = ((*vis_it)->target_proc != local_proc) ? 1 : 0;
-            utility_proc.spawn(TRIGGER_TASK_ID, &args, sizeof(args),
+            utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
                                Event::NO_EVENT, priority);
             continue;
 #if 0
@@ -3263,8 +3267,11 @@ namespace LegionRuntime {
       }
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((AddressSpaceID*)sending_buffer) = local_address_space;
-      sending_index = sizeof(local_address_space);
+      *((HLRTaskID*)sending_buffer) = HLR_MESSAGE_ID;
+      sending_index = sizeof(HLRTaskID);
+      *((AddressSpaceID*)
+          (((char*)sending_buffer)+sending_index)) = local_address_space;
+      sending_index += sizeof(local_address_space);
       header = FULL_MESSAGE;
       sending_index += sizeof(header);
       packaged_messages = 0;
@@ -3757,17 +3764,18 @@ namespace LegionRuntime {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      *((MessageHeader*)(sending_buffer+sizeof(local_address_space))) = header;
-      *((unsigned*)(sending_buffer + sizeof(local_address_space) + 
-            sizeof(header))) = packaged_messages;
+      *((MessageHeader*)(sending_buffer + sizeof(HLRTaskID) +
+                          sizeof(local_address_space))) = header;
+      *((unsigned*)(sending_buffer + sizeof(HLRTaskID) +
+            sizeof(local_address_space) + sizeof(header))) = packaged_messages;
       // Send the message
-      Event next_event = target.spawn(MESSAGE_TASK_ID,sending_buffer,
-                                      sending_index,last_message_event);
+      Event next_event = target.spawn(HLR_TASK_ID, sending_buffer,
+                                      sending_index, last_message_event);
       // Update the event
       last_message_event = next_event;
       // Reset the state of the buffer
-      sending_index = sizeof(local_address_space) + sizeof(header) + 
-                      sizeof(unsigned);
+      sending_index = sizeof(HLRTaskID) + sizeof(local_address_space) + 
+                      sizeof(header) + sizeof(unsigned);
       if (partial)
         header = PARTIAL_MESSAGE;
       else
@@ -7643,8 +7651,11 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      // Tracing does not work well with LegionSpy
+#ifndef LEGION_SPY
       // Mark that we are starting a trace
       ctx->begin_trace(tid); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7663,8 +7674,11 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      // Tracing does not work well with LegionSpy
+#ifndef LEGION_SPY
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9778,8 +9792,12 @@ namespace LegionRuntime {
     {
       if (recycle_event.exists())
       {
+        DeferredRecycleArgs deferred_recycle_args;
+        deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
+        deferred_recycle_args.did = did;
         Processor proc = Machine::get_executing_processor(); 
-        proc.spawn(DEFERRED_RECYCLE_ID,&did,sizeof(did),recycle_event);
+        proc.spawn(HLR_TASK_ID, &deferred_recycle_args,
+                  sizeof(deferred_recycle_args), recycle_event);
       }
       else
         free_distributed_id(did);
@@ -11448,11 +11466,7 @@ namespace LegionRuntime {
 #else
                             options.inner, 
 #endif
-#ifdef BOUNDS_CHECKS
-                            false, // no leaf tasks when doing bounds checks
-#else
                             options.leaf, 
-#endif
                             vid);
       }
       else
@@ -11502,11 +11516,7 @@ namespace LegionRuntime {
 #else
                                 options.inner, 
 #endif
-#ifdef BOUNDS_CHECKS
-                                false, // no leaf tasks when doing bounds checks
-#else
                                 options.leaf, 
-#endif
                                 vid);
       }
       return uid;
@@ -11767,15 +11777,7 @@ namespace LegionRuntime {
       table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
       table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
       table[SCHEDULER_ID]          = Runtime::schedule_runtime;
-      table[MESSAGE_TASK_ID]       = Runtime::message_task;
-      table[POST_END_TASK_ID]      = Runtime::post_end_task;
-      table[DEFERRED_COMPLETE_ID]  = Runtime::deferred_complete_task;
-      table[RECLAIM_LOCAL_FID]     = Runtime::reclaim_local_field_task;
-      table[DEFERRED_COLLECT_ID]   = Runtime::deferred_collect_task;
-      table[TRIGGER_DEPENDENCE_ID] = Runtime::trigger_dependence_task;
-      table[TRIGGER_OP_ID]         = Runtime::trigger_op_task;
-      table[TRIGGER_TASK_ID]       = Runtime::trigger_task_task;
-      table[DEFERRED_RECYCLE_ID]   = Runtime::deferred_recycle_task;
+      table[HLR_TASK_ID]           = Runtime::high_level_runtime_task;
     }
 
     //--------------------------------------------------------------------------
@@ -12117,104 +12119,101 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::message_task(
+    /*static*/ void Runtime::high_level_runtime_task(
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-      Runtime::get_runtime(p)->process_message_task(args, arglen);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::post_end_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask *task = *((SingleTask**)args);
-      task->post_end_task();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::deferred_complete_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Operation *op = *((Operation**)args);
-      op->deferred_complete();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::reclaim_local_field_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Deserializer derez(args,arglen);
-      DerezCheck z(derez);
-      FieldSpace handle;
-      derez.deserialize(handle);
-      FieldID fid;
-      derez.deserialize(fid);
-      Runtime::get_runtime(p)->finalize_field_destroy(handle, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::deferred_collect_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Deserializer derez(args, arglen);
-      Runtime *rt = Runtime::get_runtime(p);
-      LogicalView::handle_deferred_collect(derez, p, rt->forest);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::trigger_dependence_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Operation **trigger_args = (Operation**)args;
-      Operation *op = *trigger_args;
-      op->trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::trigger_op_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      const ProcessorManager::TriggerOpArgs *trigger_args = 
-                                  (const ProcessorManager::TriggerOpArgs*)args;
-      Operation *op = trigger_args->op;
-      bool mapped = op->trigger_execution();
-      if (!mapped)
+      const char *data = (const char*)args;
+      HLRTaskID tid = *((const HLRTaskID*)data);
+      data += sizeof(tid);
+      arglen -= sizeof(tid);
+      switch (tid)
       {
-        ProcessorManager *manager = trigger_args->manager;
-        manager->add_to_local_ready_queue(op, true/*failure*/);
+        case HLR_MESSAGE_ID:
+          {
+            Runtime::get_runtime(p)->process_message_task(data, arglen);
+            break;
+          }
+        case HLR_POST_END_ID:
+          {
+            const SingleTask::PostEndArgs *post_end_args = 
+              (const SingleTask::PostEndArgs*)args;
+            post_end_args->proxy_this->post_end_task();
+            break;
+          }
+        case HLR_DEFERRED_COMPLETE_ID:
+          {
+            const Operation::DeferredCompleteArgs *deferred_complete_args = 
+              (const Operation::DeferredCompleteArgs*)args;
+            deferred_complete_args->proxy_this->deferred_complete();
+            break;
+          }
+        case HLR_RECLAIM_LOCAL_FIELD_ID:
+          {
+            Deserializer derez(args, arglen+sizeof(HLRTaskID));
+            derez.advance_pointer(sizeof(HLRTaskID));
+            DerezCheck z(derez);
+            FieldSpace handle;
+            derez.deserialize(handle);
+            FieldID fid;
+            derez.deserialize(fid);
+            Runtime::get_runtime(p)->finalize_field_destroy(handle, fid);
+            break; 
+          }
+        case HLR_DEFERRED_COLLECT_ID:
+          {
+            Deserializer derez(args, arglen+sizeof(HLRTaskID));
+            derez.advance_pointer(sizeof(HLRTaskID));
+            Runtime *rt = Runtime::get_runtime(p);
+            LogicalView::handle_deferred_collect(derez, p, rt->forest);
+            break;
+          }
+        case HLR_TRIGGER_DEPENDENCE_ID:
+          {
+            const ProcessorManager::DeferredTriggerArgs *deferred_trigger_args =
+              (const ProcessorManager::DeferredTriggerArgs*)args;
+            deferred_trigger_args->op->trigger_dependence_analysis();
+            break;
+          }
+        case HLR_TRIGGER_OP_ID:
+          {
+            // Key off of args here instead of data
+            const ProcessorManager::TriggerOpArgs *trigger_args = 
+                            (const ProcessorManager::TriggerOpArgs*)args;
+            Operation *op = trigger_args->op;
+            bool mapped = op->trigger_execution();
+            if (!mapped)
+            {
+              ProcessorManager *manager = trigger_args->manager;
+              manager->add_to_local_ready_queue(op, true/*failure*/);
+            }
+            break;
+          }
+        case HLR_TRIGGER_TASK_ID:
+          {
+            // Key off of args here instead of data
+            const ProcessorManager::TriggerTaskArgs *trigger_args = 
+                          (const ProcessorManager::TriggerTaskArgs*)args;
+            TaskOp *op = trigger_args->op; 
+            bool mapped = op->trigger_execution();
+            if (!mapped)
+            {
+              ProcessorManager *manager = trigger_args->manager;
+              manager->add_to_ready_queue(op, true/*failure*/);
+            }
+            break;
+          }
+        case HLR_DEFERRED_RECYCLE_ID:
+          {
+            const DeferredRecycleArgs *deferred_recycle_args = 
+              (const DeferredRecycleArgs*)args;
+            Runtime::get_runtime(p)->free_distributed_id(
+                                        deferred_recycle_args->did);
+            break;
+          }
+        default:
+          assert(false); // should never get here
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::trigger_task_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      const ProcessorManager::TriggerTaskArgs *trigger_args = 
-                                (const ProcessorManager::TriggerTaskArgs*)args;
-      TaskOp *op = trigger_args->op; 
-      bool mapped = op->trigger_execution();
-      if (!mapped)
-      {
-        ProcessorManager *manager = trigger_args->manager;
-        manager->add_to_ready_queue(op, true/*failure*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::deferred_recycle_task(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did = *((const DistributedID*)args);
-      Runtime::get_runtime(p)->free_distributed_id(did);
     }
 
   }; // namespace HighLevel

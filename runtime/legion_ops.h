@@ -34,6 +34,12 @@ namespace LegionRuntime {
      */
     class Operation {
     public:
+      struct DeferredCompleteArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+      };
+    public:
       Operation(Runtime *rt);
       virtual ~Operation(void);
     public:

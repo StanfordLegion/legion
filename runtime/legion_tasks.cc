@@ -2645,6 +2645,8 @@ namespace LegionRuntime {
       {
         // Successfully allocated a local field, launch a task to reclaim it
         Serializer rez;
+        // Do this before the check since it gets pulled off first
+        rez.serialize<HLRTaskID>(HLR_RECLAIM_LOCAL_FIELD_ID);
         {
           RezCheck z(rez);
           rez.serialize(info.handle);
@@ -2655,8 +2657,8 @@ namespace LegionRuntime {
 #else
         Processor util = executing_processor.get_utility_processor();
 #endif
-        util.spawn(RECLAIM_LOCAL_FID,rez.get_buffer(),
-                   rez.get_used_bytes(),info.reclaim_event);
+        util.spawn(HLR_TASK_ID, rez.get_buffer(),
+                   rez.get_used_bytes(), info.reclaim_event);
       }
     }
 
@@ -4495,8 +4497,10 @@ namespace LegionRuntime {
 #endif
       if (util != executing_processor)
       {
-        SingleTask *proxy_this = this; 
-        util.spawn(POST_END_TASK_ID,&proxy_this,sizeof(proxy_this));
+        PostEndArgs post_end_args;
+        post_end_args.hlr_id = HLR_POST_END_ID;
+        post_end_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &post_end_args, sizeof(post_end_args));
       }
       else
         post_end_task();
@@ -4739,12 +4743,30 @@ namespace LegionRuntime {
         slices.push_back(slice);
       }
 
-      bool success = true;
 #ifdef LEGION_LOGGING
       UniqueID local_id = get_unique_task_id();
 #endif
+      bool success = trigger_slices(); 
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      local_id, END_SLICING);
+#endif
+      // If we succeeded and this is an intermediate slice task
+      // then we can reclaim it, otherwise, if it is the original
+      // index task then we want to keep it around. Note it is safe
+      // to call get_task_kind here despite the cleanup race because
+      // it is a static property of the object.
+      if (success && (get_task_kind() == SLICE_TASK_KIND))
+        deactivate();
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MultiTask::trigger_slices(void)
+    //--------------------------------------------------------------------------
+    {
       // Watch out for the cleanup race, make a copy of the slices
-      bool is_slice = (get_task_kind() == SLICE_TASK_KIND);
+      bool success = true;
       std::list<SliceTask*> local_slices = slices;
       std::set<SliceTask*> failed_slices;
       for (std::list<SliceTask*>::const_iterator it = local_slices.begin();
@@ -4777,16 +4799,6 @@ namespace LegionRuntime {
             it++;
         }
       }
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
-                                      local_id, END_SLICING);
-#endif
-
-      // If we succeeded and this is an intermediate slice task
-      // then we can reclaim it, otherwise, if it is the original
-      // index task then we want to keep it around
-      if (success && is_slice)
-        deactivate();
       return success;
     }
 
@@ -7492,9 +7504,12 @@ namespace LegionRuntime {
     bool IndexTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return false;
+      // This should only ever be called if we had slices which failed to map
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_sliced());
+      assert(!slices.empty());
+#endif
+      return trigger_slices();
     }
 
     //--------------------------------------------------------------------------

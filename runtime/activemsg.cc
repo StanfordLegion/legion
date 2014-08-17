@@ -1451,7 +1451,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
     }
 
     if(!strcmp(argv[i], "-ll:lmbsize")) {
-      lmb_size = atoi(argv[++i]) << 10; // convert KB to bytes
+      lmb_size = ((size_t)atoi(argv[++i])) << 10; // convert KB to bytes
       continue;
     }
 
@@ -1461,7 +1461,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
     }
 
     if(!strcmp(argv[i], "-ll:sdpsize")) {
-      srcdatapool_size = atoi(argv[++i]) << 20; // convert MB to bytes
+      srcdatapool_size = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
       continue;
     }
   }
