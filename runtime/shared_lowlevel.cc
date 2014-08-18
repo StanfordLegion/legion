@@ -46,8 +46,8 @@ using namespace LegionRuntime::Accessor;
 
 // The number of threads for this version
 #define NUM_PROCS	4
-#define NUM_UTIL_PROCS  0
-#define NUM_DMA_THREADS 0
+#define NUM_UTIL_PROCS  1
+#define NUM_DMA_THREADS 1
 // Maximum memory in global
 #define GLOBAL_MEM      4096   // (MB)	
 #define LOCAL_MEM       16384  // (KB)
@@ -4517,6 +4517,7 @@ namespace LegionRuntime {
         if (ready_copies.empty() && !dma_shutdown)
         {
           // Go to sleep
+          PTHREAD_SAFE_CALL(pthread_cond_wait(&dma_cond, &dma_lock));
         }
         // When we wake up see if there is anything
         // to do or see if we are done
@@ -4563,7 +4564,7 @@ namespace LegionRuntime {
     {
       DMAQueue *dma_queue = (DMAQueue*)args;
       dma_queue->run_dma_loop();
-      return NULL;
+      pthread_exit(NULL);
     }
 
     ////////////////////////////////////////////////////////

@@ -2529,14 +2529,19 @@ namespace LegionRuntime {
       if (!pending_shutdown)
       {
         AutoLock gc(gc_lock);
-        // See if we need to start a new GC epoch
-        if (gc_epoch_events.empty() || (pending_gc_ops == superscalar_width))
+        // check again after we hold the lock to make 
+        // sure we didn't lose the race
+        if (!pending_shutdown)
         {
-          gc_epoch_events.push_back(UserEvent::create_user_event());
-          pending_gc_ops = 0;
+          // See if we need to start a new GC epoch
+          if (gc_epoch_events.empty() || (pending_gc_ops == superscalar_width))
+          {
+            gc_epoch_events.push_back(UserEvent::create_user_event());
+            pending_gc_ops = 0;
+          }
+          pending_gc_ops++;
+          result = gc_epoch_events.back();
         }
-        pending_gc_ops++;
-        result = gc_epoch_events.back();
       }
       AutoLock i_lock(idle_lock);
       if (!idle_task_enabled)
@@ -2555,8 +2560,8 @@ namespace LegionRuntime {
       // Trigger all our pending gc epochs
       std::deque<UserEvent> to_trigger;
       {
-        pending_shutdown = true;
         AutoLock gc(gc_lock);
+        pending_shutdown = true;
         to_trigger = gc_epoch_events;
         gc_epoch_events.clear();
       }
