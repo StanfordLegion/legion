@@ -2375,6 +2375,38 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *left_node = get_node(left);
+      IndexSpaceNode *right_node = get_node(right);
+      if (left_node->domain.get_dim() != right_node->domain.get_dim())
+        return false;
+      else if (left_node->domain.get_dim() == 0)
+      {
+        const LowLevel::ElementMask &left_mask = 
+          left_node->handle.get_valid_mask();
+        const LowLevel::ElementMask &right_mask = 
+          right_node->handle.get_valid_mask();
+        return (left_mask.get_num_elmts() == right_mask.get_num_elmts());
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_dominated(IndexSpace src, IndexSpace dst)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if dst is dominated by source
+#ifdef DEBUG_HIGH_LEVEL
+      assert(are_compatible(src, dst));
+#endif
+      IndexSpaceNode *src_node = get_node(src);
+      IndexSpaceNode *dst_node = get_node(dst);
+      return src_node->dominates(dst_node);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::compute_index_path(IndexSpace parent, 
                                     IndexSpace child, std::vector<Color> &path)
     //--------------------------------------------------------------------------
@@ -16725,9 +16757,9 @@ namespace LegionRuntime {
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
-          condense_user_list(prev_epoch_users);
+          condense_user_list(prev_epoch_users, true/*previous*/);
         if (curr_epoch_users.size() >= Runtime::max_filter_size)
-          condense_user_list(curr_epoch_users);
+          condense_user_list(curr_epoch_users, false/*previous*/);
       }
 #endif
 #else
@@ -16987,9 +17019,9 @@ namespace LegionRuntime {
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
-          condense_user_list(prev_epoch_users);
+          condense_user_list(prev_epoch_users, true/*previous*/);
         if (curr_epoch_users.size() >= Runtime::max_filter_size)
-          condense_user_list(curr_epoch_users);
+          condense_user_list(curr_epoch_users, false/*previous*/);
       }
 #endif
 #else // PHYSICAL_FIELD_TREE
@@ -17329,7 +17361,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::condense_user_list(std::list<PhysicalUser> &users)
+    void MaterializedView::condense_user_list(std::list<PhysicalUser> &users,
+                                              bool previous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -17339,6 +17372,7 @@ namespace LegionRuntime {
       // and privleges whose user masks have been split up for various reasons.
       // Also while scanning over the list, do a quick check for events
       // which have already triggered but haven't been collected yet.
+      if (previous)
       {
         // Note storing pointers requires using an STL
         // list where nodes don't move
@@ -17386,6 +17420,18 @@ namespace LegionRuntime {
             else
               it = users.erase(it);
           }
+        }
+      }
+      else
+      {
+        // If this isn't previous, just do the check for triggered events
+        for (std::list<PhysicalUser>::iterator it = users.begin();
+              it != users.end(); /*nothing*/)
+        {
+          if (it->term_event.has_triggered())
+            it = users.erase(it);
+          else
+            it++;
         }
       }
 
@@ -17677,14 +17723,6 @@ namespace LegionRuntime {
         if (return_new_did)
           context->runtime->free_distributed_id(new_owner_did);
       }
-#ifdef DEBUG_HIGH_LEVEL
-      else 
-      {
-        // We better be holding some remote references
-        // to guarantee that the owner is still there.
-        assert(held_remote_references > 0);
-      }
-#endif
       // Otherwise we're already remote from the target and therefore
       // all of our parents are also already remote so we are done
       return owner_did;

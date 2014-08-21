@@ -349,6 +349,13 @@ namespace LegionRuntime {
       bool has_created_region(LogicalRegion handle) const;
       bool has_created_field(FieldSpace handle, FieldID fid) const;
     public:
+      void check_index_subspace(IndexSpace handle, const char *caller);
+      void check_index_subpartition(IndexPartition handle, const char *caller);
+      void check_field_space(FieldSpace handle, const char *caller);
+      void check_logical_subregion(LogicalRegion handle, const char *caller);
+      void check_logical_subpartition(LogicalPartition handle,
+                                      const char *caller);
+    public:
       void unmap_all_regions(void);
     protected:
       bool map_all_regions(Processor target, Event user_event, 

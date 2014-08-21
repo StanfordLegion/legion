@@ -2158,15 +2158,29 @@ namespace LegionRuntime {
           }
           check_copy_privilege(dst_requirements[idx], idx, false/*src*/);
         }
-        std::vector<Color> path;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          path.clear();  
           IndexSpace src_space = src_requirements[idx].region.get_index_space();
           IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-          bool has_path = runtime->forest->compute_index_path(src_space,
-                                                              dst_space, path);
-          if (!has_path)
+          if (!runtime->forest->are_compatible(src_space, dst_space))
+          {
+            log_run(LEVEL_ERROR,"Copy launcher index space mismatch at index "
+                                "%d of cross-region copy (ID %lld) in task %s "
+                                "(ID %lld). Source requirement with index "
+                                "space " IDFMT " and destination requirement "
+                                "with index space " IDFMT " do not have the "
+                                "same number of dimensions or the same number "
+                                "of elements in their element masks.",
+                                idx, get_unique_copy_id(),
+                                parent_ctx->variants->name, 
+                                parent_ctx->get_unique_task_id(),
+                                src_space.id, dst_space.id);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_COPY_SPACE_MISMATCH);
+          }
+          else if (!runtime->forest->is_dominated(src_space, dst_space))
           {
             log_run(LEVEL_ERROR,"Destination index space " IDFMT " for "
                                 "requirement %d of cross-region copy "

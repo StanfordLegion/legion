@@ -99,7 +99,7 @@ namespace LegionRuntime {
      */
     class Future::Impl : public DistributedCollectable {
     public:
-      Impl(Runtime *rt, DistributedID did,
+      Impl(Runtime *rt, bool register_future, DistributedID did, 
            AddressSpaceID owner_space, AddressSpaceID local_space,
            TaskOp *task = NULL);
       Impl(const Future::Impl &rhs);
@@ -134,10 +134,12 @@ namespace LegionRuntime {
       void mark_sampled(void);
       void broadcast_result(void);
       bool send_future(AddressSpaceID sid);
+      void register_waiter(AddressSpaceID sid);
     public:
       static void handle_future_send(Deserializer &derez, Runtime *rt, 
                                      AddressSpaceID source);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
+      static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
       // These three fields are only valid on the owner node
       TaskOp *const task;
@@ -150,6 +152,8 @@ namespace LegionRuntime {
       size_t result_size;
       volatile bool empty;
       volatile bool sampled;
+      // On the owner node, keep track of the registered waiters
+      std::set<AddressSpaceID> registered_waiters;
     };
 
     /**
@@ -653,6 +657,7 @@ namespace LegionRuntime {
         SEND_SLICE_RETURN,
         SEND_FUTURE,
         SEND_FUTURE_RESULT,
+        SEND_FUTURE_SUBSCRIPTION,
         SEND_MAKE_PERSISTENT,
         SEND_MAPPER_MESSAGE,
       };
@@ -724,6 +729,7 @@ namespace LegionRuntime {
       void send_slice_return(Serializer &rez, bool flush);
       void send_future(Serializer &rez, bool flush);
       void send_future_result(Serializer &rez, bool flush);
+      void send_future_subscription(Serializer &rez, bool flush);
       void send_make_persistent(Serializer &rez, bool flush);
       void send_mapper_message(Serializer &rez, bool flush);
     public:
@@ -1143,6 +1149,7 @@ namespace LegionRuntime {
       void send_slice_return(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
+      void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
     public:
@@ -1219,6 +1226,7 @@ namespace LegionRuntime {
       void handle_slice_return(Deserializer &derez);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
+      void handle_future_subscription(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
     public:
@@ -1311,9 +1319,11 @@ namespace LegionRuntime {
       void unregister_future(DistributedID did);
       bool has_future(DistributedID did);
       Future::Impl* find_future(DistributedID did);
+      Future::Impl* find_or_create_future(DistributedID did,
+                                          AddressSpaceID owner_space);
     public:
       Event find_gc_epoch_event(Processor gc_proc);
-      void notify_pending_shutdown(void);
+      void initiate_runtime_shutdown(void);
     public:
       IndividualTask*  get_available_individual_task(void);
       PointTask*       get_available_point_task(void);

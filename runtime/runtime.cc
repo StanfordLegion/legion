@@ -381,7 +381,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Future::Impl::Impl(Runtime *rt, DistributedID did, 
+    Future::Impl::Impl(Runtime *rt, bool register_future, DistributedID did, 
                        AddressSpaceID own_space, AddressSpaceID loc_space,
                        TaskOp *t /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
@@ -391,7 +391,8 @@ namespace LegionRuntime {
         result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
-      runtime->register_future(did, this);
+      if (register_future)
+        runtime->register_future(did, this);
     }
 
     //--------------------------------------------------------------------------
@@ -606,28 +607,19 @@ namespace LegionRuntime {
       // Should only happen on the owner
       // Clean out any previous results we've save
       DerezCheck z(derez);
-      size_t future_size;
-      derez.deserialize(future_size);
+      derez.deserialize(result_size);
       // Handle the case where we get a double send of the
       // result once from another remote node and once
       // from the original owner
       if (result == NULL)
-        result = malloc(future_size);
+        result = malloc(result_size);
       if (!ready_event.has_triggered())
       {
-        derez.deserialize(result,future_size);
+        derez.deserialize(result,result_size);
         empty = false;
       }
-#ifdef DEBUG_HIGH_LEVEL
       else
-      {
-        // In debug mode we need to keep the deserializer happy
-        assert(result_size == future_size);
-        // In theory this should just be overwriting the value
-        // with the same value
-        derez.deserialize(result,future_size);
-      }
-#endif
+        derez.advance_pointer(result_size);
     }
 
     //--------------------------------------------------------------------------
@@ -699,22 +691,7 @@ namespace LegionRuntime {
     void Future::Impl::notify_new_remote(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
-      // if we're the owner and we have a result that is complete
-      // send it to the new remote future
-      if (owner && ready_event.has_triggered())
-      {
-        Serializer rez;
-        {
-          rez.serialize(did);
-          RezCheck z(rez);
-          rez.serialize(result_size);
-          rez.serialize(result,result_size);
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(sid != local_space);
-#endif
-        runtime->send_future_result(sid, rez);
-      }
+      // do nothing 
     }
 
     //--------------------------------------------------------------------------
@@ -741,10 +718,9 @@ namespace LegionRuntime {
       // Need to hold the lock when reading the set of remote spaces
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       for (std::set<AddressSpaceID>::const_iterator it = 
-            remote_spaces.begin(); it != remote_spaces.end(); it++)
+            registered_waiters.begin(); it != registered_waiters.end(); it++)
       {
-        if ((*it) != local_space)
-          runtime->send_future_result(*it, rez); 
+        runtime->send_future_result(*it, rez); 
       }
     }
 
@@ -752,9 +728,8 @@ namespace LegionRuntime {
     bool Future::Impl::send_future(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
+      // Two phase approach, check first to see if we need to do the send
       bool need_send;
-      // Then do a quick check to see if we already sent it there
-      // If we did, then we don't have 
       {
         AutoLock gc(gc_lock,1,false/*exclusive*/);
         if (remote_spaces.find(sid) != remote_spaces.end())
@@ -763,26 +738,87 @@ namespace LegionRuntime {
           need_send = true;
       }
       // Need to send this first to avoid race
+      bool performed_send = false;
       if (need_send)
       {
         Serializer rez;
+        bool send_result = ready_event.has_triggered();
         {
           rez.serialize(did);
           rez.serialize(owner_space);
-          if (ready_event.has_triggered())
+          rez.serialize(send_result);
+          if (send_result)
           {
-            rez.serialize(true);
             RezCheck z(rez);
             rez.serialize(result_size);
             rez.serialize(result,result_size);
           }
-          else
-            rez.serialize(false);
         }
-        runtime->send_future(sid, rez);
+        // Retake the lock and make sure we didn't lose the race
+        AutoLock gc(gc_lock);
+        if (remote_spaces.find(sid) == remote_spaces.end())
+        {
+          // Pack up the remaining information
+          rez.serialize<size_t>(remote_spaces.size());
+          for (std::set<AddressSpaceID>::const_iterator it = 
+                remote_spaces.begin(); it != remote_spaces.end(); it++)
+          {
+            rez.serialize(*it);
+          }
+          // Actually do the send and then mark that we
+          // have already sent an instance there
+          runtime->send_future(sid, rez);
+          remote_spaces.insert(sid);
+          // Also if this is the owner mark that we already sent the future
+          if (owner && send_result)
+            registered_waiters.insert(sid);
+          performed_send = true;
+        }
       }
-      // Return whether we need to send a remot reference with the packed future
+      if (performed_send)
+        register_waiter(sid);
+      // Return whether we need to send a remote 
+      // reference with the packed future
       return send_remote_reference(sid);
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::Impl::register_waiter(AddressSpaceID sid)
+    //--------------------------------------------------------------------------
+    {
+      if (owner)
+      {
+        bool send_result;
+        {
+          AutoLock gc(gc_lock);
+          if (registered_waiters.find(sid) == registered_waiters.end())
+          {
+            send_result = ready_event.has_triggered();
+            registered_waiters.insert(sid);
+          }
+          else
+            send_result = false;
+        }
+        if (send_result)
+        {
+          Serializer rez;
+          {
+            rez.serialize(did);
+            RezCheck z(rez);
+            rez.serialize(result_size);
+            rez.serialize(result,result_size);
+          }
+          runtime->send_future_result(sid, rez);
+        }
+      }
+      else
+      {
+        // not the owner so send a message to the owner
+        Serializer rez;
+        rez.serialize(did);
+        rez.serialize(sid);
+        runtime->send_future_subscription(owner_space, rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -798,26 +834,20 @@ namespace LegionRuntime {
       derez.deserialize(is_complete);
       // Check to see if the runtime already has this future
       // if not then we need to make one
-      if (!runtime->has_future(did))
+      Future::Impl *future = runtime->find_or_create_future(did, own_space);
+      future->update_remote_spaces(source); 
+      if (is_complete)
       {
-        Future::Impl *future = new Future::Impl(runtime, did, own_space,
-                                                runtime->address_space);
-        future->update_remote_spaces(source);
-        if (is_complete)
-        {
-          future->unpack_future(derez);
-          future->complete_future();
-        }
+        future->unpack_future(derez);
+        future->complete_future();
       }
-      else
+      size_t num_new_spaces;
+      derez.deserialize(num_new_spaces);
+      for (unsigned idx = 0; idx < num_new_spaces; idx++)
       {
-        Future::Impl *future = runtime->find_future(did);
-        future->update_remote_spaces(source);
-        if (is_complete)
-        {
-          future->unpack_future(derez);
-          future->complete_future();
-        }
+        AddressSpaceID new_space;
+        derez.deserialize(new_space);
+        future->update_remote_spaces(new_space);
       }
     }
 
@@ -830,6 +860,20 @@ namespace LegionRuntime {
       derez.deserialize(did);
       Future::Impl *future = runtime->find_future(did);
       future->unpack_future(derez);
+      future->complete_future();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Future::Impl::handle_future_subscription(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID subscriber;
+      derez.deserialize(subscriber);
+      Future::Impl *future = runtime->find_future(did);
+      future->register_waiter(subscriber); 
     }
       
     /////////////////////////////////////////////////////////////
@@ -3680,6 +3724,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_future_subscription(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FUTURE_SUBSCRIPTION, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_make_persistent(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -4117,6 +4168,11 @@ namespace LegionRuntime {
           case SEND_FUTURE_RESULT:
             {
               runtime->handle_future_result(derez);
+              break;
+            }
+          case SEND_FUTURE_SUBSCRIPTION:
+            {
+              runtime->handle_future_subscription(derez);
               break;
             }
           case SEND_MAKE_PERSISTENT:
@@ -5529,16 +5585,11 @@ namespace LegionRuntime {
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      ctx->check_index_subspace(parent, "get_index_partition");
+#endif
       IndexPartition result = forest->get_index_partition(parent, color);
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index partition performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
       if (result == 0)
       {
         log_index(LEVEL_ERROR, "Invalid color %d for get index partitions", 
@@ -5562,16 +5613,11 @@ namespace LegionRuntime {
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      ctx->check_index_subpartition(p, "get_index_subspace");
+#endif
       IndexSpace result = forest->get_index_subspace(p, color);
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index subspace performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
       if (!result.exists())
       {
         log_index(LEVEL_ERROR, "Invalid color %d for get index subspace", 
@@ -5595,14 +5641,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal has multiple domains performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "has_multiple_domains");
 #endif
       return forest->has_multiple_domains(handle);
     }
@@ -5618,16 +5657,11 @@ namespace LegionRuntime {
     Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      ctx->check_index_subspace(handle, "get_index_space_domain");
+#endif
       Domain result = forest->get_index_space_domain(handle);
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index space domain performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
       if (!result.exists())
       {
         log_index(LEVEL_ERROR, "Invalid handle " IDFMT " for get index space "
@@ -5653,14 +5687,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index space domains performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "get_index_space_domains");
 #endif
       forest->get_index_space_domains(handle, domains);
     }
@@ -5678,16 +5705,11 @@ namespace LegionRuntime {
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      ctx->check_index_subpartition(p, "get_index_partition_color_space");
+#endif
       Domain result = forest->get_index_partition_color_space(p);
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index partition color space "
-                             "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
       if (!result.exists())
       {
         log_index(LEVEL_ERROR, "Invalid partition handle %d for get index "
@@ -5712,14 +5734,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index space partition colors "
-                             "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(sp, "get_index_space_partition_colors");
 #endif
       forest->get_index_space_partition_colors(sp, colors);
     }
@@ -5737,14 +5752,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal is index partition disjoint "
-                             "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subpartition(p, "is_index_partition_disjoint");
 #endif
       return forest->is_index_partition_disjoint(p);
     }
@@ -5761,14 +5769,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index space color performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "get_index_space_color");
 #endif
       return forest->get_index_space_color(handle);
     }
@@ -5786,14 +5787,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get index partition color performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subpartition(handle, "get_index_partition_color");
 #endif
       return forest->get_index_partition_color(handle);
     }
@@ -5811,14 +5805,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get parent index space performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subpartition(handle, "get_parent_index_space");
 #endif
       return forest->get_parent_index_space(handle);
     }
@@ -5835,14 +5822,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal has parent index partition performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "has_parent_index_partition");
 #endif
       return forest->has_parent_index_partition(handle);
     }
@@ -5860,14 +5840,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get parent index partition performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "get_parent_index_partition");
 #endif
       return forest->get_parent_index_partition(handle);
     }
@@ -5885,14 +5858,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal safe cast operation performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(region, "safe_cast");
 #endif
       if (pointer.is_null())
         return pointer;
@@ -5910,14 +5876,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal safe cast operation performed "
-                             "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(region, "safe_cast");
 #endif
       if (point.is_null())
         return point;
@@ -5994,14 +5953,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get field size performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_field_space(handle, "get_field_size");
 #endif
       return forest->get_field_size(handle, fid);
     }
@@ -6163,14 +6115,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical partition performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(parent, "get_logical_partition");
 #endif
       return forest->get_logical_partition(parent, handle);
     }
@@ -6189,14 +6134,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical partition performed in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(parent, "get_logical_partition_by_color");
 #endif
       return forest->get_logical_partition_by_color(parent, c);
     }
@@ -6216,14 +6154,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical partition performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subpartition(handle, "get_logical_partition_by_tree");
+      ctx->check_field_space(fspace, "get_logical_partition_by_tree");
 #endif
       return forest->get_logical_partition_by_tree(handle, fspace, tid);
     }
@@ -6243,14 +6175,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical subregion performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subpartition(parent, "get_logical_subregion");
 #endif
       return forest->get_logical_subregion(parent, handle);
     }
@@ -6269,14 +6194,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical subregion performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subpartition(parent, "get_logical_subregion_by_color");
 #endif
       return forest->get_logical_subregion_by_color(parent, c);
     }
@@ -6295,14 +6213,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical subregion performed in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_index_subspace(handle, "get_logical_subregion_by_tree");
+      ctx->check_field_space(fspace, "get_logical_subregion_by_tree");
 #endif
       return forest->get_logical_subregion_by_tree(handle, fspace, tid);
     }
@@ -6322,14 +6234,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical region color in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(handle, "get_logical_region_color");
 #endif
       return forest->get_logical_region_color(handle);
     }
@@ -6347,14 +6252,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get logical partition color in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subpartition(handle, "get_logical_partition_color");
 #endif
       return forest->get_logical_partition_color(handle);
     }
@@ -6372,14 +6270,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get parent logical region in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subpartition(handle, "get_parent_logical_region");
 #endif
       return forest->get_parent_logical_region(handle);
     }
@@ -6397,14 +6288,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal has parent logical partition in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(handle, "has_parent_logical_partition");
 #endif
       return forest->has_parent_logical_partition(handle);
     }
@@ -6422,14 +6306,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal get parent logical partition in "
-                             "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
+      ctx->check_logical_subregion(handle, "get_parent_logical_partition");
 #endif
       return forest->get_parent_logical_partition(handle);
     }
@@ -6496,7 +6373,7 @@ namespace LegionRuntime {
     { 
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, 
+        return Future(new Future::Impl(this, true/*register*/, 
               get_available_distributed_id(), address_space, address_space));
       IndividualTask *task = get_available_individual_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6574,7 +6451,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, 
+        return Future(new Future::Impl(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space));
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6622,7 +6499,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this,
+        return Future(new Future::Impl(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space));
       IndividualTask *task = get_available_individual_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6726,7 +6603,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this,
+        return Future(new Future::Impl(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space));
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -8748,6 +8625,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_future_subscription(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_future_subscription(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_make_persistent(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -9187,6 +9072,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Future::Impl::handle_future_result(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_future_subscription(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Future::Impl::handle_future_subscription(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -9926,6 +9818,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Future::Impl* Runtime::find_or_create_future(DistributedID did,
+                                                 AddressSpaceID owner_space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(future_lock);
+      std::map<DistributedID,Future::Impl*>::const_iterator finder = 
+        local_futures.find(did);
+      if (finder == local_futures.end())
+      {
+        Future::Impl *result = new Future::Impl(this, false/*register*/,
+                                                did, owner_space, 
+                                                address_space);
+        local_futures[did] = result;
+        return result;
+      }
+      else
+        return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     Event Runtime::find_gc_epoch_event(Processor local_proc)
     //--------------------------------------------------------------------------
     {
@@ -9950,14 +9862,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::notify_pending_shutdown(void)
+    void Runtime::initiate_runtime_shutdown(void)
     //--------------------------------------------------------------------------
     {
+      log_run(LEVEL_SPEW,"Computation has terminated. "
+                         "Shutting down the Legion runtime...");
+      // First tell all our processor managers that we are done
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
         it->second->notify_pending_shutdown();
       }
+      machine->shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -10770,7 +10686,8 @@ namespace LegionRuntime {
     Future Runtime::help_create_future(TaskOp *task /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new Future::Impl(this, get_available_distributed_id(),
+      return Future(new Future::Impl(this, true/*register*/,
+                                     get_available_distributed_id(),
                                      address_space, address_space, task));
     }
 
@@ -12107,7 +12024,6 @@ namespace LegionRuntime {
         delete get_runtime(p);
       else
       {
-        Runtime::get_runtime(p)->notify_pending_shutdown();
         unsigned result = __sync_sub_and_fetch(&Runtime::shutdown_counter, 1);
         // Only delete the runtime if we're the last one to use it
         if (result == 0)

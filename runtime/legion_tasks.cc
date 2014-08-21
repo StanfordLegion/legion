@@ -3659,6 +3659,252 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::check_index_subspace(IndexSpace handle, const char *caller)
+    //--------------------------------------------------------------------------
+    {
+      // This is always called inline so no need to take the lock
+      std::vector<Color> path;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        path.clear();
+        if (runtime->forest->compute_index_path(
+              regions[idx].region.get_index_space(), handle, path))
+          return;
+      }
+      // Finally check the index space requirements
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        path.clear();
+        if (runtime->forest->compute_index_path(indexes[idx].handle, 
+                                                handle, path))
+          return;
+      }
+      // Also check the created regions
+      for (std::set<LogicalRegion>::const_iterator it = 
+            created_regions.begin(); it != created_regions.end(); it++)
+      {
+        path.clear();
+        if (runtime->forest->compute_index_path(it->get_index_space(),
+                                                handle, path))
+          return;
+      }
+      // Finally check the created index spaces
+      for (std::set<IndexSpace>::const_iterator it = 
+            created_index_spaces.begin(); it != 
+            created_index_spaces.end(); it++)
+      {
+        path.clear();
+        if (runtime->forest->compute_index_path(*it, handle, path))
+          return;
+      }
+#if 0
+      log_task(LEVEL_ERROR,"Invalid call of %s with index space " IDFMT 
+                           "which is not a sub-space of any requested or "
+                           "created index spaces in task %s (ID %lld).",
+                           caller, handle.id, variants->name,
+                           get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_INVALID_INDEX_SUBSPACE_REQUEST);
+#else
+      log_task(LEVEL_WARNING,"Invalid call of %s with index space " IDFMT 
+                           "which is not a sub-space of any requested or "
+                           "created index spaces in task %s (ID %lld). "
+                           "This must be fixed to guarantee correct "
+                           "execution in multi-node runs.",
+                           caller, handle.id, variants->name,
+                           get_unique_task_id());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_index_subpartition(IndexPartition handle,
+                                              const char *caller)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Color> path;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        path.clear();
+        if (runtime->forest->compute_partition_path(
+              regions[idx].region.get_index_space(), handle, path))
+          return;
+      }
+      // Finally check the index space requirements
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        path.clear();
+        if (runtime->forest->compute_partition_path(
+              indexes[idx].handle, handle, path))
+          return;
+      }
+      // Also check the created regions
+      for (std::set<LogicalRegion>::const_iterator it = 
+            created_regions.begin(); it != created_regions.end(); it++)
+      {
+        path.clear();
+        if (runtime->forest->compute_partition_path(
+              it->get_index_space(), handle, path))
+          return;
+      }
+      // Finally check the created index spaces
+      for (std::set<IndexSpace>::const_iterator it = 
+            created_index_spaces.begin(); it != 
+            created_index_spaces.end(); it++)
+      {
+        path.clear();
+        if (runtime->forest->compute_partition_path(*it, handle, path))
+          return;
+      }
+#if 0
+      log_task(LEVEL_ERROR,"Invalid call of %s with index partition %d"
+                           "which is not a sub-partition of any requested "
+                           "or created index spaces in task %s (ID %lld).",
+                           caller, handle, variants->name,
+                           get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_INVALID_INDEX_SUBPARTITION_REQUEST);
+#else
+      log_task(LEVEL_WARNING,"Invalid call of %s with index partition %d"
+                           "which is not a sub-partition of any requested "
+                           "or created index spaces in task %s (ID %lld). "
+                           "This must be fixed to guarantee correct "
+                           "execution in multi-node runs.",
+                           caller, handle, variants->name,
+                           get_unique_task_id());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_field_space(FieldSpace handle, const char *caller)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].region.get_field_space() == handle)
+          return;
+      }
+      for (std::set<FieldSpace>::const_iterator it = 
+            created_field_spaces.begin(); it != 
+            created_field_spaces.end(); it++)
+      {
+        if ((*it) == handle)
+          return;
+      }
+#if 0
+      log_task(LEVEL_ERROR,"Invalid call of %s with field space %d which is "
+                           "not a field space of any requested regions and "
+                           "was not created in the context of task %s "
+                           "(ID %lld).", caller, handle.id, variants->name,
+                           get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_INVALID_FIELD_SPACE_REQUEST);
+#else
+      log_task(LEVEL_WARNING,"Invalid call of %s with field space %d which is "
+                           "not a field space of any requested regions and "
+                           "was not created in the context of task %s "
+                           "(ID %lld). This must be fixed to guarantee correct "
+                           "execution in multi-node runs", caller, handle.id, 
+                           variants->name, get_unique_task_id());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_logical_subregion(LogicalRegion handle, 
+                                             const char *caller)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Color> path;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].region.get_tree_id() != handle.get_tree_id())
+          continue;
+        path.clear();
+        if (runtime->forest->compute_index_path(
+              regions[idx].region.get_index_space(),
+              handle.get_index_space(), path))
+          return;
+      }
+      for (std::set<LogicalRegion>::const_iterator it = 
+            created_regions.begin(); it != created_regions.end(); it++)
+      {
+        if (it->get_tree_id() == handle.get_tree_id())
+          return;
+      }
+#if 0
+      log_task(LEVEL_ERROR,"Invalid call of %s with logical region ("
+                            IDFMT ",%d,%d) which is not a sub-region of any "
+                            "requested or created regions in task %s "
+                            "(ID %lld).", caller, handle.get_index_space().id,
+                            handle.get_field_space().id, handle.get_tree_id(),
+                            variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_INVALID_LOGICAL_SUBREGION_REQUEST);
+#else
+      log_task(LEVEL_WARNING,"Invalid call of %s with logical region ("
+                            IDFMT ",%d,%d) which is not a sub-region of any "
+                            "requested or created regions in task %s "
+                            "(ID %lld). This must be fixed to guarantee "
+                            "correct execution in multi-node runs.", 
+                            caller, handle.get_index_space().id,
+                            handle.get_field_space().id, handle.get_tree_id(),
+                            variants->name, get_unique_task_id());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::check_logical_subpartition(LogicalPartition handle,
+                                                const char *caller)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Color> path;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].region.get_tree_id() != handle.get_tree_id())
+          continue;
+        path.clear();
+        if (runtime->forest->compute_partition_path(
+              regions[idx].region.get_index_space(),
+              handle.get_index_partition(), path))
+          return;
+      }
+      for (std::set<LogicalRegion>::const_iterator it = 
+            created_regions.begin(); it != created_regions.end(); it++)
+      {
+        if (it->get_tree_id() == handle.get_tree_id())
+          return;
+      }
+#if 0
+      log_task(LEVEL_ERROR,"Invalid call of %s with logical partition "
+                           "(%d,%d,%d) which is not a sub-partition of any "
+                           "requested or created regions in task %s (ID %lld).",
+                           caller, handle.get_index_partition(),
+                           handle.get_field_space().id, handle.get_tree_id(),
+                           variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_INVALID_LOGICAL_SUBPARTITION_REQUEST);
+#else
+      log_task(LEVEL_WARNING,"Invalid call of %s with logical partition "
+                           "(%d,%d,%d) which is not a sub-partition of any "
+                           "requested or created regions in task %s (ID %lld). "
+                           "This must be fixed to guarantee correct execution "
+                           " in multi-node runs.",
+                           caller, handle.get_index_partition(),
+                           handle.get_field_space().id, handle.get_tree_id(),
+                           variants->name, get_unique_task_id());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
@@ -5097,11 +5343,7 @@ namespace LegionRuntime {
       // If we are the top-level-task and we are deactivated then
       // it is now safe to shutdown the machine
       if (is_top_level_task)
-      {
-        log_run(LEVEL_SPEW,"Computation has terminated. "
-                           "Shutting down the Legion runtime...");
-        runtime->machine->shutdown();
-      }
+        runtime->initiate_runtime_shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -5151,7 +5393,7 @@ namespace LegionRuntime {
 #endif
       initialize_paths(); 
       // Get a future from the parent context to use as the result
-      result = Future(new Future::Impl(runtime, 
+      result = Future(new Future::Impl(runtime, true/*register*/, 
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -5221,7 +5463,7 @@ namespace LegionRuntime {
       assert(remote_outermost_context.exists());
 #endif
       initialize_paths();
-      result = Future(new Future::Impl(runtime,
+      result = Future(new Future::Impl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -7099,7 +7341,7 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      reduction_future = Future(new Future::Impl(runtime,
+      reduction_future = Future(new Future::Impl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -7266,7 +7508,7 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      reduction_future = Future(new Future::Impl(runtime,
+      reduction_future = Future(new Future::Impl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();

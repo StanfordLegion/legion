@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include "circuit_mapper.h"
 
 using namespace LegionRuntime::HighLevel;

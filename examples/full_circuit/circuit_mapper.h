@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #ifndef __CIRCUIT_MAPPER_H__
 #define __CIRCUIT_MAPPER_H__
 

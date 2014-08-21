@@ -301,6 +301,8 @@ namespace LegionRuntime {
       bool is_disjoint(LogicalPartition handle);
       bool are_disjoint(IndexSpace parent, IndexSpace child);
       bool are_disjoint(IndexSpace parent, IndexPartition child);
+      bool are_compatible(IndexSpace left, IndexSpace right);
+      bool is_dominated(IndexSpace src, IndexSpace dst);
       bool compute_index_path(IndexSpace parent, IndexSpace child,
                               std::vector<Color> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
@@ -2881,7 +2883,7 @@ namespace LegionRuntime {
       void update_versions(const FieldMask &update_mask);
       void filter_local_users(Event term_event,
                               const FieldMask &term_mask);
-      void condense_user_list(std::list<PhysicalUser> &users);
+      void condense_user_list(std::list<PhysicalUser> &users, bool previous);
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
