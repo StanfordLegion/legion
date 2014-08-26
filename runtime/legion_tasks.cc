@@ -8098,41 +8098,36 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
-      // Hold the lock when doing these things
+      // Hold the lock when unpacking the privileges
       {
         AutoLock o_lock(op_lock);
         unpack_privilege_state(derez);
-        if (redop != 0)
-        {
+      }
+      if (redop != 0)
+      {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(reduction_op != NULL);
+        assert(reduction_op != NULL);
+        assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
-          // See if we need to make a reduction state
-          if (reduction_state == NULL)
-          {
-            reduction_state_size = reduction_op->sizeof_rhs;
-            reduction_state = malloc(reduction_state_size);
-            reduction_op->init(reduction_state,1);
-          }
-          const void *reduc_ptr = derez.get_current_pointer();
-          reduction_op->fold(reduction_state,reduc_ptr,1,true/*exclusive*/);
-          // Advance the pointer on the deserializer
-          derez.advance_pointer(reduction_state_size);
-        }
-        else
+        const void *reduc_ptr = derez.get_current_pointer();
+        fold_reduction_future(reduc_ptr, reduction_state_size,
+                              false /*owner*/, false/*exclusive*/);
+        // Advance the pointer on the deserializer
+        derez.advance_pointer(reduction_state_size);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < points; idx++)
         {
-          for (unsigned idx = 0; idx < points; idx++)
+          DomainPoint p;
+          unpack_point(derez, p);
+          if (must_epoch == NULL)
           {
-            DomainPoint p;
-            unpack_point(derez, p);
-            if (must_epoch == NULL)
-            {
-              Future f = future_map.impl->get_future(p);
-              f.impl->unpack_future(derez);
-            }
-            else
-              must_epoch->unpack_future(p, derez);
+            Future f = future_map.impl->get_future(p);
+            f.impl->unpack_future(derez);
           }
+          else
+            must_epoch->unpack_future(p, derez);
         }
       }
       return_slice_complete(points);
