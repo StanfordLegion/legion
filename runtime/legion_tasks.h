@@ -546,6 +546,7 @@ namespace LegionRuntime {
                            AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez, bool unpack_args);
     public:
+      void initialize_reduction_state(void);
       void fold_reduction_future(const void *result, size_t result_size,
                                  bool owner, bool exclusive);
     protected:
@@ -592,6 +593,7 @@ namespace LegionRuntime {
       void initialize_paths(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
@@ -909,6 +911,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
@@ -1055,6 +1058,36 @@ namespace LegionRuntime {
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t>,
                 DomainPoint::STLComparator> temporary_futures;
+    };
+
+    /**
+     * \class DeferredSlicer
+     * A class for helping with parallelizing the triggering
+     * of slice tasks from within MultiTasks
+     */
+    class DeferredSlicer {
+    public:
+      struct DeferredSliceArgs {
+      public:
+        HLRTaskID hlr_id;
+        DeferredSlicer *slicer;
+        SliceTask *slice;
+      };
+    public:
+      DeferredSlicer(MultiTask *owner);
+      DeferredSlicer(const DeferredSlicer &rhs);
+      ~DeferredSlicer(void);
+    public:
+      DeferredSlicer& operator=(const DeferredSlicer &rhs);
+    public:
+      bool trigger_slices(std::list<SliceTask*> &slices);
+      void perform_slice(SliceTask *slice);
+    public:
+      static void handle_slice(const void *args);
+    private:
+      Reservation slice_lock;
+      MultiTask *const owner;
+      std::set<SliceTask*> failed_slices;
     };
 
   }; // namespace HighLevel

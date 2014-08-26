@@ -75,7 +75,7 @@ namespace LegionRuntime {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_trace(LegionTrace *trace);
-      void set_must_epoch(MustEpochOp *epoch);
+      void set_must_epoch(MustEpochOp *epoch, unsigned index);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -116,6 +116,9 @@ namespace LegionRuntime {
       // The function to call when commit the operation is
       // ready to commit
       virtual void trigger_commit(void);
+      // A helper method for deciding what to do when we have
+      // aliased region requirements for an operation
+      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -273,6 +276,8 @@ namespace LegionRuntime {
       MustEpochOp *must_epoch;
       // Generation for out mapping epoch
       GenerationID must_epoch_gen;
+      // The index in the must epoch
+      unsigned must_epoch_index;
     };
 
     /**
@@ -427,6 +432,7 @@ namespace LegionRuntime {
       virtual void continue_mapping(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
+      virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -667,13 +673,14 @@ namespace LegionRuntime {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(Future f, Processor proc);
+      void initialize(SingleTask *ctx, Future f, Processor proc);
       void speculate(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       const char* get_logging_name(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual bool sample(bool &valid, bool &speculated);
     protected:
       Future future;
@@ -697,15 +704,17 @@ namespace LegionRuntime {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(const Predicate &p);
+      void initialize(SingleTask *task, const Predicate &p);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual bool sample(bool &valid, bool &speculated);
     protected:
       PredicateOp *pred_op;
+      GenerationID pred_gen;
     protected: 
       bool pred_valid;
       bool pred_speculated;
@@ -724,16 +733,20 @@ namespace LegionRuntime {
     public:
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
-      void initialize(const Predicate &p1, const Predicate &p2);
+      void initialize(SingleTask *task, 
+                      const Predicate &p1, const Predicate &p2);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual bool sample(bool &valid, bool &speculated);
     protected:
       PredicateOp *pred0;
       PredicateOp *pred1;
+      GenerationID pred0_gen;
+      GenerationID pred1_gen;
     protected:
       bool zero_valid;
       bool zero_speculated;
@@ -756,16 +769,20 @@ namespace LegionRuntime {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(const Predicate &p1, const Predicate &p2);
+      void initialize(SingleTask *task,
+                      const Predicate &p1, const Predicate &p2);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual bool sample(bool &valid, bool &speculated);
     protected:
       PredicateOp *pred0;
       PredicateOp *pred1;
+      GenerationID pred0_gen;
+      GenerationID pred1_gen;
     protected:
       bool zero_valid;
       bool zero_speculated;
@@ -831,7 +848,7 @@ namespace LegionRuntime {
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
     public:
-      void register_single_task(SingleTask *single);
+      void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
       void set_future(const DomainPoint &point, 
                       const void *result, size_t result_size, bool owned);
@@ -846,7 +863,9 @@ namespace LegionRuntime {
       TaskOp* find_task_by_index(int index);
     protected:
       std::vector<IndividualTask*>        indiv_tasks;
+      std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
+      std::vector<bool>                   index_triggered;
     protected:
       // The component slices for distribution
       std::set<SliceTask*>         slice_tasks;
@@ -861,7 +880,6 @@ namespace LegionRuntime {
       unsigned remaining_subop_completes;
       unsigned remaining_subop_commits;
     protected:
-      unsigned triggering_index;
       // Used to know if we successfully triggered everything
       // and therefore have all of the single tasks and a
       // valid set of constraints.
@@ -871,6 +889,103 @@ namespace LegionRuntime {
       std::vector<std::set<SingleTask*> > task_sets;
     protected:
       std::vector<DependenceRecord> dependences;
+    };
+
+    /**
+     * \class MustEpochTriggerer
+     * A helper class for parallelizing must epoch triggering
+     */
+    class MustEpochTriggerer {
+    public:
+      struct MustEpochIndivArgs {
+      public:
+        HLRTaskID hlr_id;
+        MustEpochTriggerer *triggerer;
+        IndividualTask *task;
+      };
+      struct MustEpochIndexArgs {
+        HLRTaskID hlr_id;
+        MustEpochTriggerer *triggerer;
+        IndexTask *task;
+      };
+    public:
+      MustEpochTriggerer(MustEpochOp *owner);
+      MustEpochTriggerer(const MustEpochTriggerer &rhs);
+      ~MustEpochTriggerer(void);
+    public:
+      MustEpochTriggerer& operator=(const MustEpochTriggerer &rhs);
+    public:
+      bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
+                         std::vector<bool> &indiv_triggered,
+                         const std::vector<IndexTask*> &index_tasks,
+                         std::vector<bool> &index_triggered);
+      void trigger_individual(IndividualTask *task);
+      void trigger_index(IndexTask *task);
+    public:
+      static void handle_individual(const void *args);
+      static void handle_index(const void *args);
+    private:
+      MustEpochOp *const owner;
+      Reservation trigger_lock;
+      std::set<IndividualTask*> failed_individual_tasks;
+      std::set<IndexTask*> failed_index_tasks;
+    };
+
+    /**
+     * \class MustEpochMapper
+     * A helper class for parallelizing mapping for must epochs
+     */
+    class MustEpochMapper {
+    public:
+      struct MustEpochMapArgs {
+      public:
+        HLRTaskID hlr_id;
+        MustEpochMapper *mapper;
+        SingleTask *task;
+      };
+    public:
+      MustEpochMapper(MustEpochOp *owner);
+      MustEpochMapper(const MustEpochMapper &rhs);
+      ~MustEpochMapper(void);
+    public:
+      MustEpochMapper& operator=(const MustEpochMapper &rhs);
+    public:
+      bool map_tasks(const std::set<SingleTask*> &single_tasks);
+      void map_task(SingleTask *task);
+    public:
+      static void handle_map_task(const void *args);
+    private:
+      MustEpochOp *const owner;
+      bool success;
+    };
+
+    class MustEpochDistributor {
+    public:
+      struct MustEpochDistributorArgs {
+      public:
+        HLRTaskID hlr_id;
+        TaskOp *task;
+      };
+      struct MustEpochLauncherArgs {
+      public:
+        HLRTaskID hlr_id;
+        TaskOp *task;
+      };
+    public:
+      MustEpochDistributor(MustEpochOp *owner);
+      MustEpochDistributor(const MustEpochDistributor &rhs);
+      ~MustEpochDistributor(void);
+    public:
+      MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
+    public:
+      void distribute_tasks(Runtime *runtime,
+                            const std::vector<IndividualTask*> &indiv_tasks,
+                            const std::set<SliceTask*> &slice_tasks);
+    public:
+      static void handle_distribute_task(const void *args);
+      static void handle_launch_task(const void *args);
+    private:
+      MustEpochOp *const owner;
     };
 
   }; //namespace HighLevel

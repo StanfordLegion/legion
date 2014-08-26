@@ -4283,67 +4283,10 @@ namespace LegionRuntime {
 #endif
       // Register this with the DMAQueue
       Runtime::get_dma_queue()->enqueue_dma(this);
-#if 0
-      perform_copy_operation();
-      // Trigger the done event if it exists when we're done
-      // Hold the lock when reading done event since we need to make
-      // sure it has been set if it needs to be set
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
-      EventImpl *done_clone = done_event;
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
-      if (done_clone)
-        done_clone->trigger();
-      delete this;
-#endif
     }
 
     Event CopyOperation::register_copy(Event wait_on)
     {
-#if 0
-      Event result = Event::NO_EVENT;
-      EventImpl *done_clone = NULL;
-      if (wait_on.exists()) {
-        // Try registering this as a triggerable with the event	
-        EventImpl *event_impl = Runtime::get_runtime()->get_event_impl(wait_on);
-        // Need to hold the mutex here in case we have to set the done_event
-        // to make sure it gets set before trigger is called
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
-        if (event_impl->register_dependent(this, wait_on.gen, 0)) {
-          // make sure we have a completion event
-          if (!done_event)
-            done_event = Runtime::get_runtime()->get_free_event();
-          result = done_event->get_event();
-          PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
-          return result;
-        }
-        done_clone = done_event;
-        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
-      }
-#ifdef LEGION_LOGGING
-      else
-      {
-        assert(done_event != NULL);
-        done_clone = done_event;
-      }
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Machine::get_executing_processor(),
-                                    done_event->get_event(), COPY_INIT);
-#endif
-
-      // either there was no wait event or it has already fired
-      perform_copy_operation();
-      if (done_clone)
-      {
-#ifdef LEGION_LOGGING
-        if (!result.exists())
-          result = done_clone->get_event();
-#endif
-        done_clone->trigger();
-      }
-      // We're done, so we can free ourselves
-      delete this;
-      return result;
-#endif
 #ifdef LEGION_LOGGING
       LegionRuntime::HighLevel::LegionLogging::log_timing_event(
                                     Machine::get_executing_processor(),
@@ -4371,7 +4314,7 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_COPY); 
 #ifdef LEGION_LOGGING
       LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Machine::get_executing_processor(),
+                                    Processor::NO_PROC,
                                     done_event->get_event(), COPY_BEGIN);
 #endif
 
@@ -4418,7 +4361,7 @@ namespace LegionRuntime {
       }
 #ifdef LEGION_LOGGING
       LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Machine::get_executing_processor(),
+                                      Processor::NO_PROC,
                                       done_event->get_event(), COPY_END);
 #endif
       // Trigger the event indicating that we are done
@@ -4455,20 +4398,6 @@ namespace LegionRuntime {
 					    done_event);
       return co->register_copy(wait_on);
     }
-
-#if 0
-    Event IndexSpace::Impl::copy(const std::vector<Domain::CopySrcDstField>& srcs,
-				 const std::vector<Domain::CopySrcDstField>& dsts,
-				 const ElementMask& mask, Event wait_on,
-				 ReductionOpID redop_id, bool red_fold)
-    {
-      CopyOperation *co = new CopyOperation(srcs, dsts, 
-					    get_element_mask(), mask,
-					    redop_id, red_fold,
-					    0);
-      return co->register_copy(wait_on);
-    }
-#endif
 
     ////////////////////////////////////////////////////////
     // DMA Queue 
@@ -5681,22 +5610,6 @@ namespace LegionRuntime {
       return false;
     }
 
-#ifdef POINTER_CHECKS
-    void AccessorType::verify_access(void *impl_ptr, unsigned ptr) 
-    {
-      assert(impl_ptr != NULL);
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
-      impl->verify_access(ptr);
-    }
-
-    void AccessorType::verify_access(void *impl_ptr, const LowLevel::DomainPoint& dp)
-    {
-        assert(impl_ptr != NULL);
-        RegionInstance::Impl *impl = (RegionInstance::Impl *) impl_ptr;
-	int index = impl->get_linearization().get_image(dp);
-	impl->verify_access(index);
-    }
-#endif
   };
 
   namespace Arrays {

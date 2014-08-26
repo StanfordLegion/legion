@@ -1274,7 +1274,7 @@ namespace LegionRuntime {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
       if (rhs->must_epoch != NULL)
-        this->set_must_epoch(rhs->must_epoch);
+        this->set_must_epoch(rhs->must_epoch, this->must_epoch_index);
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -3946,7 +3946,7 @@ namespace LegionRuntime {
           // See if we have a must epoch in which case
           // we can simply record ourselves and we are done
           if (must_epoch != NULL)
-            must_epoch->register_single_task(this);
+            must_epoch->register_single_task(this, must_epoch_index);
           else
           {
             // See if this task is going to be sent
@@ -5011,41 +5011,8 @@ namespace LegionRuntime {
     bool MultiTask::trigger_slices(void)
     //--------------------------------------------------------------------------
     {
-      // Watch out for the cleanup race, make a copy of the slices
-      bool success = true;
-      std::list<SliceTask*> local_slices = slices;
-      std::set<SliceTask*> failed_slices;
-      for (std::list<SliceTask*>::const_iterator it = local_slices.begin();
-            it != local_slices.end(); it++)
-      {
-        bool slice_success = (*it)->trigger_execution();
-        if (!slice_success)
-        {
-          success = false;
-          failed_slices.insert(*it);
-        }
-      }
-      // If there were some slices that didn't succeed, then we
-      // need to clean up the ones that did so we know when
-      // which ones to re-trigger when we try again later. Otherwise
-      // if all the slices succeeded, then the normal deactivation of
-      // this task will clean up the slices. Note that if we have
-      // at least one slice that didn't succeed then we know this
-      // task cannot be deactivated.
-      if (!success)
-      {
-        for (std::list<SliceTask*>::iterator it = slices.begin();
-              it != slices.end(); /*nothing*/)
-        {
-          // If we can't find it in the set of failed slices
-          // then it succeeded so we can remove it from the list
-          if (failed_slices.find(*it) == failed_slices.end())
-            it = slices.erase(it);
-          else
-            it++;
-        }
-      }
-      return success;
+      DeferredSlicer slicer(this);
+      return slicer.trigger_slices(slices);
     }
 
     //--------------------------------------------------------------------------
@@ -5062,7 +5029,10 @@ namespace LegionRuntime {
       this->argument_map = rhs->argument_map;
       this->redop = rhs->redop;
       if (this->redop != 0)
+      {
         this->reduction_op = rhs->reduction_op;
+        initialize_reduction_state();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5234,13 +5204,30 @@ namespace LegionRuntime {
       derez.deserialize(must_barrier);
       derez.deserialize(redop);
       if (redop > 0)
+      {
         reduction_op = Runtime::get_reduction_op(redop);
+        initialize_reduction_state();
+      }
       if (unpack_args)
       {
         argument_map = 
           ArgumentMap(new ArgumentMap::Impl(new ArgumentMapStore()));
         argument_map.impl->unpack_arguments(derez);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MultiTask::initialize_reduction_state(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(reduction_op != NULL);
+      assert(reduction_op->is_foldable);
+      assert(reduction_state == NULL);
+#endif
+      reduction_state_size = reduction_op->sizeof_rhs;
+      reduction_state = malloc(reduction_state_size);
+      reduction_op->init(reduction_state, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -5253,16 +5240,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(reduction_op != NULL);
       assert(reduction_op->is_foldable);
+      assert(reduction_state != NULL);
       assert(result_size == reduction_op->sizeof_rhs);
 #endif
-      // See if we need to make the state
-      if (reduction_state == NULL)
-      {
-        reduction_state_size = reduction_op->sizeof_rhs;
-        reduction_state = malloc(reduction_state_size);
-        reduction_op->init(reduction_state,1);
-      }
-      // Now do the fold operation
+      // Perform the reduction
       reduction_op->fold(reduction_state, result, 1, exclusive);
 
       // If we're the owner, then free the memory
@@ -5532,6 +5513,33 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_END_DEP_ANALYSIS);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::report_aliased_requirements(unsigned idx1, 
+                                                     unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+#if 0
+      log_run(LEVEL_ERROR,"Aliased region requirements for individual tasks "
+                          "are not permitted. Region requirements %d and %d "
+                          "of task %s (UID %lld) in parent task %s (UID %lld) "
+                          "are aliased.", idx1, idx2, variants->name,
+                          get_unique_task_id(), parent_ctx->variants->name,
+                          parent_ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+#else
+      log_run(LEVEL_WARNING,"Region requirements %d and %d of individual task "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "aliased.  This behavior is currently undefined. "
+                            "You better really know what you are doing.",
+                            idx1, idx2, variants->name, get_unique_task_id(),
+                            parent_ctx->variants->name, 
+                            parent_ctx->get_unique_task_id());
 #endif
     }
 
@@ -7335,6 +7343,8 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_UNFOLDABLE_REDUCTION_OP);
       }
+      else
+        initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (check_privileges)
         perform_privilege_checks();
@@ -7502,6 +7512,8 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_UNFOLDABLE_REDUCTION_OP);
       }
+      else
+        initialize_reduction_state();
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
         perform_privilege_checks();
@@ -7586,6 +7598,32 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_END_DEP_ANALYSIS);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::report_aliased_requirements(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+#if 0
+      log_run(LEVEL_ERROR,"Aliased region requirements for index tasks "
+                          "are not permitted. Region requirements %d and %d "
+                          "of task %s (UID %lld) in parent task %s (UID %lld) "
+                          "are aliased.", idx1, idx2, variants->name,
+                          get_unique_task_id(), parent_ctx->variants->name,
+                          parent_ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+#else
+      log_run(LEVEL_WARNING,"Region requirements %d and %d of individual task "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "aliased.  This behavior is currently undefined. "
+                            "You better really know what you are doing.",
+                            idx1, idx2, variants->name, get_unique_task_id(),
+                            parent_ctx->variants->name, 
+                            parent_ctx->get_unique_task_id());
 #endif
     }
 
@@ -7955,7 +7993,6 @@ namespace LegionRuntime {
         fold_reduction_future(result, result_size, owner, false/*exclusive*/);
       else
       {
-        AutoLock o_lock(op_lock);
         if (must_epoch == NULL)
         {
           Future f = future_map.get_future(point);
@@ -8745,7 +8782,7 @@ namespace LegionRuntime {
         enumerate_points();
       must_epoch->register_slice_task(this);
       for (unsigned idx = 0; idx < points.size(); idx++)
-        must_epoch->register_single_task(points[idx]);
+        must_epoch->register_single_task(points[idx], must_epoch_index);
     }
 
     //--------------------------------------------------------------------------
@@ -9124,6 +9161,121 @@ namespace LegionRuntime {
       derez.deserialize(slice_task);
       rt->add_to_ready_queue(slice_task->current_proc, slice_task,
                              false/*prev fail*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Slice Task 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DeferredSlicer::DeferredSlicer(MultiTask *own)
+      : owner(own)
+    //--------------------------------------------------------------------------
+    {
+      slice_lock = Reservation::create_reservation();
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSlicer::DeferredSlicer(const DeferredSlicer &rhs)
+      : owner(rhs.owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSlicer::~DeferredSlicer(void)
+    //--------------------------------------------------------------------------
+    {
+      slice_lock.destroy_reservation();
+      slice_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    DeferredSlicer& DeferredSlicer::operator=(const DeferredSlicer &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeferredSlicer::trigger_slices(std::list<SliceTask*> &slices)
+    //--------------------------------------------------------------------------
+    {
+      // Watch out for the cleanup race with some acrobatics here
+      // to handle the case where the iterator is invalidated
+      std::set<Event> wait_events;
+      {
+        Processor exec_proc = Machine::get_executing_processor();
+        Processor util_proc = exec_proc.get_utility_processor();
+        std::list<SliceTask*>::const_iterator it = slices.begin();
+        DeferredSliceArgs args;
+        args.hlr_id = HLR_DEFERRED_SLICE_ID;
+        args.slicer = this;
+        while (true) 
+        {
+          args.slice = *it;
+          it++;
+          bool done = (it == slices.end()); 
+          Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args)); 
+          if (wait.exists())
+            wait_events.insert(wait);
+          if (done)
+            break;
+        }
+      }
+
+      // Now we wait for the slices to trigger, note we do not
+      // block on the event allowing the utility processor to 
+      // perform other operations
+      if (!wait_events.empty())
+      {
+        Event sliced_event = Event::merge_events(wait_events);
+        sliced_event.wait(false/*block*/);
+      }
+
+      bool success = failed_slices.empty();
+      // If there were some slices that didn't succeed, then we
+      // need to clean up the ones that did so we know when
+      // which ones to re-trigger when we try again later. Otherwise
+      // if all the slices succeeded, then the normal deactivation of
+      // this task will clean up the slices. Note that if we have
+      // at least one slice that didn't succeed then we know this
+      // task cannot be deactivated.
+      if (!success)
+      {
+        for (std::list<SliceTask*>::iterator it = slices.begin();
+              it != slices.end(); /*nothing*/)
+        {
+          if (failed_slices.find(*it) == failed_slices.end())
+            it = slices.erase(it);
+          else
+            it++;
+        }
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredSlicer::perform_slice(SliceTask *slice)
+    //--------------------------------------------------------------------------
+    {
+      if (!slice->trigger_execution())
+      {
+        AutoLock s_lock(slice_lock);
+        failed_slices.insert(slice);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DeferredSlicer::handle_slice(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredSliceArgs *slice_args = (const DeferredSliceArgs*)args;
+      slice_args->slicer->perform_slice(slice_args->slice);
     }
 
   }; // namespace HighLevel

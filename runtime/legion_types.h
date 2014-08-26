@@ -258,6 +258,7 @@ namespace LegionRuntime {
       ERROR_INVALID_FIELD_SPACE_REQUEST = 112,
       ERROR_INVALID_LOGICAL_SUBREGION_REQUEST = 113,
       ERROR_INVALID_LOGICAL_SUBPARTITION_REQUEST = 114,
+      ERROR_ALIASED_REGION_REQUIREMENTS = 115,
     };
 
     // enum and namepsaces don't really get along well
@@ -338,6 +339,12 @@ namespace LegionRuntime {
       HLR_TRIGGER_OP_ID,
       HLR_TRIGGER_TASK_ID,
       HLR_DEFERRED_RECYCLE_ID,
+      HLR_DEFERRED_SLICE_ID,
+      HLR_MUST_INDIV_ID,
+      HLR_MUST_INDEX_ID,
+      HLR_MUST_MAP_ID,
+      HLR_MUST_DIST_ID,
+      HLR_MUST_LAUNCH_ID,
     };
 
     // Forward declarations for user level objects

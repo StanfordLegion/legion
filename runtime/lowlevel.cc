@@ -5228,6 +5228,37 @@ namespace LegionRuntime {
         Event::Impl *impl = Runtime::get_runtime()->get_event_impl(wait_for);
         
         while(!impl->has_triggered(wait_for.gen)) {
+          if (!block) {
+            gasnet_hsl_lock(&proc->mutex);
+            if (proc->tasks.size() > 0) {
+              UtilityTask *task = proc->tasks.front();
+              proc->tasks.pop_front();
+              gasnet_hsl_unlock(&proc->mutex);
+              log_util.info("running task %p (%d) in utility thread", task, task->func_id);
+              task->run();
+              log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
+              delete task;
+              // Continue since we no longer hold the lock
+              continue;
+            }
+#ifdef SHARED_UTILITY_QUEUE
+            if (proc->shared_queue) {
+              if (!proc->shared_queue->empty()) {
+                UtilityTask *task = proc->shared_queue->pop();
+                if (task) {
+                  gasnet_hsl_unlock(&proc->mutex);
+                  log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
+                  task->run();
+                  log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
+                  delete task;
+                  // Continue since we no longer hold the lock
+                  continue;
+                }
+              }
+            }
+#endif
+            gasnet_hsl_unlock(&proc->mutex);
+          }
 #ifdef __SSE2__
           _mm_pause();
 #endif

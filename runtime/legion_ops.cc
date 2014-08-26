@@ -91,6 +91,7 @@ namespace LegionRuntime {
       tracing = false;
       must_epoch = NULL;
       must_epoch_gen = 0;
+      must_epoch_index = 0;
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
@@ -181,7 +182,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_must_epoch(MustEpochOp *epoch)
+    void Operation::set_must_epoch(MustEpochOp *epoch, unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -190,6 +191,7 @@ namespace LegionRuntime {
 #endif
       must_epoch = epoch;
       must_epoch_gen = epoch->get_generation();
+      must_epoch_index = index;
       must_epoch->register_subop(this);
     }
 
@@ -285,6 +287,14 @@ namespace LegionRuntime {
       commit_operation();
       // Once we're done with this, we can deactivate the object
       deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_aliased_requirements(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called if overridden
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -672,6 +682,8 @@ namespace LegionRuntime {
       // true if the generation is older than our current generation.
       if (target == this)
       {
+        if (target_gen == gen)
+          report_aliased_requirements(target_idx, idx);
         // Can't remove this if we are tracing
         if (tracing)
         {
@@ -726,6 +738,8 @@ namespace LegionRuntime {
       }
       if (target == this)
       {
+        if (target_gen == gen)
+          report_aliased_requirements(target_idx, idx);
         // Can't remove this if we are tracing
         if (tracing)
         {
@@ -2706,6 +2720,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::report_aliased_requirements(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      bool is_src1 = idx1 < src_requirements.size();
+      bool is_src2 = idx2 < src_requirements.size();
+      unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
+      unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      log_run(LEVEL_ERROR,"Aliased region requirements for copy operations "
+                          "are not permitted. Region requirement %d of %s "
+                          "requirements and %d of %s requirements aliased for "
+                          "copy operation (UID %lld) in task %s (UID %lld).",
+                          actual_idx1, is_src1 ? "source" : "destination",
+                          actual_idx2, is_src2 ? "source" : "destination",
+                          unique_op_id, parent_ctx->variants->name,
+                          parent_ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+    }
+
+    //--------------------------------------------------------------------------
     Mappable::MappableKind CopyOp::get_mappable_kind(void) const
     //--------------------------------------------------------------------------
     {
@@ -4555,6 +4591,7 @@ namespace LegionRuntime {
     void FuturePredOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_operation();
       try_speculated = false;
       pred_valid = false;
       pred_speculated = false;
@@ -4564,6 +4601,7 @@ namespace LegionRuntime {
     void FuturePredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_operation();
       future = Future();
       runtime->free_future_predicate_op(this);
     }
@@ -4576,14 +4614,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(Future f, Processor p)
+    void FuturePredOp::initialize(SingleTask *ctx, Future f, Processor p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx != NULL);
+#endif
+      initialize_operation(ctx, true/*track*/);
       future = f;
       proc = p;
-      // Register this operation as dependent on the task that
-      // generated the future
-      register_dependence(f.impl->task, f.impl->task_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -4597,6 +4636,20 @@ namespace LegionRuntime {
                                                       pred_valid);  
         try_speculated = true;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void FuturePredOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(future.impl->task != NULL);
+#endif
+      begin_dependence_analysis();
+      // Register this operation as dependent on task that
+      // generated the future
+      register_dependence(future.impl->task, future.impl->task_gen);
+      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -4676,9 +4729,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::initialize(const Predicate &p)
+    void NotPredOp::initialize(SingleTask *ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx != NULL);
+#endif
+      initialize_operation(ctx, true/*track*/);
       if (p == Predicate::TRUE_PRED)
       {
         pred_op = NULL;
@@ -4694,7 +4751,7 @@ namespace LegionRuntime {
       else
       {
         pred_op = p.impl;  
-        register_dependence(pred_op, pred_op->get_generation());
+        pred_gen = pred_op->get_generation();
       }
     }
 
@@ -4702,7 +4759,9 @@ namespace LegionRuntime {
     void NotPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_operation();
       pred_op = NULL;
+      pred_gen = 0;
       pred_valid = false;
       pred_speculated = false;
     }
@@ -4711,6 +4770,7 @@ namespace LegionRuntime {
     void NotPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_operation();
       runtime->free_not_predicate_op(this);
     }
 
@@ -4719,6 +4779,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return "Not Predicate";
+    }
+
+    //--------------------------------------------------------------------------
+    void NotPredOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      if (pred_op != NULL)
+        register_dependence(pred_op, pred_gen);
+      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -4779,9 +4849,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::initialize(const Predicate &p1, const Predicate &p2)
+    void AndPredOp::initialize(SingleTask *ctx,
+                               const Predicate &p1, const Predicate &p2)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx != NULL);
+#endif
+      initialize_operation(ctx, true/*track*/);
       if (p1 == Predicate::TRUE_PRED)
       {
         pred0 = NULL;
@@ -4797,7 +4872,7 @@ namespace LegionRuntime {
       else
       {
         pred0 = p1.impl;
-        register_dependence(pred0, pred0->get_generation());
+        pred0_gen = pred0->get_generation();
       }
       if (p2 == Predicate::TRUE_PRED)
       {
@@ -4814,7 +4889,7 @@ namespace LegionRuntime {
       else
       {
         pred1 = p2.impl;
-        register_dependence(pred1, pred1->get_generation());
+        pred1_gen = pred1->get_generation();
       }
     }
 
@@ -4822,8 +4897,11 @@ namespace LegionRuntime {
     void AndPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_operation();
       pred0 = NULL;
       pred1 = NULL;
+      pred0_gen = 0;
+      pred1_gen = 0;
       zero_valid = false;
       zero_speculated = false;
       one_valid = false;
@@ -4834,6 +4912,7 @@ namespace LegionRuntime {
     void AndPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_operation();
       runtime->free_and_predicate_op(this);
     }
 
@@ -4842,6 +4921,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return "And Predicate";
+    }
+
+    //--------------------------------------------------------------------------
+    void AndPredOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      if (pred0 != NULL)
+        register_dependence(pred0, pred0_gen);
+      if (pred1 != NULL)
+        register_dependence(pred1, pred1_gen);
+      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -4971,9 +5062,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::initialize(const Predicate &p1, const Predicate &p2)
+    void OrPredOp::initialize(SingleTask *ctx,
+                              const Predicate &p1, const Predicate &p2)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx != NULL);
+#endif
+      initialize_operation(ctx, true/*track*/);
       if (p1 == Predicate::TRUE_PRED)
       {
         pred0 = NULL;
@@ -4989,7 +5085,7 @@ namespace LegionRuntime {
       else
       {
         pred0 = p1.impl;
-        register_dependence(pred0, pred0->get_generation());
+        pred0_gen = pred0->get_generation();
       }
       if (p2 == Predicate::TRUE_PRED)
       {
@@ -5006,7 +5102,7 @@ namespace LegionRuntime {
       else
       {
         pred1 = p2.impl;
-        register_dependence(pred1, pred1->get_generation());
+        pred1_gen = pred1->get_generation();
       }
     }
 
@@ -5014,8 +5110,11 @@ namespace LegionRuntime {
     void OrPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_operation();
       pred0 = NULL;
       pred1 = NULL;
+      pred0_gen = 0;
+      pred1_gen = 0;
       zero_valid = false;
       zero_speculated = false;
       one_valid = false;
@@ -5026,6 +5125,7 @@ namespace LegionRuntime {
     void OrPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_operation();
       runtime->free_or_predicate_op(this);
     }
 
@@ -5034,6 +5134,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return "Or Predicate";
+    }
+
+    //--------------------------------------------------------------------------
+    void OrPredOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      begin_dependence_analysis();
+      if (pred0 != NULL)
+        register_dependence(pred0, pred0_gen);
+      if (pred1 != NULL)
+        register_dependence(pred1, pred1_gen);
+      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -5180,20 +5292,22 @@ namespace LegionRuntime {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           check_privileges, false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this);
+        indiv_tasks[idx]->set_must_epoch(this, idx);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace);
       }
+      indiv_triggered.resize(indiv_tasks.size(), false);
       for (unsigned idx = 0; idx < launcher.index_tasks.size(); idx++)
       {
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           check_privileges, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this);
+        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace);
       }
+      index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
@@ -5274,7 +5388,9 @@ namespace LegionRuntime {
       deactivate_operation();
       // All the sub-operations we have will deactivate themselves
       indiv_tasks.clear();
+      indiv_triggered.clear();
       index_tasks.clear();
+      index_triggered.clear();
       slice_tasks.clear();
       single_tasks.clear();
       // Remove our reference on the future map
@@ -5323,15 +5439,10 @@ namespace LegionRuntime {
       if (!triggering_complete)
       {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
-        triggering_index = 0;
-        for (unsigned idx = 0; idx < indiv_tasks.size(); 
-              idx++, triggering_index++)
-          if (!indiv_tasks[idx]->trigger_execution())
-            return false;
-        for (unsigned idx = 0; idx < index_tasks.size(); 
-              idx++, triggering_index++)
-          if (!index_tasks[idx]->trigger_execution())
-            return false;
+        MustEpochTriggerer triggerer(this);
+        if (!triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
+                                     index_tasks, index_triggered))
+          return false;
 
 #ifdef DEBUG_HIGH_LEVEL
         assert(!single_tasks.empty());
@@ -5392,19 +5503,10 @@ namespace LegionRuntime {
       }
 
       // Then we need to actually perform the mapping
-      for (std::set<SingleTask*>::const_iterator it = 
-            single_tasks.begin(); it != single_tasks.end(); it++)
       {
-        if (!(*it)->perform_mapping(true/*mapper invoked already*/))
-        {
-          // Failed to map, unmap everyone that came before and restart
-          for (std::set<SingleTask*>::const_iterator it2 = 
-                single_tasks.begin(); it2 != it; it2++)
-          {
-            (*it2)->unmap_all_regions();
-          }
+        MustEpochMapper mapper(this); 
+        if (!mapper.map_tasks(single_tasks))
           return false;
-        }
       }
 
       // Everybody successfully mapped so now check that all
@@ -5448,22 +5550,9 @@ namespace LegionRuntime {
       }
 
       // If we passed all the constraints, then kick everything off
-      for (std::vector<IndividualTask*>::const_iterator it = 
-            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
-      {
-        if (!runtime->is_local((*it)->target_proc)) 
-          (*it)->distribute_task();
-        else
-          (*it)->launch_task();
-      }
-      for (std::set<SliceTask*>::const_iterator it = 
-            slice_tasks.begin(); it != slice_tasks.end(); it++)
-      {
-        if (!runtime->is_local((*it)->target_proc))
-          (*it)->distribute_task();
-        else
-          (*it)->launch_task();
-      }
+      MustEpochDistributor distributor(this);
+      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks);
+      
       // Mark that we are done mapping and executing this operation
       complete_mapping();
       complete_execution();
@@ -5589,20 +5678,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::register_single_task(SingleTask *single)
+    void MustEpochOp::register_single_task(SingleTask *single, unsigned index)
     //--------------------------------------------------------------------------
     {
-      single_tasks.insert(single);
+      // Can do the first part without the lock 
 #ifdef DEBUG_HIGH_LEVEL
-      assert(triggering_index < task_sets.size());
+      assert(index < task_sets.size());
 #endif
-      task_sets[triggering_index].insert(single);
+      task_sets[index].insert(single);
+      AutoLock o_lock(op_lock);
+      single_tasks.insert(single);
     }
 
     //--------------------------------------------------------------------------
     void MustEpochOp::register_slice_task(SliceTask *slice)
     //--------------------------------------------------------------------------
     {
+      AutoLock o_lock(op_lock);
       slice_tasks.insert(slice);
     }
 
@@ -5701,6 +5793,374 @@ namespace LegionRuntime {
         return index_tasks[index];
       assert(false);
       return NULL;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Triggerer 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochTriggerer::MustEpochTriggerer(MustEpochOp *own)
+      : owner(own)
+    //--------------------------------------------------------------------------
+    {
+      trigger_lock = Reservation::create_reservation();
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochTriggerer::MustEpochTriggerer(const MustEpochTriggerer &rhs)
+      : owner(rhs.owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochTriggerer::~MustEpochTriggerer(void)
+    //--------------------------------------------------------------------------
+    {
+      trigger_lock.destroy_reservation();
+      trigger_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochTriggerer& MustEpochTriggerer::operator=(
+                                                  const MustEpochTriggerer &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MustEpochTriggerer::trigger_tasks(
+                                const std::vector<IndividualTask*> &indiv_tasks,
+                                std::vector<bool> &indiv_triggered,
+                                const std::vector<IndexTask*> &index_tasks,
+                                std::vector<bool> &index_triggered)
+    //--------------------------------------------------------------------------
+    {
+      std::deque<IndividualTask*> needed_indiv;
+      std::deque<IndexTask*> needed_index;
+      std::set<Event> wait_events;
+      // Count how many triggerers we are attempting
+      for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
+        if (!indiv_triggered[idx])
+          needed_indiv.push_back(indiv_tasks[idx]);
+      for (unsigned idx = 0; idx < index_triggered.size(); idx++)
+        if (!index_triggered[idx])
+          needed_index.push_back(index_tasks[idx]);
+      // Now do the launches
+      if (!needed_indiv.empty())
+      {
+        Processor exec_proc = Machine::get_executing_processor();
+        Processor util_proc = exec_proc.get_utility_processor();
+        MustEpochIndivArgs args;
+        args.hlr_id = HLR_MUST_INDIV_ID;
+        args.triggerer = this;
+        for (unsigned idx = 0; idx < needed_indiv.size(); idx++)
+        {
+          args.task = needed_indiv[idx];
+          Event wait = util_proc.spawn(HLR_MUST_INDIV_ID, &args, sizeof(args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      if (!needed_index.empty())
+      {
+        Processor exec_proc = Machine::get_executing_processor();
+        Processor util_proc = exec_proc.get_utility_processor();
+        MustEpochIndexArgs args;
+        args.hlr_id = HLR_MUST_INDEX_ID;
+        args.triggerer = this;
+        for (unsigned idx = 0; idx < needed_index.size(); idx++)
+        {
+          args.task = needed_index[idx];
+          Event wait = util_proc.spawn(HLR_MUST_INDEX_ID, &args, sizeof(args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+
+      // Wait for all of the launches to be done
+      // We can safely block to free up the utility processor
+      if (!wait_events.empty())
+      {
+        Event trigger_event = Event::merge_events(wait_events);
+        trigger_event.wait(false/*block*/);
+      }
+      
+      // Now see if any failed
+      // Otherwise mark which ones succeeded
+      if (!failed_individual_tasks.empty())
+      {
+        for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        {
+          if (indiv_triggered[idx])
+            continue;
+          if (failed_individual_tasks.find(indiv_tasks[idx]) ==
+              failed_individual_tasks.end())
+            indiv_triggered[idx] = true;
+        }
+      }
+      if (!failed_index_tasks.empty())
+      {
+        for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        {
+          if (index_triggered[idx])
+            continue;
+          if (failed_index_tasks.find(index_tasks[idx]) ==
+              failed_index_tasks.end())
+            index_triggered[idx] = true;
+        }
+      }
+      return (failed_individual_tasks.empty() && failed_index_tasks.empty());
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochTriggerer::trigger_individual(IndividualTask *task)
+    //--------------------------------------------------------------------------
+    {
+      if (!task->trigger_execution())
+      {
+        AutoLock t_lock(trigger_lock);
+        failed_individual_tasks.insert(task);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochTriggerer::trigger_index(IndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      if (!task->trigger_execution())
+      {
+        AutoLock t_lock(trigger_lock);
+        failed_index_tasks.insert(task);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochTriggerer::handle_individual(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochIndivArgs *indiv_args = (const MustEpochIndivArgs*)args;
+      indiv_args->triggerer->trigger_individual(indiv_args->task);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochTriggerer::handle_index(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochIndexArgs *index_args = (const MustEpochIndexArgs*)args;
+      index_args->triggerer->trigger_index(index_args->task);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Mapper 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochMapper::MustEpochMapper(MustEpochOp *own)
+      : owner(own), success(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochMapper::MustEpochMapper(const MustEpochMapper &rhs)
+      : owner(rhs.owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochMapper::~MustEpochMapper(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochMapper& MustEpochMapper::operator=(const MustEpochMapper &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MustEpochMapper::map_tasks(const std::set<SingleTask*> &single_tasks)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Event> wait_events;   
+      MustEpochMapArgs args;
+      args.hlr_id = HLR_MUST_MAP_ID;
+      args.mapper = this;
+      Processor exec_proc = Machine::get_executing_processor();
+      Processor util_proc = exec_proc.get_utility_processor();
+      for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
+            it != single_tasks.end(); it++)
+      {
+        args.task = *it;
+        Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
+        if (wait.exists())
+          wait_events.insert(wait);
+      }
+      
+      if (!wait_events.empty())
+      {
+        Event mapped_event = Event::merge_events(wait_events);
+        mapped_event.wait(false/*block*/);
+      }
+
+      // If we failed to map then unmap all the tasks 
+      if (!success)
+      {
+        for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
+              it != single_tasks.end(); it++)
+        {
+          (*it)->unmap_all_regions();
+        }
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochMapper::map_task(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      // Note we don't need to hold a lock here because this is
+      // a monotonic change.  Once it fails for anyone then it
+      // fails for everyone.
+      if (!task->perform_mapping(true/*mapper invoked already*/))
+        success = false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochMapper::handle_map_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochMapArgs *map_args = (const MustEpochMapArgs*)args;
+      map_args->mapper->map_task(map_args->task);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Distributor 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochDistributor::MustEpochDistributor(MustEpochOp *own)
+      : owner(own)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochDistributor::MustEpochDistributor(const MustEpochDistributor &rhs)
+      : owner(rhs.owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochDistributor::~MustEpochDistributor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochDistributor& MustEpochDistributor::operator=(
+                                                const MustEpochDistributor &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochDistributor::distribute_tasks(Runtime *runtime,
+                                const std::vector<IndividualTask*> &indiv_tasks,
+                                const std::set<SliceTask*> &slice_tasks)
+    //--------------------------------------------------------------------------
+    {
+      MustEpochDistributorArgs dist_args;
+      dist_args.hlr_id = HLR_MUST_DIST_ID;
+      MustEpochLauncherArgs launch_args;
+      launch_args.hlr_id = HLR_MUST_LAUNCH_ID;
+      std::set<Event> wait_events;
+      Processor exec_proc = Machine::get_executing_processor();
+      Processor util_proc = exec_proc.get_utility_processor();
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        if (!runtime->is_local((*it)->target_proc))
+        {
+          dist_args.task = *it;
+          Event wait = util_proc.spawn(HLR_TASK_ID, 
+                                       &dist_args, sizeof(dist_args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+        else
+        {
+          launch_args.task = *it;
+          Event wait = util_proc.spawn(HLR_TASK_ID,
+                                       &launch_args, sizeof(launch_args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      for (std::set<SliceTask*>::const_iterator it = 
+            slice_tasks.begin(); it != slice_tasks.end(); it++)
+      {
+        if (!runtime->is_local((*it)->target_proc))
+        {
+          dist_args.task = *it;
+          Event wait = util_proc.spawn(HLR_TASK_ID,
+                                       &dist_args, sizeof(dist_args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+        else
+        {
+          launch_args.task = *it;
+          Event wait = util_proc.spawn(HLR_TASK_ID,
+                                       &launch_args, sizeof(launch_args));
+          if (wait.exists())
+            wait_events.insert(wait);
+        }
+      }
+      if (!wait_events.empty())
+      {
+        Event dist_event = Event::merge_events(wait_events);
+        dist_event.wait(false/*block*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochDistributor::handle_distribute_task(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochDistributorArgs *dist_args = 
+        (const MustEpochDistributorArgs*)args;
+      dist_args->task->distribute_task();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MustEpochDistributor::handle_launch_task(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const MustEpochLauncherArgs *launch_args = 
+        (const MustEpochLauncherArgs *)args;
+      launch_args->task->launch_task();
     }
 
   }; // namespace LegionRuntime

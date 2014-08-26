@@ -393,6 +393,8 @@ namespace LegionRuntime {
     {
       if (register_future)
         runtime->register_future(did, this);
+      if (task != NULL)
+        task->add_mapping_reference(task_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -419,6 +421,8 @@ namespace LegionRuntime {
         result = NULL;
         result_size = 0;
       }
+      if (task != NULL)
+        task->remove_mapping_reference(task_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -601,8 +605,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Future::Impl::Impl::unpack_future(Deserializer &derez)
-    //--------------------------------------------------------------------------
+    void Future::Impl::unpack_future(Deserializer &derez)
+    //-------------------------------------------------------------------------
     {
       // Should only happen on the owner
       // Clean out any previous results we've save
@@ -623,7 +627,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Future::Impl::Impl::complete_future(void)
+    void Future::Impl::complete_future(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6980,6 +6984,7 @@ namespace LegionRuntime {
     Predicate Runtime::create_predicate(Context ctx, const Future &f) 
     //--------------------------------------------------------------------------
     {
+#if 0
       if (f.impl->predicated)
       {
         log_run(LEVEL_ERROR,"Illegal predicate creation performed on "
@@ -6993,6 +6998,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_ILLEGAL_PREDICATE_FUTURE);
       }
+#endif
       // Find the mapper for this predicate
       Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_HIGH_LEVEL
@@ -7007,7 +7013,7 @@ namespace LegionRuntime {
       }
 #endif
       FuturePredOp *pred_op = get_available_future_pred_op();
-      pred_op->initialize(f, proc);
+      pred_op->initialize(ctx, f, proc);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
 #endif
@@ -7041,7 +7047,7 @@ namespace LegionRuntime {
       }
 #endif
       NotPredOp *pred_op = get_available_not_pred_op();
-      pred_op->initialize(p);
+      pred_op->initialize(ctx, p);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
 #endif
@@ -7076,7 +7082,7 @@ namespace LegionRuntime {
       }
 #endif
       AndPredOp *pred_op = get_available_and_pred_op();
-      pred_op->initialize(p1, p2);
+      pred_op->initialize(ctx, p1, p2);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
 #endif
@@ -7111,7 +7117,7 @@ namespace LegionRuntime {
       }
 #endif
       OrPredOp *pred_op = get_available_or_pred_op();
-      pred_op->initialize(p1, p2);
+      pred_op->initialize(ctx, p1, p2);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
 #endif
@@ -12130,6 +12136,36 @@ namespace LegionRuntime {
               (const DeferredRecycleArgs*)args;
             Runtime::get_runtime(p)->free_distributed_id(
                                         deferred_recycle_args->did);
+            break;
+          }
+        case HLR_DEFERRED_SLICE_ID:
+          {
+            DeferredSlicer::handle_slice(args); 
+            break;
+          }
+        case HLR_MUST_INDIV_ID:
+          {
+            MustEpochTriggerer::handle_individual(args);
+            break;
+          }
+        case HLR_MUST_INDEX_ID:
+          {
+            MustEpochTriggerer::handle_index(args);
+            break;
+          }
+        case HLR_MUST_MAP_ID:
+          {
+            MustEpochMapper::handle_map_task(args);
+            break;
+          }
+        case HLR_MUST_DIST_ID:
+          {
+            MustEpochDistributor::handle_distribute_task(args);
+            break;
+          }
+        case HLR_MUST_LAUNCH_ID:
+          {
+            MustEpochDistributor::handle_launch_task(args);
             break;
           }
         default:
