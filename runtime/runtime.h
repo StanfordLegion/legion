@@ -110,6 +110,7 @@ namespace LegionRuntime {
       void get_void_result(void);
       void* get_untyped_result(void);
       bool is_empty(bool block);
+      size_t get_untyped_size(void);
       Event get_ready_event(void) const { return ready_event; }
     public:
       // This will simply save the value of the future
@@ -144,7 +145,6 @@ namespace LegionRuntime {
       // These three fields are only valid on the owner node
       TaskOp *const task;
       const GenerationID task_gen;
-      const bool predicated;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       UserEvent ready_event;
@@ -190,7 +190,6 @@ namespace LegionRuntime {
       SingleTask *const context;
       TaskOp *const task;
       const GenerationID task_gen;
-      const bool predicated;
       const bool valid;
       Runtime *const runtime;
     private:
@@ -397,7 +396,7 @@ namespace LegionRuntime {
                                       std::vector<Mapper::DomainSplit> &splits);
       bool invoke_mapper_map_inline(Inline *op);
       bool invoke_mapper_map_copy(Copy *op);
-      bool invoke_mapper_speculate(TaskOp *op, bool &value); 
+      bool invoke_mapper_speculate(Mappable *op, bool &value); 
       bool invoke_mapper_rank_copy_targets(Mappable *mappable,
                                            LogicalRegion handle, 
                                            const std::set<Memory> &memories,
@@ -806,6 +805,19 @@ namespace LegionRuntime {
       public:
         HLRTaskID hlr_id;
         DistributedID did;
+      };
+      struct DeferredFutureSetArgs {
+        HLRTaskID hlr_id;
+        Future::Impl *target;
+        Future::Impl *result;
+        TaskOp *task_op;
+      };
+      struct DeferredFutureMapSetArgs {
+        HLRTaskID hlr_id;
+        FutureMap::Impl *future_map;
+        Future::Impl *result;
+        Domain domain;
+        TaskOp *task_op;
       };
     public:
       Runtime(Machine *m, AddressSpaceID space_id,
@@ -1272,7 +1284,8 @@ namespace LegionRuntime {
                                       std::vector<Mapper::DomainSplit> &splits);
       bool invoke_mapper_map_inline(Processor target, Inline *op);
       bool invoke_mapper_map_copy(Processor target, Copy *op);
-      bool invoke_mapper_speculate(Processor target, TaskOp *task, bool &value);
+      bool invoke_mapper_speculate(Processor target, 
+                                   Mappable *mappable, bool &value);
       bool invoke_mapper_rank_copy_targets(Processor target, Mappable *mappable,
                                            LogicalRegion handle, 
                                            const std::set<Memory> &memories,

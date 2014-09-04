@@ -1448,7 +1448,9 @@ namespace LegionRuntime {
 
     class MemPairCopier {
     public:
-      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem);
+      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
+					  const ReductionOpUntyped *redop = 0,
+					  bool fold = false);
 
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
                                         OASVec &oas_vec) = 0;
@@ -1558,6 +1560,152 @@ namespace LegionRuntime {
       char *dst_base;
     };
 
+    class LocalReductionMemPairCopier : public MemPairCopier {
+    public:
+      LocalReductionMemPairCopier(Memory _src_mem, Memory _dst_mem,
+				  const ReductionOpUntyped *_redop, bool _fold)
+      {
+	Memory::Impl *src_impl = _src_mem.impl();
+	src_base = (const char *)(src_impl->get_direct_ptr(0, src_impl->size));
+	assert(src_base);
+
+	Memory::Impl *dst_impl = _dst_mem.impl();
+	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+	assert(dst_base);
+
+	redop = _redop;
+	fold = _fold;
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<LocalReductionMemPairCopier>(this, src_inst, 
+									dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("reduction of %zd bytes\n", bytes);
+	assert((bytes % redop->sizeof_rhs) == 0);
+	if(fold)
+	  redop->fold(dst_base + dst_offset, src_base + src_offset,
+		      bytes / redop->sizeof_rhs, false /*non-exclusive*/);
+	else
+	  redop->apply(dst_base + dst_offset, src_base + src_offset,
+		       bytes / redop->sizeof_rhs, false /*non-exclusive*/);
+      }
+
+      // default behavior of 2D copy is to unroll to 1D copies
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+	// two cases here:
+	// 1) if bytes == sizeof_rhs, we can use the apply/fold_strided calls
+	if(bytes == redop->sizeof_rhs) {
+	  if(fold)
+	    redop->fold_strided(dst_base + dst_offset, src_base + src_offset,
+				src_stride, dst_stride, lines, false /*non-exclusive*/);
+	  else
+	    redop->apply_strided(dst_base + dst_offset, src_base + src_offset,
+				 src_stride, dst_stride, lines, false /*non-exclusive*/);
+	  return;
+	}
+
+	// 2) with multiple elements per line, have to do a apply/fold call per line
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
+	  src_offset += src_stride;
+	  dst_offset += dst_stride;
+	}
+      }
+
+    protected:
+      const char *src_base;
+      char *dst_base;
+      const ReductionOpUntyped *redop;
+      bool fold;
+    };
+
+    class BufferedReductionMemPairCopier : public MemPairCopier {
+    public:
+      BufferedReductionMemPairCopier(Memory _src_mem, Memory _dst_mem,
+				     const ReductionOpUntyped *_redop, bool _fold,
+				     size_t _buffer_size = 1024) // in elements
+	: buffer_size(_buffer_size)
+      {
+	src_mem = _src_mem.impl();
+	dst_mem = _dst_mem.impl();
+	redop = _redop;
+	fold = _fold;
+
+	src_buffer = new char[buffer_size * redop->sizeof_rhs];
+	dst_buffer = new char[buffer_size * (fold ? redop->sizeof_rhs : redop->sizeof_lhs)];
+      }
+
+      ~BufferedReductionMemPairCopier(void)
+      {
+	delete[] src_buffer;
+	delete[] dst_buffer;
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &oas_vec)
+      {
+	return new SpanBasedInstPairCopier<BufferedReductionMemPairCopier>(this, src_inst, 
+									   dst_inst, oas_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+	//printf("buffered copy of %zd bytes (" IDFMT ":%zd -> " IDFMT ":%zd)\n", bytes, src_mem->me.id, src_offset, dst_mem->me.id, dst_offset);
+	size_t dst_size = fold ? redop->sizeof_rhs : redop->sizeof_lhs;
+
+	assert((bytes % redop->sizeof_rhs) == 0);
+	size_t elems = bytes / redop->sizeof_rhs;
+
+	while(elems > 0) {
+	  // figure out how many elements we can do at a time
+	  size_t count = (elems > buffer_size) ? buffer_size : elems;
+
+	  // fetch source and dest data into buffers
+	  src_mem->get_bytes(src_offset, src_buffer, count * redop->sizeof_rhs);
+	  dst_mem->get_bytes(dst_offset, dst_buffer, count * dst_size);
+
+	  // apply reduction to local buffers
+	  if(fold)
+	    redop->fold(dst_buffer, src_buffer, count, true /*exclusive*/);
+	  else
+	    redop->apply(dst_buffer, src_buffer, count, true /*exclusive*/);
+
+	  dst_mem->put_bytes(dst_offset, dst_buffer, count * dst_size);
+
+	  src_offset += count * redop->sizeof_rhs;
+	  dst_offset += count * dst_size;
+	  elems -= count;
+	}
+      }
+
+      // default behavior of 2D copy is to unroll to 1D copies
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+		     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+	while(lines-- > 0) {
+	  copy_span(src_offset, dst_offset, bytes);
+	  src_offset += src_stride;
+	  dst_offset += dst_stride;
+	}
+      }
+
+    protected:
+      size_t buffer_size;
+      Memory::Impl *src_mem, *dst_mem;
+      char *src_buffer;
+      char *dst_buffer;
+      const ReductionOpUntyped *redop;
+      bool fold;
+    };
+     
     // a MemPairCopier that keeps a list of events for component copies and doesn't trigger
     //  the completion event until they're all done
     class DelayedMemPairCopier : public MemPairCopier {
@@ -2002,7 +2150,9 @@ namespace LegionRuntime {
       unsigned sequence_id, num_writes;
     };
      
-    MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem)
+    MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem,
+						const ReductionOpUntyped *redop /*= 0*/,
+						bool fold /*= false*/)
     {
       Memory::Impl *src_impl = src_mem.impl();
       Memory::Impl *dst_impl = dst_mem.impl();
@@ -2012,54 +2162,68 @@ namespace LegionRuntime {
 
       log_dma.info("copier: " IDFMT "(%d) -> " IDFMT "(%d)", src_mem.id, src_kind, dst_mem.id, dst_kind);
 
-      // can we perform simple memcpy's?
-      if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
-	 ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
-	return new MemcpyMemPairCopier(src_mem, dst_mem);
-      }
+      if(redop == 0) {
+	// can we perform simple memcpy's?
+	if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+	   ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+	  return new MemcpyMemPairCopier(src_mem, dst_mem);
+	}
 
 #ifdef USE_CUDA
-      // copy to a framebuffer
-      if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
-	 (dst_kind == Memory::Impl::MKIND_GPUFB)) {
-	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-	return new GPUtoFBMemPairCopier(src_mem, dst_gpu);
-      }
+	// copy to a framebuffer
+	if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+	   (dst_kind == Memory::Impl::MKIND_GPUFB)) {
+	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+	  return new GPUtoFBMemPairCopier(src_mem, dst_gpu);
+	}
 
-      // copy from a framebuffer
-      if((src_kind == Memory::Impl::MKIND_GPUFB) &&
-	 ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
-	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	return new GPUfromFBMemPairCopier(src_gpu, dst_mem);
-      }
+	// copy from a framebuffer
+	if((src_kind == Memory::Impl::MKIND_GPUFB) &&
+	   ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
+	  return new GPUfromFBMemPairCopier(src_gpu, dst_mem);
+	}
 
-      // copy within a framebuffer
-      if((src_kind == Memory::Impl::MKIND_GPUFB) &&
-         (dst_kind == Memory::Impl::MKIND_GPUFB)) {
-	GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-	GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-        if (src_gpu == dst_gpu)
-          return new GPUinFBMemPairCopier(src_gpu);
-        else if (src_gpu->can_access_peer(dst_gpu))
-          return new GPUPeerMemPairCopier(src_gpu, dst_gpu);
-        else
-        {
-          fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
-          assert(false);
-          return NULL;
-        }
-      }
+	// copy within a framebuffer
+	if((src_kind == Memory::Impl::MKIND_GPUFB) &&
+	   (dst_kind == Memory::Impl::MKIND_GPUFB)) {
+	  GPUProcessor *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
+	  GPUProcessor *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
+	  if (src_gpu == dst_gpu)
+	    return new GPUinFBMemPairCopier(src_gpu);
+	  else if (src_gpu->can_access_peer(dst_gpu))
+	    return new GPUPeerMemPairCopier(src_gpu, dst_gpu);
+	  else
+	    {
+	      fprintf(stderr,"TIME FOR SEAN TO IMPLEMENT MULTI-HOP COPIES!\n");
+	      assert(false);
+	      return NULL;
+	    }
+	}
 #endif
 
-      // try as many things as we can think of
-      if((dst_kind == Memory::Impl::MKIND_REMOTE) ||
-	 (dst_kind == Memory::Impl::MKIND_RDMA)) {
-        assert(src_kind != Memory::Impl::MKIND_REMOTE);
-        return new RemoteWriteMemPairCopier(src_mem, dst_mem);
-      }
+	// try as many things as we can think of
+	if((dst_kind == Memory::Impl::MKIND_REMOTE) ||
+	   (dst_kind == Memory::Impl::MKIND_RDMA)) {
+	  assert(src_kind != Memory::Impl::MKIND_REMOTE);
+	  return new RemoteWriteMemPairCopier(src_mem, dst_mem);
+	}
 
-      // fallback
-      return new BufferedMemPairCopier(src_mem, dst_mem);
+	// fallback
+	return new BufferedMemPairCopier(src_mem, dst_mem);
+      } else {
+	// reduction case
+	// can we perform simple memcpy's?
+	if(((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+	   ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+	  return new LocalReductionMemPairCopier(src_mem, dst_mem, redop, fold);
+	}
+
+	// fallback is pretty damn slow
+	log_dma.warning("using a buffering copier for reductions (%x -> %x)",
+			src_mem.id, dst_mem.id);
+	return new BufferedReductionMemPairCopier(src_mem, dst_mem, redop, fold);
+      }
     }
 
     template <unsigned DIM>
@@ -2881,6 +3045,97 @@ namespace LegionRuntime {
       assert(0);
     }
 
+    template <unsigned DIM>
+    void ReduceRequest::perform_dma_rect(MemPairCopier *mpc)
+    {
+      Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
+
+      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+
+      // single source field for now
+      assert(srcs.size() == 1);
+
+      // manufacture an OASVec for the copier
+      OASVec oasvec(1);
+      oasvec[0].src_offset = srcs[0].offset;
+      oasvec[0].dst_offset = dst.offset;
+      oasvec[0].size = redop->sizeof_rhs;
+
+      RegionInstance src_inst = srcs[0].inst;
+      RegionInstance dst_inst = dst.inst;
+
+      InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
+
+      Arrays::Mapping<DIM, 1> *src_linearization = src_inst.impl()->linearization.get_mapping<DIM>();
+      Arrays::Mapping<DIM, 1> *dst_linearization = dst_inst.impl()->linearization.get_mapping<DIM>();
+
+      // see what linear subrects we can get - again, iterate over destination first for gathering
+      for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(orig_rect, *dst_linearization); lso; lso++) {
+	for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(lso.subrect, *src_linearization); lsi; lsi++) {
+	  // see if we can compress the strides for a more efficient copy
+	  Point<1> src_cstrides[DIM], dst_cstrides[DIM];
+	  Point<DIM> extents;
+	  int cdim = compress_strides(lsi.subrect, lso.strides, lsi.strides,
+				      extents, dst_cstrides, src_cstrides);
+
+#ifdef NEW2D_DEBUG
+	  printf("ORIG: (%d,%d,%d)->(%d,%d,%d)\n",
+		 orig_rect.lo[0], orig_rect.lo[1], orig_rect.lo[2],
+		 orig_rect.hi[0], orig_rect.hi[1], orig_rect.hi[2]);
+	  printf("DST:  (%d,%d,%d)->(%d,%d,%d)  %d+(%d,%d,%d)\n",
+		 lso.subrect.lo[0], lso.subrect.lo[1], lso.subrect.lo[2],
+		 lso.subrect.hi[0], lso.subrect.hi[1], lso.subrect.hi[2],
+		 lso.image_lo[0],
+		 lso.strides[0][0], lso.strides[1][0], lso.strides[2][0]);
+	  printf("SRC:  (%d,%d,%d)->(%d,%d,%d)  %d+(%d,%d,%d)\n",
+		 lsi.subrect.lo[0], lsi.subrect.lo[1], lsi.subrect.lo[2],
+		 lsi.subrect.hi[0], lsi.subrect.hi[1], lsi.subrect.hi[2],
+		 lsi.image_lo[0],
+		 lsi.strides[0][0], lsi.strides[1][0], lsi.strides[2][0]);
+	  printf("CMP:  %d (%d,%d,%d) +(%d,%d,%d) +(%d,%d,%d)\n",
+		 cdim,
+		 extents[0], extents[1], extents[2],
+		 dst_cstrides[0][0], dst_cstrides[1][0], dst_cstrides[2][0],
+		 src_cstrides[0][0], src_cstrides[1][0], src_cstrides[2][0]);
+#endif
+	  if((cdim == 1) && (dst_cstrides[0][0] == 1) && (src_cstrides[0][0] == 1)) {
+	    // all the dimension(s) collapse to a 1-D extent in both source and dest, so one big copy
+	    ipc->copy_all_fields(lsi.image_lo[0], lso.image_lo[0], extents[0]);
+	    continue;
+	  }
+
+	  if((cdim == 2) && (dst_cstrides[0][0] == 1) && (src_cstrides[0][0] == 1)) {
+	    // source and/or destination need a 2-D description
+	    ipc->copy_all_fields(lsi.image_lo[0], lso.image_lo[0], extents[0],
+				 src_cstrides[1][0], dst_cstrides[1][0], extents[1]);
+	    continue;
+	  }
+
+	  // fall through - just identify dense (sub)subrects and copy them
+	  
+	  // iterate by output rectangle first - this gives us a chance to gather data when linearizations
+	  //  don't match up
+	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(lsi.subrect, *dst_linearization); dso; dso++) {
+	    // dense subrect in dst might not be dense in src
+	    for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
+	      Rect<1> irect = dsi.image;
+	      // rectangle in output must be recalculated
+	      Rect<DIM> subrect_check;
+	      Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
+	      assert(dsi.subrect == subrect_check);
+	      
+	      //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
+	      for (unsigned idx = 0; idx < oasvec.size(); idx++)
+		ipc->copy_field(irect.lo, orect.lo, irect.hi - irect.lo + 1, idx);
+	      //it2->src_offset, it2->dst_offset, it2->size);
+	    }
+	  }
+	}
+      }
+      
+      delete ipc;
+    }
+
     void ReduceRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
@@ -2902,6 +3157,8 @@ namespace LegionRuntime {
       Memory dst_mem = dst.inst.impl()->memory;
       Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
       Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
+
+      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
 
       //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
 
@@ -2935,7 +3192,6 @@ namespace LegionRuntime {
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
 	      int rstart, rlen;
-	      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
 	      while(e->get_next(rstart, rlen)) {
 		if(red_fold)
 		  redop->fold_strided(((char *)dst_base) + (rstart * dst_stride),
@@ -3052,7 +3308,6 @@ namespace LegionRuntime {
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
 	      int rstart, rlen;
-	      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
 	      while(e->get_next(rstart, rlen)) {
 		// translate the index space point to the dst instance's linearization
 		int dstart = dst_linearization->image(rstart);
@@ -3112,7 +3367,22 @@ namespace LegionRuntime {
 	  }
 	}
       } else {
-	assert(0);
+	MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, redop, red_fold);
+
+	switch(domain.get_dim()) {
+	case 1: perform_dma_rect<1>(mpc); break;
+	case 2: perform_dma_rect<2>(mpc); break;
+	case 3: perform_dma_rect<3>(mpc); break;
+	default: assert(0);
+	}
+
+	mpc->flush(after_copy);
+
+	// if an instance lock was taken, release it after copy completes
+	if(inst_lock_needed)
+	  dst.inst.impl()->lock.me.release(after_copy);
+
+	delete mpc;
       }
 
       log_dma.info("dma request %p finished - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
@@ -3217,7 +3487,8 @@ namespace LegionRuntime {
       if(src_is_rdma) {
 	if(dst_is_rdma) {
 	  // gasnet -> gasnet - blech
-	  assert(0);
+	  log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", gasnet_mynode());
+	  return gasnet_mynode();
 	} else {
 	  // gathers by the receiver
 	  return dst_node;

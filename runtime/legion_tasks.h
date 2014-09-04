@@ -69,6 +69,7 @@ namespace LegionRuntime {
                                 Processor::TaskFuncID tid);
       void initialize_physical_contexts(void);
       void check_empty_field_requirements(void);
+      size_t check_future_size(Future::Impl *impl);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -77,7 +78,9 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
-      virtual void continue_mapping(void);
+      virtual void resolve_true(void);
+      virtual void resolve_false(void) = 0;
+      virtual bool speculate(bool &value);
     public:
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
@@ -281,7 +284,6 @@ namespace LegionRuntime {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_reclaim_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
     public:
       bool has_executing_operation(Operation *op);
@@ -389,6 +391,7 @@ namespace LegionRuntime {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
     public:
+      virtual void resolve_false(void) = 0;
       virtual void launch_task(void);
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
@@ -448,7 +451,6 @@ namespace LegionRuntime {
       std::set<Operation*> executing_children;
       std::set<Operation*> executed_children;
       std::set<Operation*> complete_children;
-      std::set<Operation*> reclaim_children;
       // Traces for this task's execution
       std::map<TraceID,LegionTrace*> traces;
       LegionTrace *current_trace;
@@ -507,6 +509,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
+      virtual void resolve_false(void) = 0;
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
       virtual bool defer_mapping(void) = 0;
@@ -595,6 +598,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
+      virtual void resolve_false(void);
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
       virtual bool defer_mapping(void);
@@ -650,6 +654,10 @@ namespace LegionRuntime {
       RegionTreeContext remote_outermost_context;
       std::deque<RegionTreeContext> remote_contexts;
     protected:
+      Future predicate_false_future;
+      void *predicate_false_result;
+      size_t predicate_false_size;
+    protected:
       bool sent_remotely;
     protected:
       friend class Runtime;
@@ -676,6 +684,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
+      virtual void resolve_false(void);
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
       virtual bool defer_mapping(void);
@@ -736,6 +745,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
+      virtual void resolve_false(void);
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
       virtual bool defer_mapping(void);
@@ -846,7 +856,6 @@ namespace LegionRuntime {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_reclaim_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
     public:
       virtual void update_current_fence(FenceOp *op);
@@ -904,6 +913,8 @@ namespace LegionRuntime {
             bool must_parallelism,
             MapperID id, MappingTagID tag,
             bool check_privileges);
+      void initialize_predicate(const Future &pred_future,
+                                const TaskArgument &pred_arg);
       void initialize_paths(void);
       void annotate_early_mapped_regions(void);
     public:
@@ -913,6 +924,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
     public:
+      virtual void resolve_false(void);
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
       virtual bool defer_mapping(void);
@@ -970,6 +982,10 @@ namespace LegionRuntime {
       bool complete_received;
       bool commit_received;
     protected:
+      Future predicate_false_future;
+      void *predicate_false_result;
+      size_t predicate_false_size;
+    protected:
       std::vector<RegionTreePath> privilege_paths;
     };
 
@@ -993,6 +1009,7 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
+      virtual void resolve_false(void);
       virtual bool premap_task(void);
       virtual bool prepare_steal(void);
       virtual bool defer_mapping(void);

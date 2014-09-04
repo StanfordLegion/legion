@@ -259,6 +259,8 @@ namespace LegionRuntime {
       ERROR_INVALID_LOGICAL_SUBREGION_REQUEST = 113,
       ERROR_INVALID_LOGICAL_SUBPARTITION_REQUEST = 114,
       ERROR_ALIASED_REGION_REQUIREMENTS = 115,
+      ERROR_MISSING_DEFAULT_PREDICATE_RESULT = 116,
+      ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
     };
 
     // enum and namepsaces don't really get along well
@@ -345,6 +347,9 @@ namespace LegionRuntime {
       HLR_MUST_MAP_ID,
       HLR_MUST_DIST_ID,
       HLR_MUST_LAUNCH_ID,
+      HLR_DEFERRED_FUTURE_SET_ID,
+      HLR_DEFERRED_FUTURE_MAP_SET_ID,
+      HLR_RESOLVE_FUTURE_PRED_ID,
     };
 
     // Forward declarations for user level objects

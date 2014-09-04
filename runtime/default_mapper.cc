@@ -726,14 +726,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool DefaultMapper::speculate_on_predicate(const Task *task, 
+    bool DefaultMapper::speculate_on_predicate(const Mappable *mappable, 
                                                bool &spec_value)
     //--------------------------------------------------------------------------
     {
-      log_mapper(LEVEL_SPEW,"Speculate on predicate for task %s (ID %lld) in "
+      log_mapper(LEVEL_SPEW,"Speculate on predicate for mappable (ID %lld) in "
                             "default mapper for processor " IDFMT "",
-                            task->variants->name,
-                            task->get_unique_task_id(), task->target_proc.id);
+                            mappable->get_unique_mappable_id(),
+                            local_proc.id);
       // While the runtime supports speculation, it currently doesn't
       // know how to roll back from mis-speculation, so for the moment
       // we don't speculate.

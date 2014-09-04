@@ -455,7 +455,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Predicate::Predicate(void)
-      : impl(NULL), const_value(false)
+      : impl(NULL), const_value(true)
     //--------------------------------------------------------------------------
     {
     }
@@ -467,7 +467,7 @@ namespace LegionRuntime {
       const_value = p.const_value;
       impl = p.impl;
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_predicate_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -483,7 +483,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_predicate_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -492,7 +492,7 @@ namespace LegionRuntime {
     {
       if (impl != NULL)
       {
-        impl->remove_reference();
+        impl->remove_predicate_reference();
         impl = NULL;
       }
     }
@@ -502,13 +502,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-      {
-        impl->remove_reference();
-      }
+        impl->remove_predicate_reference();
       const_value = rhs.const_value;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_predicate_reference();
       return *this;
     }
 

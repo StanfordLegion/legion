@@ -449,10 +449,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool ShimMapper::speculate_on_predicate(const Task *task, bool &spec_value)
+    bool ShimMapper::speculate_on_predicate(const Mappable *m, bool &spec_value)
     //--------------------------------------------------------------------------
     {
-      return speculate_on_predicate(task->tag, spec_value);
+      return speculate_on_predicate(m->tag, spec_value);
     }
 
 

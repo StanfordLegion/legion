@@ -238,6 +238,30 @@ namespace LegionRuntime {
       int x[1];
     };
 
+    inline Point<1> make_point(int x)
+    {
+      Point<1> p;
+      p.x[0] = x;
+      return p;
+    }
+
+    inline Point<2> make_point(int x, int y)
+    {
+      Point<2> p;
+      p.x[0] = x;
+      p.x[1] = y;
+      return p;
+    }
+
+    inline Point<3> make_point(int x, int y, int z)
+    {
+      Point<3> p;
+      p.x[0] = x;
+      p.x[1] = y;
+      p.x[2] = z;
+      return p;
+    }
+
     template <unsigned DIM>
     class Rect {
     public:

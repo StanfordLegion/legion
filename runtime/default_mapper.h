@@ -80,7 +80,7 @@ namespace LegionRuntime {
                       Memory dst_mem, 
                       std::vector<Memory> &chosen_order);
       virtual void notify_profiling_info(const Task *task);
-      virtual bool speculate_on_predicate(const Task *task,
+      virtual bool speculate_on_predicate(const Mappable *mappable,
                                           bool &spec_value);
       virtual int get_tunable_value(const Task *task, 
                                     TunableID tid,

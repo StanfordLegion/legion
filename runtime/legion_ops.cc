@@ -591,7 +591,7 @@ namespace LegionRuntime {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      bool need_mapping;
+      bool need_mapping = false;
       bool need_resolution = false;
       {
         AutoLock o_lock(op_lock);
@@ -600,8 +600,13 @@ namespace LegionRuntime {
 #endif
         outstanding_mapping_deps--;
         outstanding_speculation_deps--;
-        need_mapping = (outstanding_mapping_deps == 0);
-        if ((outstanding_speculation_deps == 0) &&
+        if (!mapped && (outstanding_mapping_deps == 0) &&
+            !trigger_mapping_invoked)
+        {
+          trigger_mapping_invoked = true;
+          need_mapping = true;
+        }
+        if (!resolved && (outstanding_speculation_deps == 0) &&
             !trigger_resolution_invoked)
         {
           trigger_resolution_invoked = true;
@@ -935,10 +940,14 @@ namespace LegionRuntime {
         if ((our_gen == gen) && !committed)
         {
 #ifdef DEBUG_HIGH_LEVEL
+          assert(!resolved);
           assert(outstanding_speculation_deps > 0);
 #endif
           outstanding_speculation_deps--;
-          need_trigger = (outstanding_speculation_deps == 0);
+          need_trigger = !trigger_resolution_invoked &&
+                          (outstanding_speculation_deps == 0);
+          if (need_trigger)
+            trigger_resolution_invoked = true;
         }
       }
       if (need_trigger)
@@ -1019,28 +1028,120 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::add_reference(void)
+    void Predicate::Impl::activate_predicate(void)
     //--------------------------------------------------------------------------
     {
-      add_mapping_reference(get_generation());
+      activate_operation();
+      predicate_resolved = false;
+      predicate_references = 0;
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::remove_reference(void)
+    void Predicate::Impl::deactivate_predicate(void)
     //--------------------------------------------------------------------------
     {
-      remove_mapping_reference(get_generation());
+      deactivate_operation();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(predicate_references == 0);
+#endif
+      waiters.clear();
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::trigger_commit(void)
+    void Predicate::Impl::add_predicate_reference(void)
     //--------------------------------------------------------------------------
     {
-      commit_operation();
-      if (!Runtime::resilient_mode)
-        parent_ctx->register_reclaim_operation(this);
+      bool add_map_reference;
+      {
+        AutoLock o_lock(op_lock);
+        add_map_reference = (predicate_references == 0);
+        predicate_references++;
+      }
+      if (add_map_reference)
+        add_mapping_reference(get_generation());
+    }
+
+    //--------------------------------------------------------------------------
+    void Predicate::Impl::remove_predicate_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      bool need_trigger;
+      bool remove_reference;
+      GenerationID task_gen;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(predicate_references > 0);
+#endif
+        predicate_references--;
+        remove_reference = (predicate_references == 0);
+        if (remove_reference)
+        {
+          // Get the task generation before things can be cleaned up
+          task_gen = get_generation();
+          need_trigger = predicate_resolved;
+        }
+        else
+          need_trigger = false;
+      }
+      if (need_trigger)
+        complete_execution();
+      if (remove_reference)
+        remove_mapping_reference(task_gen);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Predicate::Impl::register_waiter(PredicateWaiter *waiter,
+                                          GenerationID waiter_gen, bool &value)
+    //--------------------------------------------------------------------------
+    {
+      bool valid;
+      AutoLock o_lock(op_lock);
+      if (predicate_resolved)
+      {
+        value = predicate_value;
+        valid = true;
+      }
       else
-        deactivate();
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(waiters.find(waiter) == waiters.end());
+#endif
+        waiters[waiter] = waiter_gen;
+        valid = false;
+      }
+      return valid;
+    }
+
+    //--------------------------------------------------------------------------
+    void Predicate::Impl::set_resolved_value(GenerationID pred_gen, bool value)
+    //--------------------------------------------------------------------------
+    {
+      bool need_trigger;
+      // Make a copy of the waiters since we could get cleaned up in parallel
+      std::map<PredicateWaiter*,GenerationID> copy_waiters;
+      {
+        AutoLock o_lock(op_lock);
+        if ((pred_gen == get_generation()) && !predicate_resolved)
+        {
+          predicate_resolved = true;
+          predicate_value = value;
+          copy_waiters = waiters;
+          need_trigger = (predicate_references == 0);
+        }
+        else
+          need_trigger= false;
+      }
+      // Notify any waiters, no need to hold the lock since waiters can't
+      // be added after we set the state to resolved
+      for (std::map<PredicateWaiter*,GenerationID>::const_iterator it = 
+            copy_waiters.begin(); it != copy_waiters.end(); it++)
+      {
+        it->first->notify_predicate_value(it->second, value);
+      }
+      // Now see if we need to indicate we are done executing
+      if (need_trigger)
+        complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1061,6 +1162,8 @@ namespace LegionRuntime {
       activate_operation();
       speculation_state = RESOLVE_TRUE_STATE;
       predicate = NULL;
+      received_trigger_resolution = false;
+      predicate_waiter = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1091,6 +1194,7 @@ namespace LegionRuntime {
       {
         speculation_state = PENDING_MAP_STATE;
         predicate = p.impl;
+        predicate->add_predicate_reference();
       }
     }
 
@@ -1118,19 +1222,27 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate != NULL);
 #endif
-          wait_event = predicate->get_completion_event();
+          predicate_waiter = UserEvent::create_user_event();
+          wait_event = predicate_waiter;
         }
       }
-      if (!wait_event.has_triggered())
+      if (wait_event.exists())
       {
-        runtime->pre_wait(proc);
-        wait_event.wait();
-        runtime->post_wait(proc);
-        bool valid, speculated;
-        result = predicate->sample(valid, speculated);
+        if (!wait_event.has_triggered())
+        {
+          runtime->pre_wait(proc);
+          wait_event.wait();
+          runtime->post_wait(proc);
+        }
+        // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_HIGH_LEVEL
-        assert(valid); // should be valid for this sample
+        assert((speculation_state == RESOLVE_TRUE_STATE) ||
+               (speculation_state == RESOLVE_FALSE_STATE));
 #endif
+        if (speculation_state == RESOLVE_TRUE_STATE)
+          result = true;
+        else
+          result = false;
       }
       return result;
     }
@@ -1147,22 +1259,30 @@ namespace LegionRuntime {
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
         if (speculation_state == RESOLVE_TRUE_STATE)
-          continue_mapping();
+          resolve_true();
         else
-          complete_mapping();
+          resolve_false();
         return;
       }
-      // See if we need to sample the predicate value, not we can do this
-      // unsafely whithout holding the lock since it never hurts to sample
-      // the value prematurely.
-      bool value, valid, speculated;
-      valid = false;
-      speculated = false;
-      if (speculation_state == PENDING_MAP_STATE)
-        value = predicate->sample(valid, speculated);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(predicate != NULL);
+#endif
+      // Register ourselves as a waiter on the predicate value
+      // If the predicate hasn't resolved yet, then we can ask the
+      // mapper if it would like us to speculate on the value.
+      // Then take the lock and set up our state.
+      bool value, speculated;
+      bool valid = predicate->register_waiter(this, get_generation(), value);
+      // Now that we've attempted to register ourselves with the
+      // predicate we can remove the predicate reference
+      predicate->remove_predicate_reference();
+      if (!valid)
+        speculated = speculate(value);
       // Now hold the lock and figure out what we should do
-      bool need_continue = false;
-      bool need_complete = false;
+      bool continue_true = false;
+      bool continue_false = false;
+      bool need_resolution = false;
+      bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
         switch (speculation_state)
@@ -1174,49 +1294,57 @@ namespace LegionRuntime {
                 if (value)
                 {
                   speculation_state = RESOLVE_TRUE_STATE;
-                  need_continue = true;
+                  continue_true = true;
                 }
                 else
                 {
                   speculation_state = RESOLVE_FALSE_STATE;
-                  need_complete = true;
+                  continue_false = true;
                 }
+                need_resolution = received_trigger_resolution;
+                need_trigger = predicate_waiter.exists();
               }
               else if (speculated)
               {
                 if (value)
                 {
                   speculation_state = SPECULATE_TRUE_STATE;
-                  need_continue = true;
+                  continue_true = true;
                 }
                 else
                 {
                   speculation_state = SPECULATE_FALSE_STATE;
-                  need_complete = true;
+                  continue_false = true;
                 }
               }
-              else
-                speculation_state = PENDING_PRED_STATE;
+              // Otherwise just stay in pending map state
               break;
             }
           case RESOLVE_TRUE_STATE:
             {
-              need_continue = true;
+              // Someone else has already resolved us to true and
+              // triggered the appropriate method
               break;
             }
           case RESOLVE_FALSE_STATE:
             {
-              need_complete = true;
+              // Someone else has already resolved us to false and
+              // triggered the appropriate method
+              break;
             }
           default:
             assert(false); // shouldn't be in the other states
         }
       }
       // Now do what we need to do
-      if (need_continue)
-        continue_mapping();
-      else if (need_complete)
-        complete_mapping();
+      if (need_trigger)
+        predicate_waiter.trigger();
+      if (continue_true)
+        resolve_true();
+      if (continue_false)
+        resolve_false();
+      if (need_resolution)
+        resolve_speculation(); 
     }
 
     //--------------------------------------------------------------------------
@@ -1229,50 +1357,59 @@ namespace LegionRuntime {
         resolve_speculation();
         return;
       }
-      bool need_continue = false;
-      bool need_complete = false;
-      bool need_mispredict = false;
-      bool restart = false;
-      bool need_resolve = true;
-      bool value, valid, speculated;
-      value = predicate->sample(valid, speculated);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(valid);
-      assert(!speculated);
-#endif
+      bool need_trigger;
       {
         AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!received_trigger_resolution);
+#endif
+        received_trigger_resolution = true;
+        need_trigger = (speculation_state == RESOLVE_TRUE_STATE) ||
+                        (speculation_state == RESOLVE_FALSE_STATE);
+      }
+      if (need_trigger)
+        resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void SpeculativeOp::notify_predicate_value(GenerationID pred_gen,bool value)
+    //--------------------------------------------------------------------------
+    {
+      bool continue_true = false;
+      bool continue_false = false;
+      bool need_mispredict = false;
+      bool restart = false;
+      bool need_resolve = false;
+      bool need_trigger = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(pred_gen == get_generation());
+#endif
         switch (speculation_state)
         {
           case PENDING_MAP_STATE:
             {
-              // We're not ready to map, so set the value
-              if (value)
-                speculation_state = RESOLVE_TRUE_STATE;
-              else
-                speculation_state = RESOLVE_FALSE_STATE;
-              break;
-            }
-          case PENDING_PRED_STATE:
-            {
               if (value)
               {
                 speculation_state = RESOLVE_TRUE_STATE;
-                need_continue = true;
+                continue_true = true;
               }
               else
               {
                 speculation_state = RESOLVE_FALSE_STATE;
-                need_complete = true;
+                continue_false = true;
               }
+              need_resolve = received_trigger_resolution;
+              need_trigger = predicate_waiter.exists();
               break;
             }
           case SPECULATE_TRUE_STATE:
             {
-              if (value)
+              if (value) // We guessed right
               {
-                // We guessed right
                 speculation_state = RESOLVE_TRUE_STATE;
+                need_resolve = received_trigger_resolution;
               }
               else
               {
@@ -1280,7 +1417,6 @@ namespace LegionRuntime {
                 speculation_state = RESOLVE_FALSE_STATE;
                 need_mispredict = true;
                 restart = false;
-                need_resolve = false;
               }
               break;
             }
@@ -1288,42 +1424,28 @@ namespace LegionRuntime {
             {
               if (value)
               {
-                // We guessed wrong
                 speculation_state = RESOLVE_TRUE_STATE;
                 need_mispredict = true;
                 restart = true;
-                need_resolve = false;
               }
               else
               {
-                // We guessed right
                 speculation_state = RESOLVE_FALSE_STATE;
+                need_resolve = received_trigger_resolution;  
               }
               break;
             }
-          case RESOLVE_TRUE_STATE:
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(value);
-#endif
-              break;
-            }
-          case RESOLVE_FALSE_STATE:
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!value);
-#endif
-              break;
-            }
           default:
-            assert(false); // should never get here
+            assert(false); // shouldn't be in any of the other states
         }
       }
-      if (need_continue)
-        continue_mapping();
-      else if (need_complete)
-        complete_mapping();
-      else if (need_mispredict)
+      if (need_trigger)
+        predicate_waiter.trigger();
+      if (continue_true)
+        resolve_true();
+      if (continue_false)
+        resolve_false();
+      if (need_mispredict)
         quash_operation(get_generation(), restart);
       if (need_resolve)
         resolve_speculation();
@@ -2377,12 +2499,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::continue_mapping(void)
+    void CopyOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
       // Put this on the queue of stuff to do
       runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
                                   this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // Mark that this operation has completed both
+      // execution and mapping indicating that we are done
+      // Do it in this order to avoid calling 'execute_trigger'
+      complete_execution();
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool CopyOp::speculate(bool &value)
+    //--------------------------------------------------------------------------
+    {
+      Processor exec_proc = parent_ctx->get_executing_processor();
+      return runtime->invoke_mapper_speculate(exec_proc, this, value);
     }
 
     //--------------------------------------------------------------------------
@@ -3818,12 +3959,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::continue_mapping(void)
+    void AcquireOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
       // Put this on the queue of stuff to do
       runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
                                   this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // Clean up this operation
+      complete_execution();
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool AcquireOp::speculate(bool &value)
+    //--------------------------------------------------------------------------
+    {
+      Processor exec_proc = parent_ctx->get_executing_processor();
+      return runtime->invoke_mapper_speculate(exec_proc, this, value);
     }
 
     //--------------------------------------------------------------------------
@@ -4261,12 +4419,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::continue_mapping(void)
+    void ReleaseOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
       // Put this on the queue of stuff to do
       runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
                                   this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // Clean up this operation
+      complete_execution();
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReleaseOp::speculate(bool &value)
+    //--------------------------------------------------------------------------
+    {
+      Processor exec_proc = parent_ctx->get_executing_processor();
+      return runtime->invoke_mapper_speculate(exec_proc, this, value);
     }
 
     //--------------------------------------------------------------------------
@@ -4591,17 +4766,14 @@ namespace LegionRuntime {
     void FuturePredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      try_speculated = false;
-      pred_valid = false;
-      pred_speculated = false;
+      activate_predicate();
     }
 
     //--------------------------------------------------------------------------
     void FuturePredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_predicate();
       future = Future();
       runtime->free_future_predicate_op(this);
     }
@@ -4614,28 +4786,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(SingleTask *ctx, Future f, Processor p)
+    void FuturePredOp::initialize(SingleTask *ctx, Future f)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx != NULL);
+      assert(f.impl != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/);
+      // Don't track this as it can lead to deadlock because
+      // predicates can't complete until all their references from
+      // the parent task have been removed.
+      initialize_operation(ctx, false/*track*/);
       future = f;
-      proc = p;
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::speculate(void)
+    void FuturePredOp::resolve_future_predicate(void)
     //--------------------------------------------------------------------------
     {
-      // Assume we are already holding the lock on this operation
-      if (!try_speculated)
-      {
-        pred_value = runtime->invoke_mapper_speculate(proc, future.impl->task, 
-                                                      pred_valid);  
-        try_speculated = true;
-      }
+      bool valid;
+      bool value = future.impl->get_boolean_value(valid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(valid);
+#endif
+      set_resolved_value(get_generation(), value);
     }
 
     //--------------------------------------------------------------------------
@@ -4653,45 +4827,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool FuturePredOp::sample(bool &valid, bool &speculated)
+    void FuturePredOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      valid = false;
-      speculated = false;
-      // Always check to see if the future has a value if we
-      // don't already have a value set
-      if (!pred_valid)
-      {
-        AutoLock o_lock(op_lock);
-        if (!pred_valid)
-          pred_value = future.impl->get_boolean_value(pred_valid);
-        if (pred_valid)
-        {
-          valid = true;
-          return pred_value;
-        }
-      }
-      // If we're still not valid, see if we want to speculate
-      if (!pred_speculated)
-      {
-        AutoLock o_lock(op_lock);
-        if (!pred_speculated && !pred_valid)
-          speculate(); 
-        if (pred_speculated)
-        {
-          speculated = true;
-          return pred_value;
-        }
-      }
+      // See if we have a value
+      bool valid;
+      bool value = future.impl->get_boolean_value(valid);
+      if (valid)
+        set_resolved_value(get_generation(), value);
       else
       {
-        // If we already speculated, just return that
-        speculated = true;
-        return pred_value;
+        // Launch a task to get the value
+        add_predicate_reference();
+        ResolveFuturePredArgs args;
+        args.hlr_id = HLR_RESOLVE_FUTURE_PRED_ID;
+        args.future_pred_op = this;
+        Processor exec_proc = Machine::get_executing_processor();
+        Processor util_proc = exec_proc.get_utility_processor();
+        util_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
+                        future.impl->get_ready_event());
       }
-      // Otherwise they get no value
-      return false;
-    }
+      // Mark that we completed mapping this operation
+      complete_mapping();
+    } 
 
     /////////////////////////////////////////////////////////////
     // Not Predicate Operation
@@ -4735,23 +4893,22 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/);
+      // Don't track this as it can lead to deadlock because
+      // predicates can't complete until all their references from
+      // the parent task have been removed.
+      initialize_operation(ctx, false/*track*/);
+      // Don't forget to reverse the values
       if (p == Predicate::TRUE_PRED)
-      {
-        pred_op = NULL;
-        pred_valid = true;
-        pred_value = false;
-      }
+        set_resolved_value(get_generation(), false);
       else if (p == Predicate::FALSE_PRED)
-      {
-        pred_op = NULL;
-        pred_valid = true;
-        pred_value = true;
-      }
+        set_resolved_value(get_generation(), true);
       else
       {
-        pred_op = p.impl;  
-        pred_gen = pred_op->get_generation();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(p.impl != NULL);
+#endif
+        pred_op = p.impl;
+        pred_op->add_predicate_reference();
       }
     }
 
@@ -4759,18 +4916,15 @@ namespace LegionRuntime {
     void NotPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      activate_predicate();
       pred_op = NULL;
-      pred_gen = 0;
-      pred_valid = false;
-      pred_speculated = false;
     }
 
     //--------------------------------------------------------------------------
     void NotPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_predicate();
       runtime->free_not_predicate_op(this);
     }
 
@@ -4787,30 +4941,40 @@ namespace LegionRuntime {
     {
       begin_dependence_analysis();
       if (pred_op != NULL)
-        register_dependence(pred_op, pred_gen);
+        register_dependence(pred_op, pred_op->get_generation());
       end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
-    bool NotPredOp::sample(bool &valid, bool &speculated)
+    void NotPredOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      valid = false;
-      speculated = false;
-      AutoLock o_lock(op_lock);
-      if (!pred_value)
-        pred_value = !pred_op->sample(pred_valid, pred_speculated);
-      if (pred_value)
+      if (pred_op != NULL)
       {
-        valid = true;
-        return pred_value;
+        bool prev_value;
+        bool valid = pred_op->register_waiter(this, get_generation(),
+                                              prev_value);
+        // Don't forget to negate 
+        if (valid)
+          set_resolved_value(get_generation(), !prev_value);
+        // Now we can remove the reference we added
+        pred_op->remove_predicate_reference();
       }
-      else if (pred_speculated)
-      {
-        speculated = true;
-        return pred_value;
-      }
-      return false;
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void NotPredOp::notify_predicate_value(GenerationID prev_gen, bool value)
+    //--------------------------------------------------------------------------
+    {
+      // No short circuit in this one
+      // We can test this without the lock because 
+      // it is monotonically increasing
+#ifdef DEBUG_HIGH_LEVEL
+      assert(prev_gen == get_generation());
+#endif
+      // Don't forget to negate the value
+      set_resolved_value(prev_gen, !value);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4856,40 +5020,43 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/);
+      // Don't track this as it can lead to deadlock because
+      // predicates can't complete until all their references from
+      // the parent task have been removed.
+      initialize_operation(ctx, false/*track*/);
+      // Short circuit case
+      if ((p1 == Predicate::FALSE_PRED) || (p2 == Predicate::FALSE_PRED))
+      {
+        set_resolved_value(get_generation(), false);
+        return;
+      }
       if (p1 == Predicate::TRUE_PRED)
       {
-        pred0 = NULL;
-        zero_valid = true;
-        zero_value = true;
-      }
-      else if (p1 == Predicate::FALSE_PRED)
-      {
-        pred0 = NULL;
-        zero_valid = true;
-        zero_value = false;
+        left_value = true;
+        left_valid = true;
       }
       else
       {
-        pred0 = p1.impl;
-        pred0_gen = pred0->get_generation();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(p1.impl != NULL);
+#endif
+        left_valid = false;
+        left = p1.impl;
+        left->add_predicate_reference();
       }
       if (p2 == Predicate::TRUE_PRED)
       {
-        pred1 = NULL;
-        one_valid = true;
-        one_value = true;
-      }
-      else if (p2 == Predicate::FALSE_PRED)
-      {
-        pred1 = NULL;
-        one_valid = true;
-        one_value = false;
+        right_value = true;
+        right_valid = true;
       }
       else
       {
-        pred1 = p2.impl;
-        pred1_gen = pred1->get_generation();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(p2.impl != NULL);
+#endif
+        right_valid = false;
+        right = p2.impl;
+        right->add_predicate_reference();
       }
     }
 
@@ -4897,22 +5064,18 @@ namespace LegionRuntime {
     void AndPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      pred0 = NULL;
-      pred1 = NULL;
-      pred0_gen = 0;
-      pred1_gen = 0;
-      zero_valid = false;
-      zero_speculated = false;
-      one_valid = false;
-      one_speculated = false;
+      activate_predicate();
+      left = NULL;
+      right = NULL;
+      left_valid = false;
+      right_valid = false;
     }
 
     //--------------------------------------------------------------------------
     void AndPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_predicate();
       runtime->free_and_predicate_op(this);
     }
 
@@ -4928,102 +5091,108 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       begin_dependence_analysis();
-      if (pred0 != NULL)
-        register_dependence(pred0, pred0_gen);
-      if (pred1 != NULL)
-        register_dependence(pred1, pred1_gen);
+      if (left != NULL)
+        register_dependence(left, left->get_generation());
+      if (left != NULL)
+        register_dependence(right, right->get_generation());
       end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
-    bool AndPredOp::sample(bool &valid, bool &speculated)
+    void AndPredOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      valid = false;
-      speculated = false;
-      AutoLock o_lock(op_lock);
-      if (!zero_valid)
-        zero_value = pred0->sample(zero_valid, zero_speculated);
-      if (!one_valid)
-        one_value = pred1->sample(one_valid, one_speculated);
-      if (zero_valid)
+      // Hold the lock when doing this to prevent 
+      // any triggers from interfering with the analysis
+      bool need_resolve = false;
+      bool resolve_value;
+      GenerationID local_gen = get_generation();
       {
-        if (one_valid)
+        AutoLock o_lock(op_lock);
+        if (!predicate_resolved)
         {
-          valid = true;
-          return (zero_value && one_value);
-        }
-        else if (one_speculated)
-        {
-          if (zero_value)
+          if (left != NULL)
+            left_valid = left->register_waiter(this, get_generation(),
+                                               left_value);
+          if (right != NULL)
+            right_valid = right->register_waiter(this, get_generation(),
+                                                 right_value);
+          // Both valid
+          if (left_valid && right_valid)
           {
-            speculated = true;
-            return one_value;
+            need_resolve = true;
+            resolve_value = (left_value && right_value);
           }
-          else
+          // Left short circuit
+          else if (left_valid && !left_value)
           {
-            valid = true;
-            return false;
+            need_resolve = true;
+            resolve_value = false;
           }
-        }
-        else
-        {
-          if (!zero_value)
+          // Right short circuit
+          else if (right_valid && !right_value) 
           {
-            valid = true;
-            return false;
+            need_resolve = true;
+            resolve_value = false;
           }
         }
       }
-      else if (zero_speculated)
+      if (need_resolve)
+        set_resolved_value(local_gen, resolve_value);
+      // Clean up any references that we have
+      if (left != NULL)
+        left->remove_predicate_reference();
+      if (right != NULL)
+        right->remove_predicate_reference();
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void AndPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
+    //--------------------------------------------------------------------------
+    {
+      bool need_resolve, resolve_value;
+      if (pred_gen == get_generation())
       {
-        if (one_valid)
+        AutoLock o_lock(op_lock);
+        // Check again to make sure we didn't lose the race
+        if ((pred_gen == get_generation()) && !predicate_resolved)
         {
-          if (one_value)
+          if (!value)
           {
-            speculated = true;
-            return zero_value;
+            need_resolve = true;
+            resolve_value = false;
           }
           else
           {
-            valid = true;
-            return false;
+            // Figure out which of the two values to fill in
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!left_valid || !right_valid);
+#endif
+            if (!left_valid)
+            {
+              left_value = value;
+              left_valid = true;
+            }
+            else
+            {
+              right_value = value;
+              right_valid = true;
+            }
+            if (left_valid && right_valid)
+            {
+              need_resolve = true;
+              resolve_value = (left_value && right_value);
+            }
           }
-        }
-        else if (one_speculated)
-        {
-          speculated = true;
-          return (zero_value && one_value);
         }
         else
-        {
-          if (!zero_value)
-          {
-            speculated = true;
-            return false;
-          }
-        }
+          need_resolve = false;
       }
       else
-      {
-        if (one_valid)
-        {
-          if (!one_value)
-          {
-            valid = true;
-            return false;
-          }
-        }
-        else if (one_speculated)
-        {
-          if (!one_value)
-          {
-            speculated = true;
-            return false;
-          }
-        }
-      }
-      return false;
+        need_resolve = false;
+      if (need_resolve)
+        set_resolved_value(pred_gen, resolve_value);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5069,40 +5238,37 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx != NULL);
 #endif
-      initialize_operation(ctx, true/*track*/);
-      if (p1 == Predicate::TRUE_PRED)
+      // Don't track this as it can lead to deadlock because
+      // predicates can't complete until all their references from
+      // the parent task have been removed.
+      initialize_operation(ctx, false/*track*/);
+      // Short circuit case
+      if ((p1 == Predicate::TRUE_PRED) || (p2 == Predicate::TRUE_PRED))
       {
-        pred0 = NULL;
-        zero_valid = true;
-        zero_value = true;
+        set_resolved_value(get_generation(), true);
+        return;
       }
-      else if (p1 == Predicate::FALSE_PRED)
+      if (p1 == Predicate::FALSE_PRED)
       {
-        pred0 = NULL;
-        zero_valid = true;
-        zero_value = false;
-      }
-      else
-      {
-        pred0 = p1.impl;
-        pred0_gen = pred0->get_generation();
-      }
-      if (p2 == Predicate::TRUE_PRED)
-      {
-        pred1 = NULL;
-        one_valid = true;
-        one_value = true;
-      }
-      else if (p2 == Predicate::FALSE_PRED)
-      {
-        pred1 = NULL;
-        one_valid = true;
-        one_value = false;
+        left_value = false;
+        left_valid = true;
       }
       else
       {
-        pred1 = p2.impl;
-        pred1_gen = pred1->get_generation();
+        left = p1.impl;
+        left_valid = false;
+        left->add_predicate_reference();
+      }
+      if (p2 == Predicate::FALSE_PRED)
+      {
+        right_value = false;
+        right_valid = true;
+      }
+      else
+      {
+        right = p2.impl;
+        right_valid = false;
+        right->add_predicate_reference();
       }
     }
 
@@ -5110,22 +5276,18 @@ namespace LegionRuntime {
     void OrPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      pred0 = NULL;
-      pred1 = NULL;
-      pred0_gen = 0;
-      pred1_gen = 0;
-      zero_valid = false;
-      zero_speculated = false;
-      one_valid = false;
-      one_speculated = false;
+      activate_predicate();
+      left = NULL;
+      right = NULL;
+      left_valid = false;
+      right_valid = false;
     }
 
     //--------------------------------------------------------------------------
     void OrPredOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_predicate();
       runtime->free_or_predicate_op(this);
     }
 
@@ -5141,103 +5303,110 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       begin_dependence_analysis();
-      if (pred0 != NULL)
-        register_dependence(pred0, pred0_gen);
-      if (pred1 != NULL)
-        register_dependence(pred1, pred1_gen);
+      if (left != NULL)
+        register_dependence(left, left->get_generation());
+      if (right != NULL)
+        register_dependence(right, right->get_generation());
       end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
-    bool OrPredOp::sample(bool &valid, bool &speculated)
+    void OrPredOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      valid = false;
-      speculated = false;
-      AutoLock o_lock(op_lock);
-      if (!zero_valid)
-        zero_value = pred0->sample(zero_valid, zero_speculated);
-      if (!one_valid)
-        one_value = pred1->sample(one_valid, one_speculated);
-      if (zero_valid)
+      // Hold the lock when doing this to prevent 
+      // any triggers from interfering with the analysis
+      bool need_resolve = false;
+      bool resolve_value;
+      GenerationID local_gen = get_generation();
       {
-        if (one_valid)
+        AutoLock o_lock(op_lock);
+        if (!predicate_resolved)
         {
-          valid = true;
-          return (zero_value || one_value);
-        }
-        else if (one_speculated)
-        {
-          if (zero_value)
+          if (left != NULL)
+            left_valid = left->register_waiter(this, get_generation(),
+                                               left_value);
+          if (right != NULL)
+            right_valid = right->register_waiter(this, get_generation(),
+                                                 right_value);
+          // Both valid
+          if (left_valid && right_valid)
           {
-            valid = true;
-            return true;
+            need_resolve = true;
+            resolve_value = (left_value || right_value);
           }
-          else
+          // Left short circuit
+          else if (left_valid && left_value)
           {
-            speculated = true;
-            return one_value;
+            need_resolve = true;
+            resolve_value = true;
           }
-        }
-        else
-        {
-          if (one_value)
+          // Right short circuit
+          else if (right_valid && right_value) 
           {
-            valid = true;
-            return true;
+            need_resolve = true;
+            resolve_value = true;
           }
         }
       }
-      else if (zero_speculated)
+      if (need_resolve)
+        set_resolved_value(local_gen, resolve_value);
+      // Clean up any references that we have
+      if (left != NULL)
+        left->remove_predicate_reference();
+      if (right != NULL)
+        right->remove_predicate_reference();
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void OrPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
+    //--------------------------------------------------------------------------
+    {
+      bool need_resolve, resolve_value;
+      if (pred_gen == get_generation())
       {
-        if (one_valid)
+        AutoLock o_lock(op_lock);
+        // Check again to make sure we didn't lose the race
+        if ((pred_gen == get_generation()) && !predicate_resolved)
         {
-          if (one_value)
+          if (value)
           {
-            valid = true;
-            return true;
+            need_resolve = true;
+            resolve_value = true;
           }
           else
           {
-            speculated = true;
-            return zero_value;
+            // Figure out which of the two values to fill in
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!left_valid || !right_valid);
+#endif
+            if (!left_valid)
+            {
+              left_value = value;
+              left_valid = true;
+            }
+            else
+            {
+              right_value = value;
+              right_valid = true;
+            }
+            if (left_valid && right_valid)
+            {
+              need_resolve = true;
+              resolve_value = (left_value || right_value);
+            }
           }
-        }
-        else if (one_speculated)
-        {
-          speculated = true;
-          return (zero_value || one_value);
         }
         else
-        {
-          if (zero_value)
-          {
-            speculated = true;
-            return true;
-          }
-        }
+          need_resolve = false;
       }
       else
-      {
-        if (one_valid)
-        {
-          if (one_value)
-          {
-            valid = true;
-            return true;
-          }
-        }
-        else if (one_speculated)
-        {
-          if (one_value)
-          {
-            speculated = true;
-            return true;
-          }
-        }
-      }
-      return true;
+        need_resolve = false;
+      if (need_resolve)
+        set_resolved_value(pred_gen, resolve_value);
     }
+
 
     /////////////////////////////////////////////////////////////
     // Must Epoch Operation 

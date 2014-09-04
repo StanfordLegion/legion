@@ -529,7 +529,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(left <= right);
 #endif
-      if (root = NULL)
+      if (root == NULL)
         return false;
       return root->intersects(left, right);
     }

@@ -8430,7 +8430,10 @@ namespace LegionRuntime {
       //gasnet_seginfo_t seginfos = new gasnet_seginfo_t[num_nodes];
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
-      r->global_memory = new GASNetMemory(ID(ID::ID_MEMORY, 0, ID::ID_GLOBAL_MEM, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+      if(gasnet_mem_size_in_mb > 0)
+	r->global_memory = new GASNetMemory(ID(ID::ID_MEMORY, 0, ID::ID_GLOBAL_MEM, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+      else
+	r->global_memory = 0;
 
       Node *n = &r->nodes[gasnet_mynode()];
 
@@ -8627,11 +8630,13 @@ namespace LegionRuntime {
 	  adata[apos++] = 5;    // "small" latency
 	}
 
-	adata[apos++] = NODE_ANNOUNCE_PMA;
-	adata[apos++] = (*it)->me.id;
-	adata[apos++] = r->global_memory->me.id;
-	adata[apos++] = 10;  // "lower" bandwidth
-	adata[apos++] = 50;    // "higher" latency
+	if(r->global_memory) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = r->global_memory->me.id;
+	  adata[apos++] = 10;  // "lower" bandwidth
+	  adata[apos++] = 50;    // "higher" latency
+	}
       }
 
       // list affinities between local CPUs / memories
@@ -8654,14 +8659,16 @@ namespace LegionRuntime {
 	  adata[apos++] = 5;    // "small" latency
 	}
 
-	adata[apos++] = NODE_ANNOUNCE_PMA;
-	adata[apos++] = (*it)->me.id;
-	adata[apos++] = r->global_memory->me.id;
-	adata[apos++] = 10;  // "lower" bandwidth
-	adata[apos++] = 50;    // "higher" latency
+	if(r->global_memory) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = r->global_memory->me.id;
+	  adata[apos++] = 10;  // "lower" bandwidth
+	  adata[apos++] = 50;    // "higher" latency
+	}
       }
 
-      if(cpu_mem_size_in_mb > 0) {
+      if((cpu_mem_size_in_mb > 0) && r->global_memory) {
 	adata[apos++] = NODE_ANNOUNCE_MMA;
 	adata[apos++] = cpumem->me.id;
 	adata[apos++] = r->global_memory->me.id;

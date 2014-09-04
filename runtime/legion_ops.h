@@ -281,6 +281,18 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class PredicateWaiter
+     * An interface class for speculative operations
+     * and compound predicates that allows them to
+     * be notified when their constituent predicates
+     * have been resolved.
+     */
+    class PredicateWaiter {
+    public:
+      virtual void notify_predicate_value(GenerationID gen, bool value) = 0;
+    };
+
+    /**
      * \class Predicate::Impl 
      * A predicate operation is an abstract class that
      * contains a method that allows other operations to
@@ -291,13 +303,22 @@ namespace LegionRuntime {
     public:
       Impl(Runtime *rt);
     public:
-      void add_reference(void);
-      void remove_reference(void);
+      void activate_predicate(void);
+      void deactivate_predicate(void);
     public:
-      virtual bool sample(bool &valid, bool &speculated) = 0;
-      // Override the commit stage so we don't deactivate
-      // predicates until they no longer need to be used
-      virtual void trigger_commit(void);
+      void add_predicate_reference(void);
+      void remove_predicate_reference(void);
+    public:
+      bool register_waiter(PredicateWaiter *waiter, 
+                           GenerationID gen, bool &value);
+    protected:
+      void set_resolved_value(GenerationID pred_gen, bool value);
+    protected:
+      bool predicate_resolved;
+      bool predicate_value;
+      std::map<PredicateWaiter*,GenerationID> waiters;
+    protected:
+      unsigned predicate_references;
     };
 
     /**
@@ -310,11 +331,10 @@ namespace LegionRuntime {
      * Based on that infomration the speculative operation
      * will decide how to manage the operation.
      */
-    class SpeculativeOp : public Operation {
+    class SpeculativeOp : public Operation, PredicateWaiter {
     public:
       enum SpecState {
         PENDING_MAP_STATE,
-        PENDING_PRED_STATE,
         SPECULATE_TRUE_STATE,
         SPECULATE_FALSE_STATE,
         RESOLVE_TRUE_STATE,
@@ -343,10 +363,17 @@ namespace LegionRuntime {
     public:
       // Call this method for inheriting classes 
       // to indicate when they should map
-      virtual void continue_mapping(void) = 0;
+      virtual bool speculate(bool &value) = 0;
+      virtual void resolve_true(void) = 0;
+      virtual void resolve_false(void) = 0;
+    public:
+      virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
       SpecState    speculation_state;
       PredicateOp *predicate;
+      bool received_trigger_resolution;
+    protected:
+      UserEvent predicate_waiter; // used only when needed
     };
 
     /**
@@ -429,10 +456,12 @@ namespace LegionRuntime {
       virtual const char* get_logging_name(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void continue_mapping(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      virtual void resolve_true(void);
+      virtual void resolve_false(void);
+      virtual bool speculate(bool &value);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -594,7 +623,9 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-      virtual void continue_mapping(void); 
+      virtual void resolve_true(void);
+      virtual void resolve_false(void);
+      virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -639,7 +670,9 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-      virtual void continue_mapping(void); 
+      virtual void resolve_true(void);
+      virtual void resolve_false(void);
+      virtual bool speculate(bool &value);
       virtual void deferred_complete(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -667,36 +700,35 @@ namespace LegionRuntime {
      */
     class FuturePredOp : public Predicate::Impl {
     public:
+      struct ResolveFuturePredArgs {
+        HLRTaskID hlr_id;
+        FuturePredOp *future_pred_op;
+      };
+    public:
       FuturePredOp(Runtime *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(SingleTask *ctx, Future f, Processor proc);
-      void speculate(void);
+      void initialize(SingleTask *ctx, Future f);
+      void resolve_future_predicate(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       const char* get_logging_name(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool sample(bool &valid, bool &speculated);
+      virtual void trigger_mapping(void);
     protected:
       Future future;
-      Processor proc;
-      bool try_speculated;
-      protected: 
-      bool pred_valid;
-      bool pred_speculated;
-      bool pred_value;
     };
 
     /**
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public Predicate::Impl {
+    class NotPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       NotPredOp(Runtime *rt);
       NotPredOp(const NotPredOp &rhs);
@@ -711,21 +743,17 @@ namespace LegionRuntime {
       virtual const char* get_logging_name(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool sample(bool &valid, bool &speculated);
+      virtual void trigger_mapping(void);
+      virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
       PredicateOp *pred_op;
-      GenerationID pred_gen;
-    protected: 
-      bool pred_valid;
-      bool pred_speculated;
-      bool pred_value;
     };
 
     /**
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public Predicate::Impl {
+    class AndPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       AndPredOp(Runtime *rt);
       AndPredOp(const AndPredOp &rhs);
@@ -741,27 +769,23 @@ namespace LegionRuntime {
       virtual const char* get_logging_name(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool sample(bool &valid, bool &speculated);
+      virtual void trigger_mapping(void);
+      virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *pred0;
-      PredicateOp *pred1;
-      GenerationID pred0_gen;
-      GenerationID pred1_gen;
+      PredicateOp *left;
+      PredicateOp *right;
     protected:
-      bool zero_valid;
-      bool zero_speculated;
-      bool zero_value;
-    protected:
-      bool one_valid;
-      bool one_speculated;
-      bool one_value;
+      bool left_value;
+      bool left_valid;
+      bool right_value;
+      bool right_valid;
     };
 
     /**
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public Predicate::Impl {
+    class OrPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       OrPredOp(Runtime *rt);
       OrPredOp(const OrPredOp &rhs);
@@ -777,20 +801,16 @@ namespace LegionRuntime {
       virtual const char* get_logging_name(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool sample(bool &valid, bool &speculated);
+      virtual void trigger_mapping(void);
+      virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *pred0;
-      PredicateOp *pred1;
-      GenerationID pred0_gen;
-      GenerationID pred1_gen;
+      PredicateOp *left;
+      PredicateOp *right;
     protected:
-      bool zero_valid;
-      bool zero_speculated;
-      bool zero_value;
-    protected:
-      bool one_valid;
-      bool one_speculated;
-      bool one_value;
+      bool left_value;
+      bool left_valid;
+      bool right_value;
+      bool right_valid;
     };
 
     /**

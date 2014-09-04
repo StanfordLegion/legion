@@ -433,6 +433,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t TaskOp::check_future_size(Future::Impl *impl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      const size_t result_size = impl->get_untyped_size();
+      if (result_size != variants->return_size)
+      {
+        log_run(LEVEL_ERROR,"Predicated task launch for task %s "
+                            "in parent task %s (UID %lld) has predicated "
+                            "false future of size %ld bytes, but the "
+                            "expected return size is %ld bytes.",
+                            variants->name, parent_ctx->variants->name,
+                            parent_ctx->get_unique_task_id(),
+                            result_size, variants->return_size);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
+      }
+      return result_size;
+    }
+
+    //--------------------------------------------------------------------------
     const char* TaskOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
@@ -479,11 +504,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::continue_mapping(void)
+    void TaskOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
       // Put this on the ready queue
       runtime->add_to_ready_queue(current_proc, this, false/*prev fail*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskOp::speculate(bool &value)
+    //--------------------------------------------------------------------------
+    {
+      Processor exec_proc = parent_ctx->get_executing_processor();
+      return runtime->invoke_mapper_speculate(exec_proc, this, value);
     }
 
     //--------------------------------------------------------------------------
@@ -1887,12 +1920,6 @@ namespace LegionRuntime {
       complete_children.clear();
       mapping_paths.clear();
       premapping_events.clear();
-      for (std::set<Operation*>::const_iterator it = reclaim_children.begin();
-            it != reclaim_children.end(); it++)
-      {
-        (*it)->deactivate();
-      }
-      reclaim_children.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -2487,14 +2514,6 @@ namespace LegionRuntime {
         Operation *op = *it;
         printf("Complete Child %p\n",op);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::register_reclaim_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      reclaim_children.insert(op);
     }
 
     //--------------------------------------------------------------------------
@@ -5293,6 +5312,8 @@ namespace LegionRuntime {
       activate_single();
       future_store = NULL;
       future_size = 0;
+      predicate_false_result = NULL;
+      predicate_false_size = 0;
       orig_task = this;
       remote_completion_event = get_completion_event();
       remote_unique_id = get_unique_task_id();
@@ -5314,8 +5335,15 @@ namespace LegionRuntime {
         future_store = NULL;
         future_size = 0;
       }
+      if (predicate_false_result != NULL)
+      {
+        free(predicate_false_result);
+        predicate_false_result = NULL;
+        predicate_false_size = 0;
+      }
       // Remove our reference on the future
       result = Future();
+      predicate_false_future = Future();
       privilege_paths.clear();
       // Read this before freeing the task
       // Should be safe, but we'll be careful
@@ -5363,6 +5391,59 @@ namespace LegionRuntime {
       index_point = launcher.point;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
+      if (launcher.predicate != Predicate::TRUE_PRED)
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          predicate_false_future = launcher.predicate_false_future;
+        else
+        {
+          predicate_false_size = launcher.predicate_false_result.get_size();
+          if (predicate_false_size == 0)
+          {
+            if (variants->return_size > 0)
+            {
+              log_run(LEVEL_ERROR,"Predicated task launch for task %s "
+                                  "in parent task %s (UID %lld) has non-void "
+                                  "return type but no default value for its "
+                                  "future if the task predicate evaluates to "
+                                  "false.  Please set either the "
+                                  "'predicate_false_result' or "
+                                  "'predicate_false_future' fields of the "
+                                  "TaskLauncher struct.",
+                                  variants->name, ctx->variants->name,
+                                  ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+            }
+          }
+          else
+          {
+            if (predicate_false_size != variants->return_size)
+            {
+              log_run(LEVEL_ERROR,"Predicated task launch for task %s "
+                                 "in parent task %s (UID %lld) has predicated "
+                                 "false return type of size %ld bytes, but the "
+                                 "expected return size is %ld bytes.",
+                                 variants->name, parent_ctx->variants->name,
+                                 parent_ctx->get_unique_task_id(),
+                                 predicate_false_size, variants->return_size);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
+            }
+#ifdef DEBUG_HIGH_LEVEL
+            assert(predicate_false_result == NULL);
+#endif
+            predicate_false_result = malloc(predicate_false_size);
+            memcpy(predicate_false_result, 
+                   launcher.predicate_false_result.get_ptr(),
+                   predicate_false_size);
+          }
+        }
+      }
       if (check_privileges)
         perform_privilege_checks();
       initialize_physical_contexts();
@@ -5541,6 +5622,53 @@ namespace LegionRuntime {
                             parent_ctx->variants->name, 
                             parent_ctx->get_unique_task_id());
 #endif
+    }
+    
+    //--------------------------------------------------------------------------
+    void IndividualTask::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger = true;
+      // Set the future to the false result
+      if (predicate_false_future.impl != NULL)
+      {
+        Event wait_on = predicate_false_future.impl->get_ready_event();
+        if (wait_on.has_triggered())
+        {
+          const size_t result_size = 
+            check_future_size(predicate_false_future.impl);
+          if (result_size > 0)
+            result.impl->set_result(
+                predicate_false_future.impl->get_untyped_result(),
+                result_size, false/*own*/);
+        }
+        else
+        {
+          // Add references so they aren't garbage collected
+          result.impl->add_gc_reference();
+          predicate_false_future.impl->add_gc_reference();
+          Runtime::DeferredFutureSetArgs args;
+          args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
+          args.target = result.impl;
+          args.result = predicate_false_future.impl;
+          args.task_op = this;
+          Processor exec_proc = Machine::get_executing_processor();
+          Processor util_proc = exec_proc.get_utility_processor();
+          util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+          trigger = false;
+        }
+      }
+      else
+      {
+        if (predicate_false_size > 0)
+          result.impl->set_result(predicate_false_result,
+                                  predicate_false_size, false/*own*/);
+      }
+      // Then clean up this task instance
+      if (trigger)
+        complete_execution();
+      complete_mapping();
+      trigger_children_complete();
     }
 
     //--------------------------------------------------------------------------
@@ -6332,6 +6460,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::premap_task(void)
     //--------------------------------------------------------------------------
     {
@@ -6676,6 +6812,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void WrapperTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7126,13 +7270,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::register_reclaim_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_reclaim_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
     void InlineTask::register_fence_dependence(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -7194,6 +7331,8 @@ namespace LegionRuntime {
       committed_points = 0;
       complete_received = false;
       commit_received = false; 
+      predicate_false_result = NULL;
+      predicate_false_size = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -7208,6 +7347,13 @@ namespace LegionRuntime {
       argument_map = ArgumentMap();
       // Remove our reference to the future map
       future_map = FutureMap();
+      if (predicate_false_result != NULL)
+      {
+        free(predicate_false_result);
+        predicate_false_result = NULL;
+        predicate_false_size = 0;
+      }
+      predicate_false_future = Future();
       // Remove our reference to the reduction future
       reduction_future = Future();
       runtime->free_index_task(this);
@@ -7256,6 +7402,9 @@ namespace LegionRuntime {
         must_barrier = Barrier::create_barrier(1);
       index_domain = launcher.launch_domain;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
+      if (launcher.predicate != Predicate::TRUE_PRED)
+        initialize_predicate(launcher.predicate_false_future,
+                             launcher.predicate_false_result);
       if (check_privileges)
         perform_privilege_checks();
       initialize_physical_contexts();
@@ -7346,6 +7495,9 @@ namespace LegionRuntime {
       else
         initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.predicate, task_id);
+      if (launcher.predicate != Predicate::TRUE_PRED)
+        initialize_predicate(launcher.predicate_false_future,
+                             launcher.predicate_false_result);
       if (check_privileges)
         perform_privilege_checks();
       initialize_physical_contexts();
@@ -7547,6 +7699,62 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::initialize_predicate(const Future &pred_future,
+                                         const TaskArgument &pred_arg)
+    //--------------------------------------------------------------------------
+    {
+      if (pred_future.impl != NULL)
+        predicate_false_future = pred_future;
+      else
+      {
+        predicate_false_size = pred_arg.get_size();
+        if (predicate_false_size == 0)
+        {
+          if (variants->return_size > 0)
+          {
+            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+                                "in parent task %s (UID %lld) has non-void "
+                                "return type but no default value for its "
+                                "future if the task predicate evaluates to "
+                                "false.  Please set either the "
+                                "'predicate_false_result' or "
+                                "'predicate_false_future' fields of the "
+                                "IndexLauncher struct.",
+                                variants->name, parent_ctx->variants->name,
+                                parent_ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        else
+        {
+          if (predicate_false_size != variants->return_size)
+          {
+            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+                                "in parent task %s (UID %lld) has predicated "
+                                "false return type of size %ld bytes, but the "
+                                "expected return size is %ld bytes.",
+                                variants->name, parent_ctx->variants->name,
+                                parent_ctx->get_unique_task_id(),
+                                predicate_false_size, variants->return_size);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
+          }
+#ifdef DEBUG_HIGH_LEVEL
+          assert(predicate_false_result == NULL);
+#endif
+          predicate_false_result = malloc(predicate_false_size);
+          memcpy(predicate_false_result, pred_arg.get_ptr(),
+                 predicate_false_size);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::initialize_paths(void)
     //--------------------------------------------------------------------------
     {
@@ -7625,6 +7833,104 @@ namespace LegionRuntime {
                             parent_ctx->variants->name, 
                             parent_ctx->get_unique_task_id());
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::resolve_false(void)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger = true;
+      // Fill in the index task map with the default future value
+      if (redop == 0)
+      {
+        // Handling the future map case
+        if (predicate_false_future.impl != NULL)
+        {
+          Event wait_on = predicate_false_future.impl->get_ready_event();
+          if (wait_on.has_triggered())
+          {
+            const size_t result_size = 
+              check_future_size(predicate_false_future.impl);
+            const void *result = 
+              predicate_false_future.impl->get_untyped_result();
+            for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+            {
+              Future f = future_map.get_future(itr.p);
+              if (result_size > 0)
+                f.impl->set_result(result, result_size, false/*own*/);
+            }
+          }
+          else
+          {
+            // Add references so things won't be prematurely collected
+            future_map.impl->add_reference();
+            predicate_false_future.impl->add_gc_reference();
+            Runtime::DeferredFutureMapSetArgs args;
+            args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
+            args.future_map = future_map.impl;
+            args.result = predicate_false_future.impl;
+            args.domain = index_domain;
+            args.task_op = this;
+            Processor exec_proc = Machine::get_executing_processor();
+            Processor util_proc = exec_proc.get_utility_processor();
+            util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+            trigger = false;
+          }
+        }
+        else
+        {
+          for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+          {
+            Future f = future_map.get_future(itr.p);
+            if (predicate_false_size > 0)
+              f.impl->set_result(predicate_false_result,
+                                 predicate_false_size, false/*own*/);
+          }
+        }
+      }
+      else
+      {
+        // Handling a reduction case
+        if (predicate_false_future.impl != NULL)
+        {
+          Event wait_on = predicate_false_future.impl->get_ready_event();
+          if (wait_on.has_triggered())
+          {
+            const size_t result_size = 
+                        check_future_size(predicate_false_future.impl);
+            if (result_size > 0)
+              reduction_future.impl->set_result(
+                  predicate_false_future.impl->get_untyped_result(),
+                  result_size, false/*own*/);
+          }
+          else
+          {
+            // Add references so they aren't garbage collected 
+            reduction_future.impl->add_gc_reference();
+            predicate_false_future.impl->add_gc_reference();
+            Runtime::DeferredFutureSetArgs args;
+            args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
+            args.target = reduction_future.impl;
+            args.result = predicate_false_future.impl;
+            args.task_op = this;
+            Processor exec_proc = Machine::get_executing_processor();
+            Processor util_proc = exec_proc.get_utility_processor();
+            util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+            trigger = false;
+          }
+        }
+        else
+        {
+          if (predicate_false_size > 0)
+            reduction_future.impl->set_result(predicate_false_result,
+                                  predicate_false_size, false/*own*/);
+        }
+      }
+      // Then clean up this task execution
+      if (trigger)
+        complete_execution();
+      complete_mapping();
+      trigger_children_complete();
     }
 
     //--------------------------------------------------------------------------
@@ -7826,15 +8132,18 @@ namespace LegionRuntime {
       // and then trigger it
       if (redop != 0)
       {
-        reduction_future.impl->set_result(reduction_state,
-                                          reduction_state_size, 
-                                          false/*owner*/);
+        if (speculation_state != RESOLVE_FALSE_STATE)
+          reduction_future.impl->set_result(reduction_state,
+                                            reduction_state_size, 
+                                            false/*owner*/);
         reduction_future.impl->complete_future();
       }
       else
         future_map.impl->complete_all_futures();
 
       complete_operation();
+      if (speculation_state == RESOLVE_FALSE_STATE)
+        trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -8307,6 +8616,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void SliceTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called

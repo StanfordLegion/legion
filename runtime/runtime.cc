@@ -386,7 +386,6 @@ namespace LegionRuntime {
                        TaskOp *t /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
         task(t), task_gen((t == NULL) ? 0 : t->get_generation()),
-        predicated((t == NULL) ? false : t->is_predicated()),
         ready_event(UserEvent::create_user_event()), result(NULL),
         result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
@@ -399,8 +398,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Future::Impl::Impl(const Future::Impl &rhs)
-      : DistributedCollectable(NULL, 0, 0, 0), task(NULL), 
-        task_gen(0), predicated(false)
+      : DistributedCollectable(NULL, 0, 0, 0), task(NULL), task_gen(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -535,6 +533,15 @@ namespace LegionRuntime {
       }
       mark_sampled();
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Future::Impl::get_untyped_size(void)
+    //--------------------------------------------------------------------------
+    {
+      // Call this first to make sure the future is ready
+      get_void_result();
+      return result_size;
     }
 
     //--------------------------------------------------------------------------
@@ -887,8 +894,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(SingleTask *ctx, TaskOp *t, Runtime *rt)
       : Collectable(), context(ctx), task(t), task_gen(t->get_generation()),
-        predicated(t->is_predicated()), valid(true),
-        runtime(rt), ready_event(t->get_completion_event()),
+        valid(true), runtime(rt), ready_event(t->get_completion_event()),
         lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
@@ -897,7 +903,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(SingleTask *ctx, Event comp_event, Runtime *rt)
       : Collectable(), context(ctx), task(NULL), task_gen(0),
-        predicated(false), valid(true), runtime(rt), ready_event(comp_event),
+        valid(true), runtime(rt), ready_event(comp_event),
         lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -906,8 +912,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(SingleTask *ctx, Runtime *rt)
       : Collectable(), context(ctx), task(NULL), task_gen(0),
-        predicated(false), valid(false),
-        runtime(rt), ready_event(Event::NO_EVENT), 
+        valid(false), runtime(rt), ready_event(Event::NO_EVENT), 
         lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
     {
@@ -916,7 +921,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FutureMap::Impl::Impl(const FutureMap::Impl &rhs)
       : Collectable(), context(NULL), task(NULL), task_gen(0), 
-        predicated(false), valid(false), runtime(NULL) 
+        valid(false), runtime(NULL) 
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1940,30 +1945,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_speculate(TaskOp *task, bool &value)
+    bool ProcessorManager::invoke_mapper_speculate(Mappable *op, bool &value)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(task->map_id < mapper_objects.size());
-      assert(mapper_objects[task->map_id] != NULL);
+      assert(op->map_id < mapper_objects.size());
+      assert(mapper_objects[op->map_id] != NULL);
 #endif
       bool result;
       std::vector<MapperMessage> messages;
       {
-        AutoLock m_lock(mapper_locks[task->map_id]);
-        inside_mapper_call[task->map_id] = true;
-        result = mapper_objects[task->map_id]->
-                                        speculate_on_predicate(task, value);
+        AutoLock m_lock(mapper_locks[op->map_id]);
+        inside_mapper_call[op->map_id] = true;
+        result = mapper_objects[op->map_id]->speculate_on_predicate(op, value);
         AutoLock g_lock(message_lock);
-        inside_mapper_call[task->map_id] = false;
-        if (!mapper_messages[task->map_id].empty())
+        inside_mapper_call[op->map_id] = false;
+        if (!mapper_messages[op->map_id].empty())
         {
-          messages = mapper_messages[task->map_id];
-          mapper_messages[task->map_id].clear();
+          messages = mapper_messages[op->map_id];
+          mapper_messages[op->map_id].clear();
         }
       }
       if (!messages.empty())
-        send_mapper_messages(task->map_id, messages);
+        send_mapper_messages(op->map_id, messages);
       return result;
     }
 
@@ -6377,8 +6381,49 @@ namespace LegionRuntime {
     { 
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, true/*register*/, 
-              get_available_distributed_id(), address_space, address_space));
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+        {
+#ifdef INORDER_EXECUTION
+          launcher.predicate_false_future.get_void_result();
+#endif
+          return launcher.predicate_false_future;
+        }
+        // Otherwise check to see if we have a value
+        Future::Impl *result = new Future::Impl(this, true/*register*/, 
+              get_available_distributed_id(), address_space, address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskVariantCollection *variants = 
+            get_variant_collection(launcher.task_id);
+          if (variants->return_size > 0)
+          {
+            log_run(LEVEL_ERROR,"Predicated task launch for task %s "
+                                "in parent task %s (UID %lld) has non-void "
+                                "return type but no default value for its "
+                                "future if the task predicate evaluates to "
+                                "false.  Please set either the "
+                                "'predicate_false_result' or "
+                                "'predicate_false_future' fields of the "
+                                "TaskLauncher struct.",
+                                variants->name, ctx->variants->name,
+                                ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
       IndividualTask *task = get_available_individual_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
@@ -6416,7 +6461,90 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return FutureMap(new FutureMap::Impl(ctx,this));
+      {
+        FutureMap::Impl *result = new FutureMap::Impl(ctx, this);
+        if (launcher.predicate_false_future.impl != NULL)
+        {
+#ifdef INORDER_EXECUTION
+          // Wait for the result if we need things to happen in order
+          launcher.predicate_false_future.get_void_result();
+#endif
+          Event ready_event = 
+            launcher.predicate_false_future.impl->get_ready_event(); 
+          if (ready_event.has_triggered())
+          {
+            const void *f_result = 
+              launcher.predicate_false_future.impl->get_untyped_result();
+            size_t f_result_size = 
+              launcher.predicate_false_future.impl->get_untyped_size();
+            for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                  itr; itr++)
+            {
+              Future f = result->get_future(itr.p);
+              f.impl->set_result(f_result, f_result_size, false/*own*/);
+            }
+            result->complete_all_futures();
+          }
+          else
+          {
+            // Otherwise launch a task to complete the future map,
+            // add the necessary references to prevent premature
+            // garbage collection by the runtime
+            result->add_reference();
+            launcher.predicate_false_future.impl->add_gc_reference();
+            DeferredFutureMapSetArgs args;
+            args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
+            args.future_map = result;
+            args.result = launcher.predicate_false_future.impl;
+            args.domain = launcher.launch_domain;
+            Processor exec_proc = ctx->get_executing_processor();
+            Processor util_proc = exec_proc.get_utility_processor();
+            util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), ready_event);
+          }
+          return FutureMap(result);
+        }
+        if (launcher.predicate_false_result.get_size() == 0)
+        {
+          // Check to make sure the task actually does expect to
+          // have a void return type
+          TaskVariantCollection *variants = 
+            get_variant_collection(launcher.task_id);
+          if (variants->return_size > 0)
+          {
+            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+                                "in parent task %s (UID %lld) has non-void "
+                                "return type but no default value for its "
+                                "future if the task predicate evaluates to "
+                                "false.  Please set either the "
+                                "'predicate_false_result' or "
+                                "'predicate_false_future' fields of the "
+                                "IndexLauncher struct.",
+                                variants->name, ctx->variants->name,
+                                ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+          // Just initialize all the futures
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+            result->get_future(itr.p);
+        }
+        else
+        {
+          const void *ptr = launcher.predicate_false_result.get_ptr();
+          size_t ptr_size = launcher.predicate_false_result.get_size();
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+          {
+            Future f = result->get_future(itr.p);
+            f.impl->set_result(ptr, ptr_size, false/*own*/);
+          }
+        }
+        result->complete_all_futures();
+        return FutureMap(result);
+      }
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
@@ -6455,8 +6583,44 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, true/*register*/,
-              get_available_distributed_id(), address_space, address_space));
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          return launcher.predicate_false_future;
+        // Otherwise check to see if we have a value
+        Future::Impl *result = new Future::Impl(this, true/*register*/, 
+              get_available_distributed_id(), address_space, address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskVariantCollection *variants = 
+            get_variant_collection(launcher.task_id);
+          if (variants->return_size > 0)
+          {
+            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+                                "in parent task %s (UID %lld) has non-void "
+                                "return type but no default value for its "
+                                "future if the task predicate evaluates to "
+                                "false.  Please set either the "
+                                "'predicate_false_result' or "
+                                "'predicate_false_future' fields of the "
+                                "IndexLauncher struct.",
+                                variants->name, ctx->variants->name,
+                                ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
@@ -6984,21 +7148,16 @@ namespace LegionRuntime {
     Predicate Runtime::create_predicate(Context ctx, const Future &f) 
     //--------------------------------------------------------------------------
     {
-#if 0
-      if (f.impl->predicated)
+      if (f.impl == NULL)
       {
         log_run(LEVEL_ERROR,"Illegal predicate creation performed on "
-                            "predicated future from task %s (ID %lld) "
-                            "inside of task %s (ID %lld).",
-                            f.impl->task->variants->name,
-                            f.impl->task->get_unique_task_id(),
+                            "empty future inside of task %s (ID %lld).",
                             ctx->variants->name, ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_PREDICATE_FUTURE);
       }
-#endif
       // Find the mapper for this predicate
       Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_HIGH_LEVEL
@@ -7013,7 +7172,9 @@ namespace LegionRuntime {
       }
 #endif
       FuturePredOp *pred_op = get_available_future_pred_op();
-      pred_op->initialize(ctx, f, proc);
+      // Hold a reference before initialization
+      Predicate result(pred_op);
+      pred_op->initialize(ctx, f);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
 #endif
@@ -7026,7 +7187,7 @@ namespace LegionRuntime {
         post_wait(proc);
       }
 #endif
-      return Predicate(pred_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7047,6 +7208,8 @@ namespace LegionRuntime {
       }
 #endif
       NotPredOp *pred_op = get_available_not_pred_op();
+      // Hold a reference before initialization
+      Predicate result(pred_op);
       pred_op->initialize(ctx, p);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
@@ -7060,7 +7223,7 @@ namespace LegionRuntime {
         post_wait(proc);
       }
 #endif
-      return Predicate(pred_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7082,6 +7245,8 @@ namespace LegionRuntime {
       }
 #endif
       AndPredOp *pred_op = get_available_and_pred_op();
+      // Hold a reference before initialization
+      Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
@@ -7095,7 +7260,7 @@ namespace LegionRuntime {
         post_wait(proc);
       }
 #endif
-      return Predicate(pred_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7117,6 +7282,8 @@ namespace LegionRuntime {
       }
 #endif
       OrPredOp *pred_op = get_available_or_pred_op();
+      // Hold a reference before initialization
+      Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
 #ifdef INORDER_EXECUTION
       Event term_event = pred_op->get_completion_event();
@@ -7130,7 +7297,7 @@ namespace LegionRuntime {
         post_wait(proc);
       }
 #endif
-      return Predicate(pred_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9468,13 +9635,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool Runtime::invoke_mapper_speculate(Processor proc, 
-                                          TaskOp *task, bool &value)
+                                          Mappable *mappable, bool &value)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      return proc_managers[proc]->invoke_mapper_speculate(task, value);
+      return proc_managers[proc]->invoke_mapper_speculate(mappable, value);
     }
 
     //--------------------------------------------------------------------------
@@ -12166,6 +12333,54 @@ namespace LegionRuntime {
         case HLR_MUST_LAUNCH_ID:
           {
             MustEpochDistributor::handle_launch_task(args);
+            break;
+          }
+        case HLR_DEFERRED_FUTURE_SET_ID:
+          {
+            DeferredFutureSetArgs *future_args =  
+              (DeferredFutureSetArgs*)args;
+            const size_t result_size = 
+              future_args->task_op->check_future_size(future_args->result);
+            if (result_size > 0)
+              future_args->target->set_result(
+                  future_args->result->get_untyped_result(),
+                  result_size, false/*own*/);
+            future_args->target->complete_future();
+            if (future_args->target->remove_gc_reference())
+              delete future_args->target;
+            if (future_args->result->remove_gc_reference())
+              delete future_args->result;
+            future_args->task_op->complete_execution();
+            break;
+          }
+        case HLR_DEFERRED_FUTURE_MAP_SET_ID:
+          {
+            DeferredFutureMapSetArgs *future_args = 
+              (DeferredFutureMapSetArgs*)args;
+            const size_t result_size = 
+              future_args->task_op->check_future_size(future_args->result);
+            const void *result = future_args->result->get_untyped_result();
+            for (Domain::DomainPointIterator itr(future_args->domain); 
+                  itr; itr++)
+            {
+              Future f = future_args->future_map->get_future(itr.p);
+              if (result_size > 0)
+                f.impl->set_result(result, result_size, false/*own*/);
+            }
+            future_args->future_map->complete_all_futures();
+            if (future_args->future_map->remove_reference())
+              delete future_args->future_map;
+            if (future_args->result->remove_gc_reference())
+              delete future_args->result;
+            future_args->task_op->complete_execution();
+            break;
+          }
+        case HLR_RESOLVE_FUTURE_PRED_ID:
+          {
+            FuturePredOp::ResolveFuturePredArgs *resolve_args = 
+              (FuturePredOp::ResolveFuturePredArgs*)args;
+            resolve_args->future_pred_op->resolve_future_predicate();
+            resolve_args->future_pred_op->remove_predicate_reference();
             break;
           }
         default:
