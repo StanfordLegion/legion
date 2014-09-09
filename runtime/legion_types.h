@@ -63,7 +63,7 @@
 #endif
 // The maximum number of processors on a node
 #ifndef MAX_NUM_PROCS
-#define MAX_NUM_PROCS                   1024
+#define MAX_NUM_PROCS                   64
 #endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
@@ -261,27 +261,28 @@ namespace LegionRuntime {
       ERROR_ALIASED_REGION_REQUIREMENTS = 115,
       ERROR_MISSING_DEFAULT_PREDICATE_RESULT = 116,
       ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
+      ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
     };
 
     // enum and namepsaces don't really get along well
     enum PrivilegeMode {
       NO_ACCESS       = 0x00000000, // Deprecated: use the NO_ACCESS_FLAG
       READ_ONLY       = 0x00000001,
-      READ_WRITE      = 0x00000111,
-      WRITE_ONLY      = 0x00000010, // same as WRITE_DISCARD
-      WRITE_DISCARD   = 0x00000010, // same as WRITE_ONLY
-      REDUCE          = 0x00000100,
+      READ_WRITE      = 0x00000007, // All three privileges
+      WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
+      WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
+      REDUCE          = 0x00000004,
       PROMOTED        = 0x00001000, // Internal use only
     };
 
     enum AllocateMode {
       NO_MEMORY       = 0x00000000,
       ALLOCABLE       = 0x00000001,
-      FREEABLE        = 0x00000010,
-      MUTABLE         = 0x00000011,
-      REGION_CREATION = 0x00000100,
-      REGION_DELETION = 0x00001000,
-      ALL_MEMORY      = 0x00001111,
+      FREEABLE        = 0x00000002,
+      MUTABLE         = 0x00000003,
+      REGION_CREATION = 0x00000004,
+      REGION_DELETION = 0x00000008,
+      ALL_MEMORY      = 0x0000000F,
     };
 
     enum CoherenceProperty {
@@ -292,9 +293,9 @@ namespace LegionRuntime {
     };
 
     // Optional region requirement flags
-    enum {
+    enum RegionFlags {
       NO_FLAG         = 0x00000000,
-      VERIFIED_FLAG  = 0x00000001,
+      VERIFIED_FLAG   = 0x00000001,
       NO_ACCESS_FLAG  = 0x00000002,
     };
 
@@ -350,6 +351,7 @@ namespace LegionRuntime {
       HLR_DEFERRED_FUTURE_SET_ID,
       HLR_DEFERRED_FUTURE_MAP_SET_ID,
       HLR_RESOLVE_FUTURE_PRED_ID,
+      HLR_MPI_RANK_ID,
     };
 
     // Forward declarations for user level objects
@@ -541,6 +543,7 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
+    typedef LowLevel::AddressSpace AddressSpace;
     typedef int TaskPriority;
     typedef unsigned int Color;
     typedef unsigned int IndexPartition;

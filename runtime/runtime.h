@@ -819,6 +819,11 @@ namespace LegionRuntime {
         Domain domain;
         TaskOp *task_op;
       };
+      struct MPIRankArgs {
+        HLRTaskID hlr_id;
+        int mpi_rank;
+        AddressSpace source_space;
+      };
     public:
       Runtime(Machine *m, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
@@ -830,6 +835,7 @@ namespace LegionRuntime {
     public:
       Runtime& operator=(const Runtime &rhs);
     public:
+      void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor proc);
       void perform_one_time_logging(void);
     public:
@@ -1048,6 +1054,9 @@ namespace LegionRuntime {
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
+    public:
+      const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
+      const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
@@ -1482,6 +1491,10 @@ namespace LegionRuntime {
       unsigned unique_operation_id;
       unsigned unique_field_id;
     protected:
+      // For MPI Inter-operability
+      std::map<int,AddressSpace> forward_mpi_mapping;
+      std::map<AddressSpace,int> reverse_mpi_mapping;
+    protected:
       Reservation available_lock;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
@@ -1554,7 +1567,7 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
-      std::set<AcquireOp*>      out_acquire_ops;
+      std::set<AcquireOp*>      out_acquire_ops; 
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
@@ -1571,6 +1584,7 @@ namespace LegionRuntime {
       static int start(int argc, char **argv, bool background);
       static void wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
+      static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
@@ -1647,6 +1661,10 @@ namespace LegionRuntime {
       static bool stealing_disabled;
       static bool resilient_mode;
       static unsigned shutdown_counter;
+      static int mpi_rank;
+      static unsigned mpi_rank_table[MAX_NUM_NODES];
+      static unsigned remaining_mpi_notifications;
+      static UserEvent mpi_rank_event;
 #ifdef DEBUG_HIGH_LEVEL
       static bool logging_region_tree_state;
       static bool verbose_logging;

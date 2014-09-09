@@ -1593,6 +1593,8 @@ namespace LegionRuntime {
       Memory::Kind get_memory_kind(Memory m) const;
       size_t get_memory_size(const Memory m) const;
 
+      size_t get_address_space_count(void) const;
+
       //void add_processor(Processor p) { procs.insert(p); }
       static Machine* get_machine(void);
 

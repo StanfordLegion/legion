@@ -235,6 +235,14 @@ namespace LegionRuntime {
                                    , UniqueID uid
 #endif
                                    );
+      Event copy_across(Mappable *mappable,
+                        Processor local_proc,
+                        RegionTreeContext src_ctx,
+                        RegionTreeContext dst_ctx,
+                        RegionRequirement &src_req,
+                        const RegionRequirement &dst_req,
+                        const InstanceRef &dst_ref,
+                        Event precondition);
       Event copy_across(RegionTreeContext src_ctx, 
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
@@ -497,6 +505,7 @@ namespace LegionRuntime {
       FIND_VALID_INSTANCE_VIEWS_CALL,
       FIND_VALID_REDUCTION_VIEWS_CALL,
       PULL_VALID_VIEWS_CALL,
+      FIND_COPY_ACROSS_INSTANCES_CALL,
       ISSUE_UPDATE_COPIES_CALL,
       ISSUE_UPDATE_REDUCTIONS_CALL,
       PERFORM_COPY_DOMAIN_CALL,
@@ -517,6 +526,7 @@ namespace LegionRuntime {
       GET_RECYCLE_EVENT_CALL,
       DEFER_COLLECT_USER_CALL,
       GET_SUBVIEW_CALL,
+      COPY_FIELD_CALL,
       COPY_TO_CALL,
       REDUCE_TO_CALL,
       COPY_FROM_CALL,
@@ -1608,6 +1618,10 @@ namespace LegionRuntime {
                                 MaterializedView *target,
                                 FieldMask &needed_fields,
                                 std::set<Event> &pending_events);
+      void find_copy_across_instances(MappableInfo *info,
+                                      MaterializedView *target,
+                           std::map<MaterializedView*,FieldMask> &src_instances,
+                       std::map<CompositeView*,FieldMask> &composite_instances);
       // Since figuring out how to issue copies is expensive, try not
       // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
@@ -1634,6 +1648,9 @@ namespace LegionRuntime {
       static void compute_precondition_sets(FieldMask update_mask,
           std::map<Event,FieldMask> &preconditions,
           std::list<PreconditionSet> &precondition_sets);
+      Event perform_copy_operation(Event precondition,
+                        const std::vector<Domain::CopySrcDstField> &src_fields,
+                        const std::vector<Domain::CopySrcDstField> &dst_fields);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    Processor local_proc,
@@ -2831,6 +2848,8 @@ namespace LegionRuntime {
       MaterializedView* get_materialized_subview(Color c);
       MaterializedView* get_materialized_parent_view(void) const;
     public:
+      void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
+    public:
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &dst_fields);
       virtual void copy_from(const FieldMask &copy_mask, 
@@ -3034,6 +3053,14 @@ namespace LegionRuntime {
                                   const FieldMask &copy_mask,
                   const std::map<Event,FieldMask> &preconditions,
                         std::map<Event,FieldMask> &postconditions);
+    public:
+      // Note that copy-across only works for a single field at a time
+      void issue_composite_copies_across(MappableInfo *info,
+                                         MaterializedView *dst,
+                                         FieldID src_field,
+                                         FieldID dst_field,
+                                         Event precondition,
+                                         std::set<Event> &postconditions);
     protected:
       void flush_reductions(MappableInfo *info,
                             MaterializedView *dst,
@@ -3121,6 +3148,14 @@ namespace LegionRuntime {
                                const FieldMask &copy_mask,
                                const std::map<Event,FieldMask> &preconditions,
                                std::map<Event,FieldMask> &postconditions);
+      void issue_across_copies(MappableInfo *info,
+                               MaterializedView *dst,
+                               unsigned src_index,
+                               FieldID  src_field,
+                               FieldID  dst_field,
+                               bool    need_field,
+                               std::set<Event> &preconditions,
+                               std::set<Event> &postconditions);
     public:
       bool intersects_with(RegionTreeNode *dst);
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
@@ -3172,6 +3207,13 @@ namespace LegionRuntime {
                                         Processor local_proc,
                                         const std::set<Event> &preconditions,
                                         const std::set<Domain> &reduce_domains);
+      Event perform_composite_across_reduction(MaterializedView *target,
+                                               FieldID dst_field,
+                                               FieldID src_field,
+                                               unsigned src_index,
+                                               Processor local_proc,
+                                       const std::set<Event> &preconditions,
+                                       const std::set<Domain> &reduce_domains);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;

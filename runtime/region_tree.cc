@@ -1359,6 +1359,132 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Event RegionTreeForest::copy_across(Mappable *mappable,
+                                        Processor local_proc,
+                                        RegionTreeContext src_ctx,
+                                        RegionTreeContext dst_ctx,
+                                        RegionRequirement &src_req,
+                                        const RegionRequirement &dst_req,
+                                        const InstanceRef &dst_ref,
+                                        Event pre)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_PERF
+      begin_perf_trace(COPY_ACROSS_ANALYSIS);
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+      assert(src_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(dst_ref.has_ref());
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
+#endif     
+      MaterializedView *dst_view = dst_ref.get_handle().get_view()->
+                              as_instance_view()->as_materialized_view();
+      // Find the valid instance views for the source and then sort them
+      std::map<MaterializedView*,FieldMask> src_instances;
+      std::map<CompositeView*,FieldMask> composite_instances;
+      RegionNode *src_node = get_node(src_req.region);
+      FieldMask src_mask = 
+        src_node->column_source->get_field_mask(src_req.privilege_fields);
+
+      RegionNode *dst_node = get_node(dst_req.region);
+      FieldMask dst_mask = 
+        dst_node->column_source->get_field_mask(dst_req.privilege_fields);
+      MappableInfo info(src_ctx.get_id(), mappable, 
+                        local_proc, src_req, src_mask);
+      src_node->find_copy_across_instances(&info, dst_view,
+                                           src_instances, composite_instances);
+      // Now is where things get tricky, since we don't have any correspondence
+      // between fields in the two different requirements we can't use our 
+      // normal copy routines. Instead we'll issue copies one field at a time
+      std::set<Event> result_events;
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      Event dst_pre = dst_ref.get_ready_event(); 
+      Event precondition = Event::merge_events(pre, dst_pre);
+      // Also compute all of the source preconditions for each instance
+      std::map<MaterializedView*,std::map<Event,FieldMask> > src_preconditions;
+      for (std::map<MaterializedView*,FieldMask>::const_iterator it = 
+            src_instances.begin(); it != src_instances.end(); it++)
+      {
+        std::map<Event,FieldMask> &preconditions = src_preconditions[it->first];
+        it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                           it->second, preconditions);
+      }
+      for (unsigned idx = 0; idx < src_req.instance_fields.size(); idx++)
+      {
+        src_fields.clear();
+        dst_fields.clear();
+        unsigned src_index = src_node->column_source->get_field_index(
+                                            src_req.instance_fields[idx]);
+        bool found = false;
+        // Iterate through the instances and see if we can find
+        // a materialized views for the source field
+        for (std::map<MaterializedView*,FieldMask>::const_iterator sit = 
+              src_instances.begin(); sit != src_instances.end(); sit++)
+        {
+          if (sit->second.is_set(src_index))
+          {
+            // Compute the src_dst fields  
+            sit->first->copy_field(src_req.instance_fields[idx], src_fields);
+            dst_view->copy_field(dst_req.instance_fields[idx], dst_fields);
+            // Compute the event preconditions
+            std::set<Event> preconditions;
+            preconditions.insert(precondition);
+            // Find the source and destination preconditions
+            for (std::map<Event,FieldMask>::const_iterator it = 
+                  src_preconditions[sit->first].begin(); it !=
+                  src_preconditions[sit->first].end(); it++)
+            {
+              if (it->second.is_set(src_index))
+                preconditions.insert(it->first);
+            }
+            // Now we've got all the preconditions so we can actually
+            // issue the copy operation
+            Event copy_pre = Event::merge_events(preconditions);
+            Event copy_post = dst_node->perform_copy_operation(
+                                  copy_pre, src_fields, dst_fields);
+            // Register the users of the post condition
+            FieldMask local_src; local_src.set_bit(src_index);
+            sit->first->add_copy_user(0/*redop*/, copy_post,
+                                      local_src, true/*reading*/,
+                                      info.local_proc);
+            // No need to register a user for the destination because
+            // we've already mapped it.
+            result_events.insert(copy_post);
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+        {
+          // Check the composite instances
+          for (std::map<CompositeView*,FieldMask>::const_iterator it = 
+                composite_instances.begin(); it != 
+                composite_instances.end(); it++)
+          {
+            if (it->second.is_set(src_index))
+            {
+              it->first->issue_composite_copies_across(&info, dst_view,
+                                          src_req.instance_fields[idx],
+                                          dst_req.instance_fields[idx],
+                                          precondition, result_events);
+              found = true;
+              break;
+            }
+          }
+        }
+        // If we still didn't find it then there are no valid
+        // instances for the data yet so we're done anyway
+      }
+      Event result = Event::merge_events(result_events);
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Event RegionTreeForest::copy_across(RegionTreeContext src_ctx, 
                                         RegionTreeContext dst_ctx,
                                         const RegionRequirement &src_req,
@@ -3163,6 +3289,11 @@ namespace LegionRuntime {
               fprintf(stdout,"  Pull Valid Views Call:\n");
               break;
             }
+          case FIND_COPY_ACROSS_INSTANCES_CALL:
+            {
+              fprintf(stdout,"  Find Copy Across Instances Call:\n");
+              break;
+            }
           case ISSUE_UPDATE_COPIES_CALL:
             {
               fprintf(stdout,"  Issue Update Copies Call:\n");
@@ -3261,6 +3392,11 @@ namespace LegionRuntime {
           case GET_SUBVIEW_CALL:
             {
               fprintf(stdout,"  Get Subview Call:\n");
+              break;
+            }
+          case COPY_FIELD_CALL:
+            {
+              fprintf(stdout,"  Copy-Field Call:\n");
               break;
             }
           case COPY_TO_CALL:
@@ -10869,6 +11005,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::find_copy_across_instances(MappableInfo *info,
+                                                    MaterializedView *target,
+                           std::map<MaterializedView*,FieldMask> &src_instances,
+                        std::map<CompositeView*,FieldMask> &composite_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, FIND_COPY_ACROSS_INSTANCES_CALL);
+#endif
+      std::map<InstanceView*,FieldMask> valid_views;
+      PhysicalState &state = 
+        acquire_physical_state(info->ctx, false/*exclusive*/);
+      find_valid_instance_views(state, info->traversal_mask,
+                                info->traversal_mask, false/*needs space*/,
+                                valid_views);
+      release_physical_state(state);
+      // Now tease them apart into src and composite views and sort
+      // them based on the target memory
+      FieldMask copy_mask = info->traversal_mask;
+      sort_copy_instances(info, target, copy_mask, valid_views,
+                          src_instances, composite_instances);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::issue_update_copies(MappableInfo *info,
                                              MaterializedView *dst,
                                              FieldMask copy_mask,
@@ -11358,6 +11518,25 @@ namespace LegionRuntime {
       // no preconditions so it can start right away!
       if (!!update_mask)
         precondition_sets.push_front(PreconditionSet(update_mask));
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeNode::perform_copy_operation(Event precondition,
+                         const std::vector<Domain::CopySrcDstField> &src_fields,
+                         const std::vector<Domain::CopySrcDstField> &dst_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (has_component_domains())
+      {
+        const std::set<Domain> &component_domains = get_component_domains();
+        std::set<Event> result_events;
+        for (std::set<Domain>::const_iterator it = component_domains.begin();
+              it != component_domains.end(); it++)
+          result_events.insert(it->copy(src_fields, dst_fields, precondition));
+        return Event::merge_events(result_events);
+      }
+      Domain copy_domain = get_domain();
+      return copy_domain.copy(src_fields, dst_fields, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -12813,9 +12992,8 @@ namespace LegionRuntime {
             if (!!actually_needed)
             {
               UserEvent our_pending_event = UserEvent::create_user_event();
-              std::map<Event,FieldMask> &pending = 
-                                          state.pending_updates[new_view];
-              pending[our_pending_event] = actually_needed;
+              state.pending_updates[new_view][our_pending_event] = 
+                                                          actually_needed;
               std::map<InstanceView*,FieldMask> valid_views;
               find_valid_instance_views(state, actually_needed, 
                   actually_needed, false/*needs space*/, valid_views);
@@ -12831,6 +13009,8 @@ namespace LegionRuntime {
                                  false/*dirty*/, new_view);
               // Then trigger our pending event and remove it 
               our_pending_event.trigger();
+              std::map<Event,FieldMask> &pending = 
+                                            state.pending_updates[new_view];
               pending.erase(our_pending_event);
               if (pending.empty())
                 state.pending_updates.erase(new_view);
@@ -16216,6 +16396,18 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    void MaterializedView::copy_field(FieldID fid,
+                              std::vector<Domain::CopySrcDstField> &copy_fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, COPY_FIELD_CALL);
+#endif
+      std::vector<FieldID> local_fields(1,fid);
+      manager->compute_copy_offsets(local_fields, copy_fields); 
+    }
+
+    //--------------------------------------------------------------------------
     void MaterializedView::copy_to(const FieldMask &copy_mask,
                                std::vector<Domain::CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
@@ -18952,6 +19144,53 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void CompositeView::issue_composite_copies_across(MappableInfo *info,
+                                                      MaterializedView *dst,
+                                                      FieldID src_field,
+                                                      FieldID dst_field,
+                                                      Event precondition,
+                                                std::set<Event> &postconditions)
+    //--------------------------------------------------------------------------
+    {
+      unsigned src_index = 
+        logical_node->column_source->get_field_index(src_field);
+      std::set<Event> preconditions;
+      // This includes the destination precondition
+      preconditions.insert(precondition);
+      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
+            roots.begin(); it != roots.end(); it++)
+      {
+        if (it->second.is_set(src_index))
+        {
+          it->first->issue_across_copies(info, dst, src_index, src_field, 
+                                         dst_field, true/*need field*/,
+                                         preconditions, postconditions);
+          // We know there is at most one root here so
+          // once we find it then we are done
+          break;
+        }
+      }
+      if (!valid_reductions.empty() && reduction_mask.is_set(src_index))
+      {
+        std::set<Event> reduce_preconditions = postconditions;
+        reduce_preconditions.insert(precondition);
+        FieldMask reduce_mask; reduce_mask.set_bit(src_index);
+        for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
+              valid_reductions.begin(); it != valid_reductions.end(); it++)
+        {
+          Event result = 
+            it->first->perform_composite_across_reduction(dst, dst_field,
+                                                          src_field, src_index,
+                                                          info->local_proc,
+                                                          reduce_preconditions,
+                                                      it->second.intersections);
+          if (result.exists())
+            postconditions.insert(result);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CompositeView::flush_reductions(MappableInfo *info,
                                          MaterializedView *dst,
                                          const FieldMask &event_mask,
@@ -19606,6 +19845,10 @@ namespace LegionRuntime {
                          update_preconditions, update_mask, 
                          find_intersection_domains(dst->logical_node),
                          src_instances, update_postconditions);
+            // If we dominate the target, then we can remove
+            // the update_mask fields from the traversal_mask
+            if (dominates(dst->logical_node))
+              traversal_mask -= update_mask;
             // Add all our updates to both the dst_preconditions
             // as well as the actual postconditions.  No need to
             // check for duplicates as we know all these events
@@ -19634,6 +19877,7 @@ namespace LegionRuntime {
           // views for those fields
           if (!composite_instances.empty())
           {
+            FieldMask update_mask;
             for (std::map<CompositeView*,FieldMask>::const_iterator it = 
                   composite_instances.begin(); it !=
                   composite_instances.end(); it++)
@@ -19641,6 +19885,7 @@ namespace LegionRuntime {
               std::map<Event,FieldMask> postconds;
               it->first->issue_composite_copies(info, dst, it->second,
                                                 preconds, postconds);
+              update_mask |= it->second;
               if (!postconds.empty())
               {
 #ifdef DEBUG_HIGH_LEVEL
@@ -19657,6 +19902,10 @@ namespace LegionRuntime {
                 postconditions.insert(postconds.begin(), postconds.end());
               }
             }
+            // If we dominate the logical node we can remove the
+            // updated fields from the traversal mask
+            if (dominates(dst->logical_node))
+              traversal_mask -= update_mask;
           }
         }
       }
@@ -19674,6 +19923,118 @@ namespace LegionRuntime {
         it->first->issue_update_copies(info, dst, traversal_mask, 
                                        overlap, dst_preconditions, 
                                        postconditions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::issue_across_copies(MappableInfo *info,
+                                            MaterializedView *dst,
+                                            unsigned src_index,
+                                            FieldID  src_field,
+                                            FieldID  dst_field,
+                                            bool    need_field,
+                                            std::set<Event> &preconditions,
+                                            std::set<Event> &postconditions)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Event> dst_preconditions = preconditions;
+      if (!valid_views.empty())
+      {
+        bool incomplete = need_field || dirty_mask.is_set(src_index);
+        if (incomplete)
+        {
+          FieldMask src_mask; src_mask.set_bit(src_index);
+          std::map<InstanceView*,FieldMask> valid_instances;
+          for (std::map<InstanceView*,FieldMask>::const_iterator it = 
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            if (it->second.is_set(src_index))
+              valid_instances[it->first] = src_mask;
+          }
+          std::map<MaterializedView*,FieldMask> src_instances;
+          std::map<CompositeView*,FieldMask> composite_instances;
+          dst->logical_node->sort_copy_instances(info, dst, src_mask,
+                      valid_instances, src_instances, composite_instances);
+          if (!src_instances.empty())
+          {
+            // There should be at most one of these
+#ifdef DEBUG_HIGH_LEVEL
+            assert(src_instances.size() == 1);
+#endif
+            MaterializedView *src = (src_instances.begin())->first;
+            std::map<Event,FieldMask> src_preconditions;
+            src->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                         src_mask, src_preconditions);
+            for (std::map<Event,FieldMask>::const_iterator it = 
+                  src_preconditions.begin(); it != 
+                  src_preconditions.end(); it++)
+            {
+              preconditions.insert(it->first);
+            }
+            Event copy_pre = Event::merge_events(preconditions);
+            std::set<Event> result_events;
+            std::vector<Domain::CopySrcDstField> src_fields, dst_fields;
+            src->copy_field(src_field, src_fields);
+            dst->copy_field(dst_field, dst_fields);
+            const std::set<Domain> &overlap_domains = 
+              find_intersection_domains(dst->logical_node);
+            for (std::set<Domain>::const_iterator it = overlap_domains.begin();
+                  it != overlap_domains.end(); it++)
+            {
+              result_events.insert(it->copy(src_fields, dst_fields, copy_pre));
+            }
+            Event copy_post = Event::merge_events(result_events);
+            if (copy_post.exists())
+            {
+              // Only need to record the source user as the destination
+              // user will be recorded by the copy across operation
+              src->add_copy_user(0/*redop*/, copy_post,
+                                 src_mask, true/*reading*/,
+                                 info->local_proc);
+              // Also add the event to the dst_preconditions and 
+              // our post conditions
+              dst_preconditions.insert(copy_post);
+              postconditions.insert(copy_post);
+            }
+            // If we dominate then we no longer need to get
+            // updates unless they are dirty
+            if (dominates(dst->logical_node))
+              need_field = false;
+          }
+          else if (!composite_instances.empty())
+          {
+            // There should be at most one of these
+#ifdef DEBUG_HIGH_LEVEL
+            assert(composite_instances.size() == 1); 
+#endif
+            CompositeView *src = (composite_instances.begin())->first; 
+            std::set<Event> postconds;
+            Event pre = Event::merge_events(preconditions);
+            src->issue_composite_copies_across(info, dst, src_field,
+                                               dst_field, pre, postconds);
+            if (!postconds.empty())
+            {
+              dst_preconditions.insert(postconds.begin(), postconds.end());
+              postconditions.insert(postconds.begin(), postconds.end());
+            }
+            // If we dominate then we no longer need to get
+            // updates unless they are dirty
+            if (dominates(dst->logical_node))
+              need_field = false;
+          }
+        }
+      }
+      // Now traverse any open children that intersect with the destination
+      for (std::map<CompositeNode*,ChildInfo>::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        if ((it->second.open_fields.is_set(src_index)) && 
+            it->first->intersects_with(dst->logical_node))
+        {
+          it->first->issue_across_copies(info, dst, src_index,
+                                         src_field, dst_field, need_field,
+                                         dst_preconditions, postconditions);
+        }
       }
     }
 
@@ -20132,6 +20493,103 @@ namespace LegionRuntime {
       find_copy_preconditions(manager->redop, true/*reading*/,
                               red_mask, src_pre);
       std::set<Event> preconditions = pre;
+      for (std::map<Event,FieldMask>::const_iterator it = src_pre.begin();
+            it != src_pre.end(); it++)
+      {
+        preconditions.insert(it->first);
+      }
+      Event reduce_pre = Event::merge_events(preconditions); 
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+      if (!reduce_pre.exists())
+      {
+        UserEvent new_reduce_pre = UserEvent::create_user_event();
+        new_reduce_pre.trigger();
+        reduce_pre = new_reduce_pre;
+      }
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependences(
+          Machine::get_executing_processor(), preconditions, reduce_pre);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(preconditions, reduce_pre);
+#endif
+      std::set<Event> post_events;
+      for (std::set<Domain>::const_iterator it = reduce_domains.begin();
+            it != reduce_domains.end(); it++)
+      {
+        Event post = manager->issue_reduction(src_fields, dst_fields,
+                                              *it, reduce_pre, fold,
+                                              false/*precise*/);
+        post_events.insert(post);
+      }
+      Event reduce_post = Event::merge_events(post_events);
+      // No need to add the user to the destination as that will
+      // be handled by the caller using the reduce post event we return
+      add_copy_user(manager->redop, reduce_post,
+                    red_mask, true/*reading*/, local_proc);
+#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+      Domain domain = logical_node->get_domain();
+      IndexSpace reduce_index_space = 
+              target->logical_node->get_domain().get_index_space();
+      if (!reduce_post.exists())
+      {
+        UserEvent new_reduce_post = UserEvent::create_user_event();
+        new_reduce_post.trigger();
+        reduce_post = new_reduce_post;
+      }
+#endif
+#ifdef LEGION_LOGGING
+      {
+        std::set<FieldID> reduce_fields;
+        manager->region_node->column_source->to_field_set(red_mask,
+                                                          reduce_fields);
+        LegionLogging::log_lowlevel_copy(
+            Machine::get_executing_processor(),
+            manager->get_instance(),
+            target->get_manager()->get_instance(),
+            reduce_index_space,
+            manager->region_node->column_source->handle,
+            manager->region_node->handle.tree_id,
+            reduce_pre, reduce_post, reduce_fields, manager->redop);
+      }
+#endif
+#ifdef LEGION_SPY
+      char *string_mask = 
+        manager->region_node->column_source->to_string(red_mask);
+      LegionSpy::log_copy_operation(manager->get_instance().id,
+          target->get_manager()->get_instance().id, reduce_index_space.id,
+          manager->region_node->column_source->handle.id,
+          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
+          manager->redop, string_mask);
+#endif
+      return reduce_post;
+    }
+
+    //--------------------------------------------------------------------------
+    Event ReductionView::perform_composite_across_reduction(
+        MaterializedView *target, FieldID dst_field, FieldID src_field,
+                              unsigned src_index, Processor local_proc, 
+                              const std::set<Event> &preconds,
+                              const std::set<Domain> &reduce_domains)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
+#endif
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      const bool fold = false;
+      target->copy_field(dst_field, dst_fields);
+      FieldMask red_mask; red_mask.set_bit(src_index);
+      this->reduce_from(manager->redop, red_mask, src_fields);
+
+      std::map<Event,FieldMask> src_pre;
+      // Don't need to ask the target for preconditions as they 
+      // are included as part of the pre set
+      find_copy_preconditions(manager->redop, true/*reading*/,
+                              red_mask, src_pre);
+      std::set<Event> preconditions = preconds;
       for (std::map<Event,FieldMask>::const_iterator it = src_pre.begin();
             it != src_pre.end(); it++)
       {

@@ -733,7 +733,7 @@ namespace LegionRuntime {
       LogicalRegion parent; /**< parent region to derive privileges from*/
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
-      unsigned flags; /**< optional flags set for region requirements*/
+      RegionFlags flags; /**< optional flags set for region requirements*/
       HandleType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
     public:
@@ -2158,7 +2158,10 @@ namespace LegionRuntime {
        * this copy operation.  Note that ONLY THE DESTINATION region
        * requirements have to have their mapping fields set as the source
        * instances will be used to find existing physical instances containing
-       * valid data and will not actually be mapped.
+       * valid data and will not actually be mapped. Users have the option
+       * of still filling in mapping requests for the src region requirements
+       * to create an explicit instance for performing the copy, but it 
+       * is not required.
        *
        * In addition, the mapper must also set the 'blocking_factor' field or
        * the 'reduction_list' field in the case of reduction copies as there
@@ -3579,6 +3582,27 @@ namespace LegionRuntime {
                                   bool nuclear);
     public:
       //------------------------------------------------------------------------
+      // MPI Interoperability 
+      //------------------------------------------------------------------------
+      /**
+       * Return a reference to the mapping from MPI ranks to address spaces.
+       * This method is only valid if the static initialization method
+       * 'configure_MPI_interoperability' was called on all nodes before 
+       * starting the runtime with the static 'start' method.
+       * @return a const reference to the forward map
+       */
+      const std::map<int/*rank*/,AddressSpace>& find_forward_MPI_mapping(void);
+
+      /**
+       * Return a reference to the reverse mapping from address spaces to
+       * MPI ranks. This method is only valid if the static initialization
+       * method 'configure_MPI_interoperability' was called on all nodes
+       * before starting the runtime with the static 'start' method.
+       * @return a const reference to the reverse map
+       */
+      const std::map<AddressSpace,int/*rank*/>& find_reverse_MPI_mapping(void);
+    public:
+      //------------------------------------------------------------------------
       // Registration Callback Operations
       //------------------------------------------------------------------------
       /**
@@ -3726,6 +3750,17 @@ namespace LegionRuntime {
        * @param top_id ID of the top level task to be run
        */
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
+
+      /**
+       * Configre the runtime for interoperability with MPI. This call
+       * should be made once in each MPI process before invoking the 
+       * 'start' function when running Legion within the same process 
+       * as MPI. As a result of this call the 'find_forward_MPI_mapping' 
+       * and 'find_reverse_MPI_mapping' methods on a runtime instance will 
+       * return a map which associates an AddressSpace with each MPI rank.
+       * @param rank the integer naming this MPI rank
+       */
+      static void configure_MPI_interoperability(int rank);
 
       /**
        * Register a reduction operation with the runtime.  Note that the
@@ -5858,6 +5893,179 @@ namespace LegionRuntime {
               0/*size*/, TaskConfigOptions(leaf, inner, idempotent), name);
     }
 
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator~(PrivilegeMode p)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<PrivilegeMode>(~unsigned(p));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator|(PrivilegeMode left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<PrivilegeMode>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator&(PrivilegeMode left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<PrivilegeMode>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator^(PrivilegeMode left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<PrivilegeMode>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator|=(PrivilegeMode &left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<PrivilegeMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator&=(PrivilegeMode &left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<PrivilegeMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline PrivilegeMode operator^=(PrivilegeMode &left, PrivilegeMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<PrivilegeMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator~(AllocateMode a)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<AllocateMode>(~unsigned(a));
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator|(AllocateMode left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<AllocateMode>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator&(AllocateMode left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<AllocateMode>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator^(AllocateMode left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<AllocateMode>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator|=(AllocateMode &left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<AllocateMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator&=(AllocateMode &left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<AllocateMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllocateMode operator^=(AllocateMode &left, AllocateMode right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<AllocateMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator~(RegionFlags f)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(~unsigned(f));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator|(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator&(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator^(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator|=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<RegionFlags>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator&=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<RegionFlags>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator^=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<RegionFlags>(l);
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

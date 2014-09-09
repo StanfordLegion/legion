@@ -4886,6 +4886,11 @@ namespace LegionRuntime {
         return Runtime::runtime->get_memory_impl(m)->total_space();
     }
 
+    size_t Machine::get_address_space_count(void) const
+    {
+        return 1;
+    }
+
     /*static*/ Machine* Machine::get_machine(void)
     {
 	return Runtime::get_runtime()->machine;

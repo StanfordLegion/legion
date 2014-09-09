@@ -2686,6 +2686,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& 
+                                HighLevelRuntime::find_forward_MPI_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_forward_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>&
+                                HighLevelRuntime::find_reverse_MPI_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_reverse_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::add_mapper(MapperID map_id, Mapper *mapper, 
                                       Processor proc)
     //--------------------------------------------------------------------------
@@ -2779,6 +2795,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Runtime::set_top_level_task_id(top_id);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void HighLevelRuntime::configure_MPI_interoperability(int rank)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::configure_MPI_interoperability(rank);
     }
 
     //--------------------------------------------------------------------------

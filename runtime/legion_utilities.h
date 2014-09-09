@@ -448,7 +448,7 @@ namespace LegionRuntime {
              unsigned int SHIFT, unsigned int MASK>
     class BitMask {
     public:
-      BitMask(T init = 0);
+      explicit BitMask(T init = 0);
       BitMask(const BitMask &rhs);
       ~BitMask(void);
     public:
@@ -520,7 +520,7 @@ namespace LegionRuntime {
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     class TLBitMask {
     public:
-      TLBitMask(T init = 0);
+      explicit TLBitMask(T init = 0);
       TLBitMask(const TLBitMask &rhs);
       ~TLBitMask(void);
     public:
@@ -586,7 +586,7 @@ namespace LegionRuntime {
     template<unsigned int MAX>
     class SSEBitMask {
     public:
-      SSEBitMask(uint64_t init = 0);
+      explicit SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
       ~SSEBitMask(void);
     public:
@@ -651,7 +651,7 @@ namespace LegionRuntime {
     template<unsigned int MAX>
     class SSETLBitMask {
     public:
-      SSETLBitMask(uint64_t init = 0);
+      explicit SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
       ~SSETLBitMask(void);
     public:
@@ -720,7 +720,7 @@ namespace LegionRuntime {
     template<unsigned int MAX>
     class AVXBitMask {
     public:
-      AVXBitMask(uint64_t init = 0);
+      explicit AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
       ~AVXBitMask(void);
     public:
@@ -794,7 +794,7 @@ namespace LegionRuntime {
     template<unsigned int MAX>
     class AVXTLBitMask {
     public:
-      AVXTLBitMask(uint64_t init = 0);
+      explicit AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
       ~AVXTLBitMask(void);
     public:

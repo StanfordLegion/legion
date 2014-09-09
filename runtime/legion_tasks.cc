@@ -3572,7 +3572,10 @@ namespace LegionRuntime {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].prop != SIMULTANEOUS)
+        // Restriction is transitive so we need to be restricted if
+        // our parent was also restricted
+        if ((regions[idx].prop != SIMULTANEOUS) &&
+            !regions[idx].restricted)
           continue;
         // Also check to see if we have a physical region
         // If not then we don't need to bother with coherence
@@ -3617,7 +3620,8 @@ namespace LegionRuntime {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].prop != SIMULTANEOUS)
+        if ((regions[idx].prop != SIMULTANEOUS) &&
+            !regions[idx].restricted)
           continue;
         if (!physical_regions[idx].is_mapped())
           continue;

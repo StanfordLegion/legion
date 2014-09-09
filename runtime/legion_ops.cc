@@ -2593,6 +2593,10 @@ namespace LegionRuntime {
       for (unsigned idx = 0; (idx < src_requirements.size()) && 
             map_success; idx++)
       {
+        // If there is no ranking for this instance then we can skip
+        // it as we will just issue copies from the existing valid instances
+        if (src_requirements[idx].target_ranking.empty())
+          continue;
         src_mapping_refs[idx] = runtime->forest->map_physical_region(
                                                         src_contexts[idx],
                                                         src_mapping_paths[idx],
@@ -2691,60 +2695,83 @@ namespace LegionRuntime {
         std::set<Event> copy_complete_events;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          InstanceRef src_ref = runtime->forest->register_physical_region(
-                                                      src_contexts[idx],
-                                                      src_mapping_refs[idx],
-                                                      src_requirements[idx],
-                                                      idx,
-                                                      this,
-                                                      local_proc,
-                                                      completion_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , get_logging_name()
-                                                      , unique_op_id
-                                                      , src_mapping_paths[idx]
-#endif
-                                                      );
           InstanceRef dst_ref = runtime->forest->register_physical_region(
-                                                      dst_contexts[idx],
-                                                      dst_mapping_refs[idx],
-                                                      dst_requirements[idx],
-                                                      idx,
-                                                      this,
-                                                      local_proc,
-                                                      completion_event
+                                                        dst_contexts[idx],
+                                                        dst_mapping_refs[idx],
+                                                        dst_requirements[idx],
+                                                        idx,
+                                                        this,
+                                                        local_proc,
+                                                        completion_event
 #ifdef DEBUG_HIGH_LEVEL
-                                                      , get_logging_name()
-                                                      , unique_op_id
-                                                      , dst_mapping_paths[idx]
+                                                        , get_logging_name()
+                                                        , unique_op_id
+                                                        , dst_mapping_paths[idx]
 #endif
-                                                      );
+                                                        );
 #ifdef DEBUG_HIGH_LEVEL
-          assert(src_ref.has_ref());
           assert(dst_ref.has_ref());
 #endif
           if (notify)
           {
-            src_requirements[idx].mapping_failed = false;
-            src_requirements[idx].selected_memory = src_ref.get_memory();
             dst_requirements[idx].mapping_failed = false;
             dst_requirements[idx].selected_memory = dst_ref.get_memory();
           }
-          // Now issue the copies from source to destination
-          copy_complete_events.insert(
-            runtime->forest->copy_across(src_contexts[idx],
-                                         dst_contexts[idx],
-                                         src_requirements[idx],
-                                         dst_requirements[idx],
-                                         src_ref, dst_ref, sync_precondition));
 #ifdef LEGION_SPY
-          start_events.insert(src_ref.get_ready_event());
           start_events.insert(dst_ref.get_ready_event());
-          LegionSpy::log_op_user(unique_op_id, idx,
-            src_ref.get_handle().get_view()->get_manager()->get_instance().id);
           LegionSpy::log_op_user(unique_op_id, src_requirements.size()+idx,
-            dst_ref.get_handle().get_view()->get_manager()->get_instance().id);
+             dst_ref.get_handle().get_view()->get_manager()->get_instance().id);
 #endif
+          if (!src_mapping_refs[idx].has_ref())
+          {
+            // In this case, there is no source instance so we need
+            // to issue copies from the valid set
+            copy_complete_events.insert(runtime->forest->copy_across(this, 
+                                          parent_ctx->get_executing_processor(),
+                                                   src_contexts[idx],
+                                                   dst_contexts[idx],
+                                                   src_requirements[idx],
+                                                   dst_requirements[idx],
+                                                   dst_ref, sync_precondition));
+          }
+          else
+          {
+            InstanceRef src_ref = runtime->forest->register_physical_region(
+                                                        src_contexts[idx],
+                                                        src_mapping_refs[idx],
+                                                        src_requirements[idx],
+                                                        idx,
+                                                        this,
+                                                        local_proc,
+                                                        completion_event
+#ifdef DEBUG_HIGH_LEVEL
+                                                        , get_logging_name()
+                                                        , unique_op_id
+                                                        , src_mapping_paths[idx]
+#endif
+                                                        );
+            
+#ifdef DEBUG_HIGH_LEVEL
+            assert(src_ref.has_ref());
+#endif
+            if (notify)
+            {
+              src_requirements[idx].mapping_failed = false;
+              src_requirements[idx].selected_memory = src_ref.get_memory();
+            }
+            // Now issue the copies from source to destination
+            copy_complete_events.insert(
+             runtime->forest->copy_across(src_contexts[idx],
+                                          dst_contexts[idx],
+                                          src_requirements[idx],
+                                          dst_requirements[idx],
+                                          src_ref, dst_ref, sync_precondition));
+#ifdef LEGION_SPY
+            start_events.insert(src_ref.get_ready_event());
+            LegionSpy::log_op_user(unique_op_id, idx,
+             src_ref.get_handle().get_view()->get_manager()->get_instance().id);
+#endif
+          }
         }
 #ifdef LEGION_LOGGING
         LegionLogging::log_timing_event(Machine::get_executing_processor(),
@@ -6032,7 +6059,7 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < needed_indiv.size(); idx++)
         {
           args.task = needed_indiv[idx];
-          Event wait = util_proc.spawn(HLR_MUST_INDIV_ID, &args, sizeof(args));
+          Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -6047,7 +6074,7 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < needed_index.size(); idx++)
         {
           args.task = needed_index[idx];
-          Event wait = util_proc.spawn(HLR_MUST_INDEX_ID, &args, sizeof(args));
+          Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
           if (wait.exists())
             wait_events.insert(wait);
         }

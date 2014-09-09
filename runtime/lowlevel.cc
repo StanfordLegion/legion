@@ -8918,6 +8918,11 @@ namespace LegionRuntime {
       return m.impl()->size;
     }
 
+    size_t Machine::get_address_space_count(void) const
+    {
+      return gasnet_nodes();
+    }
+
     int Machine::get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
 				       Processor restrict_proc /*= Processor::NO_PROC*/,
 				       Memory restrict_memory /*= Memory::NO_MEMORY*/)

@@ -4703,6 +4703,59 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::construct_mpi_rank_tables(Processor proc, int rank)
+    //--------------------------------------------------------------------------
+    {
+      // Only do this on the first processor
+      if (proc == *(local_procs.begin()))
+      {
+        // Initialize our mpi rank event
+        Runtime::mpi_rank_event = UserEvent::create_user_event();
+        // Now broadcast our address space and rank to all the other nodes
+        MPIRankArgs args;
+        args.hlr_id = HLR_MPI_RANK_ID;
+        args.mpi_rank = rank;
+        args.source_space = address_space;
+        std::set<AddressSpace> sent_targets;
+        const std::set<Processor> &all_procs = machine->get_all_processors();
+        for (std::set<Processor>::const_iterator it = all_procs.begin();
+              it != all_procs.end(); it++)
+        {
+          AddressSpace target_space = it->address_space();
+          if (target_space == address_space)
+            continue;
+          if (sent_targets.find(target_space) != sent_targets.end())
+            continue;
+          Processor::Kind kind = machine->get_processor_kind(*it);
+          if (kind != Processor::LOC_PROC)
+            continue;
+          it->spawn(HLR_TASK_ID, &args, sizeof(args));
+          sent_targets.insert(target_space);
+        }
+        // Now set our own value, update the count, and see if we're done
+        Runtime::mpi_rank_table[rank] = address_space;
+        unsigned count = 
+          __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
+        const size_t total_ranks = machine->get_address_space_count();
+        if (count == total_ranks)
+          Runtime::mpi_rank_event.trigger();
+        // Wait on the event
+        mpi_rank_event.wait(false/*block*/);
+        // Once we've triggered, then we can build the maps
+        for (unsigned local_rank = 0; local_rank < count; local_rank++)
+        {
+          AddressSpace local_space = Runtime::mpi_rank_table[local_rank];
+#ifdef DEBUG_HIGH_LEVEL
+          assert(reverse_mpi_mapping.find(local_space) == 
+                 reverse_mpi_mapping.end());
+#endif
+          forward_mpi_mapping[local_rank] = local_space;
+          reverse_mpi_mapping[local_space] = local_rank;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::launch_top_level_task(Processor proc)
     //--------------------------------------------------------------------------
     {
@@ -7304,16 +7357,6 @@ namespace LegionRuntime {
     Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal lock creation in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       return Lock(Reservation::create_reservation());
     }
 
@@ -7321,16 +7364,6 @@ namespace LegionRuntime {
     void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal lock destruction in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       ctx->destroy_user_lock(l.reservation_lock);
     }
 
@@ -7339,16 +7372,6 @@ namespace LegionRuntime {
                                  const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal grant acquire in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       // Kind of annoying, but we need to unpack and repack the
       // Lock type here to build new requests because the C++
       // type system is dumb with nested classes.
@@ -7368,16 +7391,6 @@ namespace LegionRuntime {
     void Runtime::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal grant release in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       grant.impl->release_grant();
     }
 
@@ -7386,16 +7399,6 @@ namespace LegionRuntime {
                                                         unsigned participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal phase barrier creation in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       Barrier result = Barrier::create_barrier(participants);
       return PhaseBarrier(result, participants);
     }
@@ -7404,16 +7407,6 @@ namespace LegionRuntime {
     void Runtime::destroy_phase_barrier(Context ctx, PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal phase barrier destruction in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       ctx->destroy_user_barrier(pb.phase_barrier);
     }
 
@@ -7422,16 +7415,6 @@ namespace LegionRuntime {
                                                          PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx->is_leaf())
-      {
-        log_task(LEVEL_ERROR,"Illegal phase barrier advance call in leaf "
-                             "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
-        assert(false);
-        exit(ERROR_LEAF_TASK_VIOLATION);
-      }
-#endif
       Barrier bar = pb.phase_barrier;
       // Mark that one of the expected arrivals has arrived
       // TODO: put this back in once Sean fixes barriers
@@ -7896,6 +7879,40 @@ namespace LegionRuntime {
     {
       // TODO: implement this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& Runtime::find_forward_MPI_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (forward_mpi_mapping.empty())
+      {
+        log_run(LEVEL_ERROR,"Forward MPI mapping call not supported with "
+                            "calling configure_MPI_interoperability during "
+                            "start up");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED);
+      }
+      return forward_mpi_mapping;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>& Runtime::find_reverse_MPI_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (reverse_mpi_mapping.empty())
+      {
+        log_run(LEVEL_ERROR,"Reverse MPI mapping call not supported with "
+                            "calling configure_MPI_interoperability during "
+                            "start up");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED);
+      }
+      return reverse_mpi_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -11143,6 +11160,10 @@ namespace LegionRuntime {
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
     /*static*/ unsigned Runtime::shutdown_counter = 0;
+    /*static*/ int Runtime::mpi_rank = -1;
+    /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
+    /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
+    /*static*/ UserEvent Runtime::mpi_rank_event = UserEvent::NO_USER_EVENT;
 #ifdef INORDER_EXECUTION
     /*static*/ bool Runtime::program_order_execution = true;
 #endif
@@ -11344,6 +11365,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::configure_MPI_interoperability(int rank)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(rank >= 0);
+#endif
+      mpi_rank = rank;
     }
 
     //--------------------------------------------------------------------------
@@ -12184,6 +12215,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(local_rt != NULL);
 #endif
+        // If we have an MPI rank, build the maps first
+        if (Runtime::mpi_rank >= 0)
+          local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
         local_rt->launch_top_level_task(p);
       }
     }
@@ -12381,6 +12415,18 @@ namespace LegionRuntime {
               (FuturePredOp::ResolveFuturePredArgs*)args;
             resolve_args->future_pred_op->resolve_future_predicate();
             resolve_args->future_pred_op->remove_predicate_reference();
+            break;
+          }
+        case HLR_MPI_RANK_ID:
+          {
+            MPIRankArgs *margs = (MPIRankArgs*)args;
+            Runtime::mpi_rank_table[margs->mpi_rank] = margs->source_space;
+            unsigned count = 
+              __sync_fetch_and_add(&Runtime::remaining_mpi_notifications, 1);
+            const size_t total_ranks = 
+              Machine::get_machine()->get_address_space_count();
+            if (count == total_ranks)
+              Runtime::mpi_rank_event.trigger();
             break;
           }
         default:
