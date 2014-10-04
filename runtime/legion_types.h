@@ -83,7 +83,7 @@
 #endif
 // How many tasks to group together for runtime operations
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
-#define DEFAULT_MIN_TASKS_TO_SCHEDULE   4
+#define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
 #endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline
