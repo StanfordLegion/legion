@@ -85,6 +85,7 @@ namespace LegionRuntime {
       trigger_commit_invoked = false;
       track_parent = false;
       parent_ctx = NULL;
+      children_mapped = Event::NO_EVENT;
       need_completion_trigger = true;
       completion_event = UserEvent::create_user_event();
       trace = NULL;
@@ -109,6 +110,7 @@ namespace LegionRuntime {
       outgoing.clear();
       unverified_regions.clear();
       verify_regions.clear();
+      dependent_children_mapped.clear();
       if (need_completion_trigger && !completion_event.has_triggered())
         completion_event.trigger();
     }
@@ -207,8 +209,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::initialize_operation(SingleTask *ctx, 
-                                         bool track, unsigned regs/*= 0*/)
+    void Operation::initialize_operation(SingleTask *ctx, bool track, 
+                                         Event child_event, 
+                                         unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -217,6 +220,7 @@ namespace LegionRuntime {
 #endif
       parent_ctx = ctx;
       track_parent = track;
+      children_mapped = child_event;
       if (track_parent)
         parent_ctx->register_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
@@ -615,10 +619,33 @@ namespace LegionRuntime {
       }
       if (need_mapping)
       {
-        if (must_epoch == NULL)
-          trigger_mapping();
+        bool trigger_now = false;
+        if (!dependent_children_mapped.empty())
+        {
+          Event wait_on = Event::merge_events(dependent_children_mapped);
+          if (wait_on.exists())
+          {
+            DeferredMappingArgs args;
+            args.hlr_id = HLR_DEFERRED_MAPPING_ID;
+            args.proxy_this = this;
+            args.must_epoch = must_epoch;
+            args.must_epoch_gen = must_epoch_gen;
+            Processor util = runtime->find_utility_group();
+            util.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+          }
+          else
+            trigger_now = true;
+        }
         else
-          must_epoch->notify_mapping_dependence(must_epoch_gen);
+          trigger_now = true;
+        // See if we should do the trigger now
+        if (trigger_now)
+        {
+          if (must_epoch == NULL)
+            trigger_mapping();
+          else
+            must_epoch->notify_mapping_dependence(must_epoch_gen);
+        }
       }
       if (need_resolution)
         trigger_resolution();
@@ -650,10 +677,14 @@ namespace LegionRuntime {
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
+      Event all_mapped = Event::NO_EVENT;
       bool prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 outstanding_mapping_deps,
-                                                outstanding_speculation_deps);
+                                                outstanding_speculation_deps,
+                                                all_mapped);
+      if (all_mapped.exists())
+        dependent_children_mapped.insert(all_mapped);
       if (registered_dependence)
         incoming[target] = target_gen;
       if (tracing)
@@ -680,7 +711,7 @@ namespace LegionRuntime {
       {
         do_registration = 
           must_epoch->record_dependence(this, gen, target, target_gen, 
-                                      idx, target_idx, dtype);
+                                        idx, target_idx, dtype);
       }
       // Can never register a dependence on ourself since it means
       // that the target was recycled and will never register. Return
@@ -708,10 +739,16 @@ namespace LegionRuntime {
       AutoLock o_lock(op_lock);
       bool prune = false;
       if (do_registration)
+      {
+        Event all_mapped = Event::NO_EVENT;
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 outstanding_mapping_deps,
-                                                outstanding_speculation_deps);
+                                                outstanding_speculation_deps,
+                                                all_mapped);
+        if (all_mapped.exists())
+          dependent_children_mapped.insert(all_mapped);
+      }
       if (registered_dependence)
         incoming[target] = target_gen;
       if (tracing)
@@ -764,10 +801,16 @@ namespace LegionRuntime {
       AutoLock o_lock(op_lock);
       bool prune = false;
       if (do_registration)
+      {
+        Event all_mapped = Event::NO_EVENT;
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 outstanding_mapping_deps,
-                                                outstanding_speculation_deps);
+                                                outstanding_speculation_deps,
+                                                all_mapped);
+        if (all_mapped.exists())
+          dependent_children_mapped.insert(all_mapped);
+      }
       if (registered_dependence)
       {
         incoming[target] = target_gen;
@@ -792,7 +835,8 @@ namespace LegionRuntime {
                                          Operation *op, GenerationID op_gen,
                                          bool &registered_dependence,
                                          unsigned &op_mapping_deps,
-                                         unsigned &op_speculation_deps)
+                                         unsigned &op_speculation_deps,
+                                         Event &all_mapped)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -824,6 +868,8 @@ namespace LegionRuntime {
           // registering operation
           outstanding_commit_deps++;
           registered_dependence = true;
+          // Give back the event for when all our children are mapped
+          all_mapped = children_mapped;
         }
         else
         {
@@ -920,10 +966,32 @@ namespace LegionRuntime {
       }
       if (need_trigger)
       {
-        if (must_epoch == NULL)
-          trigger_mapping();
+        bool trigger_now = false;
+        if (!dependent_children_mapped.empty())
+        {
+          Event wait_on = Event::merge_events(dependent_children_mapped);
+          if (wait_on.exists())
+          {
+            DeferredMappingArgs args;
+            args.hlr_id = HLR_DEFERRED_MAPPING_ID;
+            args.proxy_this = this;
+            args.must_epoch = must_epoch;
+            args.must_epoch_gen = must_epoch_gen;
+            Processor util = runtime->find_utility_group();
+            util.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
+          }
+          else
+            trigger_now = true;
+        }
         else
-          must_epoch->notify_mapping_dependence(must_epoch_gen);
+          trigger_now = true;
+        if (trigger_now)
+        {
+          if (must_epoch == NULL)
+            trigger_mapping();
+          else
+            must_epoch->notify_mapping_dependence(must_epoch_gen);
+        }
       }
     }
 
@@ -1175,11 +1243,12 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void SpeculativeOp::initialize_speculation(SingleTask *ctx, bool track,
+                                               Event child_event,
                                                unsigned regions,
                                                const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, regions);
+      initialize_operation(ctx, track, child_event, regions);
       if (p == Predicate::TRUE_PRED)
       {
         speculation_state = RESOLVE_TRUE_STATE;
@@ -1196,6 +1265,14 @@ namespace LegionRuntime {
         predicate = p.impl;
         predicate->add_predicate_reference();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SpeculativeOp::register_predicate_dependence(void)
+    //--------------------------------------------------------------------------
+    {
+      if (predicate != NULL)
+        register_dependence(predicate, predicate->get_generation());
     }
 
     //--------------------------------------------------------------------------
@@ -1499,7 +1576,7 @@ namespace LegionRuntime {
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       parent_task = ctx;
       if (launcher.requirement.privilege_fields.empty())
       {
@@ -1517,7 +1594,7 @@ namespace LegionRuntime {
       tag = launcher.tag;
       parent_task = ctx;
       termination_event = UserEvent::create_user_event();
-      region = PhysicalRegion(new PhysicalRegion::Impl(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
@@ -1567,7 +1644,7 @@ namespace LegionRuntime {
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       parent_task = ctx;
       requirement = req;
       if (requirement.privilege_fields.empty())
@@ -1586,7 +1663,7 @@ namespace LegionRuntime {
       tag = t;
       parent_task = ctx;
       termination_event = UserEvent::create_user_event();
-      region = PhysicalRegion(new PhysicalRegion::Impl(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
@@ -1633,7 +1710,7 @@ namespace LegionRuntime {
     void MapOp::initialize(SingleTask *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       parent_task = ctx;
       requirement.copy_without_mapping_info(reg.impl->get_requirement());
       requirement.initialize_mapping_fields();
@@ -2134,7 +2211,7 @@ namespace LegionRuntime {
     {
       parent_ctx = ctx;
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.predicate);
@@ -2473,6 +2550,8 @@ namespace LegionRuntime {
       LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
 #endif
       begin_dependence_analysis();
+      // Register a dependence on our predicate
+      register_predicate_dependence();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
@@ -2853,7 +2932,7 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
           Processor util = runtime->get_cleanup_proc(local_proc);
 #else
-          Processor util = local_proc.get_utility_processor();
+          Processor util = runtime->find_utility_group();
 #endif
           DeferredCompleteArgs deferred_complete_args;
           deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
@@ -3159,7 +3238,7 @@ namespace LegionRuntime {
     void FenceOp::initialize(SingleTask *ctx, bool mapping)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       mapping_fence = mapping;
 #ifdef LEGION_LOGGING
       LegionLogging::log_fence_operation(parent_ctx->get_executing_processor(),
@@ -3257,8 +3336,7 @@ namespace LegionRuntime {
           Processor util = runtime->get_cleanup_proc(
                             parent_ctx->get_executing_processor());
 #else
-          Processor util = parent_ctx->get_executing_processor().
-                            get_utility_processor();
+          Processor util = runtime->find_utility_group();
 #endif
           DeferredCompleteArgs deferred_complete_args;
           deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
@@ -3322,7 +3400,7 @@ namespace LegionRuntime {
                                                      IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
 #ifdef LEGION_LOGGING
@@ -3341,7 +3419,7 @@ namespace LegionRuntime {
                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
 #ifdef LEGION_LOGGING
@@ -3360,7 +3438,7 @@ namespace LegionRuntime {
                                                      FieldSpace handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
 #ifdef LEGION_LOGGING
@@ -3379,7 +3457,7 @@ namespace LegionRuntime {
                                                 FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
@@ -3399,7 +3477,7 @@ namespace LegionRuntime {
                             FieldSpace handle, const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free;
@@ -3419,7 +3497,7 @@ namespace LegionRuntime {
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
 #ifdef LEGION_LOGGING
@@ -3438,7 +3516,7 @@ namespace LegionRuntime {
                                                        LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
 #ifdef LEGION_LOGGING
@@ -3633,7 +3711,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       reference = ref;
       requirement.copy_without_mapping_info(parent_ctx->regions[idx]);
       // If it was write-discard from the task's perspective, make it
@@ -3838,8 +3916,7 @@ namespace LegionRuntime {
         Processor util = runtime->get_cleanup_proc(
                           parent_ctx->get_executing_processor());
 #else
-        Processor util = parent_ctx->get_executing_processor().
-                          get_utility_processor();
+        Processor util = runtime->find_utility_group();
 #endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
@@ -3896,7 +3973,8 @@ namespace LegionRuntime {
     {
       parent_ctx = ctx;
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, 1/*num region requirements*/,
+      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT,
+                             1/*num region requirements*/,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -3955,6 +4033,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       mapping_path = RegionTreePath();
 #endif
+      fields.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
@@ -3974,6 +4053,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       begin_dependence_analysis();
+      // Register a dependence on our predicate
+      register_predicate_dependence();
       // First register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
                                                    this, 0/*idx*/, requirement,
@@ -4114,7 +4195,7 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
         Processor util = runtime->get_cleanup_proc(local_proc);
 #else
-        Processor util = local_proc.get_utility_processor();
+        Processor util = runtime->find_utility_group();
 #endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
@@ -4357,7 +4438,8 @@ namespace LegionRuntime {
     {
       parent_ctx = ctx;
       parent_task = ctx;
-      initialize_speculation(ctx, true/*track*/, 1/*num region requirements*/,
+      initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
+                             1/*num region requirements*/,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -4415,6 +4497,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       mapping_path = RegionTreePath();
 #endif
+      fields.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
@@ -4434,6 +4517,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       begin_dependence_analysis();
+      // Register a dependence on our predicate
+      register_predicate_dependence();
       // First register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
                                                    this, 0/*idx*/, requirement,
@@ -4554,7 +4639,7 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
         Processor util = runtime->get_cleanup_proc(local_proc);
 #else
-        Processor util = local_proc.get_utility_processor();
+        Processor util = runtime->find_utility_group();
 #endif
         DeferredCompleteArgs deferred_complete_args;
         deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
@@ -4823,7 +4908,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
       future = f;
     }
 
@@ -4869,8 +4954,7 @@ namespace LegionRuntime {
         ResolveFuturePredArgs args;
         args.hlr_id = HLR_RESOLVE_FUTURE_PRED_ID;
         args.future_pred_op = this;
-        Processor exec_proc = Machine::get_executing_processor();
-        Processor util_proc = exec_proc.get_utility_processor();
+        Processor util_proc = runtime->find_utility_group();
         util_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
                         future.impl->get_ready_event());
       }
@@ -4923,7 +5007,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
       // Don't forget to reverse the values
       if (p == Predicate::TRUE_PRED)
         set_resolved_value(get_generation(), false);
@@ -5050,7 +5134,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
       // Short circuit case
       if ((p1 == Predicate::FALSE_PRED) || (p2 == Predicate::FALSE_PRED))
       {
@@ -5268,7 +5352,7 @@ namespace LegionRuntime {
       // Don't track this as it can lead to deadlock because
       // predicates can't complete until all their references from
       // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/);
+      initialize_operation(ctx, false/*track*/, Event::NO_EVENT);
       // Short circuit case
       if ((p1 == Predicate::TRUE_PRED) || (p2 == Predicate::TRUE_PRED))
       {
@@ -5477,7 +5561,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
-      initialize_operation(ctx, true/*track*/);
+      // Make an event for the all children mapped that is a merged of
+      // all our tasks all children mapped events
+      UserEvent all_children_mapped = UserEvent::create_user_event();
+      initialize_operation(ctx, true/*track*/, all_children_mapped);
       // Initialize operations for everything in the launcher
       // Note that we do not track these operations as we want them all to
       // appear as a single operation to the parent context in order to
@@ -5508,7 +5595,22 @@ namespace LegionRuntime {
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = new FutureMap::Impl(ctx, get_completion_event(), runtime);
+      result_map = legion_new<FutureMap::Impl>(ctx, 
+                                               get_completion_event(), runtime);
+      // Once all the tasks have been initialized we can defer
+      // our all mapped event on all their all mapped events
+      std::set<Event> tasks_all_mapped;
+      for (std::vector<IndividualTask*>::const_iterator it = 
+            indiv_tasks.begin(); it != indiv_tasks.end(); it++)
+      {
+        tasks_all_mapped.insert((*it)->get_children_mapped());
+      }
+      for (std::vector<IndexTask*>::const_iterator it = 
+            index_tasks.begin(); it != index_tasks.end(); it++)
+      {
+        tasks_all_mapped.insert((*it)->get_children_mapped());
+      }
+      all_children_mapped.trigger(Event::merge_events(tasks_all_mapped));
 #ifdef DEBUG_HIGH_LEVEL
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
@@ -6051,8 +6153,7 @@ namespace LegionRuntime {
       // Now do the launches
       if (!needed_indiv.empty())
       {
-        Processor exec_proc = Machine::get_executing_processor();
-        Processor util_proc = exec_proc.get_utility_processor();
+        Processor util_proc = owner->runtime->find_utility_group();
         MustEpochIndivArgs args;
         args.hlr_id = HLR_MUST_INDIV_ID;
         args.triggerer = this;
@@ -6066,8 +6167,7 @@ namespace LegionRuntime {
       }
       if (!needed_index.empty())
       {
-        Processor exec_proc = Machine::get_executing_processor();
-        Processor util_proc = exec_proc.get_utility_processor();
+        Processor util_proc = owner->runtime->find_utility_group();
         MustEpochIndexArgs args;
         args.hlr_id = HLR_MUST_INDEX_ID;
         args.triggerer = this;
@@ -6196,8 +6296,7 @@ namespace LegionRuntime {
       MustEpochMapArgs args;
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
-      Processor exec_proc = Machine::get_executing_processor();
-      Processor util_proc = exec_proc.get_utility_processor();
+      Processor util_proc = owner->runtime->find_utility_group();
       for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
             it != single_tasks.end(); it++)
       {
@@ -6291,8 +6390,7 @@ namespace LegionRuntime {
       MustEpochLauncherArgs launch_args;
       launch_args.hlr_id = HLR_MUST_LAUNCH_ID;
       std::set<Event> wait_events;
-      Processor exec_proc = Machine::get_executing_processor();
-      Processor util_proc = exec_proc.get_utility_processor();
+      Processor util_proc = runtime->find_utility_group();
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {

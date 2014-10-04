@@ -125,6 +125,9 @@ namespace LegionRuntime {
       bool stealing_enabled;
       // The maximum number of tasks scheduled per step
       unsigned max_schedule_count;
+      // Maximum number of failed mappings for a task before error
+      unsigned max_failed_mappings;
+      std::map<UniqueID,unsigned> failed_mappings;
       // Utilities for use within the default mapper 
       MappingUtilities::MachineQueryInterface machine_interface;
       MappingUtilities::MappingMemoizer memoizer;

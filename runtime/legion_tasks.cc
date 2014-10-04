@@ -131,6 +131,7 @@ namespace LegionRuntime {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      additional_procs.clear();
       if (args != NULL)
       {
         if (arg_manager != NULL)
@@ -138,17 +139,17 @@ namespace LegionRuntime {
           // If the arg manager is not NULL then we delete the
           // argument manager and just zero out the arguments
           if (arg_manager->remove_reference())
-            delete arg_manager;
+            legion_delete(arg_manager);
           arg_manager = NULL;
         }
         else
-          free(args);
+          legion_free(TASK_ARGS_ALLOC, args, arglen);
         args = NULL;
         arglen = 0;
       }
       if (local_args != NULL)
       {
-        free(local_args);
+        legion_free(LOCAL_ARGS_ALLOC, local_args, local_arglen);
         local_args = NULL;
         local_arglen = 0;
       }
@@ -213,12 +214,19 @@ namespace LegionRuntime {
       // Can figure out variants remotely
       rez.serialize(selected_variant);
       rez.serialize(target_proc);
+      rez.serialize<size_t>(additional_procs.size());
+      for (std::set<Processor>::const_iterator it = additional_procs.begin();
+            it != additional_procs.end(); it++)
+      {
+        rez.serialize(*it);
+      }
       // Can't be sending inline tasks remotely
       rez.serialize(spawn_task);
       rez.serialize(map_locally);
       rez.serialize(profile_task);
       rez.serialize(task_priority);
       rez.serialize(needs_state);
+      rez.serialize(all_children_mapped);
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceRef>::iterator it = 
             early_mapped_regions.begin(); it != 
@@ -287,12 +295,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(arg_manager == NULL);
 #endif
-          arg_manager = new AllocManager(arglen);
+          arg_manager = legion_new<AllocManager>(arglen);
           arg_manager->add_reference();
           args = arg_manager->get_allocation();
         }
         else
-          args = malloc(arglen);
+          args = legion_malloc(TASK_ARGS_ALLOC, arglen);
         derez.deserialize(args,arglen);
       }
       derez.deserialize(map_id);
@@ -304,7 +312,7 @@ namespace LegionRuntime {
       derez.deserialize(local_arglen);
       if (local_arglen > 0)
       {
-        local_args = malloc(local_arglen);
+        local_args = legion_malloc(LOCAL_ARGS_ALLOC, local_arglen);
         derez.deserialize(local_args,local_arglen);
       }
       derez.deserialize(orig_proc);
@@ -315,12 +323,21 @@ namespace LegionRuntime {
       variants = Runtime::get_variant_collection(task_id);
       derez.deserialize(selected_variant);
       derez.deserialize(target_proc);
+      size_t num_additional_procs;
+      derez.deserialize(num_additional_procs);
+      for (unsigned idx = 0; idx < num_additional_procs; idx++)
+      {
+        Processor add_proc;
+        derez.deserialize(add_proc);
+        additional_procs.insert(add_proc);
+      }
       inline_task = false;
       derez.deserialize(spawn_task);
       derez.deserialize(map_locally);
       derez.deserialize(profile_task);
       derez.deserialize(task_priority);
       derez.deserialize(needs_state);
+      derez.deserialize(all_children_mapped);
       size_t num_early;
       derez.deserialize(num_early);
       for (unsigned idx = 0; idx < num_early; idx++)
@@ -383,7 +400,9 @@ namespace LegionRuntime {
                                       Processor::TaskFuncID tid)
     //-------------------------------------------------------------------------- 
     {
-      initialize_speculation(ctx, track, regions.size(), p);
+      all_children_mapped = UserEvent::create_user_event();
+      initialize_speculation(ctx, track, 
+                             all_children_mapped, regions.size(), p);
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
       current_proc = orig_proc;
@@ -517,6 +536,20 @@ namespace LegionRuntime {
     {
       Processor exec_proc = parent_ctx->get_executing_processor();
       return runtime->invoke_mapper_speculate(exec_proc, this, value);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::activate_outstanding_task(void)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx->increment_outstanding();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::deactivate_outstanding_task(void)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx->decrement_outstanding();
     }
 
     //--------------------------------------------------------------------------
@@ -1324,7 +1357,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(arg_manager == NULL);
 #endif
-          this->arg_manager = new AllocManager(this->arglen); 
+          this->arg_manager = legion_new<AllocManager>(this->arglen); 
           this->arg_manager->add_reference();
           this->args = this->arg_manager->get_allocation();
           memcpy(this->args, rhs->args, this->arglen);
@@ -1340,7 +1373,7 @@ namespace LegionRuntime {
       else if (arglen > 0)
       {
         // If there is no argument manager then we do the copy no matter what
-        this->args = malloc(arglen);
+        this->args = legion_malloc(TASK_ARGS_ALLOC, arglen);
         memcpy(args,rhs->args,arglen);
       }
       this->map_id = rhs->map_id;
@@ -1356,6 +1389,7 @@ namespace LegionRuntime {
       this->selected_variant = rhs->selected_variant;
       this->schedule = rhs->schedule;
       this->target_proc = p; // set the target processor
+      this->additional_procs = rhs->additional_procs;
       this->inline_task = rhs->inline_task;
       this->spawn_task = stealable; // set spawn to stealable
       this->map_locally = rhs->map_locally;
@@ -1778,7 +1812,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Create a new grant impl object to perform the unpack
-      grant = Grant(new Grant::Impl());
+      grant = Grant(legion_new<Grant::Impl>());
       grant.impl->unpack_grant(derez);
     }
 
@@ -1900,6 +1934,8 @@ namespace LegionRuntime {
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
       current_trace = NULL;
+      outstanding_subtasks = 0;
+      pending_subtasks = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -1923,7 +1959,7 @@ namespace LegionRuntime {
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
-        delete it->second;
+        legion_delete(it->second);
       }
       traces.clear();
       // Clean up any locks and barriers that the user
@@ -1949,6 +1985,10 @@ namespace LegionRuntime {
         valid_wait_event = false;
         window_wait.trigger();
       }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(outstanding_subtasks == 0);
+      assert(pending_subtasks == 0);
+#endif
       if (context.exists())
         runtime->free_context(this);
     }
@@ -2196,10 +2236,14 @@ namespace LegionRuntime {
       term_premap.trigger();
       AutoLock o_lock(op_lock);
       // Remove it from the map
+      std::map<RegionTreeID,std::map<Event,FieldMask> >::iterator finder = 
+        premapping_events.find(tid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(premapping_events.find(tid) != premapping_events.end());
+      assert(finder != premapping_events.end());
 #endif
-      premapping_events[tid].erase(term_premap);
+      finder->second.erase(term_premap);
+      if (finder->second.empty())
+        premapping_events.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -2290,7 +2334,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Starting with this context, pack up all the enclosing local fields
-      std::deque<LocalFieldInfo> locals = local_fields;
+      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque locals = 
+                                                                  local_fields;
       // Get all the local fields from our enclosing contexts
       find_enclosing_local_fields(locals);
       RezCheck z(rez);
@@ -2555,7 +2600,7 @@ namespace LegionRuntime {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        current_trace = new LegionTrace(tid, this);
+        current_trace = legion_new<LegionTrace>(tid, this);
         traces[tid] = current_trace;
       }
       else
@@ -2626,6 +2671,56 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::increment_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if ((outstanding_subtasks == 0) && 
+          (pending_subtasks < Runtime::min_tasks_to_schedule))
+        runtime->activate_context(this);
+      outstanding_subtasks++;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::decrement_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(outstanding_subtasks > 0);
+#endif
+      outstanding_subtasks--;
+      if ((outstanding_subtasks == 0) && 
+          (pending_subtasks < Runtime::min_tasks_to_schedule))
+        runtime->deactivate_context(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::increment_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      pending_subtasks++;
+      if ((outstanding_subtasks > 0) &&
+          (pending_subtasks == Runtime::min_tasks_to_schedule))
+        runtime->deactivate_context(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::decrement_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(pending_subtasks > 0);
+#endif
+      if ((outstanding_subtasks > 0) &&
+          (pending_subtasks == Runtime::min_tasks_to_schedule))
+        runtime->activate_context(this);
+      pending_subtasks--;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::add_local_field(FieldSpace handle, FieldID fid, 
                                      size_t field_size)
     //--------------------------------------------------------------------------
@@ -2674,7 +2769,7 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
         Processor util = runtime->get_cleanup_proc(executing_processor);
 #else
-        Processor util = executing_processor.get_utility_processor();
+        Processor util = runtime->find_utility_group();
 #endif
         util.spawn(HLR_TASK_ID, rez.get_buffer(),
                    rez.get_used_bytes(), info.reclaim_event);
@@ -2702,7 +2797,7 @@ namespace LegionRuntime {
       regions.push_back(new_req);
       // Make a new unmapped physical region
       physical_regions.push_back(PhysicalRegion(
-            new PhysicalRegion::Impl(regions.back(), Event::NO_EVENT,
+            legion_new<PhysicalRegion::Impl>(regions.back(), Event::NO_EVENT,
                  false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
       physical_instances.push_back(InstanceRef());
       local_instances.push_back(InstanceRef());
@@ -2730,7 +2825,7 @@ namespace LegionRuntime {
         new_req.privilege_fields.insert(fid);
         regions.push_back(new_req);
         physical_regions.push_back(PhysicalRegion(
-              new PhysicalRegion::Impl(regions.back(), Event::NO_EVENT,
+              legion_new<PhysicalRegion::Impl>(regions.back(), Event::NO_EVENT,
                     false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
         physical_instances.push_back(InstanceRef());
         local_instances.push_back(InstanceRef());
@@ -4287,6 +4382,41 @@ namespace LegionRuntime {
       const std::set<Memory> &visible_memories = 
         runtime->machine->get_visible_memories(executing_processor);
 #endif
+      // If we have any additional processors, filter them on processor
+      // kind before we actually do the launch
+      std::map<Processor,std::set<Memory> > additional_visible_memories;
+      if (!additional_procs.empty())
+      {
+        std::vector<Processor> to_erase;
+        Processor::Kind exec_kind = 
+          runtime->machine->get_processor_kind(executing_processor); 
+        AddressSpace exec_space = executing_processor.address_space();
+        for (std::set<Processor>::const_iterator it = additional_procs.begin();
+              it != additional_procs.end(); it++)
+        {
+          Processor::Kind add_kind = runtime->machine->get_processor_kind(*it);
+          if (add_kind != exec_kind)
+          {
+            to_erase.push_back(*it);
+            continue;
+          }
+          AddressSpace add_space = it->address_space();
+          if (add_space != exec_space)
+            to_erase.push_back(*it);
+        }
+        for (std::vector<Processor>::const_iterator it = to_erase.begin();
+              it != to_erase.end(); it++)
+        {
+          additional_procs.erase(*it);
+        }
+        // Now compute the visible memories for all the additional processors
+        for (std::set<Processor>::const_iterator it = additional_procs.begin();
+              it != additional_procs.end(); it++)
+        {
+          additional_visible_memories[*it] = 
+            runtime->machine->get_visible_memories(*it);
+        }
+      }
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!virtual_mapped[idx])
@@ -4320,6 +4450,32 @@ namespace LegionRuntime {
             assert(visible_memories.find(inst_mem) != visible_memories.end());
           }
 #endif
+          // If we have additional processors, then check to see if
+          // they are also visible from the chosen mapped instances 
+          if (!additional_procs.empty() && 
+              physical_instances[idx].get_handle().has_view() &&
+              !(regions[idx].flags & NO_ACCESS_FLAG))
+          {
+            Memory inst_mem = physical_instances[idx].get_memory();
+            std::vector<Processor> to_erase;
+            for (std::set<Processor>::const_iterator it = 
+                  additional_procs.begin(); it != additional_procs.end(); it++)
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(additional_visible_memories.find(*it) !=
+                      additional_visible_memories.end());
+#endif
+              const std::set<Memory> &visible_mems = 
+                              additional_visible_memories[*it];
+              if (visible_mems.find(inst_mem) == visible_mems.end())
+                to_erase.push_back(*it); 
+            }
+            for (std::vector<Processor>::const_iterator it = 
+                  to_erase.begin(); it != to_erase.end(); it++)
+            {
+              additional_procs.erase(*it);
+            }
+          }
         }
       }
       // Now add get all the other preconditions for the launch
@@ -4404,7 +4560,7 @@ namespace LegionRuntime {
           if (virtual_mapped[idx])
           {
             physical_regions.push_back(PhysicalRegion(
-                  new PhysicalRegion::Impl(regions[idx],
+                  legion_new<PhysicalRegion::Impl>(regions[idx],
                     Event::NO_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             // Don't switch coherence modes since we virtually
@@ -4428,7 +4584,7 @@ namespace LegionRuntime {
             // people to wait on the value
             clone_requirements[idx].privilege = READ_WRITE;
             physical_regions.push_back(PhysicalRegion(
-                  new PhysicalRegion::Impl(regions[idx],
+                  legion_new<PhysicalRegion::Impl>(regions[idx],
                     Event::NO_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             unmap_events[idx] = UserEvent::create_user_event();
@@ -4446,7 +4602,7 @@ namespace LegionRuntime {
             clone_requirements[idx].copy_without_mapping_info(regions[idx]);
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
-                  new PhysicalRegion::Impl(clone_requirements[idx],
+                  legion_new<PhysicalRegion::Impl>(clone_requirements[idx],
                     Event::NO_EVENT/*already mapped*/, true/*mapped*/,
                     this, map_id, tag, chosen_variant.leaf, runtime)));
             // Now set the reference for this physical region 
@@ -4498,6 +4654,11 @@ namespace LegionRuntime {
             physical_regions[idx].impl->reset_reference(
                 physical_instances[idx], unmap_events[idx]);
           }
+          // we can also trigger the all children mapped event
+          all_children_mapped.trigger();
+#ifdef DEBUG_HIGH_LEVEL
+          all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
         }
       }
 
@@ -4584,8 +4745,8 @@ namespace LegionRuntime {
 #endif
       }
 #endif
-      // Notify the runtime that there is a new task running on the processor
-      runtime->increment_pending(executing_processor);
+      // Mark that we have an outstanding task in this context 
+      parent_ctx->increment_pending();
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
                                       get_unique_task_id(),
@@ -4613,7 +4774,15 @@ namespace LegionRuntime {
       // that we need to save any variables we need for after the task
       // launch here on the stack before they can be invalidated.
       Event term_event = get_task_completion();
-      Event task_launch_event = executing_processor.spawn(low_id, &proxy_this,
+      Processor launch_processor = executing_processor;
+      if (!additional_procs.empty())
+      {
+        // Find the processor group on which to launch the task
+        // Add the executing processor to the set as well
+        additional_procs.insert(executing_processor);
+        launch_processor = runtime->find_processor_group(additional_procs);
+      }
+      Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
                             sizeof(proxy_this), start_condition, task_priority);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
@@ -4644,6 +4813,9 @@ namespace LegionRuntime {
       assert(regions.size() == region_deleted.size());
       assert(regions.size() == local_instances.size());
 #endif
+      // Switch over the executing processor to the one
+      // that has actually been assigned to run this task.
+      executing_processor = Machine::get_executing_processor();
 #ifdef LEGION_LOGGING
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
@@ -4671,11 +4843,9 @@ namespace LegionRuntime {
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
-      // Tell the runtime that this task is now running
-      // and is no longer pending
-      runtime->start_execution(executing_processor);
-      // Do the decrement on the processor we initially incremented
-      runtime->decrement_pending(executing_processor);
+      // Decrement the number of pending tasks on the processor which
+      // we originally mapped this task
+      parent_ctx->decrement_pending();
       // Start the profiling if requested
       if (profile_task)
         this->start_time = (TimeStamp::get_current_time_in_micros() - 
@@ -4690,9 +4860,6 @@ namespace LegionRuntime {
     void SingleTask::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime that this task has finished executing
-      runtime->pause_execution(executing_processor);
-
       if (profile_task)
       {
         this->stop_time = (TimeStamp::get_current_time_in_micros() -
@@ -4741,6 +4908,29 @@ namespace LegionRuntime {
             runtime->add_to_dependence_queue(executing_processor, close_op);
           }
         }
+        // Also compute the conditions for the children being mapped
+        std::set<Event> preconditions;
+        AutoLock o_lock(op_lock);
+        // Only need to do this for executing and executed children
+        // We know that any complete children are done
+        for (std::set<Operation*>::const_iterator it = 
+              executing_children.begin(); it != executing_children.end(); it++)
+        {
+          Event pre = (*it)->get_children_mapped();
+          if (pre.exists())
+            preconditions.insert(pre);
+        }
+        for (std::set<Operation*>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
+        {
+          Event pre = (*it)->get_children_mapped();
+          if (pre.exists())
+            preconditions.insert(pre);
+        }
+        all_children_mapped.trigger(Event::merge_events(preconditions));
+#ifdef DEBUG_HIGH_LEVEL
+        all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
       }
       local_instances.clear();
 
@@ -4762,7 +4952,7 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
       Processor util = runtime->get_cleanup_proc(executing_processor);
 #else
-      Processor util = executing_processor.get_utility_processor();
+      Processor util = runtime->find_utility_group();
 #endif
       if (util != executing_processor)
       {
@@ -4880,7 +5070,7 @@ namespace LegionRuntime {
       deactivate_task();
       if (reduction_state != NULL)
       {
-        free(reduction_state);
+        legion_free(REDUCTION_ALLOC, reduction_state, reduction_state_size);
         reduction_state = NULL;
         reduction_state_size = 0;
       }
@@ -4928,6 +5118,7 @@ namespace LegionRuntime {
       if (must_parallelism && (slices.size() > 1))
         must_barrier = must_barrier.alter_arrival_count(slices.size()-1);
 
+      std::set<Event> all_slices_mapped;
       for (unsigned idx = 0; idx < splits.size(); idx++)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -5009,8 +5200,15 @@ namespace LegionRuntime {
                                                      splits[idx].recurse,
                                                      splits[idx].stealable,
                                                      splits.size());
+        all_slices_mapped.insert(slice->get_children_mapped());
         slices.push_back(slice);
       }
+      // Trigger our all children mapped as being done when all
+      // the slices have all their children mapped
+      all_children_mapped.trigger(Event::merge_events(all_slices_mapped));
+#ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
 
 #ifdef LEGION_LOGGING
       UniqueID local_id = get_unique_task_id();
@@ -5234,7 +5432,8 @@ namespace LegionRuntime {
       if (unpack_args)
       {
         argument_map = 
-          ArgumentMap(new ArgumentMap::Impl(new ArgumentMapStore()));
+          ArgumentMap(legion_new<ArgumentMap::Impl>(
+                legion_new<ArgumentMapStore>()));
         argument_map.impl->unpack_arguments(derez);
       }
     }
@@ -5249,7 +5448,7 @@ namespace LegionRuntime {
       assert(reduction_state == NULL);
 #endif
       reduction_state_size = reduction_op->sizeof_rhs;
-      reduction_state = malloc(reduction_state_size);
+      reduction_state = legion_malloc(REDUCTION_ALLOC, reduction_state_size);
       reduction_op->init(reduction_state, 1);
     }
 
@@ -5335,13 +5534,14 @@ namespace LegionRuntime {
       deactivate_single();
       if (future_store != NULL)
       {
-        free(future_store);
+        legion_free(FUTURE_RESULT_ALLOC, future_store, future_size);
         future_store = NULL;
         future_size = 0;
       }
       if (predicate_false_result != NULL)
       {
-        free(predicate_false_result);
+        legion_free(PREDICATE_ALLOC, predicate_false_result, 
+                    predicate_false_size);
         predicate_false_result = NULL;
         predicate_false_size = 0;
       }
@@ -5387,7 +5587,7 @@ namespace LegionRuntime {
       arglen = launcher.argument.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+        args = legion_malloc(TASK_ARGS_ALLOC, arglen);
         memcpy(args,launcher.argument.get_ptr(),arglen);
       }
       map_id = launcher.map_id;
@@ -5441,7 +5641,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(predicate_false_result == NULL);
 #endif
-            predicate_false_result = malloc(predicate_false_size);
+            predicate_false_result = 
+              legion_malloc(PREDICATE_ALLOC, predicate_false_size);
             memcpy(predicate_false_result, 
                    launcher.predicate_false_result.get_ptr(),
                    predicate_false_size);
@@ -5459,7 +5660,7 @@ namespace LegionRuntime {
 #endif
       initialize_paths(); 
       // Get a future from the parent context to use as the result
-      result = Future(new Future::Impl(runtime, true/*register*/, 
+      result = Future(legion_new<Future::Impl>(runtime, true/*register*/, 
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -5512,7 +5713,7 @@ namespace LegionRuntime {
       arglen = arg.get_size();
       if (arglen > 0)
       {
-        args = malloc(arglen);
+        args = legion_malloc(TASK_ARGS_ALLOC, arglen);
         memcpy(args,arg.get_ptr(),arglen);
       }
       map_id = mid;
@@ -5529,7 +5730,7 @@ namespace LegionRuntime {
       assert(remote_outermost_context.exists());
 #endif
       initialize_paths();
-      result = Future(new Future::Impl(runtime, true/*register*/,
+      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(), runtime->address_space,
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -5584,6 +5785,15 @@ namespace LegionRuntime {
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_DEP_ANALYSIS);
 #endif
       begin_dependence_analysis();
+      // To be correct with the new scheduler we also have to 
+      // register mapping dependences on futures
+      for (std::vector<Future>::const_iterator it = futures.begin();
+            it != futures.end(); it++)
+      {
+        register_dependence(it->impl->task, it->impl->task_gen);
+      }
+      // Also have to register any dependences on our predicate
+      register_predicate_dependence();
       RegionTreeContext ctx = parent_ctx->get_context();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -5656,8 +5866,7 @@ namespace LegionRuntime {
           args.target = result.impl;
           args.result = predicate_false_future.impl;
           args.task_op = this;
-          Processor exec_proc = Machine::get_executing_processor();
-          Processor util_proc = exec_proc.get_utility_processor();
+          Processor util_proc = runtime->find_utility_group();
           util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
           trigger = false;
         }
@@ -5668,6 +5877,10 @@ namespace LegionRuntime {
           result.impl->set_result(predicate_false_result,
                                   predicate_false_size, false/*own*/);
       }
+      all_children_mapped.trigger();
+#ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
       // Then clean up this task instance
       if (trigger)
         complete_execution();
@@ -5997,7 +6210,7 @@ namespace LegionRuntime {
         else
         {
           future_size = res_size;
-          future_store = malloc(future_size);
+          future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
           memcpy(future_store,res,future_size);
         }
       }
@@ -6107,7 +6320,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndividualTask::find_enclosing_local_fields(
-                                              std::deque<LocalFieldInfo> &infos)
+           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
     //--------------------------------------------------------------------------
     {
       // Ask the same for our parent context
@@ -6159,6 +6372,12 @@ namespace LegionRuntime {
       future_store = NULL;
       future_size = 0;
       result.impl->complete_future();
+
+      // Trigger our all children mapped event as well
+      all_children_mapped.trigger();
+#ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
 
       // Trigger our completion event
       completion_event.trigger();
@@ -6710,7 +6929,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PointTask::find_enclosing_local_fields(
-                                              std::deque<LocalFieldInfo> &infos)
+           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
     //--------------------------------------------------------------------------
     {
       // Ask the same for our parent context
@@ -7089,7 +7308,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RemoteTask::find_enclosing_local_fields(
-                                              std::deque<LocalFieldInfo> &infos)
+           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
     //--------------------------------------------------------------------------
     {
       // No need to go up since we are the uppermost task on this runtime
@@ -7229,7 +7448,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InlineTask::find_enclosing_local_fields(
-                                              std::deque<LocalFieldInfo> &infos)
+           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
     //--------------------------------------------------------------------------
     {
       enclosing->find_enclosing_local_fields(infos);
@@ -7353,7 +7572,8 @@ namespace LegionRuntime {
       future_map = FutureMap();
       if (predicate_false_result != NULL)
       {
-        free(predicate_false_result);
+        legion_free(PREDICATE_ALLOC, predicate_false_result, 
+                    predicate_false_size);
         predicate_false_result = NULL;
         predicate_false_size = 0;
       }
@@ -7392,7 +7612,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(arg_manager == NULL);
 #endif
-        arg_manager = new AllocManager(arglen);
+        arg_manager = legion_new<AllocManager>(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
@@ -7414,7 +7634,7 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
+      future_map = FutureMap(legion_new<FutureMap::Impl>(ctx, this, runtime));
 #ifdef DEBUG_HIGH_LEVEL
       future_map.impl->add_valid_domain(index_domain);
 #endif
@@ -7471,7 +7691,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(arg_manager == NULL);
 #endif
-        arg_manager = new AllocManager(arglen);
+        arg_manager = legion_new<AllocManager>(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
@@ -7507,9 +7727,9 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      reduction_future = Future(new Future::Impl(runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, this));
+      reduction_future = Future(legion_new<Future::Impl>(runtime, 
+            true/*register*/, runtime->get_available_distributed_id(), 
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -7564,7 +7784,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(arg_manager == NULL);
 #endif
-        arg_manager = new AllocManager(arglen);
+        arg_manager = legion_new<AllocManager>(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, global_arg.get_ptr(), arglen);
@@ -7583,7 +7803,7 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      future_map = FutureMap(new FutureMap::Impl(ctx, this, runtime));
+      future_map = FutureMap(legion_new<FutureMap::Impl>(ctx, this, runtime));
 #ifdef DEBUG_HIGH_LEVEL
       future_map.impl->add_valid_domain(index_domain);
 #endif
@@ -7643,7 +7863,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(arg_manager == NULL);
 #endif
-        arg_manager = new AllocManager(arglen);
+        arg_manager = legion_new<AllocManager>(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, global_arg.get_ptr(), arglen);
@@ -7676,9 +7896,9 @@ namespace LegionRuntime {
       initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
-      reduction_future = Future(new Future::Impl(runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
-            runtime->address_space, this));
+      reduction_future = Future(legion_new<Future::Impl>(runtime, 
+            true/*register*/, runtime->get_available_distributed_id(), 
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
 #ifdef LEGION_LOGGING
       LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
@@ -7751,7 +7971,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate_false_result == NULL);
 #endif
-          predicate_false_result = malloc(predicate_false_size);
+          predicate_false_result = 
+            legion_malloc(PREDICATE_ALLOC, predicate_false_size);
           memcpy(predicate_false_result, pred_arg.get_ptr(),
                  predicate_false_size);
         }
@@ -7796,6 +8017,15 @@ namespace LegionRuntime {
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_DEP_ANALYSIS);
 #endif
       begin_dependence_analysis();
+      // To be correct with the new scheduler we also have to 
+      // register mapping dependences on futures
+      for (std::vector<Future>::const_iterator it = futures.begin();
+            it != futures.end(); it++)
+      {
+        register_dependence(it->impl->task, it->impl->task_gen);
+      }
+      // Also have to register any dependences on our predicate
+      register_predicate_dependence();
       RegionTreeContext ctx = parent_ctx->get_context();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -7875,8 +8105,7 @@ namespace LegionRuntime {
             args.result = predicate_false_future.impl;
             args.domain = index_domain;
             args.task_op = this;
-            Processor exec_proc = Machine::get_executing_processor();
-            Processor util_proc = exec_proc.get_utility_processor();
+            Processor util_proc = runtime->find_utility_group();
             util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
             trigger = false;
           }
@@ -7917,8 +8146,7 @@ namespace LegionRuntime {
             args.target = reduction_future.impl;
             args.result = predicate_false_future.impl;
             args.task_op = this;
-            Processor exec_proc = Machine::get_executing_processor();
-            Processor util_proc = exec_proc.get_utility_processor();
+            Processor util_proc = runtime->find_utility_group();
             util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), wait_on);
             trigger = false;
           }
@@ -7930,6 +8158,10 @@ namespace LegionRuntime {
                                   predicate_false_size, false/*own*/);
         }
       }
+      all_children_mapped.trigger();
+#ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
       // Then clean up this task execution
       if (trigger)
         complete_execution();
@@ -8254,6 +8486,11 @@ namespace LegionRuntime {
                                           reduction_state_size,false/*owner*/);
         reduction_future.impl->complete_future();
       }
+      // Trigger the all children mapped event
+      all_children_mapped.trigger();
+#ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
 
       // Trigger all our events event
       completion_event.trigger();
@@ -8611,7 +8848,7 @@ namespace LegionRuntime {
             DomainPoint::STLComparator>::const_iterator it = 
             temporary_futures.begin(); it != temporary_futures.end(); it++)
       {
-        free(it->second.first);
+        legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
       }
       temporary_futures.clear();
       remote_contexts.clear();
@@ -9076,7 +9313,7 @@ namespace LegionRuntime {
               std::pair<void*,size_t>(const_cast<void*>(result),result_size);
           else
           {
-            void *copy = malloc(result_size);
+            void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
             memcpy(copy,result,result_size);
             temporary_futures[point] = 
               std::pair<void*,size_t>(copy,result_size);
@@ -9126,7 +9363,8 @@ namespace LegionRuntime {
       result->local_arglen = arg.get_size();
       if (result->local_arglen > 0)
       {
-        result->local_args = malloc(result->local_arglen);
+        result->local_args = 
+          legion_malloc(LOCAL_ARGS_ALLOC, result->local_arglen);
         memcpy(result->local_args,arg.get_ptr(),
                 result->local_arglen);
       }
@@ -9178,12 +9416,17 @@ namespace LegionRuntime {
       assert(index_domain.get_volume() > 0);
 #endif
       // Enumerate all the points
+      std::set<Event> all_points_mapped;
       for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
       {
         PointTask *next_point = clone_as_point_task(itr.p);
+        all_points_mapped.insert(next_point->get_children_mapped());
         points.push_back(next_point);
       }
+      // Trigger our all children mapped based on all the points being mapped
+      all_children_mapped.trigger(Event::merge_events(all_points_mapped));
 #ifdef DEBUG_HIGH_LEVEL
+      all_children_mapped = UserEvent::NO_USER_EVENT;
       assert(index_domain.get_volume() == points.size());
 #endif
       mapping_index = 0;
@@ -9525,8 +9768,7 @@ namespace LegionRuntime {
       // to handle the case where the iterator is invalidated
       std::set<Event> wait_events;
       {
-        Processor exec_proc = Machine::get_executing_processor();
-        Processor util_proc = exec_proc.get_utility_processor();
+        Processor util_proc = owner->runtime->find_utility_group();
         std::list<SliceTask*>::const_iterator it = slices.begin();
         DeferredSliceArgs args;
         args.hlr_id = HLR_DEFERRED_SLICE_ID;

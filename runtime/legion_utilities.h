@@ -198,33 +198,6 @@ namespace LegionRuntime {
     } 
 
     /////////////////////////////////////////////////////////////
-    // AllocManager
-    /////////////////////////////////////////////////////////////
-    // A class for deduplicating memory used with task arguments
-    // and knowing when to collect the data associated with it
-    class AllocManager : public Collectable {
-    public:
-      AllocManager(size_t arglen)
-        : Collectable(), allocation(malloc(arglen)), 
-          allocation_size(arglen) { }
-      AllocManager(const AllocManager &rhs)
-        : Collectable(), allocation(NULL), allocation_size(0)
-      { assert(false); /*should never be called*/ }
-      ~AllocManager(void)
-      { free(allocation); }
-    public:
-      AllocManager& operator=(const AllocManager &rhs)
-      { assert(false); /*should never be called*/ return *this; }
-    public:
-      inline void* get_allocation(void) const { return allocation; }
-      inline size_t get_allocation_size(void) const
-      { return allocation_size; }
-    private:
-      void *const allocation;
-      size_t allocation_size;
-    };
-
-    /////////////////////////////////////////////////////////////
     // AutoLock 
     /////////////////////////////////////////////////////////////
     // An auto locking class for taking a lock and releasing it when
@@ -1900,10 +1873,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcount(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -1914,10 +1895,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -1928,10 +1917,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountll(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -2514,10 +2511,18 @@ namespace LegionRuntime {
       if (!mask.sum_mask)
         return 0;
       int result = 0;
+#ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcount(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -2530,10 +2535,18 @@ namespace LegionRuntime {
       if (!mask.sum_mask)
         return 0;
       int result = 0;
+#ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -2546,10 +2559,18 @@ namespace LegionRuntime {
       if (!mask.sum_mask)
         return 0;
       int result = 0;
+#ifndef VALGRIND
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountll(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 #undef BIT_ELMTS
@@ -3099,10 +3120,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -3712,10 +3741,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -4425,10 +4462,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 
@@ -5189,10 +5234,18 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       int result = 0;
+#ifndef VALGRIND
       for (int idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
+#else
+      for (int idx = 0; idx < MAX; idx++)
+      {
+        if (mask.is_set(idx))
+          result++;
+      }
+#endif
       return result;
     }
 

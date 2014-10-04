@@ -18,6 +18,7 @@
 #define __LEGION_TRACE__
 
 #include "legion.h"
+#include "runtime.h"
 #include "legion_ops.h"
 
 namespace LegionRuntime {
@@ -30,6 +31,8 @@ namespace LegionRuntime {
      * in a given task's context.
      */
     class LegionTrace {
+    public:
+      static const AllocationType alloc_type = TRACE_ALLOC;
     public:
       struct DependenceRecord {
       public:
@@ -99,6 +102,8 @@ namespace LegionRuntime {
      */
     class TraceCaptureOp : public Operation {
     public:
+      static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
+    public:
       TraceCaptureOp(Runtime *rt);
       TraceCaptureOp(const TraceCaptureOp &rhs);
       virtual ~TraceCaptureOp(void);
@@ -122,6 +127,8 @@ namespace LegionRuntime {
      * and becomes the new current fence.
      */
     class TraceCompleteOp : public FenceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
       TraceCompleteOp(Runtime *rt);
       TraceCompleteOp(const TraceCompleteOp &rhs);

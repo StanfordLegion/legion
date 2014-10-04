@@ -71,6 +71,7 @@ namespace LegionRuntime {
     extern Logger::Category log_garbage;
     extern Logger::Category log_leak;
     extern Logger::Category log_variant;
+    extern Logger::Category log_allocation;
 
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
@@ -78,7 +79,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ArgumentMap::Impl::Impl(void)
-      : Collectable(), next(NULL), store(new ArgumentMapStore()), frozen(false)
+      : Collectable(), next(NULL), 
+        store(legion_new<ArgumentMapStore>()), frozen(false)
     //--------------------------------------------------------------------------
     {
       // This is the first impl in the chain so we make the store
@@ -119,14 +121,14 @@ namespace LegionRuntime {
         // and garbage collect it if necessary
         if (next->remove_reference())
         {
-          delete next;
+          legion_delete(next);
         }
       }
       else
       {
         // We're the last one in the chain being deleted,
         // so we have to delete the store as well
-        delete store;
+        legion_delete(store);
       }
     }
 
@@ -320,7 +322,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Make sure everyone in the chain shares the same store
-      Impl *new_impl = new Impl(store, arguments); 
+      Impl *new_impl = legion_new<Impl>(store, arguments); 
       // Add a reference so it doesn't get collected
       new_impl->add_reference();
       return new_impl;
@@ -352,7 +354,7 @@ namespace LegionRuntime {
       for (std::set<TaskArgument>::const_iterator it = values.begin();
             it != values.end(); it++)
       {
-        free(it->get_ptr());
+        legion_free(STORE_ARGUMENT_ALLOC, it->get_ptr(), it->get_size());
       }
     }
 
@@ -369,7 +371,7 @@ namespace LegionRuntime {
     TaskArgument ArgumentMapStore::add_arg(const TaskArgument &arg)
     //--------------------------------------------------------------------------
     {
-      void *buffer = malloc(arg.get_size());
+      void *buffer = legion_malloc(STORE_ARGUMENT_ALLOC, arg.get_size());
       memcpy(buffer, arg.get_ptr(), arg.get_size());
       TaskArgument new_arg(buffer,arg.get_size());
       values.insert(new_arg);
@@ -1435,7 +1437,7 @@ namespace LegionRuntime {
 #endif
 
     /////////////////////////////////////////////////////////////
-    // Physical Region Impl 
+    // Grant Impl 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -1542,6 +1544,120 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // MPI Legion Handshake Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::Impl::Impl(bool in_mpi, int mpi_parts, int legion_parts)
+      : mpi_participants(mpi_parts), legion_participants(legion_parts),
+        state(in_mpi ? IN_MPI : IN_LEGION), mpi_count(0), legion_count(0),
+        mpi_ready(UserEvent::create_user_event()),
+        legion_ready(UserEvent::create_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::Impl::Impl(const MPILegionHandshake::Impl &rhs)
+      : mpi_participants(-1), legion_participants(-1)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::Impl::~Impl(void)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger any leftover events to give them 
+      // back to the low-level runtime
+      if (!mpi_ready.has_triggered())
+        mpi_ready.trigger();
+      if (!legion_ready.has_triggered())
+        legion_ready.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::Impl& MPILegionHandshake::Impl::operator=(
+                                            const MPILegionHandshake::Impl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::Impl::mpi_handoff_to_legion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state == IN_MPI);
+#endif
+      const int count = __sync_add_and_fetch(&mpi_count, 1);
+      if (count == mpi_participants)
+      {
+        // Create a new waiter for the mpi_ready
+        UserEvent mpi_trigger = legion_ready;
+        legion_ready = UserEvent::create_user_event();
+        // Reset the count for the next iteration
+        mpi_count = 0;
+        // Switch the state to being in Legion
+        state = IN_LEGION;
+        // Now tell all the Legion threads that we are ready
+        mpi_trigger.trigger();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::Impl::mpi_wait_on_legion(void)
+    //--------------------------------------------------------------------------
+    {
+      // Wait for mpi to be ready to run
+      // Note we use the external wait to be sure 
+      // we don't get drafted by the low-level runtime
+      mpi_ready.external_wait();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state == IN_MPI);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::Impl::legion_handoff_to_mpi(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state == IN_LEGION);
+#endif
+      const int count = __sync_add_and_fetch(&legion_count, 1);
+      if (count == legion_participants)
+      {
+        UserEvent legion_trigger = mpi_ready;
+        mpi_ready = UserEvent::create_user_event();
+        // Reset the count for the next iteration
+        legion_count = 0;
+        // Switch the state to being in MPI
+        state = IN_MPI;
+        // Now tell all the MPI threads that we are ready
+        legion_trigger.trigger();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::Impl::legion_wait_on_mpi(void)
+    //--------------------------------------------------------------------------
+    {
+      // Wait for Legion to be ready to run
+      // No need to avoid being drafted by the
+      // low-level runtime here
+      legion_ready.wait(false/*block*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state == IN_LEGION);
+#endif
+    }
+
+    /////////////////////////////////////////////////////////////
     // Processor Manager 
     /////////////////////////////////////////////////////////////
 
@@ -1551,18 +1667,13 @@ namespace LegionRuntime {
                                        unsigned width, unsigned def_mappers,
                                        bool no_steal, unsigned max_steals)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        utility_proc(proc.get_utility_processor()),
-        explicit_utility_proc(local_proc != utility_proc),
+        utility_proc(rt->find_utility_group()),
         superscalar_width(width), min_outstanding(min_out), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
-        current_pending(0), current_executing(false), 
-#ifdef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
-        idle_task_enabled(true), pending_dependence_analysis(false),
-#else
-        idle_task_enabled(true),
-#endif
+        next_local_index(0),
+        task_scheduler_enabled(false), pending_shutdown(false),
+        total_active_contexts(0),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
-        pending_gc_ops(0),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
             std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION)),
@@ -1575,22 +1686,25 @@ namespace LegionRuntime {
         ready_queues[idx].clear();
         outstanding_steal_requests[idx] = std::set<Processor>();
       }
-      this->idle_lock = Reservation::create_reservation();
       this->dependence_lock = Reservation::create_reservation();
+      this->local_queue_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
-      this->gc_lock = Reservation::create_reservation();
       this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
+      context_states.resize(MAX_CONTEXTS);
+      dependence_preconditions.resize(MAX_CONTEXTS, Event::NO_EVENT);
+      local_scheduler_preconditions.resize(superscalar_width, Event::NO_EVENT);
     }
 
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
         proc_kind(Processor::LOC_PROC), utility_proc(Processor::NO_PROC),
-        explicit_utility_proc(false), superscalar_width(0), min_outstanding(0), 
-        stealing_disabled(false), max_outstanding_steals(0), 
-        current_pending(0), current_executing(false), idle_task_enabled(true)
+        superscalar_width(0), min_outstanding(0), 
+        stealing_disabled(false), max_outstanding_steals(0),next_local_index(0),
+        task_scheduler_enabled(false), pending_shutdown(false),
+        total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1616,17 +1730,13 @@ namespace LegionRuntime {
       }
       mapper_objects.clear();
       mapper_locks.clear();
-      dependence_queues.clear();
       ready_queues.clear();
-      local_ready_queue.clear();
-      idle_lock.destroy_reservation();
-      idle_lock = Reservation::NO_RESERVATION;
       dependence_lock.destroy_reservation();
       dependence_lock = Reservation::NO_RESERVATION;
+      local_queue_lock.destroy_reservation();
+      local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
       queue_lock = Reservation::NO_RESERVATION;
-      gc_lock.destroy_reservation();
-      gc_lock = Reservation::NO_RESERVATION;
       message_lock.destroy_reservation();
       message_lock = Reservation::NO_RESERVATION;
       stealing_lock.destroy_reservation();
@@ -2193,106 +2303,101 @@ namespace LegionRuntime {
         free(it->message);
       }
       messages.clear();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void ProcessorManager::perform_scheduling(void)
     //--------------------------------------------------------------------------
     {
-      // Do things in the order that they can impact
-      // each other so that changes can propagate as
-      // quickly as possible.  For operation keep track
-      // of whether there is still work to be done.
-      bool disable = true;
-#ifdef DYNAMIC_TESTS
-      // If we're doing dynamic tests, do them first
-      if (Runtime::dynamic_independence_tests)
+      perform_mapping_operations(); 
+      // Now re-take the lock and re-check the condition to see 
+      // if the next scheduling task should be launched
+      AutoLock q_lock(queue_lock);
+      if (!pending_shutdown && (total_active_contexts > 0))
       {
-        bool more_tests = runtime->perform_dynamic_independence_tests();
-        disable = disable && !more_tests;
+        task_scheduler_enabled = true;
+        launch_task_scheduler();
       }
+      else
+        task_scheduler_enabled = false; 
+    } 
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::launch_task_scheduler(void)
+    //--------------------------------------------------------------------------
+    {
+      SchedulerArgs sched_args;
+      sched_args.hlr_id = HLR_SCHEDULER_ID;
+      sched_args.proc = local_proc;
+      utility_proc.spawn(HLR_TASK_ID, &sched_args, sizeof(sched_args));
+    } 
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::notify_pending_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock q_lock(queue_lock);
+      pending_shutdown = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::activate_context(SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+      ContextID ctx_id = context->get_context_id();
+      // We can do this without holding the lock because we know
+      // the size of this vector is fixed
+      ContextState &state = context_states[ctx_id];
+      AutoLock q_lock(queue_lock); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!state.active);
 #endif
-      // Then do dependence analysis
-      bool more_dependences = perform_dependence_checks();
-      disable = disable && !more_dependences;
-      // Do any other operations next
-      bool more_ops = perform_other_operations();
-      disable = disable && !more_ops;
-      // Perform any mapping operations
-      perform_mapping_operations();
-      // Issue any garbage collection operations
-      bool more_gc = perform_gc_epoch();
-      disable = disable && !more_gc;
+      state.active = true;
+      if (state.owned_tasks > 0)
+        increment_active_contexts();
+    }
 
-      // Lastly we need to check to see if we should
-      // disable the idle task.  Hold the idle lock
-      // and check to see if we have enough outstanding
-      // work on the processor.
-      if (disable)
+    //--------------------------------------------------------------------------
+    void ProcessorManager::deactivate_context(SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+      ContextID ctx_id = context->get_context_id();
+      // We can do this without holding the lock because we know
+      // the size of this vector is fixed
+      ContextState &state = context_states[ctx_id];
+      AutoLock q_lock(queue_lock); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state.active);
+#endif
+      state.active = false;
+      if (state.owned_tasks > 0)
+        decrement_active_contexts();
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::increment_active_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the queue lock
+      if ((total_active_contexts == 0) && !task_scheduler_enabled)
       {
-        // Clearly if we're here the idle task is enabled
-        AutoLock i_lock(idle_lock);
-        // The condition for shutting down the idle task
-        // is as follows:
-        // We have no dependence analyses to perform
-        //   AND
-        // We have nothing left in our gc epoch queue
-        //   AND
-        // We have nothing in our local ready queue
-        //   AND
-        // (( We have enough pending tasks 
-        //      AND
-        //    We have a currently executing task)
-        //      OR
-        //   We have nothing in mapper ready queues )
-
-        // Check to see if the dependence queue is empty
-        AutoLock d_lock(dependence_lock);
-        bool all_empty = true;
-        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
-        {
-          if (!dependence_queues[idx].queue.empty())
-          {
-            all_empty = false;
-            break;
-          }
-        }
-        if (all_empty)
-        {
-          AutoLock gc(gc_lock);
-          if (gc_epoch_events.empty())
-          {
-            AutoLock q_lock(queue_lock);
-            if (local_ready_queue.empty())
-            {
-              // Now check to see either we have enough pending
-              // or if we have nothing in our ready queues
-              if (current_executing && (current_pending >= min_outstanding))
-              {
-                idle_task_enabled = false;
-                Processor copy = local_proc;
-                copy.disable_idle_task();
-              }
-              else
-              {
-                // Check to see if the ready queues are empty 
-                for (unsigned idx = 0; all_empty &&
-                      (idx < ready_queues.size()); idx++)
-                {
-                  if (!ready_queues[idx].empty())
-                    all_empty = false;
-                }
-                if (all_empty)
-                {
-                  idle_task_enabled = false;
-                  Processor copy = local_proc;
-                  copy.disable_idle_task();
-                }
-              }
-            }
-          }
-        }
+        task_scheduler_enabled = true;
+        launch_task_scheduler();
       }
+      total_active_contexts++;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::decrement_active_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      // Better be called while holding the queue lock
+#ifdef DEBUG_HIGH_LEVEL
+      assert(total_active_contexts > 0);
+#endif
+      total_active_contexts--;
+      if (total_active_contexts == 0)
+        task_scheduler_enabled = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2365,7 +2470,19 @@ namespace LegionRuntime {
               }
             }
             if (found)
+            {
               temp_stolen.push_back(target);
+              // Wait until we are no longer holding the lock
+              // to mark that this is no longer an outstanding task
+              ContextID ctx_id = target->get_parent()->get_context_id();
+              ContextState &state = context_states[ctx_id];
+#ifdef DEBUG_HIGH_LEVEL
+              assert(state.owned_tasks > 0);
+#endif
+              state.owned_tasks--;
+              if (state.active && (state.owned_tasks == 0))
+                decrement_active_contexts();
+            }
           }
         }
         // Now see if we can actually steal the task, if not
@@ -2379,14 +2496,20 @@ namespace LegionRuntime {
             temp_stolen[idx]->mark_stolen(thief);
             stolen.insert(temp_stolen[idx]);
             successful_steal = true;
+            temp_stolen[idx]->deactivate_outstanding_task();
           }
           else
           {
             // Always set this before putting anything on
             // the ready queue
             temp_stolen[idx]->schedule = false;
+            ContextID ctx_id = temp_stolen[idx]->get_parent()->get_context_id();
+            ContextState &state = context_states[ctx_id];
             AutoLock q_lock(queue_lock);
             ready_queues[stealer].push_front(temp_stolen[idx]);
+            if (state.active && (state.owned_tasks == 0))
+              increment_active_contexts();
+            state.owned_tasks++;
           }
         }
 
@@ -2427,59 +2550,11 @@ namespace LegionRuntime {
       }
       // Do a one time enabling of the scheduler so we can try
       // asking any of the mappers if they would like to try stealing again
-      AutoLock i_lock(idle_lock);
-      if (!idle_task_enabled)
+      AutoLock q_lock(queue_lock);
+      if (!task_scheduler_enabled)
       {
-        idle_task_enabled = true;
-        Processor copy = local_proc;
-        copy.enable_idle_task();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::increment_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(idle_lock);
-      current_pending++;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::decrement_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(idle_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(current_pending > 0);
-#endif
-      current_pending--;
-      if (!idle_task_enabled)
-      {
-        idle_task_enabled = true;
-        Processor copy = local_proc;
-        copy.enable_idle_task();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::start_execution(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(idle_lock);
-      current_executing = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::pause_execution(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(idle_lock);
-      current_executing = false;
-      if (!idle_task_enabled)
-      {
-        idle_task_enabled = true;
-        Processor copy = local_proc;
-        copy.enable_idle_task();
+        task_scheduler_enabled = true;
+        launch_task_scheduler();
       }
     }
 
@@ -2490,61 +2565,41 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(op != NULL);
 #endif
-      {
-        const unsigned depth = op->get_operation_depth();
-        AutoLock d_lock(dependence_lock);
-        // Check to see if we need to add new levels to the dependence queue
-        if (depth >= dependence_queues.size())
-        {
-          // Add levels
-          for (unsigned idx = dependence_queues.size();
-                idx <= depth; idx++)
-          {
-            dependence_queues.push_back(DependenceQueue());
-          }
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(depth < dependence_queues.size());
-#endif
-        dependence_queues[depth].queue.push_back(op);
-      }
-      {
-        AutoLock i_lock(idle_lock);
-        if (!idle_task_enabled)
-        {
-          idle_task_enabled = true;
-          Processor copy = local_proc;
-          copy.enable_idle_task();
-        }
-      }
+      DeferredTriggerArgs args;
+      args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
+      args.manager = this;
+      args.op = op;
+      ContextID ctx_id = op->get_parent()->get_context_id();
+      AutoLock d_lock(dependence_lock);
+      Event next = utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
+                                      dependence_preconditions[ctx_id]);
+      dependence_preconditions[ctx_id] = next;
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_ready_queue(TaskOp *op, bool prev_failure)
+    void ProcessorManager::add_to_ready_queue(TaskOp *task, bool prev_failure)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(op != NULL);
-      assert(op->map_id <= ready_queues.size());
+      assert(task != NULL);
+      assert(task->map_id <= ready_queues.size());
 #endif
       // always set this before putting something on the ready queue
-      op->schedule = false; 
-      {
-        AutoLock q_lock(queue_lock);
-        if (prev_failure)
-          ready_queues[op->map_id].push_front(op);
-        else
-          ready_queues[op->map_id].push_back(op);
-      }
-      {
-        AutoLock i_lock(idle_lock);
-        if (!idle_task_enabled)
-        {
-          idle_task_enabled = true;
-          Processor copy = local_proc;
-          copy.enable_idle_task();
-        }
-      }
+      task->schedule = false; 
+      // have to do this when we are not holding the lock
+      task->activate_outstanding_task();
+      // We can do this without holding the lock because the
+      // vector is of a fixed size
+      ContextID ctx_id = task->get_parent()->get_context_id();
+      ContextState &state = context_states[ctx_id];
+      AutoLock q_lock(queue_lock);
+      if (prev_failure)
+        ready_queues[task->map_id].push_front(task);
+      else
+        ready_queues[task->map_id].push_back(task);
+      if (state.active && (state.owned_tasks == 0))
+        increment_active_contexts();
+      state.owned_tasks++;
     }
 
     //--------------------------------------------------------------------------
@@ -2555,87 +2610,21 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(op != NULL);
 #endif
+      TriggerOpArgs args;
+      args.hlr_id = HLR_TRIGGER_OP_ID;
+      args.manager = this;
+      args.op = op;
+      if (!prev_failure)
       {
-        AutoLock q_lock(queue_lock);
-        if (prev_failure)
-          local_ready_queue.push_front(op);
-        else
-          local_ready_queue.push_back(op);
+        AutoLock l_lock(local_queue_lock); 
+        Event next = utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
+                              local_scheduler_preconditions[next_local_index]);
+        local_scheduler_preconditions[next_local_index++] = next;
+        if (next_local_index == superscalar_width)
+          next_local_index = 0;
       }
-      {
-        AutoLock i_lock(idle_lock);
-        if (!idle_task_enabled)
-        {
-          idle_task_enabled = true;
-          Processor copy = local_proc;
-          copy.enable_idle_task();
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    Event ProcessorManager::find_gc_epoch_event(void)
-    //--------------------------------------------------------------------------
-    {
-      Event result = Event::NO_EVENT;
-      if (!pending_shutdown)
-      {
-        AutoLock gc(gc_lock);
-        // check again after we hold the lock to make 
-        // sure we didn't lose the race
-        if (!pending_shutdown)
-        {
-          // See if we need to start a new GC epoch
-          if (gc_epoch_events.empty() || (pending_gc_ops == superscalar_width))
-          {
-            gc_epoch_events.push_back(UserEvent::create_user_event());
-            pending_gc_ops = 0;
-          }
-          pending_gc_ops++;
-          result = gc_epoch_events.back();
-        }
-      }
-      AutoLock i_lock(idle_lock);
-      if (!idle_task_enabled)
-      {
-        idle_task_enabled = true;
-        Processor copy = local_proc;
-        copy.enable_idle_task();
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::notify_pending_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-      // Trigger all our pending gc epochs
-      std::deque<UserEvent> to_trigger;
-      {
-        AutoLock gc(gc_lock);
-        pending_shutdown = true;
-        to_trigger = gc_epoch_events;
-        gc_epoch_events.clear();
-      }
-      for (std::deque<UserEvent>::const_iterator it = to_trigger.begin();
-            it != to_trigger.end(); it++)
-      {
-        it->trigger();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::sample_current_executing(void)
-    //--------------------------------------------------------------------------
-    {
-      return current_executing;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned ProcessorManager::sample_current_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      return current_pending;
+      else
+        utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
     }
 
     //--------------------------------------------------------------------------
@@ -2670,150 +2659,6 @@ namespace LegionRuntime {
       fflush(target);
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::perform_dependence_checks(void)
-    //--------------------------------------------------------------------------
-    {
-#ifndef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
-      bool remaining_ops = false;
-      // Quick check without holding the lock
-      AutoLock d_lock(dependence_lock);
-      // An important optimization here is that we always pull
-      // elements off the deeper queues first which optimizes
-      // for a depth-first traversal of the task/operation tree.
-      unsigned handled_ops = 0;
-      DeferredTriggerArgs deferred_trigger_args;
-      deferred_trigger_args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
-      for (int idx = int(dependence_queues.size())-1;
-            idx >= 0; idx--)
-      {
-        Event prev_event = dependence_queues[idx].last_event;
-        std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
-        while ((handled_ops < superscalar_width) &&
-                !current_queue.empty())
-        {
-          deferred_trigger_args.op = current_queue.front(); 
-          prev_event = utility_proc.spawn(HLR_TASK_ID, &deferred_trigger_args,
-                                    sizeof(deferred_trigger_args), prev_event);
-          current_queue.pop_front();
-          handled_ops++;
-        }
-        dependence_queues[idx].last_event = prev_event;
-        remaining_ops = remaining_ops || !current_queue.empty();
-        // If we know we have remaining ops and we've
-        // got all the ops we need, then we can break
-        if ((handled_ops == superscalar_width) && remaining_ops)
-          break;
-      }
-      return remaining_ops;
-#else
-      std::vector<Operation*> ops;
-      bool remaining_ops = false;
-      bool return_analysis_hold = false;
-      // Quick check without holding the lock
-      if (!pending_dependence_analysis)
-      {
-        AutoLock d_lock(dependence_lock);
-        // Recheck after taking the lock
-        // to avoid losing the race
-        if (!pending_dependence_analysis)
-        {
-          // Very important to mark that no one else can
-          // do dependence analysis while we are have
-          // things that still need dependence analysis
-          pending_dependence_analysis = true;
-          return_analysis_hold = true;
-          // An important optimization here is that we always pull
-          // elements off the deeper queues first which optimizes
-          // for a depth-first traversal of the task/operation tree.
-          unsigned handled_ops = 0;
-          for (int idx = int(dependence_queues.size())-1;
-                idx >= 0; idx--)
-          {
-            std::deque<Operation*> &current_queue = dependence_queues[idx].queue;
-            while ((handled_ops < superscalar_width) &&
-                    !current_queue.empty())
-            {
-              ops.push_back(current_queue.front());
-              current_queue.pop_front();
-              handled_ops++;
-            }
-            remaining_ops = remaining_ops || !current_queue.empty();
-            // If we know we have remaining ops and we've
-            // got all the ops we need, then we can break
-            if ((handled_ops == superscalar_width) && remaining_ops)
-              break;
-          }
-        }
-      }
-      else
-      {
-        AutoLock d_lock(dependence_lock,1,false);
-        for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
-        {
-          if (!dependence_queues[idx].queue.empty())
-            return true;
-        }
-        return false;
-      } 
-
-      // Perform the dependence analysis for each of the operations
-      for (unsigned idx = 0; idx < ops.size(); idx++)
-      {
-        ops[idx]->trigger_dependence_analysis();
-      }
-      if (return_analysis_hold)
-      {
-        AutoLock d_lock(dependence_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(pending_dependence_analysis);
-#endif
-        pending_dependence_analysis = false;
-      }
-      return remaining_ops;
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::perform_other_operations(void)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<Operation*> ops;
-      bool remaining_ops;
-      {
-        AutoLock q_lock(queue_lock,0,true/*exclusive*/);
-        for (unsigned idx = 0; (idx < superscalar_width) && 
-              !local_ready_queue.empty(); idx++)
-        {
-          ops.push_back(local_ready_queue.front());
-          local_ready_queue.pop_front();
-        }
-        remaining_ops = !local_ready_queue.empty();
-      }
-
-      // Ask the operations to issue their mapping tasks onto
-      // the utility processor
-      for (unsigned idx = 0; idx < ops.size(); idx++)
-      {
-        TriggerOpArgs args;
-        args.hlr_id = HLR_TRIGGER_OP_ID;
-        args.op = ops[idx];
-        args.manager = this;
-        utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
-#if 0
-        bool mapped = ops[idx]->trigger_execution();
-        if (!mapped)
-        {
-          // If we failed to perform the operation
-          // then put it back on the queue
-          AutoLock q_lock(queue_lock);
-          local_ready_queue.push_front(ops[idx]);
-        }
-#endif
-      }
-      return remaining_ops;
-    }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
@@ -2911,7 +2756,19 @@ namespace LegionRuntime {
                 vis_it = visible_tasks.erase(vis_it);
               }
               else
+              {
+                // Wait until we are not holding the queue lock
+                // to mark that this task is no longer outstanding
+                ContextID ctx_id = (*vis_it)->get_parent()->get_context_id(); 
+                ContextState &state = context_states[ctx_id];
+#ifdef DEBUG_HIGH_LEVEL
+                assert(state.owned_tasks > 0);
+#endif
+                state.owned_tasks--;
+                if (state.active && (state.owned_tasks == 0))
+                  decrement_active_contexts();
                 vis_it++;
+              }
             }
             else
             {
@@ -2925,6 +2782,9 @@ namespace LegionRuntime {
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
+        TriggerTaskArgs args;
+        args.hlr_id = HLR_TRIGGER_TASK_ID;
+        args.manager = this;
         for (std::list<TaskOp*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -2932,18 +2792,23 @@ namespace LegionRuntime {
           // ask it what it wants to do
           if ((*vis_it)->schedule || ((*vis_it)->target_proc != local_proc))
           {
+            // If we made it in here then we have definitely
+            // pulled the task off of the ready queue
+            (*vis_it)->deactivate_outstanding_task();
             bool defer = (*vis_it)->defer_mapping();
             // If the task elected to defer itself or opted to
             // not map then it is responsible for putting
             // itself back on the list of tasks to map.
             if (defer)
               continue;
-            TriggerTaskArgs args;
-            args.hlr_id = HLR_TRIGGER_TASK_ID;
-            args.op = *vis_it;
-            args.manager = this;
+            // We give a slight priority to triggering the execution
+            // of tasks relative to other runtime operations because
+            // they actually have a feedback mechanism controlling
+            // how far they get ahead.  We give a slight edge in priority
+            // to tasks being sent remotely to get them in flight.
             // Give priority to things which are getting sent remotely
-            int priority = ((*vis_it)->target_proc != local_proc) ? 1 : 0;
+            args.op = *vis_it;
+            int priority = ((*vis_it)->target_proc != local_proc) ? 2 : 1;
             utility_proc.spawn(HLR_TASK_ID, &args, sizeof(args),
                                Event::NO_EVENT, priority);
             continue;
@@ -2956,8 +2821,13 @@ namespace LegionRuntime {
           // Otherwise if we make it here, then we didn't map it and we
           // didn't send it so put it back on the ready queue
           (*vis_it)->schedule = false;
+          ContextID ctx_id = (*vis_it)->get_parent()->get_context_id();
+          ContextState &state = context_states[ctx_id];
           AutoLock q_lock(queue_lock);
           ready_queues[map_id].push_front(*vis_it);
+          if (state.active && (state.owned_tasks == 0))
+            increment_active_contexts();
+          state.owned_tasks++;
         }
       }
 
@@ -2974,48 +2844,6 @@ namespace LegionRuntime {
       // Finally issue any steal requeusts
       if (!stealing_disabled && !stealing_targets.empty())
         runtime->send_steal_request(stealing_targets, local_proc);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::perform_gc_epoch(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(idle_lock);
-      AutoLock gc(gc_lock);
-      // Handle the quick out
-      if (gc_epoch_events.empty())
-        return false;
-      // Only issue a garbage collection epoch if we have enough
-      // tasks in flight on our processor
-      bool trigger_gc_epoch = false;
-      if (current_executing && (current_pending >= min_outstanding))
-      {
-        trigger_gc_epoch = true;
-      }
-      else
-      {
-        AutoLock q_lock(queue_lock);
-        if (local_ready_queue.empty())
-        {
-          bool all_empty = true;
-          for (unsigned idx = 0; idx < ready_queues.size(); idx++)
-          {
-            if (!ready_queues[idx].empty())
-            {
-              all_empty = false;
-              break;
-            }
-          }
-          trigger_gc_epoch = all_empty;
-        }
-      }
-      if (trigger_gc_epoch && !gc_epoch_events.empty())
-      {
-        UserEvent gc_epoch_event = gc_epoch_events.front();
-        gc_epoch_event.trigger();
-        gc_epoch_events.pop_front();
-      }
-      return !gc_epoch_events.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -3163,7 +2991,7 @@ namespace LegionRuntime {
       }
       // If we are reclaiming it, remove our resource reference
       if (reclaim && instance->remove_resource_reference())
-        delete instance;
+        legion_delete(instance);
       return reclaim;
     }
 
@@ -3202,7 +3030,7 @@ namespace LegionRuntime {
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
         if (to_recycle->remove_resource_reference())
-          delete to_recycle;
+          legion_delete(to_recycle);
         return result;
       }
       return PhysicalInstance::NO_INST;
@@ -3241,7 +3069,7 @@ namespace LegionRuntime {
         use_event = to_recycle->get_recycle_event();
         // Remove our resource reference
         if (to_recycle->remove_resource_reference())
-          delete to_recycle;
+          legion_delete(to_recycle);
         return result;
       }
       return PhysicalInstance::NO_INST;
@@ -3285,7 +3113,8 @@ namespace LegionRuntime {
     {
       send_lock = Reservation::create_reservation();
       receiving_buffer_size = max_message_size;
-      receiving_buffer = (char*)malloc(receiving_buffer_size);
+      receiving_buffer = (char*)legion_malloc(MESSAGE_BUFFER_ALLOC,
+                                              receiving_buffer_size);
 #ifdef DEBUG_HIGH_LEVEL
       assert(sending_buffer != NULL);
       assert(receiving_buffer != NULL);
@@ -4216,13 +4045,16 @@ namespace LegionRuntime {
       {
         // Figure out what the new size should be
         // Keep doubling until it's larger
-        while (receiving_buffer_size < (receiving_index+arglen))
-          receiving_buffer_size *= 2;
+        size_t new_buffer_size = receiving_buffer_size;
+        while (new_buffer_size < (receiving_index+arglen))
+          new_buffer_size *= 2;
 #ifdef DEBUG_HIGH_LEVEL
-        assert(receiving_buffer_size != 0); // would cause deallocation
+        assert(new_buffer_size != 0); // would cause deallocation
 #endif
         // Now realloc the memory
-        void *new_ptr = realloc(receiving_buffer,receiving_buffer_size);
+        void *new_ptr = legion_realloc(MESSAGE_BUFFER_ALLOC, receiving_buffer,
+                                       receiving_buffer_size, new_buffer_size);
+        receiving_buffer_size = new_buffer_size;
 #ifdef DEBUG_HIGH_LEVEL
         assert(new_ptr != NULL);
 #endif
@@ -4232,6 +4064,100 @@ namespace LegionRuntime {
       memcpy(receiving_buffer+receiving_index,args,arglen);
       receiving_index += arglen;
     }
+
+    /////////////////////////////////////////////////////////////
+    // Garbage Collection Epoch 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GarbageCollectionEpoch::GarbageCollectionEpoch(Runtime *rt)
+      : runtime(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    GarbageCollectionEpoch::GarbageCollectionEpoch(
+                                              const GarbageCollectionEpoch &rhs)
+      : runtime(rhs.runtime)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    GarbageCollectionEpoch::~GarbageCollectionEpoch(void)
+    //--------------------------------------------------------------------------
+    {
+      runtime->complete_gc_epoch(this);
+    }
+
+    //--------------------------------------------------------------------------
+    GarbageCollectionEpoch& GarbageCollectionEpoch::operator=(
+                                              const GarbageCollectionEpoch &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void GarbageCollectionEpoch::add_collection(LogicalView *view, Event term)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LogicalView*,std::set<Event> >::iterator finder = 
+        collections.find(view);
+      if (finder == collections.end())
+      {
+        // Add a garbage collection reference to the view, it will
+        // be removed in LogicalView::handle_deferred_collect
+        view->add_gc_reference();
+        collections[view].insert(term);
+      }
+      else
+        finder->second.insert(term);
+    }
+
+    //--------------------------------------------------------------------------
+    void GarbageCollectionEpoch::launch(Processor utility, int priority)
+    //--------------------------------------------------------------------------
+    {
+      // Set remaining to the total number of collections
+      remaining = collections.size();
+      GarbageCollectionArgs args;
+      args.hlr_id = HLR_DEFERRED_COLLECT_ID;
+      args.epoch = this;
+      for (std::map<LogicalView*,std::set<Event> >::const_iterator it =
+            collections.begin(); it != collections.end(); /*nothing*/)
+      {
+        args.view = it->first;
+        Event precondition = Event::merge_events(it->second);
+        // Avoid the deletion race by testing the condition 
+        // before launching the task
+        it++;
+        bool done = (it == collections.end());
+        utility.spawn(HLR_TASK_ID, &args, sizeof(args), precondition, priority);
+        if (done)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool GarbageCollectionEpoch::handle_collection(
+                                              const GarbageCollectionArgs *args)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LogicalView*,std::set<Event> >::iterator finder = 
+        collections.find(args->view);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != collections.end());
+#endif
+      LogicalView::handle_deferred_collect(args->view, finder->second);
+      // See if we are done
+      return (__sync_add_and_fetch(&remaining, -1) == 0);
+    }
     
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
@@ -4240,6 +4166,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Runtime::Runtime(Machine *m, AddressSpaceID unique,
                      const std::set<Processor> &locals,
+                     const std::set<Processor> &local_utils,
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      Processor cleanup, Processor gc, Processor message)
@@ -4258,9 +4185,11 @@ namespace LegionRuntime {
         unique_field_id((unique == 0) ? runtime_stride : unique),
         mapper_info_lock(Reservation::create_reservation()),
         available_lock(Reservation::create_reservation()), total_contexts(0),
+        group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
         distributed_collectable_lock(Reservation::create_reservation()),
         hierarchical_collectable_lock(Reservation::create_reservation()),
+        gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         future_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         remote_lock(Reservation::create_reservation()),
@@ -4347,6 +4276,31 @@ namespace LegionRuntime {
         } 
       }
 #endif
+      // Construct a local utility processor group
+      if (local_utils.empty())
+      {
+        // make the utility group the set of all the local processors
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!locals.empty());
+#endif
+        if (locals.size() == 1)
+          utility_group = *(locals.begin());
+        else
+        {
+          std::vector<Processor> util_group(locals.begin(), locals.end());
+          utility_group = Processor::create_group(util_group);
+        }
+      }
+      else if (local_utils.size() == 1)
+        utility_group = *(local_utils.begin());
+      else
+      {
+        std::vector<Processor> util_g(local_utils.begin(), local_utils.end());
+        utility_group = Processor::create_group(util_g);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(utility_group.exists());
+#endif
  
       // For each of the processors in our local set, construct a manager
       for (std::set<Processor>::const_iterator it = local_procs.begin();
@@ -4363,9 +4317,6 @@ namespace LegionRuntime {
                                     stealing_disabled,
                                     machine->get_all_processors().size()-1);
         proc_managers[*it] = manager;
-        // See if we have a utility processor for this manager
-        if (manager->explicit_utility_proc)
-          utility_managers[manager->utility_proc] = manager;
         manager->add_mapper(0, new DefaultMapper(machine, high_level, *it),
                             false/*needs check*/);
       }
@@ -4399,6 +4350,9 @@ namespace LegionRuntime {
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
       }
+      // Create our first GC epoch
+      current_gc_epoch = new GarbageCollectionEpoch(this);
+      pending_gc_epochs.insert(current_gc_epoch);
 
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
@@ -4411,6 +4365,13 @@ namespace LegionRuntime {
       } else {
 	tree_state_logger = NULL;
       }
+#endif
+#ifdef TRACE_ALLOCATION
+      allocation_lock = Reservation::create_reservation(); 
+      allocation_tracing_count = 0;
+      // Instantiate all the kinds of allocations
+      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
+        allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
 
       // Before launching the top level task, see if the user requested
@@ -4494,12 +4455,16 @@ namespace LegionRuntime {
       mapper_info_lock = Reservation::NO_RESERVATION;
       available_lock.destroy_reservation();
       available_lock = Reservation::NO_RESERVATION;
+      group_lock.destroy_reservation();
+      group_lock = Reservation::NO_RESERVATION;
       distributed_id_lock.destroy_reservation();
       distributed_id_lock = Reservation::NO_RESERVATION;
       distributed_collectable_lock.destroy_reservation();
       distributed_collectable_lock = Reservation::NO_RESERVATION;
       hierarchical_collectable_lock.destroy_reservation();
       hierarchical_collectable_lock = Reservation::NO_RESERVATION;
+      gc_epoch_lock.destroy_reservation();
+      gc_epoch_lock = Reservation::NO_RESERVATION;
       future_lock.destroy_reservation();
       future_lock = Reservation::NO_RESERVATION;
       remote_lock.destroy_reservation();
@@ -4690,6 +4655,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
 	delete tree_state_logger;
+#endif
+#ifdef TRACE_ALLOCATION
+      allocation_lock.destroy_reservation();
+      allocation_lock = Reservation::NO_RESERVATION;
+      allocation_manager.clear();
 #endif
     }
 
@@ -6419,8 +6389,8 @@ namespace LegionRuntime {
     ArgumentMap Runtime::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
-      ArgumentMap::Impl *impl = new ArgumentMap::Impl(
-                                    new ArgumentMapStore());
+      ArgumentMap::Impl *impl = legion_new<ArgumentMap::Impl>(
+                                    legion_new<ArgumentMapStore>());
 #ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
@@ -6443,7 +6413,7 @@ namespace LegionRuntime {
           return launcher.predicate_false_future;
         }
         // Otherwise check to see if we have a value
-        Future::Impl *result = new Future::Impl(this, true/*register*/, 
+        Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -6515,7 +6485,7 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        FutureMap::Impl *result = new FutureMap::Impl(ctx, this);
+        FutureMap::Impl *result = legion_new<FutureMap::Impl>(ctx, this);
         if (launcher.predicate_false_future.impl != NULL)
         {
 #ifdef INORDER_EXECUTION
@@ -6550,9 +6520,7 @@ namespace LegionRuntime {
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            Processor exec_proc = ctx->get_executing_processor();
-            Processor util_proc = exec_proc.get_utility_processor();
-            util_proc.spawn(HLR_TASK_ID, &args, sizeof(args), ready_event);
+            utility_group.spawn(HLR_TASK_ID, &args, sizeof(args), ready_event);
           }
           return FutureMap(result);
         }
@@ -6640,7 +6608,7 @@ namespace LegionRuntime {
         if (launcher.predicate_false_future.impl != NULL)
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
-        Future::Impl *result = new Future::Impl(this, true/*register*/, 
+        Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/, 
               get_available_distributed_id(), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -6720,7 +6688,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, true/*register*/,
+        return Future(legion_new<Future::Impl>(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space));
       IndividualTask *task = get_available_individual_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6770,7 +6738,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
-        return FutureMap(new FutureMap::Impl(ctx,this));
+        return FutureMap(legion_new<FutureMap::Impl>(ctx,this));
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
@@ -6824,7 +6792,7 @@ namespace LegionRuntime {
     {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
-        return Future(new Future::Impl(this, true/*register*/,
+        return Future(legion_new<Future::Impl>(this, true/*register*/,
               get_available_distributed_id(), address_space, address_space));
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -7384,7 +7352,7 @@ namespace LegionRuntime {
                                           requests[idx].mode,
                                           requests[idx].exclusive);
       }
-      return Grant(new Grant::Impl(unpack_requests));
+      return Grant(legion_new<Grant::Impl>(unpack_requests));
     }
 
     //--------------------------------------------------------------------------
@@ -8192,30 +8160,6 @@ namespace LegionRuntime {
     {
       MemoryManager *manager = find_memory(mem);
       return manager->sample_allocated_instances();
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::sample_current_executing(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor,ProcessorManager*>::const_iterator finder = 
-        proc_managers.find(proc);
-      if (finder != proc_managers.end())
-        return finder->second->sample_current_executing();
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::sample_current_pending(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor,ProcessorManager*>::const_iterator finder = 
-        proc_managers.find(proc);
-      if (finder != proc_managers.end())
-        return finder->second->sample_current_pending();
-      else
-        return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -9340,9 +9284,13 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    void Runtime::process_schedule_request(Processor proc)
+    void Runtime::process_schedule_request(Processor proc, bool first/*=false*/)
     //--------------------------------------------------------------------------
     {
+      // If this is the first time through disable all further invocations
+      // of the idle task since we do our own scheduling calls
+      if (first)
+        proc.disable_idle_task();
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_procs.find(proc) != local_procs.end());
 #endif
@@ -9356,11 +9304,18 @@ namespace LegionRuntime {
       LegionProf::register_event(0/*unique id*/, PROF_BEGIN_SCHEDULER);
 #endif
       log_run(LEVEL_DEBUG,"Running scheduler on processor " IDFMT "", proc.id);
+#ifdef DYNAMIC_TESTS
+      // If we're doing dynamic tests, do them first
+      if (Runtime::dynamic_independence_tests)
+        perform_dynamic_independence_tests();
+#endif
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
-#ifdef DYNAMIC_TESTS
-      if (dynamic_independence_tests)
-        forest->perform_dynamic_tests(superscalar_width);
+#ifdef TRACE_ALLOCATION
+      unsigned long long trace_count = 
+        __sync_fetch_and_add(&allocation_tracing_count,1); 
+      if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
+        dump_allocation_info();
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Machine::get_executing_processor(),
@@ -9389,45 +9344,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::increment_pending(Processor proc)
+    void Runtime::activate_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->increment_pending();
+      for (std::map<Processor,ProcessorManager*>::const_iterator it =
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->activate_context(context);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::decrement_pending(Processor proc)
+    void Runtime::deactivate_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->decrement_pending();
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->deactivate_context(context);
+      }
     }
-
-    //--------------------------------------------------------------------------
-    void Runtime::start_execution(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->start_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::pause_execution(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->pause_execution();
-    }
-
+ 
     //--------------------------------------------------------------------------
     void Runtime::execute_task_launch(Context ctx, TaskOp *task)
     //--------------------------------------------------------------------------
@@ -9554,7 +9491,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      proc_managers[proc]->pause_execution();
+      // Don't do anything for now
     }
 
     //--------------------------------------------------------------------------
@@ -9564,7 +9501,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      proc_managers[proc]->start_execution();
+      // Don't do anything for now
     }
 
     //--------------------------------------------------------------------------
@@ -9776,6 +9713,46 @@ namespace LegionRuntime {
 #endif
       proc_managers[source]->defer_mapper_message(target, map_id, 
                                                   message, length);
+    }
+
+    //--------------------------------------------------------------------------
+    Processor Runtime::find_processor_group(const std::set<Processor> &procs)
+    //--------------------------------------------------------------------------
+    {
+      // Compute a hash of all the processor ids to avoid testing all sets 
+      // Only need to worry about local IDs since all processors are
+      // in this address space.
+      ProcessorMask local_mask;
+      for (std::set<Processor>::const_iterator it = procs.begin(); 
+            it != procs.end(); it++)
+      {
+        uint64_t local_id = it->local_id();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(local_id < MAX_NUM_PROCS);
+#endif
+        local_mask.set_bit(local_id);
+      }
+      uint64_t hash = local_mask.get_hash_key();
+      AutoLock g_lock(group_lock);
+      std::map<uint64_t,std::deque<ProcessorGroupInfo> >::iterator finder = 
+        processor_groups.find(hash);
+      if (finder != processor_groups.end())
+      {
+        for (std::deque<ProcessorGroupInfo>::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if (local_mask == it->processor_mask)
+            return it->processor_group;
+        }
+      }
+      // If we make it here create a new processor group and add it
+      std::vector<Processor> input_procs(procs.begin(), procs.end());
+      Processor group = Processor::create_group(input_procs);
+      if (finder != processor_groups.end())
+        finder->second.push_back(ProcessorGroupInfo(group, local_mask));
+      else
+        processor_groups[hash].push_back(ProcessorGroupInfo(group, local_mask));
+      return group;
     }
 
     //--------------------------------------------------------------------------
@@ -10017,7 +9994,7 @@ namespace LegionRuntime {
         local_futures.find(did);
       if (finder == local_futures.end())
       {
-        Future::Impl *result = new Future::Impl(this, false/*register*/,
+        Future::Impl *result = legion_new<Future::Impl>(this, false/*register*/,
                                                 did, owner_space, 
                                                 address_space);
         local_futures[did] = result;
@@ -10028,27 +10005,46 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event Runtime::find_gc_epoch_event(Processor local_proc)
+    void Runtime::defer_collect_user(LogicalView *view, Event term_event)
     //--------------------------------------------------------------------------
     {
-      // There are some special cases here with this call because
-      // the processor that is passed in here might not be a normal
-      // processor. They can also be utility processors or the explicit
-      // garbage collection processor.
+      GarbageCollectionEpoch *to_trigger = NULL;
+      {
+        AutoLock gc(gc_epoch_lock);
+        current_gc_epoch->add_collection(view, term_event);
+        gc_epoch_counter++;
+        if (gc_epoch_counter == Runtime::gc_epoch_size)
+        {
+          to_trigger = current_gc_epoch;
+          current_gc_epoch = new GarbageCollectionEpoch(this);
+          pending_gc_epochs.insert(current_gc_epoch);
+          gc_epoch_counter = 0;
+        }
+      }
+      if (to_trigger != NULL)
+      {
 #ifdef SPECIALIZED_UTIL_PROCS
-      // We should never be here if there is a dedicated gc processor
-      assert(false);
+        Processor util = get_gc_proc(Machine::get_executing_processor());
+#else
+        Processor util = find_utility_group();
 #endif
-      std::map<Processor,ProcessorManager*>::const_iterator finder = 
-        proc_managers.find(local_proc);
-      if (finder != proc_managers.end())
-        return finder->second->find_gc_epoch_event();
-      finder = utility_managers.find(local_proc);
-      if (finder != utility_managers.end())
-        return finder->second->find_gc_epoch_event();
-      // This should never happen
-      assert(false);
-      return Event::NO_EVENT;
+        to_trigger->launch(util, 0/*priority*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::complete_gc_epoch(GarbageCollectionEpoch *epoch)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_epoch_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      std::set<GarbageCollectionEpoch*>::iterator finder = 
+        pending_gc_epochs.find(epoch);
+      assert(finder != pending_gc_epochs.end());
+      pending_gc_epochs.erase(finder);
+#else
+      pending_gc_epochs.erase(epoch);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10057,12 +10053,20 @@ namespace LegionRuntime {
     {
       log_run(LEVEL_SPEW,"Computation has terminated. "
                          "Shutting down the Legion runtime...");
-      // First tell all our processor managers that we are done
+      // Tell all the processor managers that there is a pending shutdown
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
         it->second->notify_pending_shutdown();
       }
+      // Launch our last garbage collection epoch
+#ifdef SPECIALIZED_UTIL_PROCS
+      Processor util = get_gc_proc(Machine::get_executing_processor());
+#else
+      Processor util = find_utility_group();
+#endif
+      current_gc_epoch->launch(util, 0/*priority*/);
+      // Finally shutdown the low-level runtime
       machine->shutdown();
     }
 
@@ -10081,7 +10085,7 @@ namespace LegionRuntime {
       }
       // Couldn't find one so make a new one
       if (result == NULL)
-        result = new IndividualTask(this);
+        result = legion_new<IndividualTask>(this);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
@@ -10107,7 +10111,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new PointTask(this);
+        result = legion_new<PointTask>(this);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
@@ -10133,7 +10137,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new IndexTask(this);
+        result = legion_new<IndexTask>(this);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
@@ -10159,7 +10163,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new SliceTask(this);
+        result = legion_new<SliceTask>(this);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
@@ -10185,7 +10189,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new RemoteTask(this);
+        result = legion_new<RemoteTask>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10207,7 +10211,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new InlineTask(this);
+        result = legion_new<InlineTask>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10229,7 +10233,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new MapOp(this);
+        result = legion_new<MapOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10251,7 +10255,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new CopyOp(this);
+        result = legion_new<CopyOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10273,7 +10277,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new FenceOp(this);
+        result = legion_new<FenceOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10295,7 +10299,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new DeletionOp(this);
+        result = legion_new<DeletionOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10317,7 +10321,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new CloseOp(this);
+        result = legion_new<CloseOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10339,7 +10343,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new FuturePredOp(this);
+        result = legion_new<FuturePredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10361,7 +10365,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new NotPredOp(this);
+        result = legion_new<NotPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10383,7 +10387,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new AndPredOp(this);
+        result = legion_new<AndPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10405,7 +10409,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new OrPredOp(this);
+        result = legion_new<OrPredOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10427,7 +10431,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new AcquireOp(this);
+        result = legion_new<AcquireOp>(this);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       assert(result != NULL);
       {
@@ -10453,7 +10457,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new ReleaseOp(this);
+        result = legion_new<ReleaseOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10475,7 +10479,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new TraceCaptureOp(this);
+        result = legion_new<TraceCaptureOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10497,7 +10501,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new TraceCompleteOp(this);
+        result = legion_new<TraceCompleteOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10519,7 +10523,7 @@ namespace LegionRuntime {
         }
       }
       if (result == NULL)
-        result = new MustEpochOp(this);
+        result = legion_new<MustEpochOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -10876,7 +10880,7 @@ namespace LegionRuntime {
     Future Runtime::help_create_future(TaskOp *task /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new Future::Impl(this, true/*register*/,
+      return Future(legion_new<Future::Impl>(this, true/*register*/,
                                      get_available_distributed_id(),
                                      address_space, address_space, task));
     }
@@ -10901,6 +10905,235 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->perform_dynamic_tests(superscalar_width);
+    }
+#endif
+
+#ifdef TRACE_ALLOCATION 
+    //--------------------------------------------------------------------------
+    void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(allocation_lock);
+      std::map<AllocationType,AllocationTracker>::iterator finder = 
+        allocation_manager.find(type);
+      size_t alloc_size = size * elems;
+      finder->second.total_allocations += elems;
+      finder->second.total_bytes += alloc_size;
+      finder->second.diff_allocations += elems;
+      finder->second.diff_bytes += alloc_size;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::trace_free(AllocationType type, size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(allocation_lock);
+      std::map<AllocationType,AllocationTracker>::iterator finder = 
+        allocation_manager.find(type);
+      size_t free_size = size * elems;
+      finder->second.total_allocations -= elems;
+      finder->second.total_bytes -= free_size;
+      finder->second.diff_allocations -= elems;
+      finder->second.diff_bytes -= free_size;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::dump_allocation_info(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(allocation_lock);
+      for (std::map<AllocationType,AllocationTracker>::iterator it = 
+            allocation_manager.begin(); it != allocation_manager.end(); it++)
+      {
+        // Skip anything that is empty
+        if (it->second.total_allocations == 0)
+          continue;
+        // Skip anything that hasn't changed
+        if (it->second.diff_allocations == 0)
+          continue;
+        log_allocation(LEVEL_INFO,"%s on %d: "
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
+            get_allocation_name(it->first), address_space,
+            it->second.total_allocations, it->second.total_bytes,
+            it->second.diff_allocations, it->second.diff_bytes);
+        it->second.diff_allocations = 0;
+        it->second.diff_bytes = 0;
+      }
+      log_allocation(LEVEL_INFO,"");
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const char* Runtime::get_allocation_name(AllocationType type)
+    //--------------------------------------------------------------------------
+    {
+      switch (type)
+      {
+        case ARGUMENT_MAP_ALLOC:
+          return "Argument Map";
+        case ARGUMENT_MAP_STORE_ALLOC:
+          return "Argument Map Store";
+        case STORE_ARGUMENT_ALLOC:
+          return "Store Argument";
+        case MPI_HANDSHAKE_ALLOC:
+          return "MPI Handshake";
+        case GRANT_ALLOC:
+          return "Grant";
+        case FUTURE_ALLOC:
+          return "Future";
+        case FUTURE_MAP_ALLOC:
+          return "Future Map";
+        case PHYSICAL_REGION_ALLOC:
+          return "Physical Region";
+        case TRACE_ALLOC:
+          return "Trace";
+        case ALLOC_MANAGER_ALLOC:
+          return "Allocation Manager";
+        case ALLOC_INTERNAL_ALLOC:
+          return "Allocation Internal";
+        case TASK_ARGS_ALLOC:
+          return "Task Arguments";
+        case LOCAL_ARGS_ALLOC:
+          return "Local Arguments";
+        case REDUCTION_ALLOC:
+          return "Reduction Result"; 
+        case PREDICATE_ALLOC:
+          return "Default Predicate";
+        case FUTURE_RESULT_ALLOC:
+          return "Future Result";
+        case INSTANCE_MANAGER_ALLOC:
+          return "Instance Manager";
+        case LIST_MANAGER_ALLOC:
+          return "List Reduction Manager";
+        case FOLD_MANAGER_ALLOC:
+          return "Fold Reduction Manager";
+        case COMPOSITE_NODE_ALLOC:
+          return "Composite Node";
+        case TREE_CLOSE_ALLOC:
+          return "Tree Close List";
+        case TREE_CLOSE_IMPL_ALLOC:
+          return "Tree Close Impl";
+        case MATERIALIZED_VIEW_ALLOC:
+          return "Materialized View";
+        case REDUCTION_VIEW_ALLOC:
+          return "Reduction View";
+        case COMPOSITE_VIEW_ALLOC:
+          return "Composite View";
+        case INDIVIDUAL_TASK_ALLOC:
+          return "Individual Task";
+        case POINT_TASK_ALLOC:
+          return "Point Task";
+        case INDEX_TASK_ALLOC:
+          return "Index Task";
+        case SLICE_TASK_ALLOC:
+          return "Slice Task";
+        case REMOTE_TASK_ALLOC:
+          return "Remote Task";
+        case INLINE_TASK_ALLOC:
+          return "Inline Task";
+        case MAP_OP_ALLOC:
+          return "Map Op";
+        case COPY_OP_ALLOC:
+          return "Copy Op";
+        case FENCE_OP_ALLOC:
+          return "Fence Op";
+        case DELETION_OP_ALLOC:
+          return "Deletion Op";
+        case CLOSE_OP_ALLOC:
+          return "Close Op";
+        case FUTURE_PRED_OP_ALLOC:
+          return "Future Pred Op";
+        case NOT_PRED_OP_ALLOC:
+          return "Not Pred Op";
+        case AND_PRED_OP_ALLOC:
+          return "And Pred Op";
+        case OR_PRED_OP_ALLOC:
+          return "Or Pred Op";
+        case ACQUIRE_OP_ALLOC:
+          return "Acquire Op";
+        case RELEASE_OP_ALLOC:
+          return "Release Op";
+        case TRACE_CAPTURE_OP_ALLOC:
+          return "Trace Capture Op";
+        case TRACE_COMPLETE_OP_ALLOC:
+          return "Trace Complete Op";
+        case MUST_EPOCH_OP_ALLOC:
+          return "Must Epoch Op";
+        case MESSAGE_BUFFER_ALLOC:
+          return "Message Buffer";
+        case EXECUTING_CHILD_ALLOC:
+          return "Executing Children";
+        case EXECUTED_CHILD_ALLOC:
+          return "Executed Children";
+        case COMPLETE_CHILD_ALLOC:
+          return "Complete Children";
+        case PHYSICAL_MANAGER_ALLOC:
+          return "Physical Managers";
+        case LOGICAL_VIEW_ALLOC:
+          return "Logical Views";
+        case LOGICAL_FIELD_VERSIONS_ALLOC:
+          return "Logical Field Versions";
+        case LOGICAL_FIELD_STATE_ALLOC:
+          return "Logical Field States";
+        case CURR_LOGICAL_ALLOC:
+          return "Current Logical Users";
+        case PREV_LOGICAL_ALLOC:
+          return "Previous Logical Users";
+        case VALID_VIEW_ALLOC:
+          return "Valid Instance Views";
+        case VALID_REDUCTION_ALLOC:
+          return "Valid Reduction Views";
+        case PENDING_UPDATES_ALLOC:
+          return "Pending Updates";
+        case LAYOUT_DESCRIPTION_ALLOC:
+          return "Layout Description";
+        case CURR_PHYSICAL_ALLOC:
+          return "Current Physical Users";
+        case PREV_PHYSICAL_ALLOC:
+          return "Previous Physical Users";
+        case EVENT_REFERENCE_ALLOC:
+          return "Instance Event References";
+        case PHYSICAL_VERSION_ALLOC:
+          return "Physical Versions";
+        case MEMORY_INSTANCES_ALLOC:
+          return "Memory Manager Instances";
+        case MEMORY_REDUCTION_ALLOC:
+          return "Memory Manager Reductions";
+        case MEMORY_AVAILABLE_ALLOC:
+          return "Memory Manager Available";
+        case PROCESSOR_GROUP_ALLOC:
+          return "Processor Groups";
+        case RUNTIME_DISTRIBUTED_ALLOC:
+          return "Runtime Distributed IDs";
+        case RUNTIME_DIST_COLLECT_ALLOC:
+          return "Distributed Collectables";
+        case RUNTIME_HIER_COLLECT_ALLOC:
+          return "Hierarchical Collectables";
+        case RUNTIME_GC_EPOCH_ALLOC:
+          return "Runtime Garbage Collection Epochs";
+        case RUNTIME_FUTURE_ALLOC:
+          return "Runtime Futures";
+        case RUNTIME_REMOTE_ALLOC:
+          return "Runtime Remote Contexts";
+        case TASK_INSTANCE_REGION_ALLOC:
+          return "Task Physical Instances";
+        case TASK_LOCAL_REGION_ALLOC:
+          return "Task Local Regions";
+        case TASK_INLINE_REGION_ALLOC:
+          return "Task Inline Regions";
+        case TASK_TRACES_ALLOC:
+          return "Task Traces";
+        case TASK_RESERVATION_ALLOC:
+          return "Task Reservations";
+        case TASK_BARRIER_ALLOC:
+          return "Task Barriers";
+        case TASK_LOCAL_FIELD_ALLOC:
+          return "Task Local Fields";
+        case TASK_INLINE_ALLOC:
+          return "Task Inline Tasks";
+        default:
+          assert(false); // should never get here
+      }
+      return NULL;
     }
 #endif
 
@@ -11155,6 +11388,8 @@ namespace LegionRuntime {
                                       DEFAULT_MAX_MESSAGE_SIZE;
     /*static*/ unsigned Runtime::max_filter_size = 
                                       DEFAULT_MAX_FILTER_SIZE;
+    /*static*/ unsigned Runtime::gc_epoch_size = 
+                                      DEFAULT_GC_EPOCH_SIZE;
     /*static*/ bool Runtime::enable_imprecise_filter = false;
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
@@ -11256,6 +11491,7 @@ namespace LegionRuntime {
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         max_filter_size = DEFAULT_MAX_FILTER_SIZE;
+        gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
 #endif
@@ -11289,6 +11525,7 @@ namespace LegionRuntime {
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
           INT_ARG("-hl:filter", max_filter_size);
+          INT_ARG("-hl:epoch", gc_epoch_size);
 #ifdef DYNAMIC_TESTS
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
@@ -12069,6 +12306,14 @@ namespace LegionRuntime {
         AddressSpaceID local_space_id = 0;
         if (separate_runtime_instances)
         {
+#ifdef TRACE_ALLOCATION
+          log_run(LEVEL_ERROR,"Memory tracing not supported with "
+                              "separate runtime instances.");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_TRACING_ALLOCATION_WITH_SEPARATE);
+#endif
           // If we are doing separate runtime instances then each
           // processor effectively gets its own address space
           local_procs.insert(p);
@@ -12167,7 +12412,8 @@ namespace LegionRuntime {
                                                message_proc);
 #endif
         // Set up the runtime mask for this instance
-        Runtime *local_rt = new Runtime(machine, local_space_id, local_procs,
+        Runtime *local_rt = new Runtime(machine, local_space_id, 
+                                        local_procs, local_util_procs,
                                         address_spaces, proc_spaces,
                                         cleanup_proc, gc_proc, message_proc);
         // Now set up the runtime on all of the local processors
@@ -12206,8 +12452,10 @@ namespace LegionRuntime {
       Runtime::shutdown_counter = needed_count;
       // Have a spinning barrier here to wait for all processors
       // to finish initializing before continuing
+#ifndef VALGRIND
       while (__sync_fetch_and_add(&Runtime::startup_arrivals, 0) 
               != needed_count) { }
+#endif
       // Call in the runtime to see if we should launch the top-level task
       if (proc_kind != Processor::UTIL_PROC)
       {
@@ -12243,7 +12491,7 @@ namespace LegionRuntime {
                                   const void *args, size_t arglen, Processor p)
     //--------------------------------------------------------------------------
     {
-      Runtime::get_runtime(p)->process_schedule_request(p);
+      Runtime::get_runtime(p)->process_schedule_request(p, true/*first*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12257,6 +12505,13 @@ namespace LegionRuntime {
       arglen -= sizeof(tid);
       switch (tid)
       {
+        case HLR_SCHEDULER_ID:
+          {
+            const ProcessorManager::SchedulerArgs *sched_args = 
+              (const ProcessorManager::SchedulerArgs*)args;
+            Runtime::get_runtime(p)->process_schedule_request(sched_args->proc);
+            break;
+          }
         case HLR_MESSAGE_ID:
           {
             Runtime::get_runtime(p)->process_message_task(data, arglen);
@@ -12267,6 +12522,17 @@ namespace LegionRuntime {
             const SingleTask::PostEndArgs *post_end_args = 
               (const SingleTask::PostEndArgs*)args;
             post_end_args->proxy_this->post_end_task();
+            break;
+          }
+        case HLR_DEFERRED_MAPPING_ID:
+          {
+            const Operation::DeferredMappingArgs *deferred_mapping_args = 
+              (const Operation::DeferredMappingArgs*)args;
+            if (deferred_mapping_args->must_epoch == NULL)
+              deferred_mapping_args->proxy_this->trigger_mapping();
+            else
+              deferred_mapping_args->must_epoch->notify_mapping_dependence(
+                  deferred_mapping_args->must_epoch_gen);
             break;
           }
         case HLR_DEFERRED_COMPLETE_ID:
@@ -12290,10 +12556,11 @@ namespace LegionRuntime {
           }
         case HLR_DEFERRED_COLLECT_ID:
           {
-            Deserializer derez(args, arglen+sizeof(HLRTaskID));
-            derez.advance_pointer(sizeof(HLRTaskID));
-            Runtime *rt = Runtime::get_runtime(p);
-            LogicalView::handle_deferred_collect(derez, p, rt->forest);
+            const GarbageCollectionEpoch::GarbageCollectionArgs *collect_args =
+              (const GarbageCollectionEpoch::GarbageCollectionArgs*)args;
+            bool done = collect_args->epoch->handle_collection(collect_args);
+            if (done)
+              delete collect_args->epoch;
             break;
           }
         case HLR_TRIGGER_DEPENDENCE_ID:
@@ -12381,9 +12648,9 @@ namespace LegionRuntime {
                   result_size, false/*own*/);
             future_args->target->complete_future();
             if (future_args->target->remove_gc_reference())
-              delete future_args->target;
+              legion_delete(future_args->target);
             if (future_args->result->remove_gc_reference())
-              delete future_args->result;
+              legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
           }
@@ -12403,9 +12670,9 @@ namespace LegionRuntime {
             }
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
-              delete future_args->future_map;
+              legion_delete(future_args->future_map);
             if (future_args->result->remove_gc_reference())
-              delete future_args->result;
+              legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
           }
@@ -12433,6 +12700,65 @@ namespace LegionRuntime {
           assert(false); // should never get here
       }
     }
+
+#ifdef TRACE_ALLOCATION
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionAllocation::trace_allocation(
+                                       AllocationType a, size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *rt = Runtime::get_runtime(Machine::get_executing_processor());
+      if (rt != NULL)
+        rt->trace_allocation(a, size, elems);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionAllocation::trace_free(AllocationType a, 
+                                                 size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *rt = Runtime::get_runtime(Machine::get_executing_processor());
+      if (rt != NULL)
+        rt->trace_free(a, size, elems);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Runtime* LegionAllocation::find_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::get_runtime(Machine::get_executing_processor());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionAllocation::trace_allocation(Runtime *&runtime,
+                                       AllocationType a, size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime == NULL)
+      {
+        runtime = LegionAllocation::find_runtime();
+        // Only happens during initialization
+        if (runtime == NULL)
+          return;
+      }
+      runtime->trace_allocation(a, size, elems);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionAllocation::trace_free(Runtime *&runtime,
+                                       AllocationType a, size_t size, int elems)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime == NULL)
+      {
+        runtime = LegionAllocation::find_runtime();
+        // Only happens during intialization
+        if (runtime == NULL)
+          return;
+      }
+      runtime->trace_free(a, size, elems);
+    }
+#endif
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

@@ -32,6 +32,7 @@ namespace LegionRuntime {
     Logger::Category log_garbage("gc");
     Logger::Category log_leak("leaks");
     Logger::Category log_variant("variants");
+    Logger::Category log_allocation("allocation");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
@@ -342,7 +343,7 @@ namespace LegionRuntime {
     ArgumentMap::ArgumentMap(void)
     //--------------------------------------------------------------------------
     {
-      impl = new ArgumentMap::Impl();
+      impl = legion_new<ArgumentMap::Impl>();
 #ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
@@ -377,7 +378,7 @@ namespace LegionRuntime {
         // last reference holder, then delete it
         if (impl->remove_reference())
         {
-          delete impl;
+          legion_delete(impl);
         }
         impl = NULL;
       }
@@ -393,7 +394,7 @@ namespace LegionRuntime {
       {
         if (impl->remove_reference())
         {
-          delete impl;
+          legion_delete(impl);
         }
       }
       impl = rhs.impl;
@@ -606,7 +607,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -618,7 +619,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1400,6 +1401,103 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // MPILegionHandshake 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(const MPILegionHandshake &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::~MPILegionHandshake(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          legion_delete(impl);
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake::MPILegionHandshake(MPILegionHandshake::Impl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    MPILegionHandshake& MPILegionHandshake::operator=(
+                                                  const MPILegionHandshake &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          legion_delete(impl);
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::mpi_handoff_to_legion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      impl->mpi_handoff_to_legion();
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::mpi_wait_on_legion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      impl->mpi_wait_on_legion();
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::legion_handoff_to_mpi(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      impl->legion_handoff_to_mpi();
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::legion_wait_on_mpi(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl != NULL);
+#endif
+      impl->legion_wait_on_mpi();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future 
     /////////////////////////////////////////////////////////////
 
@@ -1426,7 +1524,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_gc_reference())
-          delete impl;
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -1447,7 +1545,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_gc_reference())
-          delete impl;
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1518,7 +1616,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -1530,7 +1628,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1600,7 +1698,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -1612,7 +1710,7 @@ namespace LegionRuntime {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          delete impl;
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -2805,6 +2903,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ MPILegionHandshake HighLevelRuntime::create_handshake(
+                                                        bool init_in_MPI,
+                                                        int mpi_participants,
+                                                        int legion_participants)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(mpi_participants > 0);
+      assert(legion_participants > 0);
+#endif
+      return MPILegionHandshake(
+          legion_new<MPILegionHandshake::Impl>(init_in_MPI,
+                                       mpi_participants, legion_participants));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ const ReductionOp* HighLevelRuntime::get_reduction_op(
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
@@ -3144,20 +3258,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->runtime->sample_allocated_instances(mem);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Mapper::sample_current_executing(Processor proc) const
-    //--------------------------------------------------------------------------
-    {
-      return runtime->runtime->sample_current_executing(proc);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Mapper::sample_current_pending(Processor proc) const
-    //--------------------------------------------------------------------------
-    {
-      return runtime->runtime->sample_current_pending(proc);
     }
 
     //--------------------------------------------------------------------------

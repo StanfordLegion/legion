@@ -35,7 +35,7 @@ enum { MSGID_LONG_EXTENSION = 253,
 static int payload_count = 0;
 #endif
 
-static const int DEFERRED_FREE_COUNT = 100;
+static const int DEFERRED_FREE_COUNT = 128;
 gasnet_hsl_t deferred_free_mutex;
 int deferred_free_pos;
 void *deferred_frees[DEFERRED_FREE_COUNT];
@@ -78,6 +78,9 @@ void deferred_free(void *ptr)
 
 class PayloadSource {
 public:
+  PayloadSource(void) { }
+  virtual ~PayloadSource(void) { }
+public:
   virtual void copy_data(void *dest) = 0;
   virtual void *get_contig_pointer(void) { return 0; }
 };
@@ -85,6 +88,7 @@ public:
 class ContiguousPayload : public PayloadSource {
 public:
   ContiguousPayload(void *_srcptr, size_t _size, int _mode);
+  virtual ~ContiguousPayload(void) { }
   virtual void copy_data(void *dest);
   virtual void *get_contig_pointer(void) { return srcptr; }
 protected:
@@ -97,6 +101,7 @@ class TwoDPayload : public PayloadSource {
 public:
   TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
 	      ptrdiff_t _line_stride, int _mode);
+  virtual ~TwoDPayload(void) { }
   virtual void copy_data(void *dest);
 protected:
   const void *srcptr;
@@ -108,6 +113,7 @@ protected:
 class SpanPayload : public PayloadSource {
 public:
   SpanPayload(const SpanList& _spans, size_t _size, int _mode);
+  virtual ~SpanPayload(void) { }
   virtual void copy_data(void *dest);
 protected:
   SpanList spans;
@@ -426,6 +432,11 @@ OutgoingMessage::~OutgoingMessage(void)
 #endif
       deferred_free(payload);
     }
+  }
+  if (payload_src != 0) {
+    assert(payload_mode == PAYLOAD_KEEPREG);
+    delete payload_src;
+    payload_src = 0;
   }
 }
 
@@ -1643,9 +1654,10 @@ void enqueue_message(gasnet_node_t target, int msgid,
   if((payload_mode == PAYLOAD_KEEP) && is_registered((void *)payload))
     payload_mode = PAYLOAD_KEEPREG;
 
-  hdr->set_payload(new ContiguousPayload((void *)payload, payload_size, payload_mode),
-		   payload_size, payload_mode,
-		   dstptr);
+  if (payload_mode != PAYLOAD_NONE)
+    hdr->set_payload(new ContiguousPayload((void *)payload, payload_size, payload_mode),
+                     payload_size, payload_mode,
+                     dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1662,10 +1674,10 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
 					     args);
 
-  hdr->set_payload(new TwoDPayload(payload, line_size, 
-				   line_count, line_stride, payload_mode),
-		   line_size * line_count, payload_mode,
-		   dstptr);
+  if (payload_mode != PAYLOAD_NONE)
+    hdr->set_payload(new TwoDPayload(payload, line_size, 
+                                     line_count, line_stride, payload_mode),
+                                     line_size * line_count, payload_mode, dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1681,9 +1693,10 @@ void enqueue_message(gasnet_node_t target, int msgid,
   					     (arg_size + sizeof(int) - 1) / sizeof(int),
   					     args);
 
-  hdr->set_payload(new SpanPayload(spans, payload_size, payload_mode),
-		   payload_size, payload_mode,
-		   dstptr);
+  if (payload_mode != PAYLOAD_NONE)
+    hdr->set_payload(new SpanPayload(spans, payload_size, payload_mode),
+                     payload_size, payload_mode,
+                     dstptr);
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }

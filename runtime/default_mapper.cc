@@ -28,6 +28,7 @@
 #define STATIC_STEALING_ENABLED       false
 #define STATIC_MAX_SCHEDULE_COUNT     8
 #define STATIC_NUM_PROFILE_SAMPLES    1
+#define STATIC_MAX_FAILED_MAPPINGS    8
 
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
@@ -49,6 +50,7 @@ namespace LegionRuntime {
         war_enabled(STATIC_WAR_ENABLED),
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
+        max_failed_mappings(STATIC_MAX_FAILED_MAPPINGS),
         machine_interface(MappingUtilities::MachineQueryInterface(m))
     //--------------------------------------------------------------------------
     {
@@ -81,6 +83,7 @@ namespace LegionRuntime {
           BOOL_ARG("-dm:bft", breadth_first_traversal);
           INT_ARG("-dm:sched", max_schedule_count);
           INT_ARG("-dm:prof",num_profiling_samples);
+          INT_ARG("-dm:fail",max_failed_mappings);
 #undef BOOL_ARG
 #undef INT_ARG
         }
@@ -614,6 +617,7 @@ namespace LegionRuntime {
     void DefaultMapper::notify_mapping_result(const Mappable *mappable)
     //--------------------------------------------------------------------------
     {
+      UniqueID uid = mappable->get_unique_mappable_id();
       // We should only get this for tasks in the default mapper
       if (mappable->get_mappable_kind() == Mappable::TASK_MAPPABLE)
       {
@@ -621,25 +625,43 @@ namespace LegionRuntime {
         assert(task != NULL);
         log_mapper(LEVEL_SPEW,"Notify mapping for task %s (ID %lld) in "
                               "default mapper for processor " IDFMT "",
-                              task->variants->name,
-                              task->get_unique_task_id(), local_proc.id);
+                              task->variants->name, uid, local_proc.id);
         for (unsigned idx = 0; idx < task->regions.size(); idx++)
         {
           memoizer.notify_mapping(task->target_proc, task, idx, 
                                   task->regions[idx].selected_memory);
         }
       }
+      std::map<UniqueID,unsigned>::iterator finder = failed_mappings.find(uid);
+      if (finder != failed_mappings.end())
+        failed_mappings.erase(finder);
     }
 
     //--------------------------------------------------------------------------
     void DefaultMapper::notify_mapping_failed(const Mappable *mappable)
     //--------------------------------------------------------------------------
     {
-      log_mapper(LEVEL_SPEW,"Notify failed mapping for operation ID %lld "
-                            "in default mapper for processor " IDFMT "",
-                            mappable->get_unique_mappable_id(), local_proc.id);
-      // Do nothing for now and hope things drain out and free
-      // up the necessary memory resources to do the mapping
+      UniqueID uid = mappable->get_unique_mappable_id(); 
+      log_mapper(LEVEL_WARNING,"Notify failed mapping for operation ID %lld "
+                      "in default mapper for processor " IDFMT "! Retrying...",
+                       uid, local_proc.id);
+      std::map<UniqueID,unsigned>::iterator finder = failed_mappings.find(uid);
+      if (finder == failed_mappings.end())
+        failed_mappings[uid] = 1;
+      else
+      {
+        finder->second++;
+        if (finder->second == max_failed_mappings)
+        {
+          log_mapper(LEVEL_ERROR,"Reached maximum number of failed mappings "
+                                 "for operation ID %lld in default mapper for "
+                                 "processor " IDFMT "!  Try implementing a "
+                                 "custom mapper or changing the size of the "
+                                 "memories in the low-level runtime. "
+                                 "Failing out ...", uid, local_proc.id);
+          assert(false);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -848,6 +870,7 @@ namespace LegionRuntime {
           while (enabled->get_next(position, length)) {
             num_elts += length;
           }
+          delete enabled;
         }
 
         // Choose split sizes based on number of elements and processors.
@@ -865,6 +888,7 @@ namespace LegionRuntime {
           while (enabled->get_next(position, length)) {
             chunks[chunk].disable(position, length);
           }
+          delete enabled;
         }
 
         // Iterate through valid elements again and assign to chunks.
@@ -887,6 +911,7 @@ namespace LegionRuntime {
               length -= remaining_in_chunk;
             }
           }
+          delete enabled;
         }
 
         for (unsigned chunk = 0; chunk < num_chunks; chunk++) 

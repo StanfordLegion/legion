@@ -1087,6 +1087,13 @@ namespace LegionRuntime {
 #endif
       }
 
+      virtual ~EventMerger(void)
+      {
+#ifndef LOCK_FREE_MERGED_EVENTS
+        gasnet_hsl_destroy(&mutex);
+#endif
+      }
+
       void add_event(Event wait_for)
       {
 	if(wait_for.has_triggered()) return; // early out
@@ -1463,7 +1470,7 @@ namespace LegionRuntime {
       {
         gasnett_cond_init(&cond);
       }
-      ~PthreadCondWaiter(void) 
+      virtual ~PthreadCondWaiter(void) 
       {
         gasnett_cond_destroy(&cond);
       }
@@ -1508,6 +1515,8 @@ namespace LegionRuntime {
       DeferredEventTrigger(Event _after_event)
 	: after_event(_after_event)
       {}
+
+      virtual ~DeferredEventTrigger(void) { }
 
       virtual bool event_triggered(void)
       {
@@ -1692,6 +1701,8 @@ namespace LegionRuntime {
       DeferredBarrierArrival(Barrier _barrier, int _delta)
 	: barrier(_barrier), delta(_delta)
       {}
+
+      virtual ~DeferredBarrierArrival(void) { }
 
       virtual bool event_triggered(void)
       {
@@ -2426,6 +2437,8 @@ namespace LegionRuntime {
 			  Event _after_lock)
 	: lock(_lock), mode(_mode), exclusive(_exclusive), after_lock(_after_lock) {}
 
+      virtual ~DeferredLockRequest(void) { }
+
       virtual bool event_triggered(void)
       {
 	lock.impl()->acquire(mode, exclusive, after_lock);
@@ -2468,6 +2481,8 @@ namespace LegionRuntime {
     public:
       DeferredUnlockRequest(Reservation _lock)
 	: lock(_lock) {}
+
+      virtual ~DeferredUnlockRequest(void) { }
 
       virtual bool event_triggered(void)
       {
@@ -2596,6 +2611,8 @@ namespace LegionRuntime {
     public:
       DeferredLockDestruction(Reservation _lock) : lock(_lock) {}
 
+      virtual ~DeferredLockDestruction(void) { }
+
       virtual bool event_triggered(void)
       {
 	lock.impl()->release_reservation();
@@ -2705,7 +2722,7 @@ namespace LegionRuntime {
 	  // perfect match
 	  off_t retval = it->first;
 	  free_blocks.erase(it);
-	  log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd\n", me.id, size, retval);
+	  log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
 	  return retval;
 	}
 	
@@ -2714,18 +2731,19 @@ namespace LegionRuntime {
 	  off_t leftover = it->second - size;
 	  off_t retval = it->first + leftover;
 	  it->second = leftover;
-	  log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd\n", me.id, size, retval);
+	  log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
 	  return retval;
 	}
       }
 
       // no blocks large enough - boo hoo
-      log_malloc.info("alloc FAILED: mem=" IDFMT " size=%zd\n", me.id, size);
+      log_malloc.info("alloc FAILED: mem=" IDFMT " size=%zd", me.id, size);
       return -1;
     }
 
     void Memory::Impl::free_bytes_local(off_t offset, size_t size)
     {
+      log_malloc.info("free block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, offset);
       AutoHSLLock al(mutex);
 
       // frees of zero bytes should have the special offset
@@ -4162,6 +4180,63 @@ namespace LegionRuntime {
     }
 
     ///////////////////////////////////////////////////
+    // Task
+
+    Logger::Category log_task("task");
+    Logger::Category log_util("util");
+
+    Task::Task(Processor _proc, Processor::TaskFuncID _func_id,
+	       const void *_args, size_t _arglen,
+	       Event _finish_event, int _priority, int expected_count)
+      : proc(_proc), func_id(_func_id), arglen(_arglen),
+	finish_event(_finish_event), priority(_priority),
+        run_count(0), finish_count(expected_count)
+    {
+      if(arglen) {
+	args = malloc(arglen);
+	memcpy(args, _args, arglen);
+      } else
+	args = 0;
+    }
+
+    Task::~Task(void)
+    {
+      free(args);
+    }
+
+    class DeferredTaskSpawn : public Event::Impl::EventWaiter {
+    public:
+      DeferredTaskSpawn(Processor::Impl *_proc, Task *_task) 
+        : proc(_proc), task(_task) {}
+
+      virtual ~DeferredTaskSpawn(void)
+      {
+        // we do _NOT_ own the task - do not free it
+      }
+
+      virtual bool event_triggered(void)
+      {
+        log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=" IDFMT "/%d",
+                 task->func_id, 
+                 task->finish_event.id, task->finish_event.gen);
+
+        proc->enqueue_task(task);
+
+        return true;
+      }
+
+      virtual void print_info(FILE *f)
+      {
+        fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
+               task->func_id, task->proc.id, task->finish_event.id, task->finish_event.gen);
+      }
+
+    protected:
+      Processor::Impl *proc;
+      Task *task;
+    };
+
+    ///////////////////////////////////////////////////
     // Processor
 
     // global because I'm being lazy...
@@ -4174,8 +4249,14 @@ namespace LegionRuntime {
       return Runtime::runtime->get_processor_impl(*this);
     }
 
-    Logger::Category log_task("task");
-    Logger::Category log_util("util");
+    Processor::Impl::Impl(Processor _me, Processor::Kind _kind, Processor _util /*= Processor::NO_PROC*/)
+      : me(_me), kind(_kind), util(_util), util_proc(0), run_counter(0)
+    {
+    }
+
+    Processor::Impl::~Impl(void)
+    {
+    }
 
     void Processor::Impl::set_utility_processor(UtilityProcessor *_util_proc)
     {
@@ -4190,8 +4271,90 @@ namespace LegionRuntime {
       util = util_proc->me;
     }
 
+    ProcessorGroup::ProcessorGroup(void)
+      : Processor::Impl(Processor::NO_PROC, Processor::PROC_GROUP),
+	members_valid(false), members_requested(false), next_free(0)
+    {
+    }
+
+    ProcessorGroup::~ProcessorGroup(void)
+    {
+    }
+
+    void ProcessorGroup::init(Processor _me, int _owner)
+    {
+      assert(ID(_me).node() == _owner);
+
+      me = _me;
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+    }
+
+    void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
+    {
+      // can only be perform on owner node
+      assert(ID(me).node() == gasnet_mynode());
+      
+      // can only be done once
+      assert(!members_valid);
+
+      for(std::vector<Processor>::const_iterator it = member_list.begin();
+	  it != member_list.end();
+	  it++) {
+	Processor::Impl *m_impl = (*it).impl();
+	members.push_back(m_impl);
+      }
+
+      members_requested = true;
+      members_valid = true;
+    }
+
+    void ProcessorGroup::get_group_members(std::vector<Processor>& member_list)
+    {
+      assert(members_valid);
+
+      for(std::vector<Processor::Impl *>::const_iterator it = members.begin();
+	  it != members.end();
+	  it++)
+	member_list.push_back((*it)->me);
+    }
+
+    void ProcessorGroup::tasks_available(int priority)
+    {
+      // wake up everybody for now
+      for(std::vector<Processor::Impl *>::const_iterator it = members.begin();
+	  it != members.end();
+	  it++)
+	(*it)->tasks_available(priority);
+    }
+
+    void ProcessorGroup::enqueue_task(Task *task)
+    {
+      for (std::vector<Processor::Impl *>::const_iterator it = members.begin();
+            it != members.end(); it++)
+      {
+        (*it)->enqueue_task(task);
+      }
+    }
+
+    /*virtual*/ void ProcessorGroup::spawn_task(Processor::TaskFuncID func_id,
+						const void *args, size_t arglen,
+						//std::set<RegionInstance> instances_needed,
+						Event start_event, Event finish_event,
+						int priority)
+    {
+      // create a task object and insert it into the queue
+      Task *task = new Task(me, func_id, args, arglen, 
+                            finish_event, priority, members.size());
+
+      if (start_event.has_triggered())
+        enqueue_task(task);
+      else
+        start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
+    }
+
     class LocalProcessor : public Processor::Impl {
     public:
+#if 0
       // simple task object keeps a copy of args
       class Task {
       public:
@@ -4239,86 +4402,6 @@ namespace LegionRuntime {
 	Event finish_event;
         int priority;
       };
-
-#define SHARED_TASK_QUEUE
-#ifdef SHARED_TASK_QUEUE
-      class SharedTaskQueue {
-      public:
-        SharedTaskQueue(SharedTaskQueue *_parent)
-         : parent(_parent)
-        {
-          gasnet_hsl_init(&mutex);
-        }
-
-        void add_processor(LocalProcessor *p)
-        {
-          {
-            AutoHSLLock a(mutex);
-            procs.insert(p);
-          }
-          if(parent)
-            parent->add_processor(p);
-        }
-
-        void remove_processor(LocalProcessor *p)
-        {
-          {
-            AutoHSLLock a(mutex);
-            procs.erase(p);
-          }
-          if(parent)
-            parent->remove_processor(p);
-        }
-
-        // quick lock-free check to see if anything might be available
-        bool probably_empty(void) const
-        {
-          return(tasks.empty() && (!parent || parent->probably_empty()));
-        }
-
-        // attempt to actually pop the next item, returns NULL on failure
-        Task *pop(void)
-        {
-          if(!tasks.empty()) {  // don't even try if we're empty
-            AutoHSLLock a(mutex);
-            if(!tasks.empty()) { // double-check to avoid losing a race
-              Task *t = tasks.front();
-              tasks.pop_front();
-              return t;
-            }
-          }
-          // we have nothing?  maybe a parent queue does?
-          if(parent) return parent->pop();
-          // nope, nothing
-          return 0;
-        }
-
-        // add a task to the shared queue
-        void add(Task *to_add)
-        {
-          // TODO: go lock-free?
-          bool was_empty = false;
-          {
-            AutoHSLLock a(mutex);
-            was_empty = tasks.empty();
-            tasks.pri_insert(to_add);
-          }
-
-          // if we were empty, and now we're not, notify all processors
-          if(was_empty) {
-            for(std::set<LocalProcessor *>::const_iterator it = procs.begin();
-                it != procs.end();
-                it++)
-              (*it)->shared_tasks_available();
-          }
-        }
-
-      protected:
-        SharedTaskQueue *parent;
-        pri_list<Task *> tasks;
-        gasnet_hsl_t mutex;
-        std::set<LocalProcessor *> procs;
-      };
 #endif
 
       // simple thread object just has a task field that you can set and 
@@ -4329,6 +4412,8 @@ namespace LegionRuntime {
 	public:
 	  EventStackEntry(Thread *_thread, Event _event, EventStackEntry *_next)
 	    : thread(_thread), event(_event), next(_next), triggered(false) {}
+
+          virtual ~EventStackEntry(void) { }
 
 	  void add_waiter(void)
 	  {
@@ -4401,6 +4486,23 @@ namespace LegionRuntime {
 
 	~Thread(void) {}
 
+	void run_task(Task *task, Processor actual_proc = Processor::NO_PROC)
+	{
+          Processor::TaskFuncPtr fptr = task_id_table[task->func_id];
+          char argstr[100];
+          argstr[0] = 0;
+          for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
+            sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
+          if(task->arglen > 40) strcpy(argstr+80, "...");
+          log_task(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+                   "task start: %d (%p) (%s)", task->func_id, fptr, argstr);
+          (*fptr)(task->args, task->arglen, (actual_proc.exists() ? actual_proc : task->proc));
+          log_task(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+                   "task end: %d (%p) (%s)", task->func_id, fptr, argstr);
+          if(task->finish_event.exists())
+            task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
+	}
+
 	virtual void sleep_on_event(Event wait_for, bool block = false)
 	{
 	  // create an entry to go on our event stack (on our stack)
@@ -4444,44 +4546,23 @@ namespace LegionRuntime {
 	      // plan B - if there's a ready task, we can run it while
 	      //   we're waiting (unless 'block' is set)
 	      if(!block) {
-                if(proc->ready_tasks.size() > 0) {
-		  Task *newtask = proc->ready_tasks.front();
-		  proc->ready_tasks.pop_front();
-		
+                if(!proc->task_queue.empty()) {
+		  Task *newtask = proc->task_queue.pop();
 		  log_task.info("thread %p (proc " IDFMT ") running task %p instead of sleeping",
 			        this, proc->me.id, newtask);
 
 		  al.release();
-		  newtask->run();
+                  if (__sync_fetch_and_add(&(newtask->run_count),1) == 0)
+                    run_task(newtask);
 		  al.reacquire();
 
 		  log_task.info("thread %p (proc " IDFMT ") done with inner task %p, back to waiting on " IDFMT "/%d",
 			        this, proc->me.id, newtask, wait_for.id, wait_for.gen);
 
-		  delete newtask;
+                  if (__sync_add_and_fetch(&(newtask->finish_count),-1) == 0)
+                    delete newtask;
 		  continue;
 	        }
-
-#ifdef SHARED_TASK_QUEUE
-	        // plan B(2) - try the shared queue
-	        if(proc->shared_queue) {
-	          Task *stask = proc->shared_queue->pop();
-                  if(stask) {
-		    log_task.info("thread %p (proc " IDFMT ") running shared task %p instead of sleeping",
-			          this, proc->me.id, stask);
-
-		    al.release();
-		    stask->run();
-		    al.reacquire();
-
-		    log_task.info("thread %p (proc " IDFMT ") done with inner shared task %p, back to waiting on " IDFMT "/%d",
-			          this, proc->me.id, stask, wait_for.id, wait_for.gen);
-
-		    delete stask;
-		    continue;
-                  }
-                }
-#endif
 	      }
 
 	      // plan C - run the idle task if it's enabled and nobody else
@@ -4494,7 +4575,7 @@ namespace LegionRuntime {
 		proc->in_idle_task = true;
 		
 		al.release();
-		proc->idle_task->run();
+		run_task(proc->idle_task);
 		al.reacquire();
 
 		proc->in_idle_task = false;
@@ -4623,33 +4704,33 @@ namespace LegionRuntime {
 	    //   we're not at the active thread count limit
 	    if(proc->active_thread_count < proc->max_active_threads) {
               Task *newtask = 0;
-              if(proc->ready_tasks.size() > 0) {
-                newtask = proc->ready_tasks.front();
-                proc->ready_tasks.pop_front();
+              if(!proc->task_queue.empty()) {
+                newtask = proc->task_queue.pop();
               }
-#ifdef SHARED_TASK_QUEUE
-              if(!newtask && proc->shared_queue) {
-                // try to grab a task from the shared queue
-                newtask = proc->shared_queue->pop();
-              }
-#endif
-
               if(newtask) {
-	        log_task.info("thread running ready task %p for proc " IDFMT "",
-			      newtask, proc->me.id);
-	        proc->active_thread_count++;
-	        state = STATE_RUN;
+                // Keep holding the lock until we are sure we're
+                // going to run this task
+                if (__sync_fetch_and_add(&(newtask->run_count),1) == 0) {
+                  
+                  proc->active_thread_count++;
+                  state = STATE_RUN;
 
-	        // drop processor lock while we run the task
-	        al.release();
-	        newtask->run();
-	        al.reacquire();
+                  al.release();
+                  log_task.info("thread running ready task %p for proc " IDFMT "",
+                                newtask, proc->me.id);
+                  run_task(newtask, proc->me);
+                  log_task.info("thread finished running task %p for proc " IDFMT "",
+                                newtask, proc->me.id);
+                  if (__sync_add_and_fetch(&(newtask->finish_count),-1) == 0)
+                    delete newtask;
+                  al.reacquire();
 
-	        state = STATE_IDLE;
-	        proc->active_thread_count--;
-	        log_task.info("thread finished running task %p for proc " IDFMT "",
-			      newtask, proc->me.id);
-	        delete newtask;
+                  state = STATE_IDLE;
+                  proc->active_thread_count--;
+                  
+                } else if (__sync_add_and_fetch(&(newtask->finish_count),-1) == 0) {
+                  delete newtask;
+                }
 	        continue;
               }
 	    }
@@ -4666,7 +4747,7 @@ namespace LegionRuntime {
 	      state = STATE_RUN;
 		
 	      al.release();
-	      proc->idle_task->run();
+	      run_task(proc->idle_task);
 	      al.reacquire();
 
 	      proc->in_idle_task = false;
@@ -4730,55 +4811,11 @@ namespace LegionRuntime {
         {
           return proc->me;
         }
-      };
-
-      class DeferredTaskSpawn : public Event::Impl::EventWaiter {
-      public:
-	DeferredTaskSpawn(Task *_task) : task(_task) {}
-
-	virtual ~DeferredTaskSpawn(void)
-	{
-	  // we do _NOT_ own the task - do not free it
-	}
-
-	virtual bool event_triggered(void)
-	{
-	  log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=" IDFMT "/%d",
-		   task->func_id, 
-		   task->finish_event.id, task->finish_event.gen);
-
-	  // add task to processor's ready queue
-#ifdef SHARED_TASK_QUEUE
-          if(task->func_id && task->proc->shared_queue) {
-            // always insert into shared queue for now
-            task->proc->shared_queue->add(task);
-            return true;
-          }
-#endif
-	  task->proc->add_ready_task(task);
-
-          return true;
-	}
-
-	virtual void print_info(FILE *f)
-	{
-	  fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
-		 task->func_id, task->proc->me.id, task->finish_event.id, task->finish_event.gen);
-	}
-
-      protected:
-	Task *task;
-      };
+      }; 
 
       LocalProcessor(Processor _me, int _core_id, 
-#ifdef SHARED_TASK_QUEUE
-                     SharedTaskQueue *_shared_queue,
-#endif
 		     int _total_threads = 1, int _max_active_threads = 1)
 	: Processor::Impl(_me, Processor::LOC_PROC), core_id(_core_id),
-#ifdef SHARED_TASK_QUEUE
-          shared_queue(_shared_queue),
-#endif
 	  total_threads(_total_threads),
 	  active_thread_count(0), max_active_threads(_max_active_threads),
 	  init_done(false), shutdown_requested(false), shutdown_event(Event::NO_EVENT), in_idle_task(false),
@@ -4789,21 +4826,12 @@ namespace LegionRuntime {
 	// if a processor-idle task is in the table, make a Task object for it
 	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
 	idle_task = ((it != task_id_table.end()) ?
-  		       new Task(this, Processor::TASK_ID_PROCESSOR_IDLE, 0, 0, Event::NO_EVENT, 0) :
+  		       new Task(me, Processor::TASK_ID_PROCESSOR_IDLE, 0, 0, Event::NO_EVENT, 0, 0) :
 		       0);
-
-#ifdef SHARED_TASK_QUEUE
-        if(shared_queue)
-          shared_queue->add_processor(this);
-#endif
       }
 
       ~LocalProcessor(void)
       {
-#ifdef SHARED_TASK_QUEUE
-        if(shared_queue)
-          shared_queue->remove_processor(this);
-#endif
 	delete idle_task;
       }
 
@@ -4818,7 +4846,7 @@ namespace LegionRuntime {
 	}
       }
 
-      void add_ready_task(Task *task)
+      virtual void enqueue_task(Task *task)
       {
 	// modifications to task/thread lists require mutex
 	AutoHSLLock a(mutex);
@@ -4839,30 +4867,7 @@ namespace LegionRuntime {
 	  return;
 	}
 
-        // Common case: if the guy on the back has our priority or higher then just
-        // put us on the back too.
-        if (ready_tasks.empty() || (ready_tasks.back()->priority >= task->priority))
-          ready_tasks.push_back(task);
-        else
-        {
-          // Uncommon case: go through the list until we find someone
-          // who has a priority lower than ours.  We know they
-          // exist since we saw them on the back.
-          bool inserted = false;
-          for (std::list<Task*>::iterator it = ready_tasks.begin();
-                it != ready_tasks.end(); it++)
-          {
-            if ((*it)->priority < task->priority)
-            {
-              ready_tasks.insert(it, task);
-              inserted = true;
-              break;
-            }
-          }
-          // Technically we shouldn't need this, but just to be safe
-          if (!inserted)
-            ready_tasks.push_back(task);
-        }
+        task_queue.insert(task, task->priority); 
 
 	log_task.info("pushing ready task %p onto list for proc " IDFMT " (active=%d, idle=%zd, preempt=%zd)",
 		      task, me.id, active_thread_count,
@@ -4891,8 +4896,9 @@ namespace LegionRuntime {
 	}
       }
 
-      void shared_tasks_available(void)
+      virtual void tasks_available(int priority)
       {
+	log_task.warning("tasks available: priority = %d", priority);
         AutoHSLLock a(mutex);
 
 	if(active_thread_count < max_active_threads) {
@@ -4943,7 +4949,8 @@ namespace LegionRuntime {
                               int priority)
       {
 	// create task object to hold args, etc.
-	Task *task = new Task(this, func_id, args, arglen, finish_event, priority);
+	Task *task = new Task(me, func_id, args, arglen, finish_event, 
+                              priority, 1/*users*/);
 
 	// early out - if the event has obviously triggered (or is NO_EVENT)
 	//  don't build up continuation
@@ -4951,18 +4958,11 @@ namespace LegionRuntime {
 	  log_task(LEVEL_INFO, "new ready task: func=%d start=" IDFMT "/%d finish=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen,
 		   finish_event.id, finish_event.gen);
-#ifdef SHARED_TASK_QUEUE
-          if(func_id && shared_queue) {
-            // always insert into shared queue for now
-            shared_queue->add(task);
-            return;
-          }
-#endif
-	  add_ready_task(task);
+          enqueue_task(task);
 	} else {
 	  log_task(LEVEL_DEBUG, "deferring spawn: func=%d event=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen);
-	  start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(task));
+	  start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
 	}
       }
 
@@ -5025,11 +5025,8 @@ namespace LegionRuntime {
 
     protected:
       int core_id;
-#ifdef SHARED_TASK_QUEUE
-      SharedTaskQueue *shared_queue;
-#endif
+      JobQueue<Task> task_queue;
       int total_threads, active_thread_count, max_active_threads;
-      std::list<Task *> ready_tasks;
       std::list<Thread *> avail_threads;
       std::list<Thread *> resumable_threads;
       std::list<Thread *> preemptable_threads;
@@ -5040,72 +5037,6 @@ namespace LegionRuntime {
       bool in_idle_task;
       Task *idle_task;
       bool idle_task_enabled;
-    };
-
-    class UtilityProcessor::UtilityTask : public Event::Impl::EventWaiter {
-    public:
-      UtilityTask(UtilityProcessor *_proc,
-		  Processor::TaskFuncID _func_id,
-		  const void *_args, size_t _arglen,
-		  Event _finish_event, int _priority)
-	: proc(_proc), func_id(_func_id), arglen(_arglen),
-	  finish_event(_finish_event), priority(_priority)
-      {
-	if(arglen) {
-	  args = malloc(arglen);
-	  memcpy(args, _args, arglen);
-	} else {
-	  args = 0;
-	}
-      }
-
-      virtual ~UtilityTask(void)
-      {
-	if(args) free(args);
-      }
-
-      virtual bool event_triggered(void)
-      {
-	proc->enqueue_runnable_task(this);
-
-        // no deletion here
-        return false;
-      }
-
-      virtual void print_info(FILE *f)
-      {
-	fprintf(f,"utility thread for processor " IDFMT ": after=" IDFMT "/%d\n", 
-            proc->me.id, finish_event.id, finish_event.gen);
-      }
-
-      void run(Processor actual_proc = Processor::NO_PROC)
-      {
-	if(func_id == 0) {
-	  log_task.info("shutdown requested");
-	  proc->request_shutdown();
-	  return;
-	}
-	Processor::TaskFuncPtr fptr = task_id_table[func_id];
-	char argstr[100];
-	argstr[0] = 0;
-	for(size_t i = 0; (i < arglen) && (i < 40); i++)
-	  sprintf(argstr+2*i, "%02x", ((unsigned char *)args)[i]);
-	if(arglen > 40) strcpy(argstr+80, "...");
-	log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_DEBUG), 
-		 "task start: %d (%p) (%s)", func_id, fptr, argstr);
-	(*fptr)(args, arglen, (actual_proc.exists() ? actual_proc : proc->me));
-	log_task(((func_id == 3) ? LEVEL_SPEW : LEVEL_DEBUG), 
-		 "task end: %d (%p) (%s)", func_id, fptr, argstr);
-	if(finish_event.exists())
-	  finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
-      }
-
-      UtilityProcessor *proc;
-      Processor::TaskFuncID func_id;
-      void *args;
-      size_t arglen;
-      Event finish_event;
-      int priority;
     };
 
     void PreemptableThread::start_thread(size_t stack_size, int core_id, const char *debug_name)
@@ -5154,74 +5085,29 @@ namespace LegionRuntime {
       return 0;
     }
 
-#ifdef SHARED_UTILITY_QUEUE
-    class UtilityQueue {
-    public:
-      UtilityQueue(void)
-      {
-        gasnet_hsl_init(&mutex);
-      }
-
-      void add_processor(UtilityProcessor *p)
-      {
-        AutoHSLLock a(mutex);
-        procs.insert(p);
-      }
-
-      void remove_processor(UtilityProcessor *p)
-      {
-        AutoHSLLock a(mutex);
-        procs.erase(p);
-      }
-
-      bool empty(void)
-      {
-        AutoHSLLock a(mutex);
-        return tasks.empty();
-      }
-
-      UtilityProcessor::UtilityTask* pop(void)
-      {
-        if (!tasks.empty()) {
-          AutoHSLLock a(mutex);
-          if (!tasks.empty()) {
-            UtilityProcessor::UtilityTask *t = tasks.front();
-            tasks.pop_front();
-            return t;
-          }
-        }
-        return 0;
-      }
-
-      void add(UtilityProcessor::UtilityTask *to_add)
-      {
-        bool was_empty = false;
-        {
-          AutoHSLLock a(mutex);
-          was_empty = tasks.empty();
-          tasks.pri_insert(to_add);
-        }
-
-        if(was_empty) {
-          for(std::set<UtilityProcessor*>::const_iterator it = procs.begin();
-              it != procs.end(); it++)
-            (*it)->shared_tasks_available();
-        }
-      }
-
-    protected:
-      gasnet_hsl_t mutex;
-      std::set<UtilityProcessor*> procs;
-      pri_list<UtilityProcessor::UtilityTask*> tasks;
-    };
-#endif
-
     class UtilityProcessor::UtilityThread : public PreemptableThread {
     public:
       UtilityThread(UtilityProcessor *_proc)
 	: proc(_proc) {}
 
       virtual ~UtilityThread(void) {}
+
+      void run_task(Task *task, Processor actual_proc = Processor::NO_PROC)
+      {
+	Processor::TaskFuncPtr fptr = task_id_table[task->func_id];
+	char argstr[100];
+	argstr[0] = 0;
+	for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
+	  sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
+	if(task->arglen > 40) strcpy(argstr+80, "...");
+	log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+		 "utility task start: %d (%p) (%s)", task->func_id, fptr, argstr);
+	(*fptr)(task->args, task->arglen, (actual_proc.exists() ? actual_proc : task->proc));
+	log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+		 "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
+	if(task->finish_event.exists())
+	  task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
+      }
 
       void sleep_on_event(Event wait_for, bool block = false)
       {
@@ -5230,33 +5116,21 @@ namespace LegionRuntime {
         while(!impl->has_triggered(wait_for.gen)) {
           if (!block) {
             gasnet_hsl_lock(&proc->mutex);
-            if (proc->tasks.size() > 0) {
-              UtilityTask *task = proc->tasks.front();
-              proc->tasks.pop_front();
-              gasnet_hsl_unlock(&proc->mutex);
-              log_util.info("running task %p (%d) in utility thread", task, task->func_id);
-              task->run();
-              log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
-              delete task;
-              // Continue since we no longer hold the lock
-              continue;
-            }
-#ifdef SHARED_UTILITY_QUEUE
-            if (proc->shared_queue) {
-              if (!proc->shared_queue->empty()) {
-                UtilityTask *task = proc->shared_queue->pop();
-                if (task) {
-                  gasnet_hsl_unlock(&proc->mutex);
-                  log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
-                  task->run();
-                  log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
+            if(!proc->task_queue.empty())
+	    {
+	      Task *task = proc->task_queue.pop();
+	      if(task) {
+		gasnet_hsl_unlock(&proc->mutex);
+		log_util.info("running task %p (%d) in utility thread", task, task->func_id);
+                if (__sync_fetch_and_add(&(task->run_count),1) == 0)
+                  run_task(task, proc->me);
+		log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
+                if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
                   delete task;
-                  // Continue since we no longer hold the lock
-                  continue;
-                }
-              }
-            }
-#endif
+		// Continue since we no longer hold the lock
+		continue;
+	      }
+	    }
             gasnet_hsl_unlock(&proc->mutex);
           }
 #ifdef __SSE2__
@@ -5300,35 +5174,32 @@ namespace LegionRuntime {
 
 	while(!proc->shutdown_requested) {
 	  // try to run tasks from the runnable queue
-	  while(proc->tasks.size() > 0) {
-	    UtilityTask *task = proc->tasks.front();
-	    proc->tasks.pop_front();
-	    gasnet_hsl_unlock(&proc->mutex);
-	    log_util.info("running task %p (%d) in utility thread", task, task->func_id);
-	    task->run();
-	    log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
-	    delete task;
-	    gasnet_hsl_lock(&proc->mutex);
-	  }
+	  while(!proc->task_queue.empty()) {
 
-#ifdef SHARED_UTILITY_QUEUE
-          if (proc->shared_queue) { 
-            while (!proc->shared_queue->empty()) {
-              UtilityTask *task = proc->shared_queue->pop();
-              // There is no atomicity guarantee on the check for
-              // empty and pop so we have to re-check to see if 
-              // we actually got something.
-              if (task) {
-                gasnet_hsl_unlock(&proc->mutex);
-                log_util.info("running shared task %p (%d) in utility thread", task, task->func_id);
-                task->run();
-                log_util.info("done with shared task %p (%d) in utility thread", task, task->func_id);
+	    Task *task = proc->task_queue.pop();
+
+	    // is it the shutdown task?
+	    if(task->func_id == 0) {
+	      proc->shutdown_requested = true;
+	      // wake up any other threads that are sleeping
+	      gasnett_cond_broadcast(&proc->condvar);
+	      delete task;
+	      continue;
+	    }
+
+            // hold the lock until we are sure we're running this task
+            if (__sync_fetch_and_add(&(task->run_count),1) == 0) {
+              gasnet_hsl_unlock(&proc->mutex);
+              log_util.info("running task %p (%d) in utility thread", task, task->func_id);
+              run_task(task, proc->me);
+              log_util.info("done with task %p (%d) in utility thread", task, task->func_id);
+              if (__sync_add_and_fetch(&(task->finish_count),-1) == 0)
                 delete task;
-                gasnet_hsl_lock(&proc->mutex);
-              }
+              gasnet_hsl_lock(&proc->mutex);
+            } else if (__sync_add_and_fetch(&(task->finish_count),-1) == 0) {
+              delete task;
             }
-          }
-#endif
+	  }
 
 	  // run some/all of the idle tasks for idle processors
 	  // the set can change, so grab a copy, then let go of the lock
@@ -5345,7 +5216,8 @@ namespace LegionRuntime {
 	      // for each item on the list, run the idle task as long as:
 	      //  1) it's still in the idle proc set, and
 	      //  2) somebody else isn't already running its idle task
-	      bool ok_to_run = ((proc->idle_procs.count(idle_proc) > 0) &&
+	      bool ok_to_run = (proc->idle_task && 
+                                (proc->idle_procs.count(idle_proc) > 0) &&
 				(proc->procs_in_idle_task.count(idle_proc) == 0));
 	      if(ok_to_run) {
 		proc->procs_in_idle_task.insert(idle_proc);
@@ -5353,7 +5225,8 @@ namespace LegionRuntime {
 
 		// run the idle task on behalf of the idle proc
 		log_util.debug("running idle task for " IDFMT "", idle_proc->me.id);
-		proc->idle_task->run(idle_proc->me);
+                if (proc->idle_task)
+		run_task(proc->idle_task, idle_proc->me);
 		log_util.debug("done with idle task for " IDFMT "", idle_proc->me.id);
 
 		gasnet_hsl_lock(&proc->mutex);
@@ -5363,12 +5236,8 @@ namespace LegionRuntime {
 	  }
 	  
 	  // if we really have nothing to do, it's ok to go to sleep
-	  if((proc->tasks.size() == 0) && (proc->idle_procs.size() == 0) &&
-	     !proc->shutdown_requested
-#ifdef SHARED_UTILITY_QUEUE
-              && ((proc->shared_queue == NULL) || proc->shared_queue->empty())
-#endif
-             ) {
+	  if(proc->task_queue.empty() && (proc->idle_procs.size() == 0) &&
+	     !proc->shutdown_requested) {
 	    log_util.info("utility thread going to sleep (%p, %p)", this, proc);
 	    gasnett_cond_wait(&proc->condvar, &proc->mutex.lock);
 	    log_util.info("utility thread awake again");
@@ -5377,8 +5246,6 @@ namespace LegionRuntime {
 
 	log_util.info("utility worker thread shutting down, proc=" IDFMT "", proc->me.id);
 	proc->threads.erase(this);
-	if(proc->threads.size() == 0)
-	  proc->run_counter->decrement();
 	gasnett_cond_broadcast(&proc->condvar);
 	gasnet_hsl_unlock(&proc->mutex);
         // Let go of the lock while holding calling the shutdown task
@@ -5400,38 +5267,24 @@ namespace LegionRuntime {
     };
 
     UtilityProcessor::UtilityProcessor(Processor _me,
-#ifdef SHARED_UTILITY_QUEUE
-                                       UtilityQueue *_shared_queue,
-#endif
                                        int _core_id /*=-1*/,
 				       int _num_worker_threads /*= 1*/)
       : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
 	core_id(_core_id), num_worker_threads(_num_worker_threads), shutdown_requested(false)
-#ifdef SHARED_UTILITY_QUEUE
-        , shared_queue(_shared_queue)
-#endif
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
 
       Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
       idle_task = ((it != task_id_table.end()) ?
-		     new UtilityTask(this, 
-				     Processor::TASK_ID_PROCESSOR_IDLE, 
-				     0, 0, Event::NO_EVENT, 0) :
+		     new Task(this->me, 
+			      Processor::TASK_ID_PROCESSOR_IDLE, 
+			      0, 0, Event::NO_EVENT, 0, 0) :
 		     0);
-#ifdef SHARED_UTILITY_QUEUE
-      if (shared_queue)
-        shared_queue->add_processor(this);
-#endif
     }
 
     UtilityProcessor::~UtilityProcessor(void)
     {
-#ifdef SHARED_UTILITY_QUEUE
-      if (shared_queue)
-        shared_queue->remove_processor(this);
-#endif
       if(idle_task)
 	delete idle_task;
     }
@@ -5462,59 +5315,27 @@ namespace LegionRuntime {
 						  Event start_event, Event finish_event,
                                                   int priority)
     {
-      UtilityTask *task = new UtilityTask(this, func_id, args, arglen,
-					  finish_event, priority);
-      if(start_event.has_triggered()) {
-	enqueue_runnable_task(task);
-      } else {
-	start_event.impl()->add_waiter(start_event, task);
-      }
-    }
+      Task *task = new Task(this->me, func_id, args, arglen,
+			    finish_event, priority, 1/*users*/);
 
-    void UtilityProcessor::enqueue_runnable_task(UtilityTask *task)
-    {
-#ifdef SHARED_UTILITY_QUEUE
-      if (shared_queue)
-      {
-        shared_queue->add(task);
-        return;
-      }
-#endif
-      AutoHSLLock al(mutex);
-      // Common case: if the guy on the back has our priority or higher
-      // then just put us on the back too
-      if (tasks.empty() || (tasks.back()->priority >= task->priority))
-        tasks.push_back(task);
+      if (start_event.has_triggered())
+        enqueue_task(task);
       else
-      {
-        // Uncommon case: go through the list until we find someone
-        // who has priority lower than ours.  We know they exist
-        // since we saw them on the back
-        bool inserted = false;
-        for (std::list<UtilityTask*>::iterator it = tasks.begin();
-              it != tasks.end(); it++)
-        {
-          if ((*it)->priority < task->priority)
-          {
-            tasks.insert(it, task);
-            inserted = true;
-            break;
-          }
-        }
-        // Technically we shouldn't need this, but just to be safe
-        if (!inserted)
-          tasks.push_back(task);
-      }
-      gasnett_cond_signal(&condvar);
+        start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
 
-#ifdef SHARED_UTILITY_QUEUE
-    void UtilityProcessor::shared_tasks_available(void)
+    void UtilityProcessor::tasks_available(int priority)
     {
       AutoHSLLock al(mutex);
       gasnett_cond_signal(&condvar);
     }
-#endif
+
+    void UtilityProcessor::enqueue_task(Task *task)
+    {
+      AutoHSLLock al(mutex);
+      task_queue.insert(task, task->priority);
+      gasnett_cond_signal(&condvar);
+    }
 
     void UtilityProcessor::enable_idle_task(Processor::Impl *proc)
     {
@@ -5653,6 +5474,18 @@ namespace LegionRuntime {
       {
       }
 
+      virtual void enqueue_task(Task *task)
+      {
+        // should never be called
+        assert(0);
+      }
+
+      virtual void tasks_available(int priority)
+      {
+	log_task.warning("remote processor " IDFMT " being told about local tasks ready?",
+			 me.id);
+      }
+
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
@@ -5673,6 +5506,32 @@ namespace LegionRuntime {
 				  PAYLOAD_COPY);
       }
     };
+
+    /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
+    {
+      // are we creating a local group?
+      if((members.size() == 0) || (ID(members[0]).node() == gasnet_mynode())) {
+	ProcessorGroup *grp = Runtime::runtime->local_proc_group_free_list->alloc_entry();
+	grp->set_group_members(members);
+	return grp->me;
+      }
+
+      assert(0);
+    }
+
+    void Processor::get_group_members(std::vector<Processor>& members)
+    {
+      // if we're a plain old processor, the only member of our "group" is ourself
+      if(ID(*this).type() == ID::ID_PROCESSOR) {
+	members.push_back(*this);
+	return;
+      }
+
+      assert(ID(*this).type() == ID::ID_PROCGROUP);
+
+      ProcessorGroup *grp = Runtime::get_runtime()->get_procgroup_impl(*this);
+      grp->get_group_members(members);
+    }
 
     Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
 			   //std::set<RegionInstance> instances_needed,
@@ -5793,6 +5652,9 @@ namespace LegionRuntime {
       case ID::ID_INSTANCE:
 	return &(get_instance_impl(id)->lock);
 
+      case ID::ID_PROCGROUP:
+	return &(get_procgroup_impl(id)->lock);
+
       default:
 	assert(0);
       }
@@ -5822,8 +5684,21 @@ namespace LegionRuntime {
 
     Processor::Impl *Runtime::get_processor_impl(ID id)
     {
+      if(id.type() == ID::ID_PROCGROUP)
+	return get_procgroup_impl(id);
+
       assert(id.type() == ID::ID_PROCESSOR);
       return null_check(runtime->nodes[id.node()].processors[id.index()]);
+    }
+
+    ProcessorGroup *Runtime::get_procgroup_impl(ID id)
+    {
+      assert(id.type() == ID::ID_PROCGROUP);
+
+      Node *n = &runtime->nodes[id.node()];
+      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.index(), id.node());
+      assert(impl->me == id.convert<Processor>());
+      return impl;
     }
 
     IndexSpace::Impl *Runtime::get_index_space_impl(ID id)
@@ -6166,6 +6041,7 @@ namespace LegionRuntime {
     class DeferredInstDestroy : public Event::Impl::EventWaiter {
     public:
       DeferredInstDestroy(RegionInstance::Impl *i) : impl(i) { }
+      virtual ~DeferredInstDestroy(void) { }
     public:
       virtual bool event_triggered(void)
       {
@@ -7601,6 +7477,7 @@ namespace LegionRuntime {
     ///////////////////////////////////////////////////
     // 
 
+#ifdef DIEDIEDIE
     class ProcessorThread;
 
     // internal structures for locks, event, etc.
@@ -7791,6 +7668,7 @@ namespace LegionRuntime {
       unsigned wptr, rptr, size;
       AMQueueEntry *buffer;
     };	
+#endif
 
     struct MachineShutdownRequestArgs {
       int initiating_node;
@@ -8396,6 +8274,7 @@ namespace LegionRuntime {
 	r->local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
 	r->local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
 	r->local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
+	r->local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
       }
 
 #ifdef DEADLOCK_TRACE
@@ -8452,17 +8331,11 @@ namespace LegionRuntime {
       explicit_utility_procs = (num_util_procs > 0);
       if (num_util_procs > 0)
       {
-#ifdef SHARED_UTILITY_QUEUE
-        UtilityQueue *shared_utility_queue = new UtilityQueue();
-#endif
         for(unsigned i = 0; i < num_util_procs; i++) {
           UtilityProcessor *up = new UtilityProcessor(ID(ID::ID_PROCESSOR, 
                                                          gasnet_mynode(), 
                                                          n->processors.size()).convert<Processor>(),
-#ifdef SHARED_UTILITY_QUEUE
-                                                      shared_utility_queue,
-#endif
-                                                      num_local_cpus+i/*core id*/);
+                                                        num_local_cpus+i/*core id*/);
 
           n->processors.push_back(up);
           local_util_procs.push_back(up);
@@ -8514,11 +8387,6 @@ namespace LegionRuntime {
       }
 #endif
       // create local processors
-#ifdef SHARED_TASK_QUEUE
-      // until we handle numa better, we might as well share tasks between all CPUs
-      LocalProcessor::SharedTaskQueue *shared_task_queue = 
-        new LocalProcessor::SharedTaskQueue(0);
-#endif
       for(unsigned i = 0; i < num_local_cpus; i++) {
 	Processor p = ID(ID::ID_PROCESSOR, 
 			 gasnet_mynode(), 
@@ -8526,9 +8394,6 @@ namespace LegionRuntime {
 
 	LocalProcessor *lp = new LocalProcessor(p, 
 						i,
-#ifdef SHARED_TASK_QUEUE
-                                                shared_task_queue,
-#endif
 						cpu_worker_threads, 
 						1); // HLRT not thread-safe yet
 	if(num_util_procs > 0) {
@@ -9056,6 +8921,9 @@ namespace LegionRuntime {
 
       // wait for idle-ness somehow?
       int timeout = -1;
+#ifdef TRACE_RESOURCES
+      Runtime *rt = Runtime::get_runtime();
+#endif
       while(running_proc_count.get() > 0) {
 	if(timeout >= 0) {
 	  timeout--;
@@ -9066,6 +8934,12 @@ namespace LegionRuntime {
 	}
 	fflush(stdout);
 	sleep(1);
+#ifdef TRACE_RESOURCES
+        log_machine.info("total events: %d", rt->local_event_free_list->next_alloc);
+        log_machine.info("total reservations: %d", rt->local_reservation_free_list->next_alloc);
+        log_machine.info("total index spaces: %d", rt->local_index_space_free_list->next_alloc);
+        log_machine.info("total proc groups: %d", rt->local_proc_group_free_list->next_alloc);
+#endif
       }
 #if defined(ORDERED_LOGGING) || defined(NODE_LOGGING)
       Logger::finalize();

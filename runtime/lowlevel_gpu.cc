@@ -302,6 +302,12 @@ namespace LegionRuntime {
 	}
       }
 
+      void tasks_available(int priority)
+      {
+	AutoHSLLock al(mutex);
+	gasnett_cond_signal(&worker_condvar);
+      }
+
       void enqueue_task(GPUTask *job)
       {
         AutoHSLLock a(mutex);
@@ -537,6 +543,8 @@ namespace LegionRuntime {
         else
           assert(false); // who does host to host here?!?
       }
+
+      virtual ~GPUMemcpy(void) { }
     public:
       virtual bool event_triggered(void)
       {
@@ -625,6 +633,8 @@ namespace LegionRuntime {
 	  mask(_mask), elmt_size(_elmt_size)
       {}
 
+      virtual ~GPUMemcpy1D(void) { }
+
       void do_span(off_t pos, size_t len)
       {
 	off_t span_start = pos * elmt_size;
@@ -669,6 +679,8 @@ namespace LegionRuntime {
           src_stride((_src_stride < _bytes) ? _bytes : _src_stride),
           bytes(_bytes), lines(_lines)
       {}
+
+      virtual ~GPUMemcpy2D(void) { }
     public:
       virtual void execute(void)
       {
@@ -941,6 +953,17 @@ namespace LegionRuntime {
     void *GPUProcessor::get_fbmem_gpu_base(void)
     {
       return ((char *)internal->fbmem_gpu_base) + internal->fbmem_reserve;
+    }
+
+    void GPUProcessor::tasks_available(int priority)
+    {
+      internal->tasks_available(priority);
+    }
+
+    void GPUProcessor::enqueue_task(Task *task)
+    {
+      // should never be called
+      assert(0);
     }
 
     void GPUProcessor::spawn_task(Processor::TaskFuncID func_id,

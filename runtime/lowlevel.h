@@ -186,6 +186,7 @@ namespace LegionRuntime {
 	TOC_PROC, // Throughput core
 	LOC_PROC, // Latency core
 	UTIL_PROC, // Utility core
+	PROC_GROUP, // Processor group
       };
 
       void enable_idle_task(void);
@@ -195,6 +196,9 @@ namespace LegionRuntime {
       AddressSpace address_space(void) const;
       // Return the local ID within the address space
       IDType local_id(void) const;
+
+      static Processor create_group(const std::vector<Processor>& members);
+      void get_group_members(std::vector<Processor>& members);
 
       // special task IDs
       enum {

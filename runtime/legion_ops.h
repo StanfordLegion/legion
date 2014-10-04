@@ -19,6 +19,7 @@
 
 #include "legion.h"
 #include "region_tree.h"
+#include "legion_allocation.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -34,6 +35,13 @@ namespace LegionRuntime {
      */
     class Operation {
     public:
+      struct DeferredMappingArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+        MustEpochOp *must_epoch;
+        GenerationID must_epoch_gen;
+      };
       struct DeferredCompleteArgs {
       public:
         HLRTaskID hlr_id;
@@ -52,6 +60,7 @@ namespace LegionRuntime {
       void deactivate_operation(void);
     public:
       inline GenerationID get_generation(void) const { return gen; }
+      inline Event get_children_mapped(void) const { return children_mapped; }
       inline Event get_completion_event(void) const { return completion_event; }
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
@@ -85,8 +94,9 @@ namespace LegionRuntime {
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
       void initialize_operation(SingleTask *ctx, bool track,
+                                Event children_mapped,
                                 unsigned num_regions = 0); 
-      public:
+    public:
       // The following two calls may be implemented
       // differently depending on the operation, but we
       // provide base versions of them so that operations
@@ -186,7 +196,8 @@ namespace LegionRuntime {
                                 Operation *op, GenerationID op_gen,
                                 bool &registered_dependence,
                                 unsigned &op_mapping_deps,
-                                unsigned &op_speculation_deps);
+                                unsigned &op_speculation_deps,
+                                Event &children_mapped);
       // Check to see if the operation is still valid
       // for the given GenerationID.  This method is not precise
       // and may return false when the operation has committed.
@@ -233,6 +244,9 @@ namespace LegionRuntime {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
+      // Set of events from operations we depend that describe when
+      // all of their children have mapped
+      std::set<Event> dependent_children_mapped;
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -266,6 +280,8 @@ namespace LegionRuntime {
       bool track_parent;
       // The enclosing context for this operation
       SingleTask *parent_ctx;
+      // The event for when any children this operation has are mapped
+      Event children_mapped;
       // The completion event for this operation
       UserEvent completion_event;
       // The trace for this operation if any
@@ -347,7 +363,9 @@ namespace LegionRuntime {
       void deactivate_speculative(void);
     public:
       void initialize_speculation(SingleTask *ctx, bool track, 
+                                  Event child_event,
                                   unsigned regions, const Predicate &p);
+      void register_predicate_dependence(void);
       bool is_predicated(void) const;
       // Wait until the predicate is valid and then return
       // its value.  Give it the current processor in case it
@@ -392,6 +410,8 @@ namespace LegionRuntime {
      * being restarted.
      */
     class MapOp : public Inline, public Operation {
+    public:
+      static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
       MapOp(Runtime *rt);
       MapOp(const MapOp &rhs);
@@ -440,6 +460,8 @@ namespace LegionRuntime {
      * using the low-level runtime copy facilities. 
      */
     class CopyOp : public Copy, public SpeculativeOp {
+    public:
+      static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
       CopyOp(Runtime *rt);
       CopyOp(const CopyOp &rhs);
@@ -492,6 +514,8 @@ namespace LegionRuntime {
      */
     class FenceOp : public Operation {
     public:
+      static const AllocationType alloc_type = FENCE_OP_ALLOC;
+    public:
       FenceOp(Runtime *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
@@ -520,6 +544,8 @@ namespace LegionRuntime {
      * until they are safe to be committed.
      */
     class DeletionOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DELETION_OP_ALLOC;
     public:
       enum DeletionKind {
         INDEX_SPACE_DELETION,
@@ -575,6 +601,8 @@ namespace LegionRuntime {
      */
     class CloseOp : public Operation {
     public:
+      static const AllocationType alloc_type = CLOSE_OP_ALLOC;
+    public:
       CloseOp(Runtime *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
@@ -607,6 +635,8 @@ namespace LegionRuntime {
      * regions with simultaneous coherence.
      */
     class AcquireOp : public Acquire, public SpeculativeOp {
+    public:
+      static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
       AcquireOp(Runtime *rt);
       AcquireOp(const AcquireOp &rhs);
@@ -655,6 +685,8 @@ namespace LegionRuntime {
      */
     class ReleaseOp : public Release, public SpeculativeOp {
     public:
+      static const AllocationType alloc_type = RELEASE_OP_ALLOC;
+    public:
       ReleaseOp(Runtime *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
@@ -700,6 +732,8 @@ namespace LegionRuntime {
      */
     class FuturePredOp : public Predicate::Impl {
     public:
+      static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
+    public:
       struct ResolveFuturePredArgs {
         HLRTaskID hlr_id;
         FuturePredOp *future_pred_op;
@@ -730,6 +764,8 @@ namespace LegionRuntime {
      */
     class NotPredOp : public Predicate::Impl, PredicateWaiter {
     public:
+      static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
+    public:
       NotPredOp(Runtime *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
@@ -754,6 +790,8 @@ namespace LegionRuntime {
      * A class for and-ing other predicates
      */
     class AndPredOp : public Predicate::Impl, PredicateWaiter {
+    public:
+      static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
       AndPredOp(Runtime *rt);
       AndPredOp(const AndPredOp &rhs);
@@ -786,6 +824,8 @@ namespace LegionRuntime {
      * A class for or-ing other predicates
      */
     class OrPredOp : public Predicate::Impl, PredicateWaiter {
+    public:
+      static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
       OrPredOp(Runtime *rt);
       OrPredOp(const OrPredOp &rhs);
@@ -823,6 +863,8 @@ namespace LegionRuntime {
      * be run in parallel or it reports an error.
      */
     class MustEpochOp : public Operation {
+    public:
+      static const AllocationType alloc_type = MUST_EPOCH_OP_ALLOC;
     public:
       struct DependenceRecord {
       public:

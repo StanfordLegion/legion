@@ -49,12 +49,9 @@
 #endif
 
 #ifndef MAX_FIELDS
-#define MAX_FIELDS         128 // must be divisible by 2^FIELD_SHIFT
+#define MAX_FIELDS         128 // must be a power of 2
 #endif
 
-#ifndef FIELD_LOG2
-#define FIELD_LOG2         7 // log2(MAX_FIELDS)
-#endif
 // Some default values 
 
 // The maximum number of nodes to be run on
@@ -110,6 +107,39 @@
 // result in checks always being performed
 #ifndef DEFAULT_LOGICAL_USER_TIMEOUT
 #define DEFAULT_LOGICAL_USER_TIMEOUT    32
+#endif
+// Number of events to place in each GC epoch
+// Large counts improve efficiency but add latency to
+// garbage collection.  Smaller count reduce efficiency
+// but improve latency of collection.
+#ifndef DEFAULT_GC_EPOCH_SIZE
+#define DEFAULT_GC_EPOCH_SIZE           64
+#endif
+
+// Used for debugging memory leaks
+// How often tracing information is dumped
+// based on the number of scheduler invocations
+#ifndef TRACE_ALLOCATION_FREQUENCY
+#define TRACE_ALLOCATION_FREQUENCY      1024 
+#endif
+
+// Some helper macros
+
+// This statically computes an integer log base 2 for a number
+// which is guaranteed to be a power of 2. Adapted from 
+// http://graphics.stanford.edu/~seander/bithacks.html#IntegerLogDeBruijn
+#define STATIC_LOG2(x)  (LOG2_LOOKUP((uint32_t)(x * 0x077CB531U) >> 27))
+#define LOG2_LOOKUP(x) ((x==0) ? 0 : (x==1) ? 1 : (x==2) ? 28 : (x==3) ? 2 : \
+                   (x==4) ? 29 : (x==5) ? 14 : (x==6) ? 24 : (x==7) ? 3 : \
+                   (x==8) ? 30 : (x==9) ? 22 : (x==10) ? 20 : (x==11) ? 15 : \
+                   (x==12) ? 25 : (x==13) ? 17 : (x==14) ? 4 : (x==15) ? 8 : \
+                   (x==16) ? 31 : (x==17) ? 27 : (x==18) ? 13 : (x==19) ? 23 : \
+                   (x==20) ? 21 : (x==21) ? 19 : (x==22) ? 16 : (x==23) ? 7 : \
+                   (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
+                   (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
+
+#ifndef FIELD_LOG2
+#define FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
 #endif
 
 namespace BindingLib { class Utility; } // BindingLib namespace
@@ -262,6 +292,7 @@ namespace LegionRuntime {
       ERROR_MISSING_DEFAULT_PREDICATE_RESULT = 116,
       ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
       ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
+      ERROR_TRACING_ALLOCATION_WITH_SEPARATE = 119,
     };
 
     // enum and namepsaces don't really get along well
@@ -333,8 +364,10 @@ namespace LegionRuntime {
 
     // Enumeration of high-level runtime tasks
     enum HLRTaskID {
+      HLR_SCHEDULER_ID,
       HLR_MESSAGE_ID,
       HLR_POST_END_ID,
+      HLR_DEFERRED_MAPPING_ID,
       HLR_DEFERRED_COMPLETE_ID,
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
@@ -408,6 +441,8 @@ namespace LegionRuntime {
     class Collectable;
     class ArgumentMapStore;
     class ProcessorManager;
+    class MessageManager;
+    class GarbageCollectionEpoch;
     class Runtime;
 
     // legion_ops.h
@@ -668,6 +703,43 @@ namespace LegionRuntime {
 
 #undef NODE_SHIFT
 #undef NODE_MASK
+
+// The following macros are used in the ProcessorMask instantiation of BitMask
+// If you change one you probably have to change the others too
+#define PROC_TYPE           uint64_t
+#define PROC_SHIFT          6
+#define PROC_MASK           0x3F
+#define PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
+
+#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
+#if (MAX_NUM_PROCS > 256)
+    typedef AVXTLBitMask<MAX_NUM_PROCS> ProcessorMask;
+#elif (MAX_NUM_PROCS > 128)
+    typedef AVXBitMask<MAX_NUM_PROCS> ProcessorMask;
+#elif (MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#else
+    typedef BitMask<PROCTYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+#endif
+#elif defined(__SSE2__)
+#if (MAX_NUM_PROCS > 128)
+    typedef SSETLBitMask<MAX_NUM_PROCS> ProcessorMask;
+#elif (MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#else
+    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+#endif
+#else
+#if (MAX_NUM_PROCS > 64)
+    typedef TLBitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> 
+                                                                  ProcessorMask;
+#else
+    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+#endif
+#endif
+
+#undef PROC_SHIFT
+#undef PROC_MASK
 
 #define FRIEND_ALL_RUNTIME_CLASSES                \
     friend class HighLevelRuntime;                \

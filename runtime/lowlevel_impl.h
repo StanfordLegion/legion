@@ -156,7 +156,7 @@ namespace LegionRuntime {
     class GASNetHSL {
     public:
       GASNetHSL(void) { gasnet_hsl_init(&mutex); }
-      ~GASNetHSL(void) { }
+      ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
 
       void lock(void) { gasnet_hsl_lock(&mutex); }
       void unlock(void) { gasnet_hsl_unlock(&mutex); }
@@ -497,11 +497,11 @@ namespace LegionRuntime {
     public:
 #ifdef LEGION_IDS_ARE_64BIT
       enum {
-	TYPE_BITS = 3,
+	TYPE_BITS = 4,
 	INDEX_H_BITS = 12,
 	INDEX_L_BITS = 32,
 	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 17 = 128k nodes */
+	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
       };
 #else
       // two forms of bit pack for IDs:
@@ -509,13 +509,13 @@ namespace LegionRuntime {
       //  3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
       //  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
       // +-----+---------------------------------------------------------+
-      // | TYP |   NODE  |           INDEX                               |
-      // | TYP |   NODE  |   INDEX_H     |           INDEX_L             |
+      // |  TYP  |   NODE  |         INDEX                               |
+      // |  TYP  |   NODE  |  INDEX_H    |           INDEX_L             |
       // +-----+---------------------------------------------------------+
 
       enum {
-	TYPE_BITS = 3,
-	INDEX_H_BITS = 8,
+	TYPE_BITS = 4,
+	INDEX_H_BITS = 7,
 	INDEX_L_BITS = 16,
 	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
 	NODE_BITS = 32 - TYPE_BITS - INDEX_BITS /* 5 = 32 nodes */
@@ -524,13 +524,21 @@ namespace LegionRuntime {
 
       enum ID_Types {
 	ID_SPECIAL,
+	ID_UNUSED_1,
 	ID_EVENT,
+	ID_UNUSED_3,
 	ID_LOCK,
+	ID_UNUSED_5,
 	ID_MEMORY,
+	ID_UNUSED_7,
 	ID_PROCESSOR,
+	ID_PROCGROUP,
 	ID_INDEXSPACE,
+	ID_UNUSED_11,
 	ID_ALLOCATOR,
+	ID_UNUSED_13,
 	ID_INSTANCE,
+	ID_UNUSED_15,
       };
 
       enum ID_Specials {
@@ -568,6 +576,72 @@ namespace LegionRuntime {
       IDType value;
     };
     
+    class Event::Impl {
+    public:
+      Impl(void);
+
+      static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
+
+      void init(Event _me, unsigned _init_owner);
+
+      static Event create_event(void);
+
+      // test whether an event has triggered without waiting
+      // make this a volatile method so that if we poll it
+      // then it will do the right thing
+      bool has_triggered(Event::gen_t needed_gen) volatile;
+
+      // causes calling thread to block until event has occurred
+      //void wait(Event::gen_t needed_gen);
+
+      void external_wait(Event::gen_t needed_gen);
+
+      // creates an event that won't trigger until all input events have
+      static Event merge_events(const std::set<Event>& wait_for);
+      static Event merge_events(Event ev1, Event ev2,
+				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
+				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
+
+      // record that the event has triggered and notify anybody who cares
+      void trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on = NO_EVENT);
+
+      // used to adjust a barrier's arrival count either up or down
+      // if delta > 0, timestamp is current time (on requesting node)
+      // if delta < 0, timestamp says which positive adjustment this arrival must wait for
+      void adjust_arrival(Event::gen_t barrier_gen, int delta, 
+			  Barrier::timestamp_t timestamp, Event wait_on = NO_EVENT);
+
+      class EventWaiter {
+      public:
+        EventWaiter(void) { }
+        virtual ~EventWaiter(void) { }
+      public:
+	virtual bool event_triggered(void) = 0;
+	virtual void print_info(FILE *f) = 0;
+      };
+
+      void add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed = false);
+
+    public: //protected:
+      Event me;
+      unsigned owner;
+      Event::gen_t generation, gen_subscribed, free_generation;
+      Event::Impl *next_free;
+      //static Event::Impl *first_free;
+      //static gasnet_hsl_t freelist_mutex;
+
+      gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
+
+      std::map<Event::gen_t,NodeMask> remote_waiters;
+      std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
+
+      // for barriers
+      unsigned base_arrival_count, current_arrival_count;
+
+      class PendingUpdates;
+      std::map<Event::gen_t, PendingUpdates *> pending_updates;
+    };
+
     struct ElementMaskImpl {
       //int count, offset;
       typedef unsigned long long uint64;
@@ -745,15 +819,42 @@ namespace LegionRuntime {
 
     class UtilityProcessor;
 
+    class ProcessorGroup;
+
+    // information for a task launch
+    class Task {
+    public:
+      Task(Processor _proc,
+	   Processor::TaskFuncID _func_id,
+	   const void *_args, size_t _arglen,
+	   Event _finish_event, int _priority,
+           int expected_count);
+
+      virtual ~Task(void);
+
+      Processor proc;
+      Processor::TaskFuncID func_id;
+      void *args;
+      size_t arglen;
+      Event finish_event;
+      int priority;
+      int run_count, finish_count;
+    };
+
     class Processor::Impl {
     public:
-      Impl(Processor _me, Processor::Kind _kind, Processor _util = Processor::NO_PROC)
-	: me(_me), kind(_kind), util(_util), util_proc(0), run_counter(0) {}
+      Impl(Processor _me, Processor::Kind _kind, Processor _util = Processor::NO_PROC);
+
+      virtual ~Impl(void);
 
       void run(Atomic<int> *_run_counter)
       {
 	run_counter = _run_counter;
       }
+
+      virtual void tasks_available(int priority) = 0;
+
+      virtual void enqueue_task(Task *task) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -779,6 +880,95 @@ namespace LegionRuntime {
       Processor util;
       UtilityProcessor *util_proc;
       Atomic<int> *run_counter;
+    }; 
+
+    // generic way of keeping a prioritized queue of stuff to do
+    // Needs to be protected by owner lock
+    template <typename JOBTYPE>
+    class JobQueue {
+    public:
+      JobQueue(void);
+
+      bool empty(void) const;
+
+      void insert(JOBTYPE *job, int priority);
+
+      JOBTYPE *pop(void);
+
+      std::map<int, std::deque<JOBTYPE*> > ready;
+    };
+
+    template <typename JOBTYPE>
+    JobQueue<JOBTYPE>::JobQueue(void)
+    {
+    }
+
+    template<typename JOBTYPES>
+    bool JobQueue<JOBTYPES>::empty(void) const
+    {
+      return ready.empty();
+    }
+
+    template <typename JOBTYPE>
+    void JobQueue<JOBTYPE>::insert(JOBTYPE *job, int priority)
+    {
+      std::deque<JOBTYPE *>& dq = ready[-priority];
+      dq.push_back(job);
+    }
+
+    template <typename JOBTYPE>
+    JOBTYPE *JobQueue<JOBTYPE>::pop(void)
+    {
+      if(ready.empty()) return 0;
+
+      // get the sublist with the highest priority (remember, we negate before lookup)
+      typename std::map<int, std::deque<JOBTYPE *> >::iterator it = ready.begin();
+
+      // any deque that's present better be non-empty
+      assert(!(it->second.empty()));
+      JOBTYPE *job = it->second.front();
+      it->second.pop_front();
+
+      // if the list is now empty, remove it and update the new max priority
+      if(it->second.empty()) {
+	ready.erase(it);
+      }
+
+      return job;
+    }
+
+    class ProcessorGroup : public Processor::Impl {
+    public:
+      ProcessorGroup(void);
+
+      virtual ~ProcessorGroup(void);
+
+      static const ID::ID_Types ID_TYPE = ID::ID_PROCGROUP;
+
+      void init(Processor _me, int _owner);
+
+      void set_group_members(const std::vector<Processor>& member_list);
+
+      void get_group_members(std::vector<Processor>& member_list);
+
+      virtual void tasks_available(int priority);
+
+      virtual void enqueue_task(Task *task);
+
+      virtual void spawn_task(Processor::TaskFuncID func_id,
+			      const void *args, size_t arglen,
+			      //std::set<RegionInstance> instances_needed,
+			      Event start_event, Event finish_event,
+                              int priority);
+
+    public: //protected:
+      bool members_valid;
+      bool members_requested;
+      std::vector<Processor::Impl *> members;
+      Reservation::Impl lock;
+      ProcessorGroup *next_free;
+
+      void request_group_members(void);
     };
     
     class PreemptableThread {
@@ -802,23 +992,19 @@ namespace LegionRuntime {
       pthread_t thread;
     };
 
-#define SHARED_UTILITY_QUEUE
-#ifdef SHARED_UTILITY_QUEUE
-    class UtilityQueue;
-#endif
-
     class UtilityProcessor : public Processor::Impl {
     public:
       UtilityProcessor(Processor _me, 
-#ifdef SHARED_UTILITY_QUEUE
-                       UtilityQueue *_shared_queue,
-#endif
                        int core_id = -1, 
                        int _num_worker_threads = 1);
 
       virtual ~UtilityProcessor(void);
 
       void start_worker_threads(size_t stack_size);
+
+      virtual void tasks_available(int priority);
+      
+      virtual void enqueue_task(Task *task);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
@@ -833,18 +1019,13 @@ namespace LegionRuntime {
 
       void wait_for_shutdown(void);
 
-#ifdef SHARED_UTILITY_QUEUE
-      void shared_tasks_available(void);
-#endif
-
       class UtilityThread;
-      class UtilityTask;
 
     protected:
       //friend class UtilityThread;
       //friend class UtilityTask;
 
-      void enqueue_runnable_task(UtilityTask *task);
+      //void enqueue_runnable_task(Task *task);
       int core_id;
       int num_worker_threads;
       bool shutdown_requested;
@@ -853,14 +1034,12 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex;
       gasnett_cond_t condvar;
 
-      UtilityTask *idle_task;
-
-#ifdef SHARED_UTILITY_QUEUE
-      UtilityQueue *shared_queue;
-#endif
+      Task *idle_task;
 
       std::set<UtilityThread *> threads;
-      std::list<UtilityTask *> tasks;
+
+      JobQueue<Task> task_queue;
+
       std::set<Processor::Impl *> idle_procs;
       std::set<Processor::Impl *> procs_in_idle_task;
     };
@@ -1069,69 +1248,6 @@ namespace LegionRuntime {
       Reservation::Impl lock;
     };
 
-    class Event::Impl {
-    public:
-      Impl(void);
-
-      static const ID::ID_Types ID_TYPE = ID::ID_EVENT;
-
-      void init(Event _me, unsigned _init_owner);
-
-      static Event create_event(void);
-
-      // test whether an event has triggered without waiting
-      // make this a volatile method so that if we poll it
-      // then it will do the right thing
-      bool has_triggered(Event::gen_t needed_gen) volatile;
-
-      // causes calling thread to block until event has occurred
-      //void wait(Event::gen_t needed_gen);
-
-      void external_wait(Event::gen_t needed_gen);
-
-      // creates an event that won't trigger until all input events have
-      static Event merge_events(const std::set<Event>& wait_for);
-      static Event merge_events(Event ev1, Event ev2,
-				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
-				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
-
-      // record that the event has triggered and notify anybody who cares
-      void trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on = NO_EVENT);
-
-      // used to adjust a barrier's arrival count either up or down
-      // if delta > 0, timestamp is current time (on requesting node)
-      // if delta < 0, timestamp says which positive adjustment this arrival must wait for
-      void adjust_arrival(Event::gen_t barrier_gen, int delta, 
-			  Barrier::timestamp_t timestamp, Event wait_on = NO_EVENT);
-
-      class EventWaiter {
-      public:
-	virtual bool event_triggered(void) = 0;
-	virtual void print_info(FILE *f) = 0;
-      };
-
-      void add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed = false);
-
-    public: //protected:
-      Event me;
-      unsigned owner;
-      Event::gen_t generation, gen_subscribed, free_generation;
-      Event::Impl *next_free;
-      //static Event::Impl *first_free;
-      //static gasnet_hsl_t freelist_mutex;
-
-      gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible event)
-
-      std::map<Event::gen_t,NodeMask> remote_waiters;
-      std::map<Event::gen_t, std::vector<EventWaiter *> > local_waiters; // set of local threads that are waiting on event (keyed by generation)
-
-      // for barriers
-      unsigned base_arrival_count, current_arrival_count;
-
-      class PendingUpdates;
-      std::map<Event::gen_t, PendingUpdates *> pending_updates;
-    };
-
     class IndexSpace::Impl {
     public:
       Impl(void);
@@ -1225,6 +1341,7 @@ namespace LegionRuntime {
     typedef DynamicTableAllocator<Event::Impl, 10, 8> EventTableAllocator;
     typedef DynamicTableAllocator<Reservation::Impl, 10, 8> ReservationTableAllocator;
     typedef DynamicTableAllocator<IndexSpace::Impl, 10, 4> IndexSpaceTableAllocator;
+    typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
 
     // for each of the ID-based runtime objects, we're going to have an
     //  implementation class and a table to look them up in
@@ -1238,6 +1355,7 @@ namespace LegionRuntime {
       DynamicTable<EventTableAllocator> events;
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<IndexSpaceTableAllocator> index_spaces;
+      DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
     class Runtime {
@@ -1248,6 +1366,7 @@ namespace LegionRuntime {
       Reservation::Impl *get_lock_impl(ID id);
       Memory::Impl *get_memory_impl(ID id);
       Processor::Impl *get_processor_impl(ID id);
+      ProcessorGroup *get_procgroup_impl(ID id);
       IndexSpace::Impl *get_index_space_impl(ID id);
       RegionInstance::Impl *get_instance_impl(ID id);
 #ifdef DEADLOCK_TRACE
@@ -1263,6 +1382,7 @@ namespace LegionRuntime {
       EventTableAllocator::FreeList *local_event_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
+      ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
 
 #ifdef DEADLOCK_TRACE
       unsigned next_thread;

@@ -19,6 +19,7 @@
 
 #include "legion_types.h"
 #include "legion_utilities.h"
+#include "legion_allocation.h"
 #include "garbage_collection.h"
 #include "field_tree.h"
 
@@ -365,8 +366,10 @@ namespace LegionRuntime {
       std::map<RegionTreeID,RegionNode*>        tree_nodes;
     private:
       // References to objects stored in the region forest
-      std::map<DistributedID,PhysicalManager*> managers;
-      std::map<DistributedID,LogicalView*> views;
+      LegionKeyValue<DistributedID,PhysicalManager*,
+                     PHYSICAL_MANAGER_ALLOC>::map managers;
+      LegionKeyValue<DistributedID,LogicalView*,
+                     LOGICAL_VIEW_ALLOC>::map views;
 #ifdef DYNAMIC_TESTS
     public:
       class DynamicSpaceTest {
@@ -854,7 +857,8 @@ namespace LegionRuntime {
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
       // differentiate them.
-      std::map<FIELD_TYPE,std::deque<LayoutDescription*> > layouts;
+      std::map<FIELD_TYPE,LegionContainer<LayoutDescription*,
+                          LAYOUT_DESCRIPTION_ALLOC>::deque> layouts;
     };
  
     /**
@@ -924,6 +928,8 @@ namespace LegionRuntime {
      * operations that need to be performed.
      */
     class TreeCloseImpl : public Collectable {
+    public:
+      static const AllocationType alloc_type = TREE_CLOSE_IMPL_ALLOC;
     public:
       TreeCloseImpl(int child, const FieldMask &m, bool open);
       TreeCloseImpl(const TreeCloseImpl &rhs);
@@ -1064,16 +1070,18 @@ namespace LegionRuntime {
     public:
       void reset(void);
     public:
-      std::map<VersionID,FieldMask> field_versions;
-      std::list<FieldState> field_states;
+      LegionKeyValue<VersionID,FieldMask,
+                     LOGICAL_FIELD_VERSIONS_ALLOC>::map field_versions;
+      LegionContainer<FieldState,LOGICAL_FIELD_STATE_ALLOC>::list field_states;
 #ifndef LOGICAL_FIELD_TREE
-      std::list<LogicalUser> curr_epoch_users;
-      std::list<LogicalUser> prev_epoch_users;
+      LegionContainer<LogicalUser,CURR_LOGICAL_ALLOC>::list curr_epoch_users;
+      LegionContainer<LogicalUser,PREV_LOGICAL_ALLOC>::list prev_epoch_users;
 #else
       FieldTree<LogicalUser> *curr_epoch_users;
       FieldTree<LogicalUser> *prev_epoch_users;
 #endif
-      std::map<Color,std::list<TreeClose> > close_operations;
+      std::map<Color,LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list> 
+                                                            close_operations;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask user_level_coherence;
@@ -1204,9 +1212,12 @@ namespace LegionRuntime {
       FieldMask dirty_mask;
       FieldMask reduction_mask;
       ChildState children;
-      std::map<InstanceView*,FieldMask> valid_views;
-      std::map<ReductionView*,FieldMask> reduction_views;
-      std::map<MaterializedView*,std::map<Event,FieldMask> > pending_updates;
+      LegionKeyValue<InstanceView*, FieldMask,
+                     VALID_VIEW_ALLOC>::map valid_views;
+      LegionKeyValue<ReductionView*, FieldMask,
+                     VALID_REDUCTION_ALLOC>::map reduction_views;
+      LegionKeyValue<MaterializedView*, std::map<Event,FieldMask>,
+                     PENDING_UPDATES_ALLOC>::map pending_updates;
     public:
       // These are used for managing access to the physical state
       unsigned acquired_count;
@@ -1742,11 +1753,13 @@ namespace LegionRuntime {
     public:
 #ifndef LOGICAL_FIELD_TREE
       // Logical helper operations
+      template<typename ALLOC> 
       FieldMask perform_dependence_checks(const LogicalUser &user, 
-            std::list<LogicalUser> &users, const FieldMask &check_mask, 
+            std::list<LogicalUser, ALLOC> &users, const FieldMask &check_mask,
             bool validates_regions);
+      template<typename ALLOC>
       void perform_closing_checks(LogicalCloser &closer,
-            std::list<LogicalUser> &users, const FieldMask &check_mask);
+            std::list<LogicalUser, ALLOC> &users, const FieldMask &check_mask);
 #else
       FieldMask perform_dependence_checks(const LogicalUser &user,
             FieldTree<LogicalUser> *users, const FieldMask &check_mask,
@@ -2419,6 +2432,9 @@ namespace LegionRuntime {
       // have to be transformed when the manager is sent remotely
       std::map<unsigned/*index*/,FieldID> field_indexes;
     protected:
+      // Memoized value for matching physical instances
+      std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
+    protected:
       Reservation offset_lock; 
       std::map<FIELD_TYPE,std::vector<OffsetEntry> > memoized_offsets;
     protected:
@@ -2470,6 +2486,8 @@ namespace LegionRuntime {
      * A class for managing normal physical instances
      */
     class InstanceManager : public PhysicalManager {
+    public:
+      static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
       struct OffsetEntry {
       public:
@@ -2592,6 +2610,10 @@ namespace LegionRuntime {
           bool precise_domain) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
+      virtual bool is_list_manager(void) const = 0;
+      virtual ListReductionManager* as_list_manager(void) const = 0;
+      virtual FoldReductionManager* as_fold_manager(void) const = 0;
+    public:
       DistributedID send_manager(AddressSpaceID target, 
                         std::set<PhysicalManager*> &needed_managers);
     public:
@@ -2616,6 +2638,8 @@ namespace LegionRuntime {
      * A class for storing list reduction instances
      */
     class ListReductionManager : public ReductionManager {
+    public:
+      static const AllocationType alloc_type = LIST_MANAGER_ALLOC;
     public:
       ListReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
@@ -2643,6 +2667,10 @@ namespace LegionRuntime {
           Domain space, Event precondition, bool reduction_fold,
           bool precise_domain);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual bool is_list_manager(void) const;
+      virtual ListReductionManager* as_list_manager(void) const;
+      virtual FoldReductionManager* as_fold_manager(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -2652,6 +2680,8 @@ namespace LegionRuntime {
      * A class for representing fold reduction instances
      */
     class FoldReductionManager : public ReductionManager {
+    public:
+      static const AllocationType alloc_type = FOLD_MANAGER_ALLOC;
     public:
       FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
@@ -2679,6 +2709,10 @@ namespace LegionRuntime {
           Domain space, Event precondition, bool reduction_fold,
           bool precise_domain);
       virtual Domain get_pointer_space(void) const;
+    public:
+      virtual bool is_list_manager(void) const;
+      virtual ListReductionManager* as_list_manager(void) const;
+      virtual FoldReductionManager* as_fold_manager(void) const;
     };
 
     /**
@@ -2718,13 +2752,10 @@ namespace LegionRuntime {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      void defer_collect_user(Event term_event, const FieldMask &mask,
-                              Processor p);
-      virtual void collect_user(Event term_event,
-                                const FieldMask &term_mask) = 0;
-      static void handle_deferred_collect(Deserializer &derez,
-                                          Processor gc_proc,
-                                          RegionTreeForest *context);
+      void defer_collect_user(Event term_event);
+      virtual void collect_users(const std::set<Event> &term_events) = 0;
+      static void handle_deferred_collect(LogicalView *view,
+                                          const std::set<Event> &term_events);
     public:
       void send_back_user(const PhysicalUser &user);
       virtual void process_send_back_user(AddressSpaceID source,
@@ -2778,8 +2809,7 @@ namespace LegionRuntime {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      virtual void collect_user(Event term_event,
-                                const FieldMask &term_mask) = 0;
+      virtual void collect_users(const std::set<Event> &term_events) = 0;
     public:
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user) = 0;
@@ -2823,6 +2853,8 @@ namespace LegionRuntime {
      * logical view onto a single physical instance.
      */
     class MaterializedView : public InstanceView {
+    public:
+      static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, DistributedID own_did,
@@ -2876,8 +2908,7 @@ namespace LegionRuntime {
       virtual void garbage_collect(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void collect_user(Event term_event,
-                                const FieldMask &term_mask);
+      virtual void collect_users(const std::set<Event> &term_users);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
     protected:
@@ -2886,6 +2917,7 @@ namespace LegionRuntime {
       void add_local_user(std::set<Event> &wait_on, 
                           const PhysicalUser &user);
       void add_copy_user_above(PhysicalUser &user);
+      void add_local_copy_user(PhysicalUser &user);
     protected: 
       void find_copy_preconditions_above(Color child_color,
                                    ReductionOpID redop, bool reading,
@@ -2900,9 +2932,11 @@ namespace LegionRuntime {
                                     const FieldMask &user_mask,
                                     Color child_color);
       void update_versions(const FieldMask &update_mask);
-      void filter_local_users(Event term_event,
-                              const FieldMask &term_mask);
-      void condense_user_list(std::list<PhysicalUser> &users, bool previous);
+      void filter_local_users(Event term_event);
+      void filter_local_users(const std::set<Event> &term_events);
+      template<typename ALLOC>
+      void condense_user_list(std::list<PhysicalUser,ALLOC> &users, 
+                              bool previous);
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -2931,7 +2965,8 @@ namespace LegionRuntime {
       static void handle_send_updates(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
-      static void filter_list(std::list<PhysicalUser> &user_list,
+      template<typename ALLOC>
+      static void filter_list(std::list<PhysicalUser,ALLOC> &user_list,
                               const FieldMask &filter_mask);
     public:
       InstanceManager *const manager;
@@ -2948,17 +2983,18 @@ namespace LegionRuntime {
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
 #ifndef PHYSICAL_FIELD_TREE
-      std::list<PhysicalUser> curr_epoch_users;
-      std::list<PhysicalUser> prev_epoch_users;
+      LegionContainer<PhysicalUser,CURR_PHYSICAL_ALLOC>::list curr_epoch_users;
+      LegionContainer<PhysicalUser,PREV_PHYSICAL_ALLOC>::list prev_epoch_users;
 #else
       FieldTree<PhysicalUser> *const curr_epoch_users;
       FieldTree<PhysicalUser> *const prev_epoch_users;
 #endif
       // Keep track of how many outstanding references we have
       // for each of the user events
-      std::set<Event> event_references;
+      LegionContainer<Event,EVENT_REFERENCE_ALLOC>::set event_references;
       // Version information for each of the fields
-      std::map<VersionID,FieldMask> current_versions;
+      LegionKeyValue<VersionID,FieldMask,
+                     PHYSICAL_VERSION_ALLOC>::map current_versions;
     };
 
     /**
@@ -2968,6 +3004,8 @@ namespace LegionRuntime {
      * logical region with a bunch of different instances.
      */
     class CompositeView : public InstanceView {
+    public:
+      static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC;
     public:
       struct ReduceInfo {
       public:
@@ -3011,8 +3049,7 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      virtual void collect_user(Event term_event,
-                                const FieldMask &term_mask);
+      virtual void collect_users(const std::set<Event> &term_events);
     public:
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
@@ -3114,6 +3151,8 @@ namespace LegionRuntime {
      */
     class CompositeNode : public Collectable {
     public:
+      static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
+    public:
       struct ChildInfo {
       public:
         ChildInfo(void)
@@ -3192,6 +3231,8 @@ namespace LegionRuntime {
      */
     class ReductionView : public LogicalView {
     public:
+      static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
+    public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, DistributedID own_did,
                     RegionTreeNode *node, ReductionManager *manager);
@@ -3238,8 +3279,7 @@ namespace LegionRuntime {
       virtual void garbage_collect(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void collect_user(Event term_event,
-                                const FieldMask &term_mask);
+      virtual void collect_users(const std::set<Event> &term_events);
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
     public:

@@ -18,10 +18,11 @@
 #define __LEGION_TASKS_H__
 
 #include "legion.h"
+#include "runtime.h"
 #include "legion_ops.h"
 #include "region_tree.h"
-#include "runtime.h"
 #include "legion_utilities.h"
+#include "legion_allocation.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -97,6 +98,10 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+    public:
+      // Tell the parent context that this task is in a ready queue
+      void activate_outstanding_task(void);
+      void deactivate_outstanding_task(void);
     public:
       void register_region_creation(LogicalRegion handle);
       void register_region_deletion(LogicalRegion handle);
@@ -184,6 +189,8 @@ namespace LegionRuntime {
       bool needs_state;
     protected:
       AllocManager *arg_manager;
+    protected:
+      UserEvent all_children_mapped;
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
@@ -294,6 +301,11 @@ namespace LegionRuntime {
     public:
       void begin_trace(TraceID tid);
       void end_trace(TraceID tid);
+    public:
+      void increment_outstanding(void);
+      void decrement_outstanding(void);
+      void increment_pending(void);
+      void decrement_pending(void);
     public:
       void add_local_field(FieldSpace handle, FieldID fid, size_t size);
       void add_local_fields(FieldSpace handle, 
@@ -416,7 +428,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos) = 0;
+      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
     public:
       virtual void handle_future(const void *res, 
@@ -435,24 +447,27 @@ namespace LegionRuntime {
       unsigned num_virtual_mappings;
       Processor executing_processor;
       // Hold the result of the mapping 
-      std::deque<InstanceRef> physical_instances;
+      LegionContainer<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::deque 
+                                                    physical_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
-      std::deque<InstanceRef> local_instances;
+      LegionContainer<InstanceRef,TASK_LOCAL_REGION_ALLOC>::deque
+                                                    local_instances;
       // Hold the physical regions for the task's execution
-      std::vector<PhysicalRegion> physical_regions; 
+      std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
-      std::list<PhysicalRegion> inline_regions;
+      LegionContainer<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::list
+                                                   inline_regions;
       // Context for this task
       RegionTreeContext context; 
     protected:
       // Track whether this task has finished executing
-      std::set<Operation*> executing_children;
-      std::set<Operation*> executed_children;
-      std::set<Operation*> complete_children;
+      LegionContainer<Operation*,EXECUTING_CHILD_ALLOC>::set executing_children;
+      LegionContainer<Operation*,EXECUTED_CHILD_ALLOC>::set executed_children;
+      LegionContainer<Operation*,COMPLETE_CHILD_ALLOC>::set complete_children;
       // Traces for this task's execution
-      std::map<TraceID,LegionTrace*> traces;
+      LegionKeyValue<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::map traces;
       LegionTrace *current_trace;
       // Event for waiting when the number of mapping+executing
       // child operations has grown too large.
@@ -461,6 +476,11 @@ namespace LegionRuntime {
       Event deferred_map;
       Event deferred_complete;
     protected:
+      // Number of sub-tasks ready to map
+      unsigned outstanding_subtasks;
+      // Number of mapped sub-tasks that are yet to run
+      unsigned pending_subtasks;
+    protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
     protected:
@@ -468,10 +488,11 @@ namespace LegionRuntime {
       bool simultaneous_checked, has_simultaneous;
     protected:
       // Resources that can build up over a task's lifetime
-      std::deque<Reservation> context_locks;
-      std::deque<Barrier> context_barriers; 
-      std::deque<LocalFieldInfo> local_fields; 
-      std::deque<InlineTask*> inline_tasks;
+      LegionContainer<Reservation,TASK_RESERVATION_ALLOC>::deque context_locks;
+      LegionContainer<Barrier,TASK_BARRIER_ALLOC>::deque context_barriers;
+      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque
+                                                                 local_fields;
+      LegionContainer<InlineTask*,TASK_INLINE_ALLOC>::deque inline_tasks;
     protected:
       // Support for serializing premapping operations.  Note
       // we make it possible for operations accessing different
@@ -571,6 +592,8 @@ namespace LegionRuntime {
      */
     class IndividualTask : public SingleTask {
     public:
+      static const AllocationType alloc_type = INDIVIDUAL_TASK_ALLOC;
+    public:
       IndividualTask(Runtime *rt);
       IndividualTask(const IndividualTask &rhs);
       virtual ~IndividualTask(void);
@@ -622,7 +645,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos);
+          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     protected:
       void pack_remote_mapped(Serializer &rez);
@@ -673,6 +696,8 @@ namespace LegionRuntime {
      */
     class PointTask : public SingleTask {
     public:
+      static const AllocationType alloc_type = POINT_TASK_ALLOC;
+    public:
       PointTask(Runtime *rt);
       PointTask(const PointTask &rhs);
       virtual ~PointTask(void);
@@ -705,7 +730,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos);
+          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     public:
       virtual void handle_future(const void *res, 
@@ -766,7 +791,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos) = 0;
+      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     public:
       virtual void handle_future(const void *res, 
@@ -789,6 +814,8 @@ namespace LegionRuntime {
      */
     class RemoteTask : public WrapperTask {
     public:
+      static const AllocationType alloc_type = REMOTE_TASK_ALLOC;
+    public:
       RemoteTask(Runtime *rt);
       RemoteTask(const RemoteTask &rhs);
       virtual ~RemoteTask(void);
@@ -809,7 +836,7 @@ namespace LegionRuntime {
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos);
+          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
     public:
       void add_top_region(LogicalRegion handle);
     protected:
@@ -826,6 +853,8 @@ namespace LegionRuntime {
      * performing inline task operations
      */
     class InlineTask : public WrapperTask {
+    public:
+      static const AllocationType alloc_type = INLINE_TASK_ALLOC;
     public:
       InlineTask(Runtime *rt);
       InlineTask(const InlineTask &rhs);
@@ -849,7 +878,7 @@ namespace LegionRuntime {
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
-                                   std::deque<LocalFieldInfo> &infos);
+          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
     public:
       virtual void register_child_operation(Operation *op);
       virtual void register_child_executed(Operation *op);
@@ -873,6 +902,8 @@ namespace LegionRuntime {
      * the machine and eventually returned to this index space task.
      */
     class IndexTask : public MultiTask {
+    public:
+      static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
       IndexTask(Runtime *rt);
       IndexTask(const IndexTask &rhs);
@@ -997,6 +1028,8 @@ namespace LegionRuntime {
      * slicing up the domain of the index space task launch.
      */
     class SliceTask : public MultiTask {
+    public:
+      static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
       SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);

@@ -22,6 +22,9 @@
 #include <map>
 
 #include <cassert>
+#ifndef __GNUC__
+#include "atomics.h" // for __sync_fetch_and_add
+#endif
 
 // why must I define this every time I need it?
 static inline int imin(int a, int b) { return (a < b) ? a : b; }
@@ -444,7 +447,7 @@ namespace LegionRuntime {
       }
       inline bool remove_reference(void)
       {
-        unsigned prev = __sync_fetch_and_sub(&references, 1);
+        unsigned prev = __sync_fetch_and_add(&references, -1);
         assert(prev >= 1);
         return (prev == 1);
       }

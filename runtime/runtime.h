@@ -18,12 +18,42 @@
 #define __RUNTIME_H__
 
 #include "legion.h"
-#include "legion_utilities.h"
 #include "region_tree.h"
+#include "legion_utilities.h"
+#include "legion_allocation.h"
 #include "garbage_collection.h"
 
 namespace LegionRuntime {
-  namespace HighLevel {
+  namespace HighLevel { 
+
+    /**
+     * A class for deduplicating memory used with task arguments
+     * and knowing when to collect the data associated with it
+     */
+    class AllocManager : public Collectable {
+    public:
+      static const AllocationType alloc_type = ALLOC_MANAGER_ALLOC;
+    public:
+      AllocManager(size_t arglen)
+        : Collectable(), 
+          allocation(legion_malloc(ALLOC_INTERNAL_ALLOC, arglen)), 
+          allocation_size(arglen) { }
+      AllocManager(const AllocManager &rhs)
+        : Collectable(), allocation(NULL), allocation_size(0)
+      { assert(false); /*should never be called*/ }
+      ~AllocManager(void)
+      { legion_free(ALLOC_INTERNAL_ALLOC, allocation, allocation_size); }
+    public:
+      AllocManager& operator=(const AllocManager &rhs)
+      { assert(false); /*should never be called*/ return *this; }
+    public:
+      inline void* get_allocation(void) const { return allocation; }
+      inline size_t get_allocation_size(void) const
+      { return allocation_size; }
+    private:
+      void *const allocation;
+      size_t allocation_size;
+    };
 
     /**
      * \class ArgumentMap::Impl
@@ -38,6 +68,8 @@ namespace LegionRuntime {
      * points and values.
      */
     class ArgumentMap::Impl : public Collectable {
+    public:
+      static const AllocationType alloc_type = ARGUMENT_MAP_ALLOC;
     public:
       FRIEND_ALL_RUNTIME_CLASSES
       Impl(void);
@@ -76,6 +108,8 @@ namespace LegionRuntime {
      */
     class ArgumentMapStore {
     public:
+      static const AllocationType alloc_type = ARGUMENT_MAP_STORE_ALLOC;
+    public:
       FRIEND_ALL_RUNTIME_CLASSES
       ArgumentMapStore(void);
       ArgumentMapStore(const ArgumentMapStore &rhs);
@@ -98,6 +132,8 @@ namespace LegionRuntime {
      * to manage garbage collection of distributed futures
      */
     class Future::Impl : public DistributedCollectable {
+    public:
+      static const AllocationType alloc_type = FUTURE_ALLOC;
     public:
       Impl(Runtime *rt, bool register_future, DistributedID did, 
            AddressSpaceID owner_space, AddressSpaceID local_space,
@@ -166,6 +202,8 @@ namespace LegionRuntime {
      */
     class FutureMap::Impl : public Collectable {
     public:
+      static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
+    public:
       Impl(SingleTask *ctx, TaskOp *task, 
            Runtime *rt);
       Impl(SingleTask *ctx, Event completion_event,
@@ -219,6 +257,8 @@ namespace LegionRuntime {
      * guaranteed to only be running on one processor.
      */
     class PhysicalRegion::Impl : public Collectable {
+    public:
+      static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
       Impl(const RegionRequirement &req, Event ready_event,
            bool mapped, SingleTask *ctx, MapperID mid,
@@ -291,6 +331,8 @@ namespace LegionRuntime {
      */
     class Grant::Impl : public Collectable {
     public:
+      static const AllocationType alloc_type = GRANT_ALLOC;
+    public:
       struct ReservationRequest {
       public:
         ReservationRequest(void)
@@ -325,6 +367,36 @@ namespace LegionRuntime {
       Reservation grant_lock;
     };
 
+    class MPILegionHandshake::Impl : public Collectable {
+    public:
+      static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
+    public:
+      enum ControlState {
+        IN_MPI,
+        IN_LEGION,
+      };
+    public:
+      Impl(bool in_mpi, int mpi_participants, int legion_participants);
+      Impl(const Impl &rhs);
+      ~Impl(void);
+    public:
+      Impl& operator=(const Impl &rhs);
+    public:
+      void mpi_handoff_to_legion(void);
+      void mpi_wait_on_legion(void);
+    public:
+      void legion_handoff_to_mpi(void);
+      void legion_wait_on_mpi(void);
+    private:
+      const int mpi_participants;
+      const int legion_participants;
+      ControlState state;
+    private:
+      int mpi_count, legion_count;
+    private:
+      UserEvent mpi_ready, legion_ready;
+    };
+
     /**
      * \class ProcessorManager
      * This class manages all the state for a single processor
@@ -338,6 +410,7 @@ namespace LegionRuntime {
       struct DeferredTriggerArgs {
       public:
         HLRTaskID hlr_id;
+        ProcessorManager *manager;
         Operation *op;
       };
       struct TriggerOpArgs {
@@ -346,19 +419,16 @@ namespace LegionRuntime {
         Operation *op;
         ProcessorManager *manager;
       };
+      struct SchedulerArgs {
+      public:
+        HLRTaskID hlr_id;
+        Processor proc;
+      };
       struct TriggerTaskArgs {
       public:
         HLRTaskID hlr_id;
         TaskOp *op;
         ProcessorManager *manager;
-      };
-      struct DependenceQueue {
-      public:
-        DependenceQueue(void)
-          : last_event(Event::NO_EVENT) { }
-      public:
-        Event last_event;
-        std::deque<Operation*> queue;
       };
       struct MapperMessage {
       public:
@@ -426,44 +496,38 @@ namespace LegionRuntime {
                                 std::vector<MapperMessage> &messages);
     public:
       void perform_scheduling(void);
+      void launch_task_scheduler(void);
+      void notify_pending_shutdown(void);
+    public:
+      void activate_context(SingleTask *context);
+      void deactivate_context(SingleTask *context);
+    public:
       void process_steal_request(Processor thief, 
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
-    public:
-      void increment_pending(void);
-      void decrement_pending(void);
-      void start_execution(void);
-      void pause_execution(void);
     public:
       void add_to_dependence_queue(Operation *op);
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
-      Event find_gc_epoch_event(void);
-      void notify_pending_shutdown(void);
-    public:
       // Mapper introspection methods
-      bool sample_current_executing(void);
-      unsigned sample_current_pending(void);
       unsigned sample_unmapped_tasks(MapperID map_id);
 #ifdef HANG_TRACE
     public:
       void dump_state(FILE *target);
 #endif
     protected:
-      bool perform_dependence_checks(void);
-      bool perform_other_operations(void);
       void perform_mapping_operations(void);
-      bool perform_gc_epoch(void);
       void issue_advertisements(MapperID mid);
+    protected:
+      void increment_active_contexts(void);
+      void decrement_active_contexts(void);
     public:
       // Immutable state
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
       const Processor utility_proc;
-      // Is our utility processor different from the local proc
-      const bool explicit_utility_proc;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
       // Minimum number of tasks that must be scheduled to disable idle task
@@ -473,45 +537,35 @@ namespace LegionRuntime {
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
     protected:
-      // Mutable state
-      unsigned current_pending;
-      bool current_executing;
-      bool idle_task_enabled;
-#ifdef DISABLE_DEFERRED_DEPENDENCE_ANALYSIS
-      bool pending_dependence_analysis;
-#endif
-    protected:
-      // Note locks are declaraed in the order in which they
-      // must be taken 
-      Reservation idle_lock;
-      // Reservation for protecting the dependence queue
+      // Dependence analysis state
       Reservation dependence_lock;
-      // Reservation for protecting the ready queues and
-      // the other ready queue
+      std::vector<Event> dependence_preconditions;
+    protected:
+      // Local queue state
+      Reservation local_queue_lock;
+      unsigned next_local_index;
+      std::vector<Event> local_scheduler_preconditions;
+    protected:
+      // Scheduling state
       Reservation queue_lock;
-      // Reservation for managing the list of garbage collection events
-      Reservation gc_lock;
+      bool task_scheduler_enabled;
+      bool pending_shutdown;
+      unsigned total_active_contexts;
+      struct ContextState {
+      public:
+        ContextState(void)
+          : active(false), owned_tasks(0) { }
+      public:
+        bool active;
+        unsigned owned_tasks;
+      };
+      std::vector<ContextState> context_states;
+    protected:
       // Reservation for protecting the list of messages that
       // need to be sent
       Reservation message_lock;
-      // A list of operations needing dependence analysis.  We keep
-      // a seperate list for each depth.  This allows us to pull
-      // from deeper lists first which is a performance optimization
-      // to prevent operations from deeper levels of the task tree
-      // from having to wait for operations at shallower levels.
-      std::deque<DependenceQueue> dependence_queues;
       // For each mapper, a list of tasks that are ready to map
       std::vector<std::list<TaskOp*> > ready_queues;
-      // All the local operations that are ready to be performed
-      // which we will do in batches as they become ready
-      std::list<Operation*> local_ready_queue;
-      // List of garbage collection epoch events to trigger
-      std::deque<UserEvent> gc_epoch_events;
-      // The pending number of garbage collection operations 
-      // pending on the last epoch event
-      unsigned pending_gc_ops;
-      // Know when we should stop issuing gc epoch events
-      bool pending_shutdown;
       // Mapper objects
       std::vector<Mapper*> mapper_objects;
       // Mapper locks
@@ -579,11 +633,14 @@ namespace LegionRuntime {
       // structures in this memory manager
       Reservation manager_lock;
       // Current set of physical instances and their sizes
-      std::map<InstanceManager*,size_t> physical_instances;
+      LegionKeyValue<InstanceManager*,size_t,
+                     MEMORY_INSTANCES_ALLOC>::map physical_instances;
       // Current set of reduction instances and their sizes
-      std::map<ReductionManager*,size_t> reduction_instances;
+      LegionKeyValue<ReductionManager*,size_t,
+                     MEMORY_REDUCTION_ALLOC>::map reduction_instances;
       // Set of physical instances which are currently eligible for recycling
-      std::set<InstanceManager*> available_instances;
+      LegionContainer<InstanceManager*,
+                      MEMORY_AVAILABLE_ALLOC>::set available_instances;
     };
 
     /**
@@ -767,6 +824,34 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class GarbageCollectionEpoch
+     * A class for managing the a set of garbage collections
+     */
+    class GarbageCollectionEpoch {
+    public:
+      struct GarbageCollectionArgs {
+      public:
+        HLRTaskID hlr_id;
+        GarbageCollectionEpoch *epoch;
+        LogicalView *view;
+      };
+    public:
+      GarbageCollectionEpoch(Runtime *runtime);
+      GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
+      ~GarbageCollectionEpoch(void);
+    public:
+      GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
+    public:
+      void add_collection(LogicalView *view, Event term_event);
+      void launch(Processor utility, int priority);
+      bool handle_collection(const GarbageCollectionArgs *args);
+    private:
+      Runtime *const runtime;
+      int remaining;
+      std::map<LogicalView*,std::set<Event> > collections;
+    };
+
+    /**
      * \struct RegionTreeContext
      * A struct for storing the necessary data for managering a context
      * in the region tree.
@@ -825,8 +910,20 @@ namespace LegionRuntime {
         AddressSpace source_space;
       };
     public:
+      struct ProcessorGroupInfo {
+      public:
+        ProcessorGroupInfo(void)
+          : processor_group(Processor::NO_PROC) { }
+        ProcessorGroupInfo(Processor p, const ProcessorMask &m)
+          : processor_group(p), processor_mask(m) { }
+      public:
+        Processor           processor_group;
+        ProcessorMask       processor_mask;
+      };
+    public:
       Runtime(Machine *m, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
+              const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
               const std::map<Processor,AddressSpaceID> &proc_spaces,
               Processor cleanup, Processor gc, Processor message);
@@ -1097,8 +1194,6 @@ namespace LegionRuntime {
       size_t sample_allocated_space(Memory mem);
       size_t sample_free_space(Memory mem);
       unsigned sample_allocated_instances(Memory mem);
-      bool sample_current_executing(Processor proc);
-      unsigned sample_current_pending(Processor proc);
       unsigned sample_unmapped_tasks(Processor proc, Mapper *mapper);
     public:
       // Messaging functions
@@ -1266,10 +1361,9 @@ namespace LegionRuntime {
       void dump_processor_states(FILE *target);
 #endif
     public:
-      void increment_pending(Processor p);
-      void decrement_pending(Processor p);
-      void start_execution(Processor p);
-      void pause_execution(Processor p);
+      // Manage the execution of tasks within a context
+      void activate_context(SingleTask *context);
+      void deactivate_context(SingleTask *context);
     public:
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
@@ -1320,6 +1414,9 @@ namespace LegionRuntime {
       void handle_mapper_send_message(Mapper *mapper, Processor target, 
                                       const void *message, size_t length);
     public:
+      inline Processor find_utility_group(void) { return utility_group; }
+      Processor find_processor_group(const std::set<Processor> &procs);
+    public:
       void allocate_context(SingleTask *task);
       void free_context(SingleTask *task);
     public:
@@ -1344,7 +1441,9 @@ namespace LegionRuntime {
       Future::Impl* find_or_create_future(DistributedID did,
                                           AddressSpaceID owner_space);
     public:
-      Event find_gc_epoch_event(Processor gc_proc);
+      void defer_collect_user(LogicalView *view, Event term_event);
+      void complete_gc_epoch(GarbageCollectionEpoch *epoch);
+    public:
       void initiate_runtime_shutdown(void);
     public:
       IndividualTask*  get_available_individual_task(void);
@@ -1391,6 +1490,7 @@ namespace LegionRuntime {
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
+      Processor find_utility_processor(Processor proc);
     public:
       IndexPartition  get_unique_partition_id(void);
       FieldSpaceID    get_unique_field_space_id(void);
@@ -1409,6 +1509,13 @@ namespace LegionRuntime {
 #ifdef DYNAMIC_TESTS
     public:
       bool perform_dynamic_independence_tests(void);
+#endif
+#ifdef TRACE_ALLOCATION
+    public:
+      void trace_allocation(AllocationType type, size_t size, int elems);
+      void trace_free(AllocationType type, size_t size, int elems);
+      void dump_allocation_info(void);
+      static const char* get_allocation_name(AllocationType type);
 #endif
     public:
       // These are the static methods that become the meta-tasks
@@ -1430,7 +1537,7 @@ namespace LegionRuntime {
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
-      void process_schedule_request(Processor p);
+      void process_schedule_request(Processor p, bool first = false);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The HighLevelRuntime wrapper for this class
@@ -1440,6 +1547,7 @@ namespace LegionRuntime {
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
       RegionTreeForest *const forest;
+      Processor utility_group;
 #ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;
@@ -1460,12 +1568,6 @@ namespace LegionRuntime {
       std::map<AddressSpaceID,MessageManager*> message_managers;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
-      // Map from utility processors to managers, note that this
-      // just stores a processor manager for each utility processor
-      // even though there might be multiple managers that map
-      // to each utility processor. This reverse lookup is used
-      // for handling garbage collection operation.
-      std::map<Processor,ProcessorManager*> utility_managers;
     protected:
       struct MapperInfo {
         MapperInfo(void)
@@ -1499,24 +1601,55 @@ namespace LegionRuntime {
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:
+      Reservation group_lock;
+      LegionKeyValue<uint64_t,std::deque<ProcessorGroupInfo>,
+                     PROCESSOR_GROUP_ALLOC>::map processor_groups;
+    protected:
       Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
-      std::deque<DistributedID> available_distributed_ids;
+      LegionContainer<DistributedID,RUNTIME_DISTRIBUTED_ALLOC>::deque 
+                                              available_distributed_ids;
     protected:
-      // Garbage collection data structures
       Reservation distributed_collectable_lock;
-      std::map<DistributedID,DistributedCollectable*> dist_collectables;
+      LegionKeyValue<DistributedID,DistributedCollectable*,
+                     RUNTIME_DIST_COLLECT_ALLOC>::map dist_collectables;
       Reservation hierarchical_collectable_lock;
-      std::map<DistributedID,HierarchicalCollectable*> hier_collectables;
+      LegionKeyValue<DistributedID,HierarchicalCollectable*,
+                     RUNTIME_HIER_COLLECT_ALLOC>::map hier_collectables;
+    protected:
+      Reservation gc_epoch_lock;
+      GarbageCollectionEpoch *current_gc_epoch;
+      LegionContainer<GarbageCollectionEpoch*,
+                      RUNTIME_GC_EPOCH_ALLOC>::set pending_gc_epochs;
+      unsigned gc_epoch_counter;
     protected:
       // Keep track of futures
       Reservation future_lock;
-      std::map<DistributedID,Future::Impl*> local_futures;
+      LegionKeyValue<DistributedID,Future::Impl*,
+                     RUNTIME_FUTURE_ALLOC>::map local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       Reservation remote_lock;
-      std::map<UniqueID,RemoteTask*> remote_contexts;
+      LegionKeyValue<UniqueID,RemoteTask*,
+                     RUNTIME_REMOTE_ALLOC>::map remote_contexts;
+#ifdef TRACE_ALLOCATION
+    protected:
+      struct AllocationTracker {
+      public:
+        AllocationTracker(void)
+          : total_allocations(0), total_bytes(0),
+            diff_allocations(0), diff_bytes(0) { }
+      public:
+        unsigned total_allocations;
+        size_t         total_bytes;
+        int       diff_allocations;
+        off_t           diff_bytes;
+      };
+      Reservation allocation_lock;
+      std::map<AllocationType,AllocationTracker> allocation_manager;
+      unsigned long long allocation_tracing_count;
+#endif
     protected:
       Reservation individual_task_lock;
       Reservation point_task_lock;
@@ -1656,6 +1789,7 @@ namespace LegionRuntime {
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;
+      static unsigned gc_epoch_size;
       static bool enable_imprecise_filter;
       static bool separate_runtime_instances;
       static bool stealing_disabled;

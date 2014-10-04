@@ -1377,6 +1377,53 @@ namespace LegionRuntime {
     };
 
     //==========================================================================
+    //                     MPI Interoperability Classes
+    //==========================================================================
+
+    class MPILegionHandshake {
+    public:
+      MPILegionHandshake(void);
+      MPILegionHandshake(const MPILegionHandshake &rhs);
+      ~MPILegionHandshake(void);
+    public:
+      class Impl;
+    private:
+      Impl *impl;
+    protected:
+      // Only the runtime should be able to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      MPILegionHandshake(Impl *impl);
+    public:
+      bool operator==(const MPILegionHandshake &h) const
+        { return impl == h.impl; }
+      bool operator<(const MPILegionHandshake &h) const
+        { return impl < h.impl; }
+      MPILegionHandshake& operator=(const MPILegionHandshake &rhs);
+    public:
+      /**
+       * Non-blocking call to signal to Legion that this participant
+       * is ready to pass control to Legion.
+       */
+      void mpi_handoff_to_legion(void);
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all Legion participants to hand over control to MPI.
+       */
+      void mpi_wait_on_legion(void);
+    public:
+      /**
+       * A non-blocking call to signal to MPI that this participant
+       * is ready to pass control to MPI.
+       */
+      void legion_handoff_to_mpi(void);
+      /**
+       * A blocking call that will cause this participant to wait
+       * for all MPI participants to hand over control to Legion.
+       */
+      void legion_wait_on_mpi(void);
+    };
+
+    //==========================================================================
     //                            Mapping Classes
     //==========================================================================
     
@@ -1468,6 +1515,7 @@ namespace LegionRuntime {
       // the set_task_options call.  See the Mapper 
       // interface for description of these fields.
       Processor                           target_proc;
+      std::set<Processor>                 additional_procs;
       bool                                inline_task;
       bool                                spawn_task;
       bool                                map_locally;
@@ -2497,24 +2545,6 @@ namespace LegionRuntime {
        * @return number of instances allocated in the memory
        */
       unsigned sample_allocated_instances(Memory m) const;
-
-      /**
-       * Test whether the specified processor is currently executing
-       * a task or not. This sample is only valid for processors in 
-       * the local address space.
-       * @param p the processor to be sampled
-       * @return true if the processor is executing a task false otherwise
-       */
-      bool sample_current_executing(Processor p) const; 
-
-      /**
-       * Take a sample of the number of tasks that are already mapped
-       * to be run on the target processor. This sample is only valid
-       * for processors in the local address space. 
-       * @param p the processor to be sampled
-       * @return the count of the tasks already mapped to the processor
-       */
-      unsigned sample_current_pending(Processor p) const;
 
       /**
        * Take a sample of the number of unmapped tasks which are
@@ -3694,6 +3724,11 @@ namespace LegionRuntime {
        * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.
+       * -hl:epoch <int> Change the size of garbage collection epochs. The
+       *              default value is 64. Increasing it adds latency to
+       *              the garbage collection but makes it more efficient.
+       *              Decreasing the value reduces latency, but adds
+       *              inefficiency to the collection.
        * ---------------------
        *  Resiliency
        * ---------------------
@@ -3761,6 +3796,21 @@ namespace LegionRuntime {
        * @param rank the integer naming this MPI rank
        */
       static void configure_MPI_interoperability(int rank);
+
+      /**
+       * Create a handshake object for exchanging control between MPI
+       * and Legion. We make this a static method so that it can be
+       * created before the Legion runtime is initialized.
+       * @param init_in_MPI who owns initial control of the handshake,
+       *                    by default it is MPI
+       * @param mpi_participants number of calls that need to be made to 
+       *                    the handshake to pass control from MPI to Legion
+       * @param legion_participants number of calls that need to be made to
+       *                    the handshake to pass control from Legion to MPI
+       */
+      static MPILegionHandshake create_handshake(bool init_in_MPI = true,
+                                                 int mpi_participants = 1,
+                                                 int legion_participants = 1);
 
       /**
        * Register a reduction operation with the runtime.  Note that the
@@ -5474,7 +5524,7 @@ namespace LegionRuntime {
       assert(arglen == sizeof(Context));
 #endif
       // Get the arguments associated with the context
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
       Task *task = reinterpret_cast<Task*>(ctx);
 
       // Invoke the task with the given context

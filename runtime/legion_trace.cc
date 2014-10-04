@@ -248,7 +248,7 @@ namespace LegionRuntime {
     void TraceCaptureOp::initialize_capture(SingleTask *ctx)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
     }
 
     //--------------------------------------------------------------------------
