@@ -821,6 +821,14 @@ function LegionLib:unmap_region(physical_region)
    self.__runtime:unmap_region(self.__ctx, physical_region)
 end
 
+function LegionLib:map_all_regions()
+   self.__runtime:map_all_regions(self.__ctx)
+end
+
+function LegionLib:unmap_all_regions()
+   self.__runtime:unmap_all_regions(self.__ctx)
+end
+
 function LegionLib:allocate_in_indexspace(ispace, num)
    local allocator =
       self.__runtime:create_index_allocator(self.__ctx,

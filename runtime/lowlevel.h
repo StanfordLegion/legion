@@ -23,6 +23,7 @@
 #include <cstdarg>
 #include <stdint.h>
 
+#include "lowlevel_config.h"
 #include "common.h"
 #include "utilities.h"
 #include "accessor.h"
@@ -47,15 +48,8 @@ namespace LegionRuntime {
 
     class Machine;
 
-#ifdef LEGION_IDS_ARE_64BIT
-    typedef unsigned long long IDType;
-#define IDFMT "%llx"
-#else
-    typedef unsigned IDType;
-#define IDFMT "%x"
-#endif
-
-    typedef unsigned int AddressSpace;
+    typedef ::legion_lowlevel_id_t IDType;
+    typedef ::legion_lowlevel_address_space_t AddressSpace;
 
     class Event {
     public:
@@ -177,16 +171,17 @@ namespace LegionRuntime {
 
       Processor get_utility_processor(void) const;
 
-      typedef unsigned TaskFuncID;
+      typedef ::legion_lowlevel_task_func_id_t TaskFuncID;
       typedef void (*TaskFuncPtr)(const void *args, size_t arglen, Processor proc);
       typedef std::map<TaskFuncID, TaskFuncPtr> TaskIDTable;
 
       // Different Processor types
+      // Keep this in sync with legion_processor_kind_t in lowlevel_config.h
       enum Kind {
-	TOC_PROC, // Throughput core
-	LOC_PROC, // Latency core
-	UTIL_PROC, // Utility core
-	PROC_GROUP, // Processor group
+        TOC_PROC = ::TOC_PROC, // Throughput core
+        LOC_PROC = ::LOC_PROC, // Latency core
+        UTIL_PROC = ::UTIL_PROC, // Utility core
+        PROC_GROUP = ::PROC_GROUP, // Processor group
       };
 
       void enable_idle_task(void);
@@ -352,7 +347,7 @@ namespace LegionRuntime {
     };
 #endif
 
-    typedef int ReductionOpID;
+    typedef legion_lowlevel_reduction_op_id_t ReductionOpID;
     class ReductionOpUntyped {
     public:
       size_t sizeof_lhs;

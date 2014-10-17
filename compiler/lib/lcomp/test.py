@@ -403,7 +403,7 @@ def run_all_tests(thread_count, clean_first, verbose):
                     test_dir,
                     lambda args, dirname, names: test_paths.extend(
                         path
-                        for name in names
+                        for name in sorted(names)
                         for path in [os.path.join(dirname, name)]
                         if os.path.isfile(path) and os.path.splitext(path)[1] in ('.lg', '.md')),
                     ())

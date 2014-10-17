@@ -17,6 +17,11 @@
 #ifndef __LEGION_RUNTIME_H__
 #define __LEGION_RUNTIME_H__
 
+/**
+ * \file legion.h
+ * Legion C++ API
+ */
+
 #include "legion_types.h"
 
 // temporary helper macro to turn link errors into runtime errors

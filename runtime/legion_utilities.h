@@ -918,7 +918,7 @@ namespace LegionRuntime {
     inline void Serializer::serialize<bool>(const bool &element)
     //--------------------------------------------------------------------------
     {
-      while ((index + 4) > total_bytes)
+      while ((size_t)(index + 4) > total_bytes)
         resize();
       *((bool*)buffer+index) = element;
       index += 4;

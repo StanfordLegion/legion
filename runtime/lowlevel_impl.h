@@ -51,8 +51,6 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <list>
 #include <map>
 
-// Comment this out to disable shared task queue
-
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -69,7 +67,10 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
   } \
 } while(0)
 
-// GASnet helper stuff
+
+namespace Realm {
+  class Module;
+};
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -1377,6 +1378,7 @@ namespace LegionRuntime {
     public:
       static Runtime *runtime;
 
+      std::vector<Realm::Module *> modules;
       Node *nodes;
       Memory::Impl *global_memory;
       EventTableAllocator::FreeList *local_event_free_list;

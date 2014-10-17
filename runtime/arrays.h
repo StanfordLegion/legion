@@ -398,6 +398,8 @@ namespace LegionRuntime {
     public:
       Mapping(void)
         : references(0) { }
+
+      virtual ~Mapping(void) {}
     public:
       static const unsigned IDIM = IDIM_;
       static const unsigned ODIM = ODIM_;

@@ -20,23 +20,32 @@ GPU_ARCH ?= fermi
 #GPU_ARCH ?= kepler
 #GPU_ARCH ?= k20
 
+# if CUDA is not set, but CUDATOOLKIT_HOME is, use that
+ifdef CUDATOOLKIT_HOME
+CUDA ?= $(CUDATOOLKIT_HOME)
+endif
+
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
 # defaults for GASNet
 CONDUIT ?= udp
+ifdef GASNET_ROOT
+GASNET ?= $(GASNET_ROOT)
+else
 GASNET ?= $(LG_RT_DIR)/gasnet/release
+endif
+# newer versions of gasnet seem to need this
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 
 # Handle some of the common machines we frequent
 
-ifeq ($(shell uname -n),sapling-head)
+ifeq ($(shell uname -n),sapling)
 CC_FLAGS += -march=native
-GASNET=/usr/local/gasnet-1.20.0-openmpi
-MPI=/usr/local/openmpi-1.6.4
-CUDA=/usr/local/cuda-5.0
 CONDUIT=ibv
 GPU_ARCH=fermi
+USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0000)
 CC_FLAGS += -march=native
@@ -56,11 +65,9 @@ GPU_ARCH=fermi
 endif
 ifeq ($(shell uname -n),n0002)
 CC_FLAGS += -march=native
-GASNET=/usr/local/gasnet-1.20.0-openmpi
-MPI=/usr/local/openmpi-1.6.4
-CUDA=/usr/local/cuda-5.0
 CONDUIT=ibv
 GPU_ARCH=fermi
+USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0003)
 CC_FLAGS += -march=native
@@ -95,6 +102,12 @@ ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -lrt -lpthread
 else
 LD_FLAGS	+= -lpthread
+endif
+
+USE_LIBDL = 1
+ifeq ($(strip $(USE_LIBDL)),1)
+#CC_FLAGS += -rdynamic
+LD_FLAGS += -ldl -rdynamic
 endif
 
 # Falgs for running in the general low-level runtime
@@ -165,7 +178,7 @@ LD_FLAGS	+= -lgasnet-udp-par -lamudp
 endif
 
 #Extra options for MPI
-ifdef MPI
+ifdef USE_MPI
 CC 	:= mpicc
 CXX	:= mpicxx
 GCC	:= $(CXX)
@@ -211,6 +224,7 @@ MAPPER_SRC	+= $(LG_RT_DIR)/alt_mappers.cc
 endif
 
 HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion.cc \
+		    $(LG_RT_DIR)/legion_c.cc \
 		    $(LG_RT_DIR)/legion_ops.cc \
 		    $(LG_RT_DIR)/legion_tasks.cc \
 		    $(LG_RT_DIR)/legion_trace.cc \

@@ -2337,8 +2337,8 @@ namespace LegionRuntime {
       first_enabled_elmt = copy_from.first_enabled_elmt;
       last_enabled_elmt = copy_from.last_enabled_elmt;
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      if (raw_data)
-        free(raw_data);
+      //if (raw_data)
+      //  free(raw_data);
       raw_data = calloc(1, bytes_needed);
 
       if(copy_from.raw_data) {

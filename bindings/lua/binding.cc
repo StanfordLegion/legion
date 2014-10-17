@@ -190,6 +190,8 @@ luabind::scope register_HighLevelRuntime()
           (Context, unsigned, MapperID, MappingTagID))
          &HighLevelRuntime::map_region)
     .def("unmap_region", &HighLevelRuntime::unmap_region)
+    .def("map_all_regions", &HighLevelRuntime::map_all_regions)
+    .def("unmap_all_regions", &HighLevelRuntime::unmap_all_regions)
     .scope
     [
      def("set_top_level_task_id", &HighLevelRuntime::set_top_level_task_id)
@@ -312,14 +314,14 @@ namespace
     return RegionRequirement(pid, _proj, op, _prop, _parent, _tag, _verified);
   }  
 
-  Point<1> make_point(int x) { return Point<1>(x); }
-  Point<2> make_point(int x, int y)
+  Point<1> make_point1(int x) { return Point<1>(x); }
+  Point<2> make_point2(int x, int y)
   {
     int vals[2];
     vals[0] = x; vals[1] = y;
     return Point<2>(vals);
   }
-  Point<3> make_point(int x, int y, int z)
+  Point<3> make_point3(int x, int y, int z)
   {
     int vals[3];
     vals[0] = x; vals[1] = y; vals[2] = z;
@@ -334,15 +336,15 @@ namespace
 
   Blockify<1> make_blockify(int x)
   {
-    return Blockify<1>(make_point(x));
+    return Blockify<1>(make_point1(x));
   }
   Blockify<2> make_blockify(int x, int y)
   {
-    return Blockify<2>(make_point(x, y));
+    return Blockify<2>(make_point2(x, y));
   }
   Blockify<3> make_blockify(int x, int y, int z)
   {
-    return Blockify<3>(make_point(x, y, z));
+    return Blockify<3>(make_point3(x, y, z));
   }
 
   luabind::object get_coords_from_domain_point(lua_State* L,
@@ -758,13 +760,13 @@ luabind::scope register_highlevel()
       // .def(constructor<int>())
       // .def("at", &Point<1>::operator[])
       def("make",
-          (Point<1>(*)(int))&make_point)
+          (Point<1>(*)(int))&make_point1)
       ,
       def("make",
-          (Point<2>(*)(int, int))&make_point)
+          (Point<2>(*)(int, int))&make_point2)
       ,
       def("make",
-          (Point<3>(*)(int, int, int))&make_point)
+          (Point<3>(*)(int, int, int))&make_point3)
       ]
      ,
      namespace_("Rect")

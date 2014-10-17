@@ -33,6 +33,7 @@ OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
 SHARED_LOWLEVEL=1	  # Use the shared low level
 #ALT_MAPPERS=1		  # Include the alternative mappers
 WITH_TERRA?=0
+WITH_TERRA_STATIC_LINKING?=0
 LEGION_LOGGING?=0
 
 ifeq ($(WITH_TERRA),1)
@@ -62,7 +63,9 @@ NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:= -L$(LUABIND_DIR)/lib/ -lluabind
 ifdef LUAJIT_DIR
+ifeq ($(WITH_TERRA_STATIC_LINKING),0)
 LD_FLAGS += -L$(LUAJIT_DIR)/lib/ -lluajit-5.1
+endif
 else 
 ifdef LUA_DIR
 LD_FLAGS += -L$(LUA_DIR)/lib/ -llua
@@ -71,8 +74,18 @@ endif
 
 ifeq ($(WITH_TERRA),1)
 	INC_FLAGS += -I$(TERRA_DIR)/src
+ifeq ($(WITH_TERRA_STATIC_LINKING),0)
 	LD_FLAGS += -L$(TERRA_DIR)/build -lterra
+endif
 	CC_FLAGS += -DWITH_TERRA
+endif
+
+ifeq ($(WITH_TERRA_STATIC_LINKING),1)
+ifeq ($(shell uname), Darwin)
+	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
+else
+	LD_FLAGS += -shared
+endif
 endif
 
 ifeq ($(LEGION_LOGGING), 1)
@@ -145,9 +158,9 @@ all:
 $(OUTFILE) : $(ALL_OBJS)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 ifdef SHARED_LOWLEVEL
-	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) -shared $(GASNET_FLAGS)
+	$(GCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
 else
-	$(NVCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) -shared $(GASNET_FLAGS)
+	$(NVCC) -o $(OUTFILE) $(ALL_OBJS) $(LD_FLAGS) $(GASNET_FLAGS)
 endif
 
 $(GEN_OBJS) : %.o : %.cc

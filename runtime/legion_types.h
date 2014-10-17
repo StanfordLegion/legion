@@ -17,6 +17,11 @@
 #ifndef __LEGION_TYPES_H__
 #define __LEGION_TYPES_H__
 
+/**
+ * \file legion_types.h
+ */
+
+#include "legion_config.h"
 #include "lowlevel.h"
 
 #include <cstdio>
@@ -33,117 +38,7 @@
 #include <deque>
 #include <vector>
 
-// If we enable field tree acceleration
-// then enable it for both the logical and
-// physical tree analyses.
-#ifdef FIELD_TREE
-#error "FIELD_TREE macro is no longer supported"
-#define LOGICAL_FIELD_TREE
-#define PHYSICAL_FIELD_TREE
-#endif
-
-#define AUTO_GENERATE_ID   UINT_MAX
-
-#ifndef MAX_RETURN_SIZE
-#define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
-#endif
-
-#ifndef MAX_FIELDS
-#define MAX_FIELDS         128 // must be a power of 2
-#endif
-
-// Some default values 
-
-// The maximum number of nodes to be run on
-#ifndef MAX_NUM_NODES
-#define MAX_NUM_NODES                   1024
-#endif
-// The maximum number of processors on a node
-#ifndef MAX_NUM_PROCS
-#define MAX_NUM_PROCS                   64
-#endif
-// Default number of mapper slots
-#ifndef DEFAULT_MAPPER_SLOTS
-#define DEFAULT_MAPPER_SLOTS            8
-#endif
-// Default number of contexts made for each runtime instance
-// Ideally this is a power of 2 (better for performance)
-#ifndef DEFAULT_CONTEXTS
-#define DEFAULT_CONTEXTS                8 
-#endif
-// Maximum number of allowed contexts that can be created
-// by a Legion runtime instance on a given node. Powers of
-// 2 are encouraged.
-#ifndef MAX_CONTEXTS
-#define MAX_CONTEXTS                    128
-#endif
-// Maximum number of sub-tasks per task at a time
-#ifndef DEFAULT_MAX_TASK_WINDOW
-#define DEFAULT_MAX_TASK_WINDOW         1024 
-#endif
-// How many tasks to group together for runtime operations
-#ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
-#define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
-#endif
-// Scheduling granularity for how many operations to
-// handle at a time at each stage of the pipeline
-#ifndef DEFAULT_SUPERSCALAR_WIDTH
-#define DEFAULT_SUPERSCALAR_WIDTH       4
-#endif
-// The maximum size of active messages sent by the runtime in bytes
-// Note this value was picked based on making a tradeoff between
-// latency and bandwidth numbers on both Cray and Infiniband
-// interconnect networks.
-#ifndef DEFAULT_MAX_MESSAGE_SIZE
-#define DEFAULT_MAX_MESSAGE_SIZE        16384 
-#endif
-// Maximum number of tasks in logical region node before consolidation
-#ifndef DEFAULT_MAX_FILTER_SIZE
-#define DEFAULT_MAX_FILTER_SIZE         0
-#endif
-// Timeout before checking for whether a logical user
-// should be pruned from the logical region tree data strucutre
-// Making the value less than or equal to zero will
-// result in checks always being performed
-#ifndef DEFAULT_LOGICAL_USER_TIMEOUT
-#define DEFAULT_LOGICAL_USER_TIMEOUT    32
-#endif
-// Number of events to place in each GC epoch
-// Large counts improve efficiency but add latency to
-// garbage collection.  Smaller count reduce efficiency
-// but improve latency of collection.
-#ifndef DEFAULT_GC_EPOCH_SIZE
-#define DEFAULT_GC_EPOCH_SIZE           64
-#endif
-
-// Used for debugging memory leaks
-// How often tracing information is dumped
-// based on the number of scheduler invocations
-#ifndef TRACE_ALLOCATION_FREQUENCY
-#define TRACE_ALLOCATION_FREQUENCY      1024 
-#endif
-
-// Some helper macros
-
-// This statically computes an integer log base 2 for a number
-// which is guaranteed to be a power of 2. Adapted from 
-// http://graphics.stanford.edu/~seander/bithacks.html#IntegerLogDeBruijn
-#define STATIC_LOG2(x)  (LOG2_LOOKUP((uint32_t)(x * 0x077CB531U) >> 27))
-#define LOG2_LOOKUP(x) ((x==0) ? 0 : (x==1) ? 1 : (x==2) ? 28 : (x==3) ? 2 : \
-                   (x==4) ? 29 : (x==5) ? 14 : (x==6) ? 24 : (x==7) ? 3 : \
-                   (x==8) ? 30 : (x==9) ? 22 : (x==10) ? 20 : (x==11) ? 15 : \
-                   (x==12) ? 25 : (x==13) ? 17 : (x==14) ? 4 : (x==15) ? 8 : \
-                   (x==16) ? 31 : (x==17) ? 27 : (x==18) ? 13 : (x==19) ? 23 : \
-                   (x==20) ? 21 : (x==21) ? 19 : (x==22) ? 16 : (x==23) ? 7 : \
-                   (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
-                   (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
-
-#ifndef FIELD_LOG2
-#define FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
-#endif
-
 namespace BindingLib { class Utility; } // BindingLib namespace
-
 
 namespace LegionRuntime {
   /**
@@ -171,179 +66,14 @@ namespace LegionRuntime {
   };
   
   namespace HighLevel {
-    
-    enum LegionErrorType {
-      NO_ERROR = 0,
-      ERROR_RESERVED_REDOP_ID = 1,
-      ERROR_DUPLICATE_REDOP_ID = 2,
-      ERROR_RESERVED_TYPE_HANDLE = 3,
-      ERROR_DUPLICATE_TYPE_HANDLE = 4,
-      ERROR_DUPLICATE_FIELD_ID = 5,
-      ERROR_PARENT_TYPE_HANDLE_NONEXISTENT = 6,
-      ERROR_MISSING_PARENT_FIELD_ID = 7,
-      ERROR_RESERVED_PROJECTION_ID = 8,
-      ERROR_DUPLICATE_PROJECTION_ID = 9,
-      ERROR_UNREGISTERED_VARIANT = 10,
-      ERROR_USE_REDUCTION_REGION_REQ = 11,
-      ERROR_INVALID_ACCESSOR_REQUESTED = 12,
-      ERROR_PHYSICAL_REGION_UNMAPPED = 13,
-      ERROR_RESERVED_TASK_ID = 14,
-      ERROR_INVALID_ARG_MAP_DESTRUCTION = 15,
-      ERROR_RESERVED_MAPPING_ID = 16,
-      ERROR_BAD_INDEX_PRIVILEGES = 17,
-      ERROR_BAD_FIELD_PRIVILEGES = 18,
-      ERROR_BAD_REGION_PRIVILEGES = 19,
-      ERROR_BAD_PARTITION_PRIVILEGES = 20,
-      ERROR_BAD_PARENT_INDEX = 21,
-      ERROR_BAD_INDEX_PATH = 22,
-      ERROR_BAD_PARENT_REGION = 23,
-      ERROR_BAD_REGION_PATH = 24,
-      ERROR_BAD_PARTITION_PATH = 25,
-      ERROR_BAD_FIELD = 26,
-      ERROR_BAD_REGION_TYPE = 27,
-      ERROR_INVALID_TYPE_HANDLE = 28,
-      ERROR_LEAF_TASK_VIOLATION = 29,
-      ERROR_INVALID_REDOP_ID = 30,
-      ERROR_REDUCTION_INITIAL_VALUE_MISMATCH = 31,
-      ERROR_INVALID_UNMAP_OP = 32,
-      ERROR_INVALID_DUPLICATE_MAPPING = 33,
-      ERROR_INVALID_REGION_ARGUMENT_INDEX = 34,
-      ERROR_INVALID_MAPPING_ACCESS = 35,
-      ERROR_STALE_INLINE_MAPPING_ACCESS = 36,
-      ERROR_INVALID_INDEX_SPACE_PARENT = 37,
-      ERROR_INVALID_INDEX_PART_PARENT = 38,
-      ERROR_INVALID_INDEX_SPACE_COLOR = 39,
-      ERROR_INVALID_INDEX_PART_COLOR = 40,
-      ERROR_INVALID_INDEX_SPACE_HANDLE = 41,
-      ERROR_INVALID_INDEX_PART_HANDLE = 42,
-      ERROR_FIELD_SPACE_FIELD_MISMATCH = 43,
-      ERROR_INVALID_INSTANCE_FIELD = 44,
-      ERROR_DUPLICATE_INSTANCE_FIELD = 45,
-      ERROR_TYPE_INST_MISMATCH = 46,
-      ERROR_TYPE_INST_MISSIZE = 47,
-      ERROR_INVALID_INDEX_SPACE_ENTRY = 48,
-      ERROR_INVALID_INDEX_PART_ENTRY = 49,
-      ERROR_INVALID_FIELD_SPACE_ENTRY = 50,
-      ERROR_INVALID_REGION_ENTRY = 51,
-      ERROR_INVALID_PARTITION_ENTRY = 52,
-      ERROR_ALIASED_INTRA_TASK_REGIONS = 53,
-      ERROR_MAX_FIELD_OVERFLOW = 54,
-      ERROR_MISSING_TASK_COLLECTION = 55,
-      ERROR_INVALID_IDENTITY_PROJECTION_USE = 56,
-      ERROR_INVALID_PROJECTION_ID = 57,
-      ERROR_NON_DISJOINT_PARTITION = 58,
-      ERROR_BAD_PROJECTION_USE = 59,
-      ERROR_INDEPENDENT_SLICES_VIOLATION = 60,
-      ERROR_INVALID_REGION_HANDLE = 61,
-      ERROR_INVALID_PARTITION_HANDLE = 62,
-      ERROR_VIRTUAL_MAP_IN_LEAF_TASK = 63,
-      ERROR_LEAF_MISMATCH = 64,
-      ERROR_INVALID_PROCESSOR_SELECTION = 65,
-      ERROR_INVALID_VARIANT_SELECTION = 66,
-      ERROR_INVALID_MAPPER_OUTPUT = 67,
-      ERROR_UNINITIALIZED_REDUCTION = 68,
-      ERROR_INVALID_INDEX_DOMAIN = 69,
-      ERROR_INVALID_INDEX_PART_DOMAIN = 70,
-      ERROR_DISJOINTNESS_TEST_FAILURE = 71,
-      ERROR_NON_DISJOINT_TASK_REGIONS = 72,
-      ERROR_INVALID_FIELD_ACCESSOR_PRIVILEGES = 73,
-      ERROR_INVALID_PREMAPPED_REGION_LOCATION = 74,
-      ERROR_IDEMPOTENT_MISMATCH = 75,
-      ERROR_INVALID_MAPPER_ID = 76,
-      ERROR_INVALID_TREE_ENTRY = 77,
-      ERROR_SEPARATE_UTILITY_PROCS = 78,
-      ERROR_MAXIMUM_NODES_EXCEEDED = 79,
-      ERROR_MAXIMUM_PROCS_EXCEEDED = 80,
-      ERROR_INVALID_TASK_ID = 81,
-      ERROR_INVALID_MAPPER_DOMAIN_SLICE = 82,
-      ERROR_UNFOLDABLE_REDUCTION_OP = 83,
-      ERROR_INVALID_INLINE_ID = 84,
-      ERROR_ILLEGAL_MUST_PARALLEL_INLINE = 85,
-      ERROR_RETURN_SIZE_MISMATCH = 86,
-      ERROR_ACCESSING_EMPTY_FUTURE = 87,
-      ERROR_ILLEGAL_PREDICATE_FUTURE = 88,
-      ERROR_COPY_REQUIREMENTS_MISMATCH = 89,
-      ERROR_INVALID_COPY_FIELDS_SIZE = 90,
-      ERROR_COPY_SPACE_MISMATCH = 91,
-      ERROR_INVALID_COPY_PRIVILEGE = 92,
-      ERROR_INVALID_PARTITION_COLOR = 93,
-      ERROR_EXCEEDED_MAX_CONTEXTS = 94,
-      ERROR_ACQUIRE_MISMATCH = 95,
-      ERROR_RELEASE_MISMATCH = 96,
-      ERROR_INNER_LEAF_MISMATCH = 97,
-      ERROR_INVALID_FIELD_PRIVILEGES = 98,
-      ERROR_ILLEGAL_NESTED_TRACE = 99,
-      ERROR_UNMATCHED_END_TRACE = 100,
-      ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK = 101,
-      ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK = 102,
-      ERROR_INVALID_PARENT_REQUEST = 103,
-      ERROR_INVALID_FIELD_ID = 104,
-      ERROR_NESTED_MUST_EPOCH = 105,
-      ERROR_UNMATCHED_MUST_EPOCH = 106,
-      ERROR_MUST_EPOCH_FAILURE = 107,
-      ERROR_DOMAIN_DIM_MISMATCH = 108,
-      ERROR_INVALID_PROCESSOR_NAME = 109,
-      ERROR_INVALID_INDEX_SUBSPACE_REQUEST = 110,
-      ERROR_INVALID_INDEX_SUBPARTITION_REQUEST = 111,
-      ERROR_INVALID_FIELD_SPACE_REQUEST = 112,
-      ERROR_INVALID_LOGICAL_SUBREGION_REQUEST = 113,
-      ERROR_INVALID_LOGICAL_SUBPARTITION_REQUEST = 114,
-      ERROR_ALIASED_REGION_REQUIREMENTS = 115,
-      ERROR_MISSING_DEFAULT_PREDICATE_RESULT = 116,
-      ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
-      ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
-      ERROR_TRACING_ALLOCATION_WITH_SEPARATE = 119,
-    };
 
-    // enum and namepsaces don't really get along well
-    enum PrivilegeMode {
-      NO_ACCESS       = 0x00000000, // Deprecated: use the NO_ACCESS_FLAG
-      READ_ONLY       = 0x00000001,
-      READ_WRITE      = 0x00000007, // All three privileges
-      WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
-      WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
-      REDUCE          = 0x00000004,
-      PROMOTED        = 0x00001000, // Internal use only
-    };
-
-    enum AllocateMode {
-      NO_MEMORY       = 0x00000000,
-      ALLOCABLE       = 0x00000001,
-      FREEABLE        = 0x00000002,
-      MUTABLE         = 0x00000003,
-      REGION_CREATION = 0x00000004,
-      REGION_DELETION = 0x00000008,
-      ALL_MEMORY      = 0x0000000F,
-    };
-
-    enum CoherenceProperty {
-      EXCLUSIVE    = 0,
-      ATOMIC       = 1,
-      SIMULTANEOUS = 2,
-      RELAXED      = 3,
-    };
-
-    // Optional region requirement flags
-    enum RegionFlags {
-      NO_FLAG         = 0x00000000,
-      VERIFIED_FLAG   = 0x00000001,
-      NO_ACCESS_FLAG  = 0x00000002,
-    };
-
-    enum HandleType {
-      SINGULAR, // a single logical region
-      PART_PROJECTION, // projection from a partition
-      REG_PROJECTION, // projection from a region
-    };
-
-    enum DependenceType {
-      NO_DEPENDENCE = 0,
-      TRUE_DEPENDENCE = 1,
-      ANTI_DEPENDENCE = 2, // Write-After-Read or Write-After-Write with Write-Only privilege
-      ATOMIC_DEPENDENCE = 3,
-      SIMULTANEOUS_DEPENDENCE = 4,
-      PROMOTED_DEPENDENCE = 5,
-    };
+    typedef ::legion_error_t LegionErrorType;
+    typedef ::legion_privilege_mode_t PrivilegeMode;
+    typedef ::legion_allocate_mode_t AllocateMode;
+    typedef ::legion_coherence_property_t CoherenceProperty;
+    typedef ::legion_region_flags_t RegionFlags;
+    typedef ::legion_handle_type_t HandleType;
+    typedef ::legion_dependence_type_t DependenceType;
 
     enum OpenState {
       NOT_OPEN            = 0,
@@ -435,6 +165,10 @@ namespace LegionRuntime {
     // legion.h
     class LegionTaskWrapper;
     class LegionSerialization;
+
+    // Forward declarations for C wrapper objects
+    // legion_c_util.h
+    class CObjectWrapper;
 
     // Forward declarations for runtime level objects
     // runtime.h
@@ -573,33 +307,33 @@ namespace LegionRuntime {
     typedef LowLevel::UserEvent UserEvent;
     typedef LowLevel::Reservation Reservation;
     typedef LowLevel::Barrier Barrier;
-    typedef LowLevel::ReductionOpID ReductionOpID;
+    typedef ::legion_reduction_op_id_t ReductionOpID;
     typedef LowLevel::ReductionOpUntyped ReductionOp;
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
-    typedef LowLevel::AddressSpace AddressSpace;
-    typedef int TaskPriority;
-    typedef unsigned int Color;
-    typedef unsigned int IndexPartition;
-    typedef unsigned int FieldID;
-    typedef unsigned int TraceID;
-    typedef unsigned int MapperID;
-    typedef unsigned int ContextID;
-    typedef unsigned int InstanceID;
-    typedef unsigned int FieldSpaceID;
-    typedef unsigned int GenerationID;
-    typedef unsigned int TypeHandle;
-    typedef unsigned int ProjectionID;
-    typedef unsigned int RegionTreeID;
-    typedef unsigned int DistributedID;
-    typedef unsigned int AddressSpaceID;
-    typedef unsigned int TunableID;
-    typedef unsigned long MappingTagID;
-    typedef unsigned long VariantID;
-    typedef unsigned long long UniqueID;
-    typedef unsigned long long VersionID;
-    typedef Processor::TaskFuncID TaskID;
+    typedef ::legion_address_space_t AddressSpace;
+    typedef ::legion_task_priority_t TaskPriority;
+    typedef ::legion_color_t Color;
+    typedef ::legion_index_partition_t IndexPartition;
+    typedef ::legion_field_id_t FieldID;
+    typedef ::legion_trace_id_t TraceID;
+    typedef ::legion_mapper_id_t MapperID;
+    typedef ::legion_context_id_t ContextID;
+    typedef ::legion_instance_id_t InstanceID;
+    typedef ::legion_field_space_id_t FieldSpaceID;
+    typedef ::legion_generation_id_t GenerationID;
+    typedef ::legion_type_handle TypeHandle;
+    typedef ::legion_projection_id_t ProjectionID;
+    typedef ::legion_region_tree_id_t RegionTreeID;
+    typedef ::legion_distributed_id_t DistributedID;
+    typedef ::legion_address_space_id_t AddressSpaceID;
+    typedef ::legion_tunable_id_t TunableID;
+    typedef ::legion_mapping_tag_id_t MappingTagID;
+    typedef ::legion_variant_id_t VariantID;
+    typedef ::legion_unique_id_t UniqueID;
+    typedef ::legion_version_id_t VersionID;
+    typedef ::legion_task_id_t TaskID;
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
@@ -791,7 +525,8 @@ namespace LegionRuntime {
     friend class ListReductionManager;            \
     friend class FoldReductionManager;            \
     friend class TreeStateLogger;                 \
-    friend class BindingLib::Utility;
+    friend class BindingLib::Utility;             \
+    friend class CObjectWrapper;
 
     // Timing events
     enum {

@@ -75,6 +75,8 @@ function main_task(binding, regions, args)
    args.alpha = math.random()
    print("alpha: " .. args.alpha)
 
+   binding:unmap_all_regions()
+
    -- Prepare arguments
    local global_arg = args
    local local_args = {}
@@ -127,9 +129,9 @@ function main_task(binding, regions, args)
 
    print("VERIFYING RESULTS")
    
-   local r_x = binding:map_region(RegionRequirement:new { region = args.r_x })
-   local r_y = binding:map_region(RegionRequirement:new { region = args.r_y })
-   local r_z = binding:map_region(RegionRequirement:new { region = args.r_z })
+   local r_x = binding:map_region(RegionRequirement:new { region = args.r_x }:add_field(args.fid))
+   local r_y = binding:map_region(RegionRequirement:new { region = args.r_y }:add_field(args.fid))
+   local r_z = binding:map_region(RegionRequirement:new { region = args.r_z }:add_field(args.fid))
 
    r_x:wait_until_valid()
    r_y:wait_until_valid()
