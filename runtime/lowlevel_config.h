@@ -48,4 +48,9 @@ typedef enum legion_lowlevel_processor_kind_t {
   PROC_GROUP, // Processor group
 } legion_lowlevel_processor_kind_t;
 
+// Keep this in sync with Domain::MAX_RECT_DIM in lowlevel.h
+typedef enum legion_lowlevel_domain_max_rect_dim_t {
+  MAX_RECT_DIM = 3,
+} legion_lowlevel_domain_max_rect_dim_t;
+
 #endif

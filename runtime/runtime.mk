@@ -49,19 +49,15 @@ USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0000)
 CC_FLAGS += -march=native
-GASNET=/usr/local/gasnet-1.20.0-openmpi
-MPI=/usr/local/openmpi-1.6.4
-CUDA=/usr/local/cuda-5.0
 CONDUIT=ibv
 GPU_ARCH=fermi
+USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0001)
 CC_FLAGS += -march=native
-GASNET=/usr/local/gasnet-1.20.0-openmpi
-MPI=/usr/local/openmpi-1.6.4
-CUDA=/usr/local/cuda-5.0
 CONDUIT=ibv
 GPU_ARCH=fermi
+USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0002)
 CC_FLAGS += -march=native
@@ -71,11 +67,9 @@ USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0003)
 CC_FLAGS += -march=native
-GASNET=/usr/local/gasnet-1.20.0-openmpi
-MPI=/usr/local/openmpi-1.6.4
-CUDA=/usr/local/cuda-5.0
 CONDUIT=ibv
 GPU_ARCH=fermi
+USE_MPI=1
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 CC_FLAGS += -march=native

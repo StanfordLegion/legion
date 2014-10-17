@@ -105,6 +105,7 @@ local function load_circuit(ckt, conf, binding)
          n = n + 1
          return elem
       end
+      print("size of randlist: " .. #elem_list)
    end
 
    local wires_req = RegionRequirement:new { region = ckt.all_wires } 
@@ -193,7 +194,7 @@ local function load_circuit(ckt, conf, binding)
          wire.voltage = {}
          for j = 0, WIRE_SEGMENTS - 2 do wire.voltage[j] = 0.0 end
          wire.resistance = stdlib.drand48() * 10 + 1
-         wire.inductance = (stdlib.drand48() + 0.1) * DELTAT
+         wire.inductance = (stdlib.drand48() + 0.1) * DELTAT * 1e-3
          wire.capacitance = stdlib.drand48() * 0.1
          
          wire.in_ptr = random_element(private_node_map[n])
@@ -203,12 +204,9 @@ local function load_circuit(ckt, conf, binding)
             wire.out_ptr = random_element(private_node_map[n])
          else
             -- pick a random other piece and a node from there
-            local nn = n
+            local nn = math.floor(stdlib.drand48() * (conf.num_pieces - 1))
 
-            while (n == nn)
-            do
-               nn = math.floor(stdlib.drand48() * (conf.num_pieces - 1))
-            end
+            if (nn >= n) then nn = nn + 1 end
 
             wire.out_ptr = random_element(private_node_map[nn])
 
@@ -389,17 +387,19 @@ function print_result(binding, ckt)
       local wire = wires_acc:read(ptr)
       stdio.printf("[Wire %.0f] in_ptr: %.0f, in_loc: %.0f, " ..
                       "out_ptr: %.0f, out_loc: %.0f, " ..
+                      "inductance: %f, resistance: %f, capacitance: %f, " ..
                       "current: ", ptr,
                    wire.in_ptr, wire.in_loc,
-                   wire.out_ptr, wire.out_loc);
+                   wire.out_ptr, wire.out_loc,
+                   wire.inductance, wire.resistance, wire.capacitance);
       for i = 0, WIRE_SEGMENTS - 1
       do
-        stdio.printf("%.3f ", wire.current[i]);
+        stdio.printf("%f ", wire.current[i]);
       end
       stdio.printf(", voltage: ");
       for i = 0, WIRE_SEGMENTS - 2
       do
-        stdio.printf("%.3f ", wire.voltage[i]);
+        stdio.printf("%f ", wire.voltage[i]);
       end
       stdio.printf("\n");
    end
@@ -586,7 +586,7 @@ function circuit_main(binding, regions, args)
    print("simulation complete - destroying regions")
 
    if conf.verify then print_result(binding, circuit) end
-   
+
    local sim_time = ts_end - ts_start
    local num_circuit_nodes = conf.num_pieces * conf.nodes_per_piece
    local num_circuit_wires = conf.num_pieces * conf.wires_per_piece

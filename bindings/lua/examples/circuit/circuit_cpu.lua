@@ -124,7 +124,7 @@ function distribute_charge_cpu(reg, global_args, piece)
                      -dt * wire.current[0])
       reduce_node(pvt_nodes, shr_nodes, ghost_nodes,
                   wire.out_loc, wire.out_ptr,
-                     -dt * wire.current[WIRE_SEGMENTS - 1])
+                     dt * wire.current[WIRE_SEGMENTS - 1])
    end
 
 end

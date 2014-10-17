@@ -25,10 +25,17 @@
 #include "legion.h"
 #include "legion_c.h"
 
+#include <algorithm>
+
 namespace LegionRuntime {
   namespace HighLevel {
     class CObjectWrapper {
     public:
+
+      typedef Accessor::AccessorType::Generic Generic;
+      typedef Accessor::AccessorType::SOA<0> SOA;
+      typedef Accessor::RegionAccessor<Generic> AccessorGeneric;
+      typedef Accessor::RegionAccessor<SOA, char> AccessorArray;
 
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
@@ -48,7 +55,6 @@ namespace LegionRuntime {
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, HighLevelRuntime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, Context);
-      NEW_OPAQUE_WRAPPER(legion_domain_t, Domain *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
@@ -58,8 +64,10 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
-
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -76,6 +84,51 @@ namespace LegionRuntime {
         ptr_t ptr;
         ptr.value = ptr_.value;
         return ptr;
+      }
+
+#define NEW_POINT_WRAPPER(T_, T, DIM)                \
+      static T_ wrap(T t) {                          \
+        T_ t_;                                       \
+        std::copy(t.x, t.x + DIM, t_.x);             \
+        return t_;                                   \
+      }                                              \
+      static T unwrap(T_ t_) {                       \
+        T t(t_.x);                                   \
+      }
+
+      NEW_POINT_WRAPPER(legion_point_1d_t, Point<1>, 1);
+      NEW_POINT_WRAPPER(legion_point_2d_t, Point<2>, 2);
+      NEW_POINT_WRAPPER(legion_point_3d_t, Point<3>, 3);
+#undef NEW_POINT_WRAPPER
+
+#define NEW_RECT_WRAPPER(T_, T)                         \
+      static T_ wrap(T t) {                             \
+        T_ t_ = { .lo = wrap(t.lo), .hi = wrap(t.hi) }; \
+        return t_;                                      \
+      }                                                 \
+      static T unwrap(T_ t_) {                          \
+        T t(unwrap(t_.lo), unwrap(t_.hi));              \
+      }
+
+      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect<1>);
+      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect<2>);
+      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect<3>);
+#undef NEW_RECT_WRAPPER
+
+      static legion_domain_t
+      wrap(Domain domain) {
+        legion_domain_t domain_;
+        domain_.is_id = domain.is_id;
+        domain_.dim = domain.dim;
+        std::copy(domain.rect_data, domain.rect_data + 2 * MAX_RECT_DIM, domain_.rect_data);
+      }
+
+      static Domain
+      unwrap(legion_domain_t domain_) {
+        Domain domain;
+        domain.is_id = domain_.is_id;
+        domain.dim = domain_.dim;
+        std::copy(domain_.rect_data, domain_.rect_data + 2 * MAX_RECT_DIM, domain.rect_data);
       }
 
       static legion_index_space_t
@@ -196,6 +249,20 @@ namespace LegionRuntime {
       unwrap(legion_task_argument_t arg_)
       {
         return TaskArgument(arg_.args, arg_.arglen);
+      }
+
+      static const legion_byte_offset_t
+      wrap(const Accessor::ByteOffset offset)
+      {
+        const legion_byte_offset_t offset_ = { .offset = offset.offset };
+        return offset_;
+      }
+
+      static const Accessor::ByteOffset
+      unwrap(const legion_byte_offset_t offset_)
+      {
+        const Accessor::ByteOffset offset(offset_.offset);
+        return offset;
       }
 
       static const legion_input_args_t

@@ -615,7 +615,7 @@ local function convert_terra_struct_to_lua_struct(terra_struct)
    for _, v in pairs(terra_struct.entries)
    do
       local ty = nil
-      if v.type.N
+      if rawget(v.type, 'N')
       then
          ty = ArrayType:new(convert_terra_type(v.type.type),
                             v.type.N)

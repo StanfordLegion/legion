@@ -822,7 +822,9 @@ namespace LegionRuntime {
 
     class Domain {
     public:
-      enum { MAX_RECT_DIM = 3 };
+      // Keep this in sync with legion_lowlevel_domain_max_rect_dim_t
+      // in lowlevel_config.h
+      enum { MAX_RECT_DIM = ::MAX_RECT_DIM };
       Domain(void) : is_id(0), dim(0) {}
       Domain(LegionRuntime::LowLevel::IndexSpace is) : is_id(is.id), dim(0) {}
       Domain(const Domain& other) : is_id(other.is_id), dim(other.dim)

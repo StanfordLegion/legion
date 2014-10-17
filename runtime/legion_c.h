@@ -41,12 +41,10 @@ extern "C" {
   // Proxy Types
   // -----------------------------------------------------------------------
 
-// #define NEW_OPAQUE_TYPE(t) typedef void * t
-#define NEW_OPAQUE_TYPE(t) typedef struct t { void *impl; } t
-
+// #define NEW_OPAQUE_TYPE(T) typedef void * T
+#define NEW_OPAQUE_TYPE(T) typedef struct T { void *impl; } T
   NEW_OPAQUE_TYPE(legion_runtime_t);
   NEW_OPAQUE_TYPE(legion_context_t);
-  NEW_OPAQUE_TYPE(legion_domain_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
@@ -56,9 +54,10 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
-  NEW_OPAQUE_TYPE(legion_task_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
-
+  NEW_OPAQUE_TYPE(legion_accessor_generic_t);
+  NEW_OPAQUE_TYPE(legion_accessor_array_t);
+  NEW_OPAQUE_TYPE(legion_task_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -67,6 +66,27 @@ extern "C" {
   typedef struct legion_ptr_t {
     unsigned value;
   } legion_ptr_t;
+
+#define NEW_POINT_TYPE(T, DIM) typedef struct T { int x[DIM]; } T
+  NEW_POINT_TYPE(legion_point_1d_t, 1);
+  NEW_POINT_TYPE(legion_point_2d_t, 2);
+  NEW_POINT_TYPE(legion_point_3d_t, 3);
+#undef NEW_POINT_TYPE
+
+#define NEW_RECT_TYPE(T, PT) typedef struct T { PT lo, hi; } T
+  NEW_RECT_TYPE(legion_rect_1d_t, legion_point_1d_t);
+  NEW_RECT_TYPE(legion_rect_2d_t, legion_point_2d_t);
+  NEW_RECT_TYPE(legion_rect_3d_t, legion_point_3d_t);
+#undef NEW_RECT_TYPE
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain
+   */
+  typedef struct legion_domain_t {
+    legion_lowlevel_id_t is_id;
+    int dim;
+    int rect_data[2 * MAX_RECT_DIM];
+  } legion_domain_t;
 
   /**
    * @see LegionRuntime::HighLevel::IndexSpace
@@ -126,6 +146,13 @@ extern "C" {
   } legion_task_argument_t;
 
   /**
+   * @see LegionRuntime::Accessor::ByteOffset
+   */
+  typedef struct legion_byte_offset_t {
+    int offset;
+  } legion_byte_offset_t;
+
+  /**
    * @see LegionRuntime::HighLevel::InputArgs
    */
   typedef struct legion_input_args_t {
@@ -178,13 +205,42 @@ extern "C" {
   }
 
   // -----------------------------------------------------------------------
+  // Domain Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   */
+  legion_domain_t
+  legion_domain_from_rect_1d(legion_rect_1d_t r);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   */
+  legion_domain_t
+  legion_domain_from_rect_2d(legion_rect_2d_t r);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   */
+  legion_domain_t
+  legion_domain_from_rect_3d(legion_rect_3d_t r);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::Domain(
+   *        LegionRuntime::HighLevel::IndexSpace)
+   */
+  legion_domain_t
+  legion_domain_from_index_space(legion_index_space_t is);
+
+  // -----------------------------------------------------------------------
   // Coloring Operations
   // -----------------------------------------------------------------------
 
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::Coloring
+   * @see LegionRuntime::HighLevel::Coloring
    */
   legion_coloring_t
   legion_coloring_create(void);
@@ -192,13 +248,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::Coloring
+   * @see LegionRuntime::HighLevel::Coloring
    */
   void
   legion_coloring_destroy(legion_coloring_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::Coloring
+   * @see LegionRuntime::HighLevel::Coloring
    */
   void
   legion_coloring_add_point(legion_coloring_t handle,
@@ -206,7 +262,7 @@ extern "C" {
                             legion_ptr_t point);
 
   /**
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::Coloring
+   * @see LegionRuntime::HighLevel::Coloring
    */
   void
   legion_coloring_add_range(legion_coloring_t handle,
@@ -667,6 +723,112 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  // -----------------------------------------------------------------------
+  // Physical Data Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
+   */
+  legion_accessor_generic_t
+  legion_physical_region_get_field_accessor_generic(
+    legion_physical_region_t handle,
+    legion_field_id_t fid);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
+   */
+  legion_accessor_array_t
+  legion_physical_region_get_field_accessor_array(
+    legion_physical_region_t handle,
+    legion_field_id_t fid);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   */
+  void
+  legion_accessor_generic_destroy(legion_accessor_generic_t handle);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::read_untyped()
+   */
+  void
+  legion_accessor_generic_read(legion_accessor_generic_t handle,
+                               legion_ptr_t ptr,
+                               void *dst,
+                               size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::write_untyped()
+   */
+  void
+  legion_accessor_generic_write(legion_accessor_generic_t handle,
+                                legion_ptr_t ptr,
+                                const void *src,
+                                size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
+   */
+  void *
+  legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle,
+                                          legion_rect_1d_t rect,
+                                          legion_rect_1d_t *subrect,
+                                          legion_byte_offset_t *offsets);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
+   */
+  void *
+  legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle,
+                                          legion_rect_2d_t rect,
+                                          legion_rect_2d_t *subrect,
+                                          legion_byte_offset_t *offsets);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
+   */
+  void *
+  legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle,
+                                          legion_rect_3d_t rect,
+                                          legion_rect_3d_t *subrect,
+                                          legion_byte_offset_t *offsets);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   */
+  void
+  legion_accessor_array_destroy(legion_accessor_array_t handle);
+
+  /**
+   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
+   */
+  void
+  legion_accessor_array_read(legion_accessor_array_t handle,
+                             legion_ptr_t ptr,
+                             void *dst,
+                             size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
+   */
+  void
+  legion_accessor_array_write(legion_accessor_array_t handle,
+                              legion_ptr_t ptr,
+                              const void *src,
+                              size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
+   */
+  void *
+  legion_accessor_array_ref(legion_accessor_array_t handle,
+                            legion_ptr_t ptr);
 
   // -----------------------------------------------------------------------
   // Task Operations

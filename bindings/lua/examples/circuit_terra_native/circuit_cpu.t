@@ -88,9 +88,10 @@ function gen_calc_new_currents_cpu(WS, NS)
             alignedstore(vecp(&new_i_ptr[4]), alignedload(vecp(&wire_current[4])))
             new_i_ptr[8] = wire_current[8]
             new_i_ptr[9] = wire_current[9]
+            new_v_ptr[0] = in_node.voltage
             alignedstore(vecp(&new_v_ptr[1]), alignedload(vecp(&wire_voltage[0])))
             alignedstore(vecp(&new_v_ptr[5]), alignedload(vecp(&wire_voltage[4])))
-            new_v_ptr[0] = in_node.voltage
+            new_v_ptr[9] = wire_voltage[8];
             new_v_ptr[WS] = out_node.voltage
 
             var dt_vec : vec  = DELTAT
@@ -98,10 +99,10 @@ function gen_calc_new_currents_cpu(WS, NS)
             var ind_vec : vec = wire.inductance
             var res_vec : vec = wire.resistance
 
-            var dt = DELTAT
-            var cap = wire.capacitance
-            var ind = wire.inductance
-            var res = wire.resistance
+            var dt : float = DELTAT
+            var cap : float = wire.capacitance
+            var ind : float = wire.inductance
+            var res : float = wire.resistance
 
             for j = 0, NS
             do
@@ -110,12 +111,12 @@ function gen_calc_new_currents_cpu(WS, NS)
                   var tmp1 : vec = alignedload(vecp(&new_v_ptr[i + 1])) - alignedload(vecp(&new_v_ptr[i]))
                   var tmp2 : vec = alignedload(vecp(&new_i_ptr[i])) - alignedload(vecp(&wire_current[i]))
                   tmp2 = ind_vec * tmp2 / dt_vec
-                  alignedstore(vecp(&new_i_ptr[i]), (tmp1 - tmp2) / res_vec)
+                  alignedstore(vecp(&new_i_ptr[i]), (tmp2 - tmp1) / res_vec)
                end
 
                for i = 8, 10
                do
-                  var tmp1 = new_v_ptr[i + 1] - new_v_ptr[i]
+                  var tmp1 = new_v_ptr[i] - new_v_ptr[i + 1]
                   var tmp2 = new_i_ptr[i] - wire_current[i]
                   tmp2 = ind * tmp2 / dt
                   new_i_ptr[i] = (tmp1 - tmp2) / res
@@ -146,11 +147,8 @@ function gen_calc_new_currents_cpu(WS, NS)
             alignedstore(vecp(&wire_current[4]), alignedload(vecp(&new_i_ptr[4])))
             wire_current[8] = new_i_ptr[8]
             wire_current[9] = new_i_ptr[9]
-            wire_voltage[0] = new_v_ptr[1]
-            wire_voltage[1] = new_v_ptr[2]
-            wire_voltage[2] = new_v_ptr[3]
-            alignedstore(vecp(&wire_voltage[3]), alignedload(vecp(&new_v_ptr[4])))
-            wire_voltage[7] = new_v_ptr[8]
+            alignedstore(vecp(&wire_voltage[0]), alignedload(vecp(&new_v_ptr[1])))
+            alignedstore(vecp(&wire_voltage[4]), alignedload(vecp(&new_v_ptr[5])))
             wire_voltage[8] = new_v_ptr[9]
 
             pvt_wires:write(wire_ptr, wire)
@@ -204,8 +202,9 @@ terra calc_new_currents_cpu(regions: &TPhysicalRegion,
 
       for i = 0, WIRE_SEGMENTS     do new_i[i] = wire.current[i] end
       for i = 0, WIRE_SEGMENTS - 1 do new_v[i + 1] = wire.voltage[i] end
-      new_v[0] = in_node.voltage;
-      new_v[WIRE_SEGMENTS] = out_node.voltage;
+
+      new_v[0] = in_node.voltage
+      new_v[WIRE_SEGMENTS] = out_node.voltage
 
       for j = 0, steps
       do
@@ -215,7 +214,7 @@ terra calc_new_currents_cpu(regions: &TPhysicalRegion,
          for i = 0, WIRE_SEGMENTS
          do
             new_i[i] =
-               ((new_v[i + 1] - new_v[i]) - 
+               ((new_v[i] - new_v[i + 1]) - 
                    (wire.inductance * (new_i[i] - wire.current[i]) / dt))
                / wire.resistance
          end
@@ -292,14 +291,14 @@ terra distribute_charges_cpu(regions: &TPhysicalRegion,
       var wire_ptr = itr:next()
       var wire = pvt_wires:read(wire_ptr)
 
-      var dt = DELTAT; 
+      var dt : float = DELTAT; 
 
       reduce_node(pvt_nodes, shr_nodes, ghost_nodes,
                   wire.in_loc, wire.in_ptr,
                      -dt * wire.current[0])
       reduce_node(pvt_nodes, shr_nodes, ghost_nodes,
                   wire.out_loc, wire.out_ptr,
-                     -dt * wire.current[WIRE_SEGMENTS - 1])
+                     dt * wire.current[WIRE_SEGMENTS - 1])
    end
 
    pvt_wires:close()
