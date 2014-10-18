@@ -94,6 +94,7 @@ namespace LegionRuntime {
       }                                              \
       static T unwrap(T_ t_) {                       \
         T t(t_.x);                                   \
+        return t;                                    \
       }
 
       NEW_POINT_WRAPPER(legion_point_1d_t, Point<1>, 1);
@@ -108,6 +109,7 @@ namespace LegionRuntime {
       }                                                 \
       static T unwrap(T_ t_) {                          \
         T t(unwrap(t_.lo), unwrap(t_.hi));              \
+        return t;                                       \
       }
 
       NEW_RECT_WRAPPER(legion_rect_1d_t, Rect<1>);
@@ -121,6 +123,7 @@ namespace LegionRuntime {
         domain_.is_id = domain.is_id;
         domain_.dim = domain.dim;
         std::copy(domain.rect_data, domain.rect_data + 2 * MAX_RECT_DIM, domain_.rect_data);
+        return domain_;
       }
 
       static Domain
@@ -129,6 +132,7 @@ namespace LegionRuntime {
         domain.is_id = domain_.is_id;
         domain.dim = domain_.dim;
         std::copy(domain_.rect_data, domain_.rect_data + 2 * MAX_RECT_DIM, domain.rect_data);
+        return domain;
       }
 
       static legion_index_space_t

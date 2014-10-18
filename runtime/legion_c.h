@@ -626,7 +626,6 @@ extern "C" {
   legion_task_launcher_add_region_requirement_logical_region(
     legion_task_launcher_t launcher,
     legion_logical_region_t handle,
-    legion_projection_id_t proj /* = 0 */,
     legion_privilege_mode_t priv,
     legion_coherence_property_t prop,
     legion_logical_region_t parent,

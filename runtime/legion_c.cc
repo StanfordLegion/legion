@@ -515,7 +515,6 @@ unsigned
 legion_task_launcher_add_region_requirement_logical_region(
   legion_task_launcher_t launcher_,
   legion_logical_region_t handle_,
-  legion_projection_id_t proj /* = 0 */,
   legion_privilege_mode_t priv,
   legion_coherence_property_t prop,
   legion_logical_region_t parent_,
@@ -528,7 +527,7 @@ legion_task_launcher_add_region_requirement_logical_region(
 
   unsigned idx = launcher->region_requirements.size();
   launcher->add_region_requirement(
-    RegionRequirement(handle, proj, priv, prop, parent, tag, verified));
+    RegionRequirement(handle, priv, prop, parent, tag, verified));
   return idx;
 }
 
@@ -867,7 +866,7 @@ legion_runtime_start(int argc,
                      char **argv,
                      bool background /* = false */)
 {
-  HighLevelRuntime::start(argc, argv, background);
+  return HighLevelRuntime::start(argc, argv, background);
 }
 
 void
@@ -896,12 +895,15 @@ task_wrapper_void(const Task *task,
                   const legion_task_pointer_void_t &task_pointer)
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
-  legion_physical_region_t *regions_ = 0;
-  unsigned num_regions = 0;
+  std::vector<legion_physical_region_t> regions_;
+  for (int i = 0; i < regions.size(); i++) {
+    regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
+  }
+  unsigned num_regions = regions_.size();
   legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
 
-  task_pointer(task_, regions_, num_regions, ctx_, runtime_);
+  task_pointer(task_, &regions_[0], num_regions, ctx_, runtime_);
 }
 
 legion_task_id_t
@@ -918,6 +920,7 @@ legion_runtime_register_task_void(
   Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
   TaskConfigOptions options = CObjectWrapper::unwrap(options_);
 
-  HighLevelRuntime::register_legion_task<legion_task_pointer_void_t, task_wrapper_void>(
+  return HighLevelRuntime::register_legion_task<
+    legion_task_pointer_void_t, task_wrapper_void>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
