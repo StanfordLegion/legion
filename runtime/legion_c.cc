@@ -454,6 +454,15 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
+legion_task_result_t
+legion_future_get_result(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  TaskResult result = handle->get_result<TaskResult>();
+  return CObjectWrapper::wrap(result);
+}
+
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -469,6 +478,23 @@ legion_future_get_untyped_pointer(legion_future_t handle_)
   Future *handle = CObjectWrapper::unwrap(handle_);
 
   return handle->get_untyped_pointer();
+}
+
+legion_task_result_t
+legion_task_result_create(const void *handle, size_t size)
+{
+  legion_task_result_t result;
+  result.value = malloc(size);
+  assert(result.value);
+  memcpy(result.value, handle, size);
+  result.value_size = size;
+  return result;
+}
+
+void
+legion_task_result_destroy(legion_task_result_t handle)
+{
+  free(handle.value);
 }
 
 //------------------------------------------------------------------------
@@ -922,5 +948,48 @@ legion_runtime_register_task_void(
 
   return HighLevelRuntime::register_legion_task<
     legion_task_pointer_void_t, task_wrapper_void>(
+    id, proc_kind, single, index, task_pointer, vid, options, task_name);
+}
+
+TaskResult
+task_wrapper(const Task *task,
+             const std::vector<PhysicalRegion> &regions,
+             Context ctx,
+             HighLevelRuntime *runtime,
+             const legion_task_pointer_t &task_pointer)
+{
+  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
+  std::vector<legion_physical_region_t> regions_;
+  for (int i = 0; i < regions.size(); i++) {
+    regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
+  }
+  unsigned num_regions = regions_.size();
+  legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
+  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
+
+  legion_task_result_t result_ =
+    task_pointer(task_, &regions_[0], num_regions, ctx_, runtime_);
+
+  TaskResult result = CObjectWrapper::unwrap(result_);
+  free(result_.value);
+  return result;
+}
+
+legion_task_id_t
+legion_runtime_register_task(
+  legion_task_id_t id,
+  legion_processor_kind_t proc_kind_,
+  bool single,
+  bool index,
+  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
+  legion_task_config_options_t options_,
+  const char *task_name /* = NULL*/,
+  legion_task_pointer_t task_pointer)
+{
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
+
+  return HighLevelRuntime::register_legion_task<
+    TaskResult, legion_task_pointer_t, task_wrapper>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }

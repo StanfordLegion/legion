@@ -146,6 +146,14 @@ extern "C" {
   } legion_task_argument_t;
 
   /**
+   * @see LegionRuntime::HighLevel::TaskResult
+   */
+  typedef struct legion_task_result_t {
+    void *value;
+    size_t value_size;
+  } legion_task_result_t;
+
+  /**
    * @see LegionRuntime::Accessor::ByteOffset
    */
   typedef struct legion_byte_offset_t {
@@ -174,6 +182,17 @@ extern "C" {
    */
   typedef
     void (*legion_task_pointer_void_t)(
+      const legion_task_t /* task */,
+      const legion_physical_region_t * /* regions */,
+      unsigned /* num_regions */,
+      legion_context_t /* ctx */,
+      legion_runtime_t /* runtime */);
+
+  /**
+   * Interface for a Legion C task returning void.
+   */
+  typedef
+    legion_task_result_t (*legion_task_pointer_t)(
       const legion_task_t /* task */,
       const legion_physical_region_t * /* regions */,
       unsigned /* num_regions */,
@@ -572,6 +591,14 @@ extern "C" {
   legion_future_get_void_result(legion_future_t handle);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::get_result()
+   */
+  legion_task_result_t
+  legion_future_get_result(legion_future_t handle);
+
+  /**
    * @see LegionRuntime::HighLevel::Future::is_empty()
    */
   bool
@@ -583,6 +610,22 @@ extern "C" {
    */
   const void *
   legion_future_get_untyped_pointer(legion_future_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::execute_task()
+   */
+  legion_task_result_t
+  legion_task_result_create(const void *handle, size_t size);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::execute_task()
+   */
+  void
+  legion_task_result_destroy(legion_task_result_t handle);
 
   // -----------------------------------------------------------------------
   // Task Launch Operations
@@ -906,6 +949,20 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_void_t task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::register_legion_task()
+   */
+  legion_task_id_t
+  legion_runtime_register_task(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    bool single,
+    bool index,
+    legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
+    legion_task_config_options_t options,
+    const char *task_name /* = NULL*/,
+    legion_task_pointer_t task_pointer);
 
 #ifdef __cplusplus
 }
