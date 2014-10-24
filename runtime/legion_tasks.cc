@@ -8268,6 +8268,11 @@ namespace LegionRuntime {
           SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
                                                  true/*needs slice*/,
                                                  spawn_task, 1LL);
+          // Before we do this we have to chain the all children mapped event
+          all_children_mapped.trigger(clone->get_children_mapped());
+#ifdef DEBUG_HIGH_LEVEL
+          all_children_mapped = UserEvent::NO_USER_EVENT;
+#endif
           runtime->send_task(target_proc, clone);
           return false; // We have now been sent away
         }

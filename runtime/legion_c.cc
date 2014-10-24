@@ -677,9 +677,137 @@ legion_index_launcher_add_field(legion_index_launcher_t launcher_,
   launcher->add_field(idx, fid, inst);
 }
 
+legion_inline_launcher_t
+legion_inline_launcher_create_logical_region(
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t region_tag /* = 0 */,
+  bool verified /* = false*/,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  InlineLauncher *launcher = new InlineLauncher(
+    RegionRequirement(handle, priv, prop, parent, region_tag, verified),
+    id,
+    launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_inline_launcher_destroy(legion_inline_launcher_t handle_)
+{
+  InlineLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_physical_region_t
+legion_inline_launcher_execute(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_inline_launcher_t launcher_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  InlineLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  PhysicalRegion r = runtime->map_region(ctx, *launcher);
+  return CObjectWrapper::wrap(new PhysicalRegion(r));
+}
+
+void
+legion_inline_launcher_add_field(legion_inline_launcher_t launcher_,
+                                 legion_field_id_t fid,
+                                 bool inst /* = true */)
+{
+  InlineLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid, inst);
+}
+
+void
+legion_runtime_remap_region(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_physical_region_t region_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  PhysicalRegion *region = CObjectWrapper::unwrap(region_);
+
+  runtime->remap_region(ctx, *region);
+}
+
+void
+legion_runtime_unmap_region(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_physical_region_t region_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  PhysicalRegion *region = CObjectWrapper::unwrap(region_);
+
+  runtime->unmap_region(ctx, *region);
+}
+
+void
+legion_runtime_map_all_region(legion_runtime_t runtime_,
+                              legion_context_t ctx_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->map_all_regions(ctx);
+}
+
+void
+legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
+                                 legion_context_t ctx_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->unmap_all_regions(ctx);
+}
+
 // -----------------------------------------------------------------------
 // Physical Data Operations
 // -----------------------------------------------------------------------
+
+void
+legion_physical_region_destroy(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+bool
+legion_physical_region_is_mapped(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_mapped();
+}
+
+void
+legion_physical_region_wait_until_valid(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->wait_until_valid();
+}
+
+bool
+legion_physical_region_is_valid(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->is_valid();
+}
 
 legion_accessor_generic_t
 legion_physical_region_get_field_accessor_generic(
@@ -839,6 +967,39 @@ legion_accessor_array_ref(legion_accessor_array_t handle_,
   return static_cast<void *>(data);
 }
 
+legion_index_iterator_t
+legion_index_iterator_create(legion_index_space_t handle_)
+{
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  IndexIterator *iterator = new IndexIterator(handle);
+  return CObjectWrapper::wrap(iterator);
+}
+
+void
+legion_index_iterator_destroy(legion_index_iterator_t handle_)
+{
+  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+bool
+legion_index_iterator_has_next(legion_index_iterator_t handle_)
+{
+  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->has_next();
+}
+
+legion_ptr_t
+legion_index_iterator_next(legion_index_iterator_t handle_)
+{
+  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(handle->next());
+}
+
 //------------------------------------------------------------------------
 // Task Operations
 //------------------------------------------------------------------------
@@ -925,11 +1086,15 @@ task_wrapper_void(const Task *task,
   for (int i = 0; i < regions.size(); i++) {
     regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
   }
+  legion_physical_region_t *regions_ptr = NULL;
+  if (regions.size() > 0) {
+    regions_ptr = &regions_[0];
+  }
   unsigned num_regions = regions_.size();
   legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
 
-  task_pointer(task_, &regions_[0], num_regions, ctx_, runtime_);
+  task_pointer(task_, regions_ptr, num_regions, ctx_, runtime_);
 }
 
 legion_task_id_t
@@ -963,15 +1128,19 @@ task_wrapper(const Task *task,
   for (int i = 0; i < regions.size(); i++) {
     regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
   }
+  legion_physical_region_t *regions_ptr = NULL;
+  if (regions_.size() > 0) {
+    regions_ptr = &regions_[0];
+  }
   unsigned num_regions = regions_.size();
   legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
 
   legion_task_result_t result_ =
-    task_pointer(task_, &regions_[0], num_regions, ctx_, runtime_);
+    task_pointer(task_, regions_ptr, num_regions, ctx_, runtime_);
 
   TaskResult result = CObjectWrapper::unwrap(result_);
-  free(result_.value);
+  legion_task_result_destroy(result_);
   return result;
 }
 

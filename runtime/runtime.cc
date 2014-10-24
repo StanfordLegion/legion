@@ -9785,7 +9785,7 @@ namespace LegionRuntime {
         log_run(LEVEL_ERROR,"ERROR: Maximum number of allowed contexts %d "
                             "exceeded when initializing task %s (UID %lld). "
                             "Please change 'MAX_CONTEXTS' at top "
-                            "of legion_types.h and recompile. It is also "
+                            "of legion_config.h and recompile. It is also "
                             "possible to reduce context usage by annotating "
                             "task variants as leaf tasks since leaf tasks do "
                             "not require context allocation.",
@@ -12396,7 +12396,7 @@ namespace LegionRuntime {
         {
           log_run(LEVEL_ERROR,"Maximum number of local processors %ld exceeds "
                               "compile time maximum of %d.  Change the value "
-                              "in legion_type.h and recompile.",
+                              "in legion_config.h and recompile.",
                               local_procs.size(), MAX_NUM_PROCS);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);

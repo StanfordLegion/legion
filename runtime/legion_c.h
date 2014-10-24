@@ -54,9 +54,11 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
+  NEW_OPAQUE_TYPE(legion_inline_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_generic_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_t);
+  NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
 #undef NEW_OPAQUE_TYPE
 
@@ -766,9 +768,107 @@ extern "C" {
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
 
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::InlineLauncher::InlineLauncher()
+   */
+  legion_inline_launcher_t
+  legion_inline_launcher_create_logical_region(
+    legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t region_tag /* = 0 */,
+    bool verified /* = false*/,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::InlineLauncher::~InlineLauncher()
+   */
+  void
+  legion_inline_launcher_destroy(legion_inline_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::map_region()
+   */
+  legion_physical_region_t
+  legion_inline_launcher_execute(legion_runtime_t runtime,
+                                 legion_context_t ctx,
+                                 legion_inline_launcher_t launcher);
+
+  /**
+   * @see LegionRuntime::HighLevel::InlineLauncher::add_field()
+   */
+  void
+  legion_inline_launcher_add_field(legion_inline_launcher_t launcher,
+                                   legion_field_id_t fid,
+                                   bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::remap_region()
+   */
+  void
+  legion_runtime_remap_region(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_physical_region_t region);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::unmap_region()
+   */
+  void
+  legion_runtime_unmap_region(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_physical_region_t region);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::map_all_regions()
+   */
+  void
+  legion_runtime_map_all_region(legion_runtime_t runtime,
+                                legion_context_t ctx);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::unmap_all_regions()
+   */
+  void
+  legion_runtime_unmap_all_regions(legion_runtime_t runtime,
+                                   legion_context_t ctx);
+
   // -----------------------------------------------------------------------
   // Physical Data Operations
   // -----------------------------------------------------------------------
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::PhysicalRegion::~PhysicalRegion()
+   */
+  void
+  legion_physical_region_destroy(legion_physical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::is_mapped()
+   */
+  bool
+  legion_physical_region_is_mapped(legion_physical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::wait_until_valid()
+   */
+  void
+  legion_physical_region_wait_until_valid(legion_physical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::is_valid()
+   */
+  bool
+  legion_physical_region_is_valid(legion_physical_region_t handle);
 
   /**
    * @return Caller takes ownership of return value.
@@ -871,6 +971,34 @@ extern "C" {
   void *
   legion_accessor_array_ref(legion_accessor_array_t handle,
                             legion_ptr_t ptr);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::IndexIterator::IndexIterator()
+   */
+  legion_index_iterator_t
+  legion_index_iterator_create(legion_index_space_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::IndexIterator::~IndexIterator()
+   */
+  void
+  legion_index_iterator_destroy(legion_index_iterator_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexIterator::has_next()
+   */
+  bool
+  legion_index_iterator_has_next(legion_index_iterator_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexIterator::next()
+   */
+  legion_ptr_t
+  legion_index_iterator_next(legion_index_iterator_t handle);
 
   // -----------------------------------------------------------------------
   // Task Operations

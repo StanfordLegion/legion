@@ -5824,7 +5824,7 @@ namespace LegionRuntime {
       // If we make it here, the mask is full and we are out of allocations
       log_field(LEVEL_ERROR,"Exceeded maximum number of allocated fields for "
                             "field space %x.  Change MAX_FIELDS from %d and "
-                            "related macros at the top of legion_types.h and "
+                            "related macros at the top of legion_config.h and "
                             "recompile.", handle.id, MAX_FIELDS);
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);

@@ -71,10 +71,10 @@ namespace LegionRuntime {
         return sizeof(size_t) + value_size;
       }
       size_t legion_deserialize(const void *buffer) {
-        value_size = *(size_t *)buffer;
+        value_size = *(const size_t *)buffer;
         value = malloc(value_size);
         assert(value);
-        memcpy(value, (void *)(((size_t *)buffer)+1), value_size);
+        memcpy(value, (void *)(((const size_t *)buffer)+1), value_size);
         return sizeof(size_t) + value_size;
       }
 
@@ -93,11 +93,13 @@ namespace LegionRuntime {
 
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
-        T_ t_ = { .impl = static_cast<void *>(t) };                     \
+        T_ t_;                                                          \
+        t_.impl = static_cast<void *>(t);                               \
         return t_;                                                      \
       }                                                                 \
       static const T_ wrap_const(const T t) {                           \
-        const T_ t_ = { .impl = const_cast<void *>(static_cast<const void *>(t)) }; \
+        T_ t_;                                                          \
+        t_.impl = const_cast<void *>(static_cast<const void *>(t));     \
         return t_;                                                      \
       }                                                                 \
       static T unwrap(T_ t_) {                                          \
@@ -118,9 +120,11 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
+      NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
 #undef NEW_OPAQUE_WRAPPER
 
@@ -158,7 +162,9 @@ namespace LegionRuntime {
 
 #define NEW_RECT_WRAPPER(T_, T)                         \
       static T_ wrap(T t) {                             \
-        T_ t_ = { .lo = wrap(t.lo), .hi = wrap(t.hi) }; \
+        T_ t_;                                          \
+        t_.lo = wrap(t.lo);                             \
+        t_.hi = wrap(t.hi);                             \
         return t_;                                      \
       }                                                 \
       static T unwrap(T_ t_) {                          \
@@ -329,7 +335,8 @@ namespace LegionRuntime {
       static const legion_byte_offset_t
       wrap(const Accessor::ByteOffset offset)
       {
-        const legion_byte_offset_t offset_ = { .offset = offset.offset };
+        legion_byte_offset_t offset_;
+        offset_.offset = offset.offset;
         return offset_;
       }
 
@@ -343,25 +350,28 @@ namespace LegionRuntime {
       static const legion_input_args_t
       wrap_const(const InputArgs arg)
       {
-        const legion_input_args_t arg_ = { .argv = arg.argv, .argc = arg.argc };
+        legion_input_args_t arg_;
+        arg_.argv = arg.argv;
+        arg_.argc = arg.argc;
         return arg_;
       }
 
       static const InputArgs
       unwrap_const(const legion_input_args_t args_)
       {
-        const InputArgs args = { .argv = args_.argv, .argc = args_.argc };
+        InputArgs args;
+        args.argv = args_.argv;
+        args.argc = args_.argc;
         return args;
       }
 
       static legion_task_config_options_t
       wrap(TaskConfigOptions options)
       {
-        legion_task_config_options_t options_ = {
-          .leaf = options.leaf,
-          .inner = options.inner,
-          .idempotent = options.idempotent,
-        };
+        legion_task_config_options_t options_;
+        options_.leaf = options.leaf;
+        options_.inner = options.inner;
+        options_.idempotent = options.idempotent;
         return options_;
       }
 

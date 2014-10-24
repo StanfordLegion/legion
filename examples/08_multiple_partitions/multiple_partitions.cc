@@ -280,7 +280,7 @@ void stencil_task(const Task *task,
   // path which checks for clamping when necessary.
   // If not, then we can do the fast path without
   // any checks.
-  if ((rect.lo[0] == 0) || (rect.hi[0] == (max_elements-1)))
+  if ((rect.lo[0] < 2) || (rect.hi[0] > (max_elements-3)))
   {
     printf("Running slow stencil path for point %d...\n", point);
     // Note in the slow path that there are checks which
