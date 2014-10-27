@@ -272,7 +272,7 @@ typedef enum legion_error_t {
 
 // enum and namepsaces don't really get along well
 typedef enum legion_privilege_mode_t {
-  NO_ACCESS       = 0x00000000, // Deprecated: use the NO_ACCESS_FLAG
+  NO_ACCESS       = 0x00000000, 
   READ_ONLY       = 0x00000001,
   READ_WRITE      = 0x00000007, // All three privileges
   WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD

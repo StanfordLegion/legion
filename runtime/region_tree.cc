@@ -6574,11 +6574,11 @@ namespace LegionRuntime {
     {
       std::map<ReductionView*,FieldMask> valid_reductions;
       {
-        PhysicalState &state = 
+        PhysicalState *state = 
           node->acquire_physical_state(ctx, true/*exclusive*/);
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           FieldMask overlap = it->second & close_mask;
           if (!!overlap)
@@ -6612,11 +6612,11 @@ namespace LegionRuntime {
     {
       std::map<ReductionView*,FieldMask> valid_reductions;
       {
-        PhysicalState &state = 
+        PhysicalState *state = 
           node->acquire_physical_state(ctx, true/*exclusive*/);
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           FieldMask overlap = it->second & close_mask;
           if (!!overlap)
@@ -6706,7 +6706,7 @@ namespace LegionRuntime {
       if (!close_ops.empty())
       {
         PhysicalCloser closer(info, false/*leave open*/, closing_handle);  
-        PhysicalState &state = 
+        PhysicalState *state = 
           node->acquire_physical_state(info->ctx, true/*exclusive*/);
         // Once we decide to make a composite instance for any of them
         // then we will make a composite instance for all of them
@@ -6732,7 +6732,7 @@ namespace LegionRuntime {
               PhysicalCloser child_closer(info, true/*leave open*/, 
                                           child_node->handle);
               // Acquire the child's state
-              PhysicalState &child_state = 
+              PhysicalState *child_state = 
                 child_node->acquire_physical_state(info->ctx,true/*exclusive*/);
               // Now do the close operation
               if (!child_node->siphon_physical_children(child_closer, 
@@ -6867,12 +6867,12 @@ namespace LegionRuntime {
         }
         FieldMask next_valid;
         for (std::map<Color,FieldMask>::const_iterator it = 
-              state.children.open_children.begin(); it !=
-              state.children.open_children.end(); it++)
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
         {
           next_valid |= it->second;
         }
-        state.children.valid_fields = next_valid;
+        state->children.valid_fields = next_valid;
         // Update the node views and the dirty mask
         if (!create_composite)
           closer.update_node_views(node, state);
@@ -6881,17 +6881,17 @@ namespace LegionRuntime {
       // Flush any reduction operations
       node->flush_reductions(info->traversal_mask, 
                              info->req.redop, info);
-      PhysicalState &state = 
+      PhysicalState *state = 
         node->acquire_physical_state(info->ctx, true/*exclusive*/);
       // Update our physical state to indicate which child
       // we are opening and in which fields
       if (has_child)
       {
-        state.children.valid_fields |= info->traversal_mask;
+        state->children.valid_fields |= info->traversal_mask;
         std::map<Color,FieldMask>::iterator finder = 
-          state.children.open_children.find(next_child);
-        if (finder == state.children.open_children.end())
-          state.children.open_children[next_child] = info->traversal_mask;
+          state->children.open_children.find(next_child);
+        if (finder == state->children.open_children.end())
+          state->children.open_children[next_child] = info->traversal_mask;
         else
           finder->second |= info->traversal_mask;
       }
@@ -6908,7 +6908,7 @@ namespace LegionRuntime {
         // which memories have full instances and which ones
         // only have partial instances
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              state.valid_views.begin(); it != state.valid_views.end(); it++)
+              state->valid_views.begin(); it != state->valid_views.end(); it++)
         {
           if (it->first->is_composite_view())
             continue;
@@ -7039,13 +7039,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(has_child);
 #endif
-      PhysicalState &state = 
+      PhysicalState *state = 
         node->acquire_physical_state(info->ctx, true/*exclusive*/);
-      state.children.valid_fields |= info->traversal_mask;
+      state->children.valid_fields |= info->traversal_mask;
       std::map<Color,FieldMask>::iterator finder = 
-        state.children.open_children.find(next_child);
-      if (finder == state.children.open_children.end())
-        state.children.open_children[next_child] = info->traversal_mask;
+        state->children.open_children.find(next_child);
+      if (finder == state->children.open_children.end())
+        state->children.open_children[next_child] = info->traversal_mask;
       else
         finder->second |= info->traversal_mask;
       node->release_physical_state(state);
@@ -7121,7 +7121,7 @@ namespace LegionRuntime {
       // of valid instances with the right set of fields
       std::set<FieldID> new_fields = info->req.privilege_fields;
       {
-        PhysicalState &state = 
+        PhysicalState *state = 
           node->acquire_physical_state(info->ctx, false/*exclusive*/);
         if (!additional_fields.empty())
         {
@@ -7337,7 +7337,7 @@ namespace LegionRuntime {
 
       std::set<ReductionView*> valid_views;
       {
-        PhysicalState &state = 
+        PhysicalState *state = 
           node->acquire_physical_state(info->ctx, false/*exclusive*/);
         node->find_valid_reduction_views(state, user_mask, valid_views);
         node->release_physical_state(state);
@@ -7952,6 +7952,45 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
+    PhysicalState::PhysicalState(const PhysicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      dirty_mask = rhs.dirty_mask;
+      reduction_mask = rhs.reduction_mask;
+      children = rhs.children;
+      valid_views = rhs.valid_views;
+      reduction_views = rhs.reduction_views;
+      pending_updates = rhs.pending_updates;
+      acquired_count = rhs.acquired_count;
+      exclusive = rhs.exclusive;
+      requests = rhs.requests;
+      ctx = rhs.ctx;
+#ifdef DEBUG_HIGH_LEVEL
+      node = rhs.node;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalState& PhysicalState::operator=(const PhysicalState &rhs)
+    //--------------------------------------------------------------------------
+    {
+      dirty_mask = rhs.dirty_mask;
+      reduction_mask = rhs.reduction_mask;
+      children = rhs.children;
+      valid_views = rhs.valid_views;
+      reduction_views = rhs.reduction_views;
+      pending_updates = rhs.pending_updates;
+      acquired_count = rhs.acquired_count;
+      exclusive = rhs.exclusive;
+      requests = rhs.requests;
+      ctx = rhs.ctx;
+#ifdef DEBUG_HIGH_LEVEL
+      node = rhs.node;
+#endif
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, Color c)
     //--------------------------------------------------------------------------
     {
@@ -8262,7 +8301,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PhysicalCloser::update_node_views(RegionTreeNode *node,
-                                           PhysicalState &state)
+                                           PhysicalState *state)
     //--------------------------------------------------------------------------
     {
       node->update_valid_views(state, info->traversal_mask,
@@ -8331,7 +8370,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeCloser::update_valid_views(PhysicalState &state,
+    void CompositeCloser::update_valid_views(PhysicalState *state,
                                              CompositeNode *root,
                                              const FieldMask &closed_mask)
     //--------------------------------------------------------------------------
@@ -8833,20 +8872,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalState& RegionTreeNode::acquire_physical_state(ContextID ctx,
+    PhysicalState* RegionTreeNode::acquire_physical_state(ContextID ctx,
                                                           bool exclusive)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
-      PhysicalState &result = physical_states[ctx];
+      PhysicalState *result = &(physical_states[ctx]);
       acquire_physical_state(result, exclusive);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::acquire_physical_state(PhysicalState &state,
+    void RegionTreeNode::acquire_physical_state(PhysicalState *state,
                                                  bool exclusive)
     //--------------------------------------------------------------------------
     {
@@ -8857,18 +8896,18 @@ namespace LegionRuntime {
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(state.node == this);
+        assert(state->node == this);
 #endif
         // Check to see if it has already been acquired
-        if (state.acquired_count > 0)
+        if (state->acquired_count > 0)
         {
           // If they are both not exclusive and there
           // is nobody in the queue ahead of us, then we can share
           // otherwise we need to wait
-          if (state.requests.empty() && !exclusive && !state.exclusive)
+          if (state->requests.empty() && !exclusive && !state->exclusive)
           {
             // Update the acquisition count
-            state.acquired_count++;
+            state->acquired_count++;
           }
           else
           {
@@ -8878,7 +8917,7 @@ namespace LegionRuntime {
             // we will have already been added to the list of 
             // acquistions by the thread who woke us up.
             UserEvent ready_event = UserEvent::create_user_event();
-            state.requests.push_back(
+            state->requests.push_back(
                 std::pair<UserEvent,bool>(ready_event, exclusive));
             // Can't go to sleep holding the lock so
             // set the wait_event then release the lock
@@ -8888,8 +8927,8 @@ namespace LegionRuntime {
         else
         {
           // Mark that we've acquired it in our mode
-          state.acquired_count++;
-          state.exclusive = exclusive;
+          state->acquired_count++;
+          state->exclusive = exclusive;
         }
       }
       // See if we need to wait
@@ -8898,41 +8937,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeNode::release_physical_state(PhysicalState &state)
+    bool RegionTreeNode::release_physical_state(PhysicalState *state)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, RELEASE_PHYSICAL_STATE_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.acquired_count > 0);
+      assert(state->acquired_count > 0);
 #endif
-      state.acquired_count--;
+      state->acquired_count--;
       // Get the old exlusivity state
-      bool result = state.exclusive;
+      bool result = state->exclusive;
       // Now see if we can wake any body up
-      if ((state.acquired_count == 0) && !state.requests.empty())
+      if ((state->acquired_count == 0) && !state->requests.empty())
       {
         // Set the new state, update the acquisition
         // count and then trigger the event
-        state.exclusive = state.requests.front().second;
-        state.acquired_count = 1;
-        state.requests.front().first.trigger();
-        state.requests.pop_front();
+        state->exclusive = state->requests.front().second;
+        state->acquired_count = 1;
+        state->requests.front().first.trigger();
+        state->requests.pop_front();
         // If it is not exclusive see how many other people
         // we can wake up
-        if (!state.exclusive)
+        if (!state->exclusive)
         {
-          while (!state.requests.empty() &&
-                 !state.requests.front().second)
+          while (!state->requests.empty() &&
+                 !state->requests.front().second)
           {
-            state.acquired_count++;
-            state.requests.front().first.trigger();
-            state.requests.pop_front();
+            state->acquired_count++;
+            state->requests.front().first.trigger();
+            state->requests.pop_front();
           }
         }
       }
@@ -10201,9 +10240,9 @@ namespace LegionRuntime {
       std::map<InstanceView*,FieldMask> valid_instances;
       std::map<ReductionView*,FieldMask> valid_reductions;
       {
-        PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
-        dirty_fields = state.dirty_mask & closing_mask;
-        reduc_fields = state.reduction_mask & closing_mask;
+        PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+        dirty_fields = state->dirty_mask & closing_mask;
+        reduc_fields = state->reduction_mask & closing_mask;
         if (is_region())
         {
           if (!!dirty_fields)
@@ -10211,7 +10250,7 @@ namespace LegionRuntime {
             // Pull down instance views so we don't issue unnecessary copies
             pull_valid_instance_views(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!state.valid_views.empty());
+            assert(!state->valid_views.empty());
 #endif
             find_valid_instance_views(state, closing_mask, closing_mask, 
                                       false/*needs space*/, valid_instances);
@@ -10219,8 +10258,8 @@ namespace LegionRuntime {
           if (!!reduc_fields)
           {
             for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-                  state.reduction_views.begin(); it != 
-                  state.reduction_views.end(); it++)
+                  state->reduction_views.begin(); it != 
+                  state->reduction_views.end(); it++)
             {
               FieldMask overlap = it->second & closing_mask;
               if (!!overlap)
@@ -10268,7 +10307,7 @@ namespace LegionRuntime {
 #endif
       {
         PhysicalCloser next_closer(closer);
-        PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+        PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
         bool create_composite = false;
 #ifdef DEBUG_HIGH_LEVEL
         bool result = 
@@ -10294,7 +10333,7 @@ namespace LegionRuntime {
           if (!!dirty_below)
             invalidate_instance_views(state, dirty_below,
                                       true/*clean*/, false/*force*/);
-          state.dirty_mask -= closing_mask;
+          state->dirty_mask -= closing_mask;
         }
         // Finally release our hold on the state
         release_physical_state(state);
@@ -10488,7 +10527,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     bool RegionTreeNode::siphon_physical_children(PhysicalCloser &closer,
-                                              PhysicalState &state,
+                                              PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               int next_child,
                                               bool &create_composite)
@@ -10498,15 +10537,15 @@ namespace LegionRuntime {
       PerfTracer tracer(context, SIPHON_PHYSICAL_CHILDREN_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       // First check, if all the fields are disjoint, then we're done
-      if (state.children.valid_fields * closing_mask)
+      if (state->children.valid_fields * closing_mask)
         return true;
       // Make a copy of the open children map since close_physical_child
       // will release our hold on the lock which may lead to someone
       // else invalidating our iterator.
-      std::map<Color,FieldMask> open_copy = state.children.open_children;
+      std::map<Color,FieldMask> open_copy = state->children.open_children;
       // Otherwise go through all of the children and 
       // see which ones we need to clean up
       for (std::map<Color,FieldMask>::iterator it = open_copy.begin();
@@ -10519,18 +10558,18 @@ namespace LegionRuntime {
       // Rebuild the valid mask
       FieldMask next_valid;
       for (std::map<Color,FieldMask>::const_iterator it = 
-            state.children.open_children.begin(); it !=
-            state.children.open_children.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         next_valid |= it->second;
       }
-      state.children.valid_fields = next_valid;
+      state->children.valid_fields = next_valid;
       return true;
     }
 
     //--------------------------------------------------------------------------
     bool RegionTreeNode::close_physical_child(PhysicalCloser &closer,
-                                              PhysicalState &state,
+                                              PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               Color target_child,
                                               int next_child,
@@ -10541,12 +10580,12 @@ namespace LegionRuntime {
       PerfTracer tracer(context, CLOSE_PHYSICAL_CHILD_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       // See if we can find the child
       std::map<Color,FieldMask>::iterator finder = 
-        state.children.open_children.find(target_child);
-      if (finder == state.children.open_children.end())
+        state->children.open_children.find(target_child);
+      if (finder == state->children.open_children.end())
         return true;
       // Check field disjointness
       if (finder->second * closing_mask)
@@ -10598,7 +10637,7 @@ namespace LegionRuntime {
       {
         finder->second -= close_mask;
         if (!finder->second)
-          state.children.open_children.erase(finder);
+          state->children.open_children.erase(finder);
       }
       // Release our lock on the current state before going down
       bool was_exclusive = release_physical_state(state);
@@ -10641,7 +10680,7 @@ namespace LegionRuntime {
       // Tell the node to update its parent
       node->update_parent_info(closing_mask);
       // Acquire the state and save any pertinent information in the node
-      PhysicalState &state = 
+      PhysicalState *state = 
                 acquire_physical_state(closer.ctx, true/*exlusive*/);
       // First close up any children below and see if we are flushing
       // back any dirty data which is complete
@@ -10667,7 +10706,7 @@ namespace LegionRuntime {
         if (!!dirty_below)
           invalidate_instance_views(state, dirty_below,
                                     true/*clean*/, false/*force*/);
-        state.dirty_mask -= closing_mask;
+        state->dirty_mask -= closing_mask;
       }
       // No matter what invalidate the reduction views
       invalidate_reduction_views(state, closing_mask);
@@ -10677,7 +10716,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_physical_children(CompositeCloser &closer,
                                                   CompositeNode *node,
-                                                  PhysicalState &state,
+                                                  PhysicalState *state,
                                                   const FieldMask &closing_mask,
                                                   FieldMask &dirty_mask,
                                                   FieldMask &complete_mask)
@@ -10687,16 +10726,16 @@ namespace LegionRuntime {
       PerfTracer tracer(context, SIPHON_PHYSICAL_CHILDREN_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
       assert(node->logical_node == this);
 #endif
       // First check, if all the fields are disjoint, then we're done
-      if (state.children.valid_fields * closing_mask)
+      if (state->children.valid_fields * closing_mask)
         return;
       // Make a copy of the open children map since close_physical_child
       // will release our hold on the lock which may lead to someone
       // else invalidating our iterator.
-      std::map<Color,FieldMask> open_copy = state.children.open_children;
+      std::map<Color,FieldMask> open_copy = state->children.open_children;
       // Keep track of two sets of fields
       // 1. The set of fields for which all children are complete
       // 2. The set of fields for which any children are complete
@@ -10734,18 +10773,18 @@ namespace LegionRuntime {
       // Rebuild the valid mask
       FieldMask next_valid;
       for (std::map<Color,FieldMask>::const_iterator it = 
-            state.children.open_children.begin(); it !=
-            state.children.open_children.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         next_valid |= it->second;
       }
-      state.children.valid_fields = next_valid;
+      state->children.valid_fields = next_valid;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_physical_child(CompositeCloser &closer,
                                               CompositeNode *node,
-                                              PhysicalState &state,
+                                              PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               Color target_child,
                                               int next_child,
@@ -10757,13 +10796,13 @@ namespace LegionRuntime {
       PerfTracer tracer(context, CLOSE_PHYSICAL_CHILD_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
       assert(node->logical_node == this);
 #endif
       // See if we can find the child
       std::map<Color,FieldMask>::iterator finder = 
-        state.children.open_children.find(target_child);
-      if (finder == state.children.open_children.end())
+        state->children.open_children.find(target_child);
+      if (finder == state->children.open_children.end())
         return;
       // Check field disjointness
       if (finder->second * closing_mask)
@@ -10779,7 +10818,7 @@ namespace LegionRuntime {
       {
         finder->second -= close_mask;
         if (!finder->second)
-          state.children.open_children.erase(finder);
+          state->children.open_children.erase(finder);
       }
       // Release our lock on the current state before going down
       bool was_exclusive = release_physical_state(state);
@@ -10792,7 +10831,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_valid_instance_views(PhysicalState &state,
+    void RegionTreeNode::find_valid_instance_views(PhysicalState *state,
                                                    const FieldMask &valid_mask,
                                                    const FieldMask &space_mask,
                                                    bool needs_space,
@@ -10803,15 +10842,15 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_VALID_INSTANCE_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
-      FieldMask up_mask = valid_mask - state.dirty_mask;
+      FieldMask up_mask = valid_mask - state->dirty_mask;
       RegionTreeNode *parent = get_parent();
       if ((!!up_mask || needs_space) && (parent != NULL))
       {
         // Acquire the parent nodes physical state in read-only mode
-        PhysicalState &parent_state = 
-          parent->acquire_physical_state(state.ctx, false/*exclusive*/);
+        PhysicalState *parent_state = 
+          parent->acquire_physical_state(state->ctx, false/*exclusive*/);
         std::map<InstanceView*,FieldMask> local_valid;
         parent->find_valid_instance_views(parent_state, up_mask, space_mask, 
                                           needs_space, local_valid);
@@ -10837,7 +10876,7 @@ namespace LegionRuntime {
       }
       // Now figure out which of our valid views we can add
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-            state.valid_views.begin(); it != state.valid_views.end(); it++)
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
       {
         // If we need the physical instances to be at least as big as the
         // needed fields, check that first
@@ -10888,7 +10927,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_valid_reduction_views(PhysicalState &state,
+    void RegionTreeNode::find_valid_reduction_views(PhysicalState *state,
                                                     const FieldMask &valid_mask,
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
@@ -10897,17 +10936,17 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_VALID_REDUCTION_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       // See if we can continue going up the tree
-      if (state.dirty_mask * valid_mask)
+      if (state->dirty_mask * valid_mask)
       {
         RegionTreeNode *parent = get_parent();
         if (parent != NULL)
         {
           // Acquire the parent state in non-exclusive mode
-          PhysicalState &parent_state = 
-            parent->acquire_physical_state(state.ctx, false/*exclusive*/);
+          PhysicalState *parent_state = 
+            parent->acquire_physical_state(state->ctx, false/*exclusive*/);
           parent->find_valid_reduction_views(parent_state, 
                                              valid_mask, valid_views);
           // Release the parent state
@@ -10915,8 +10954,8 @@ namespace LegionRuntime {
         }
       }
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         FieldMask uncovered = valid_mask - it->second;
         if (!uncovered && (valid_views.find(it->first) == valid_views.end()))
@@ -10941,7 +10980,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::pull_valid_instance_views(PhysicalState &state,
+    void RegionTreeNode::pull_valid_instance_views(PhysicalState *state,
                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -10949,7 +10988,7 @@ namespace LegionRuntime {
       PerfTracer tracer(context, PULL_VALID_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       std::map<InstanceView*,FieldMask> new_valid_views;
       find_valid_instance_views(state, mask, mask, 
@@ -10964,7 +11003,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_pending_updates(PhysicalState &state,
+    void RegionTreeNode::find_pending_updates(PhysicalState *state,
                                               MaterializedView *target,
                                               FieldMask &needed_fields,
                                               std::set<Event> &pending_events) 
@@ -10973,16 +11012,16 @@ namespace LegionRuntime {
       // Check out our fields first
       {
         std::map<InstanceView*,FieldMask>::const_iterator finder = 
-          state.valid_views.find(target);
-        if (finder != state.valid_views.end())
+          state->valid_views.find(target);
+        if (finder != state->valid_views.end())
           needed_fields -= finder->second;
       }
       if (!!needed_fields)
       {
         // Go through and see if we have any pending updates at this level
         std::map<MaterializedView*,std::map<Event,FieldMask> >::iterator
-          finder = state.pending_updates.find(target);
-        if (finder != state.pending_updates.end())
+          finder = state->pending_updates.find(target);
+        if (finder != state->pending_updates.end())
         {
           std::map<Event,FieldMask> &pending = finder->second;
           if (!pending.empty())
@@ -11004,14 +11043,14 @@ namespace LegionRuntime {
         RegionTreeNode *parent = get_parent();
         if (!!needed_fields && (parent != NULL) && target->has_parent_view())
         {
-          FieldMask up_mask = needed_fields - state.dirty_mask;
+          FieldMask up_mask = needed_fields - state->dirty_mask;
           if (!!up_mask)
           {
             MaterializedView *parent_view = 
                                      target->get_materialized_parent_view();
             FieldMask copy_up = up_mask;
-            PhysicalState &parent_state = 
-              parent->acquire_physical_state(state.ctx, false/*exclusive*/);
+            PhysicalState *parent_state = 
+              parent->acquire_physical_state(state->ctx, false/*exclusive*/);
             parent->find_pending_updates(parent_state, parent_view,
                                          copy_up, pending_events);
             parent->release_physical_state(parent_state);
@@ -11034,7 +11073,7 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_COPY_ACROSS_INSTANCES_CALL);
 #endif
       std::map<InstanceView*,FieldMask> valid_views;
-      PhysicalState &state = 
+      PhysicalState *state = 
         acquire_physical_state(info->ctx, false/*exclusive*/);
       find_valid_instance_views(state, info->traversal_mask,
                                 info->traversal_mask, false/*needs space*/,
@@ -11606,7 +11645,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_instance_views(PhysicalState &state,
+    void RegionTreeNode::invalidate_instance_views(PhysicalState *state,
                                                  const FieldMask &invalid_mask,
                                                  bool clean, bool force)
     //--------------------------------------------------------------------------
@@ -11615,11 +11654,11 @@ namespace LegionRuntime {
       PerfTracer tracer(context, INVALIDATE_INSTANCE_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       std::vector<InstanceView*> to_delete;
       for (std::map<InstanceView*,FieldMask>::iterator it = 
-            state.valid_views.begin(); it != state.valid_views.end(); it++)
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
       {
         it->second -= invalid_mask;
         if (!it->second && (force || !it->first->is_persistent()))
@@ -11635,14 +11674,14 @@ namespace LegionRuntime {
           else
             legion_delete((*it)->as_materialized_view());
         }
-        state.valid_views.erase(*it);
+        state->valid_views.erase(*it);
       }
       if (clean)
-        state.dirty_mask -= invalid_mask;
+        state->dirty_mask -= invalid_mask;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_reduction_views(PhysicalState &state,
+    void RegionTreeNode::invalidate_reduction_views(PhysicalState *state,
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
@@ -11650,12 +11689,12 @@ namespace LegionRuntime {
       PerfTracer tracer(context, INVALIDATE_REDUCTION_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       std::vector<ReductionView*> to_delete;
       for (std::map<ReductionView*,FieldMask>::iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         it->second -= invalid_mask;
         if (!it->second)
@@ -11666,13 +11705,13 @@ namespace LegionRuntime {
       {
         if ((*it)->remove_valid_reference())
           legion_delete(*it);
-        state.reduction_views.erase(*it);
+        state->reduction_views.erase(*it);
       }
-      state.reduction_mask -= invalid_mask;
+      state->reduction_mask -= invalid_mask;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_valid_views(PhysicalState &state, 
+    void RegionTreeNode::update_valid_views(PhysicalState *state, 
                                             const FieldMask &valid_mask,
                                             bool dirty, InstanceView *new_view)
     //--------------------------------------------------------------------------
@@ -11681,7 +11720,7 @@ namespace LegionRuntime {
       PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
       if (!new_view->is_composite_view())
         assert(!(valid_mask - 
           new_view->as_materialized_view()->manager->layout->allocated_fields));
@@ -11694,14 +11733,14 @@ namespace LegionRuntime {
       {
         invalidate_instance_views(state, valid_mask, 
                                   false/*clean*/, false/*force*/);
-        state.dirty_mask |= valid_mask;
+        state->dirty_mask |= valid_mask;
       }
       std::map<InstanceView*,FieldMask>::iterator finder = 
-        state.valid_views.find(new_view);
-      if (finder == state.valid_views.end())
+        state->valid_views.find(new_view);
+      if (finder == state->valid_views.end())
       {
         // New valid view, update everything accordingly
-        state.valid_views[new_view] = valid_mask;
+        state->valid_views[new_view] = valid_mask;
       }
       else
       {
@@ -11715,7 +11754,7 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_valid_views(PhysicalState &state,
+    void RegionTreeNode::update_valid_views(PhysicalState *state,
                                             const FieldMask &valid_mask,
                                             const FieldMask &dirty_mask,
                                     const std::vector<InstanceView*> &new_views)
@@ -11725,7 +11764,7 @@ namespace LegionRuntime {
       PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       // Add our references first to avoid any premature free operations
       for (std::vector<InstanceView*>::const_iterator it = new_views.begin();
@@ -11740,17 +11779,17 @@ namespace LegionRuntime {
       {
         invalidate_instance_views(state, dirty_mask, 
                                   false/*clean*/, false/*force*/);
-        state.dirty_mask |= dirty_mask;
+        state->dirty_mask |= dirty_mask;
       }
       for (std::vector<InstanceView*>::const_iterator it = new_views.begin();
             it != new_views.end(); it++)
       {
         std::map<InstanceView*,FieldMask>::iterator finder = 
-          state.valid_views.find(*it);
-        if (finder == state.valid_views.end())
+          state->valid_views.find(*it);
+        if (finder == state->valid_views.end())
         {
           // New valid view, update everything accordingly
-          state.valid_views[*it] = valid_mask;
+          state->valid_views[*it] = valid_mask;
         }
         else
         {
@@ -11762,7 +11801,7 @@ namespace LegionRuntime {
           (*it)->remove_valid_reference();
         }
 #ifdef DEBUG_HIGH_LEVEL
-        finder = state.valid_views.find(*it);
+        finder = state->valid_views.find(*it);
         if (!(*it)->is_composite_view())
         assert(!(finder->second - 
             (*it)->as_materialized_view()->manager->layout->allocated_fields));
@@ -11771,7 +11810,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_valid_views(PhysicalState &state,
+    void RegionTreeNode::update_valid_views(PhysicalState *state,
                                             const FieldMask &valid_mask,
                                             const FieldMask &dirty_mask,
                                 const std::vector<MaterializedView*> &new_views)
@@ -11781,7 +11820,7 @@ namespace LegionRuntime {
       PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       // Add our references first to avoid any premature free operations
       for (std::vector<MaterializedView*>::const_iterator it = 
@@ -11796,17 +11835,17 @@ namespace LegionRuntime {
       {
         invalidate_instance_views(state, dirty_mask, 
                                   false/*clean*/, false/*force*/);
-        state.dirty_mask |= dirty_mask;
+        state->dirty_mask |= dirty_mask;
       }
       for (std::vector<MaterializedView*>::const_iterator it = 
             new_views.begin(); it != new_views.end(); it++)
       {
         std::map<InstanceView*,FieldMask>::iterator finder = 
-          state.valid_views.find(*it);
-        if (finder == state.valid_views.end())
+          state->valid_views.find(*it);
+        if (finder == state->valid_views.end())
         {
           // New valid view, update everything accordingly
-          state.valid_views[*it] = valid_mask;
+          state->valid_views[*it] = valid_mask;
         }
         else
         {
@@ -11818,14 +11857,14 @@ namespace LegionRuntime {
           (*it)->remove_valid_reference();
         }
 #ifdef DEBUG_HIGH_LEVEL
-        finder = state.valid_views.find(*it);
+        finder = state->valid_views.find(*it);
         assert(!(finder->second - (*it)->manager->layout->allocated_fields));
 #endif
       }
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_reduction_views(PhysicalState &state,
+    void RegionTreeNode::update_reduction_views(PhysicalState *state,
                                                 const FieldMask &valid_mask,
                                                 ReductionView *new_view) 
     //--------------------------------------------------------------------------
@@ -11834,20 +11873,20 @@ namespace LegionRuntime {
       PerfTracer tracer(context, UPDATE_REDUCTION_VIEWS_CALL);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
-      assert(state.node == this);
+      assert(state->node == this);
 #endif
       std::map<ReductionView*,FieldMask>::iterator finder = 
-        state.reduction_views.find(new_view);
-      if (finder == state.reduction_views.end())
+        state->reduction_views.find(new_view);
+      if (finder == state->reduction_views.end())
       {
         new_view->add_valid_reference();
-        state.reduction_views[new_view] = valid_mask;
+        state->reduction_views[new_view] = valid_mask;
       }
       else
       {
         finder->second |= valid_mask;
       }
-      state.reduction_mask |= valid_mask;
+      state->reduction_mask |= valid_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -11866,11 +11905,11 @@ namespace LegionRuntime {
       std::map<InstanceView*,FieldMask> valid_views;
       std::map<ReductionView*,FieldMask> reduction_views;
       {
-        PhysicalState &state = 
+        PhysicalState *state = 
           acquire_physical_state(info->ctx, false/*exclusive*/);
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           // Skip reductions that have the same reduction op ID
           if (it->first->get_redop() == redop)
@@ -11914,7 +11953,7 @@ namespace LegionRuntime {
         assert(update_mask == flush_mask);
 #endif
         // Now update our physical state
-        PhysicalState &state = 
+        PhysicalState *state = 
           acquire_physical_state(info->ctx, true/*exclusive*/);
         // Update the valid views.  Don't mark them dirty since we
         // don't want to accidentally invalidate some of our other
@@ -11928,7 +11967,7 @@ namespace LegionRuntime {
         }
         // Update the dirty mask since we didn't do it when updating
         // the valid instance views do it now
-        state.dirty_mask |= flush_mask;
+        state->dirty_mask |= flush_mask;
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
         release_physical_state(state);
@@ -11947,22 +11986,22 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!state.dirty_mask);
-      assert(!state.reduction_mask);
-      assert(!state.children.valid_fields);
-      assert(state.children.open_children.empty());
-      assert(state.valid_views.empty());
-      assert(state.reduction_views.empty());
+      assert(!state->dirty_mask);
+      assert(!state->reduction_mask);
+      assert(!state->children.valid_fields);
+      assert(state->children.open_children.empty());
+      assert(state->valid_views.empty());
+      assert(state->reduction_views.empty());
       // Should be one since we're using it
-      assert(state.acquired_count == 1);
+      assert(state->acquired_count == 1);
 #endif
-      state.dirty_mask = FieldMask();
-      state.reduction_mask = FieldMask();
-      state.children = ChildState();
-      state.valid_views.clear();
-      state.reduction_views.clear();
+      state->dirty_mask = FieldMask();
+      state->reduction_mask = FieldMask();
+      state->children = ChildState();
+      state->valid_views.clear();
+      state->reduction_views.clear();
       release_physical_state(state);
     }
 
@@ -11976,15 +12015,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 
-      state.dirty_mask = FieldMask();
-      state.reduction_mask = FieldMask();
-      state.children = ChildState();
-      state.pending_updates.clear();
+      state->dirty_mask = FieldMask();
+      state->reduction_mask = FieldMask();
+      state->children = ChildState();
+      state->pending_updates.clear();
 
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-            state.valid_views.begin(); it != state.valid_views.end(); it++)
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
       {
         if (it->first->remove_valid_reference())
         {
@@ -11994,15 +12033,15 @@ namespace LegionRuntime {
             legion_delete(it->first->as_materialized_view());
         }
       }
-      state.valid_views.clear();
+      state->valid_views.clear();
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         if (it->first->remove_valid_reference())
           legion_delete(it->first);
       }
-      state.reduction_views.clear();
+      state->reduction_views.clear();
       release_physical_state(state);
     }
 
@@ -12018,22 +12057,22 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx < physical_state_size);
 #endif
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 
       invalidate_instance_views(state, invalid_mask, true/*clean*/, force);
       invalidate_reduction_views(state, invalid_mask);
-      state.children.valid_fields -= invalid_mask;
+      state->children.valid_fields -= invalid_mask;
       std::vector<Color> to_delete;
       for (std::map<Color,FieldMask>::iterator it = 
-            state.children.open_children.begin(); it !=
-            state.children.open_children.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         it->second -= invalid_mask;
         if (!it->second)
           to_delete.push_back(it->first);
       }
       for (unsigned idx = 0; idx < to_delete.size(); idx++)
-        state.children.open_children.erase(to_delete[idx]);
+        state->children.open_children.erase(to_delete[idx]);
       release_physical_state(state);
     }
 
@@ -12045,22 +12084,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Acquire our state in read only mode
-      PhysicalState &state = acquire_physical_state(ctx, false/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
       RezCheck z(rez);
-      rez.serialize(state.dirty_mask & send_mask);
-      rez.serialize(state.reduction_mask & send_mask);
-      rez.serialize(state.children.open_children.size());
+      rez.serialize(state->dirty_mask & send_mask);
+      rez.serialize(state->reduction_mask & send_mask);
+      rez.serialize(state->children.open_children.size());
       for (std::map<Color,FieldMask>::const_iterator it = 
-            state.children.open_children.begin(); it !=
-            state.children.open_children.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(it->first);
         rez.serialize(overlap);
       }
-      rez.serialize(state.valid_views.size());
+      rez.serialize(state->valid_views.size());
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-            state.valid_views.begin(); it != state.valid_views.end(); it++)
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(overlap);
@@ -12076,10 +12115,10 @@ namespace LegionRuntime {
           rez.serialize(did); // empty did
         }
       }
-      rez.serialize(state.reduction_views.size());
+      rez.serialize(state->reduction_views.size());
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(overlap);
@@ -12095,7 +12134,7 @@ namespace LegionRuntime {
           rez.serialize(did); // empty did
         }
       }
-      bool result = !(send_mask * state.children.valid_fields);
+      bool result = !(send_mask * state->children.valid_fields);
       // Release our hold on this node
       release_physical_state(state);
       return result;
@@ -12111,22 +12150,22 @@ namespace LegionRuntime {
       // send_back_state on instance and reduction views.  Since what is
       // sent is the same, we can use the same unpack_send_state method
       // when unpacking on the destination node.
-      PhysicalState &state = acquire_physical_state(ctx, false/*exclusive*/); 
+      PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/); 
       RezCheck z(rez);
-      rez.serialize(state.dirty_mask);
-      rez.serialize(state.reduction_mask);
-      rez.serialize(state.children.open_children.size());
+      rez.serialize(state->dirty_mask);
+      rez.serialize(state->reduction_mask);
+      rez.serialize(state->children.open_children.size());
       for (std::map<Color,FieldMask>::const_iterator it = 
-            state.children.open_children.begin(); it !=
-            state.children.open_children.end(); it++)
+            state->children.open_children.begin(); it !=
+            state->children.open_children.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(it->first);
         rez.serialize(overlap);
       }
-      rez.serialize(state.valid_views.size());
+      rez.serialize(state->valid_views.size());
       for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-            state.valid_views.begin(); it != state.valid_views.end(); it++)
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(overlap);
@@ -12142,10 +12181,10 @@ namespace LegionRuntime {
           rez.serialize(did); // empty did
         }
       }
-      rez.serialize(state.reduction_views.size());
+      rez.serialize(state->reduction_views.size());
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         FieldMask overlap = it->second & send_mask;
         rez.serialize(overlap);
@@ -12161,7 +12200,7 @@ namespace LegionRuntime {
           rez.serialize(did); // empty did
         }
       }
-      bool result = !(send_mask * state.children.valid_fields);
+      bool result = !(send_mask * state->children.valid_fields);
       // Release our hold on the state
       release_physical_state(state);
       return result;
@@ -12172,18 +12211,18 @@ namespace LegionRuntime {
                                   FieldSpaceNode *column, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       DerezCheck z(derez);
       // Dirty mask
       FieldMask dirty_mask;
       derez.deserialize(dirty_mask);
       column->transform_field_mask(dirty_mask, source);
-      state.dirty_mask |= dirty_mask;
+      state->dirty_mask |= dirty_mask;
       // Reduction mask
       FieldMask reduction_mask;
       derez.deserialize(reduction_mask);
       column->transform_field_mask(reduction_mask, source);
-      state.reduction_mask |= reduction_mask;
+      state->reduction_mask |= reduction_mask;
       size_t num_open_children;
       derez.deserialize(num_open_children);
       for (unsigned idx = 0; idx < num_open_children; idx++)
@@ -12196,12 +12235,12 @@ namespace LegionRuntime {
         {
           column->transform_field_mask(child_mask, source);
           std::map<Color,FieldMask>::iterator finder = 
-            state.children.open_children.find(child_color);
-          if (finder == state.children.open_children.end())
-            state.children.open_children[child_color] = child_mask;
+            state->children.open_children.find(child_color);
+          if (finder == state->children.open_children.end())
+            state->children.open_children[child_color] = child_mask;
           else
             finder->second |= child_mask;
-          state.children.valid_fields |= child_mask;
+          state->children.valid_fields |= child_mask;
         }
       }
       size_t num_valid_views;
@@ -12953,14 +12992,14 @@ namespace LegionRuntime {
       assert(view != NULL);
       assert(ctx < physical_state_size);
 #endif
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       // We've already pre-mapped so we've pulled down
       // all the valid instance views.  Check to see if we
       // the target views is already there with the right
       // set of valid fields.
       std::map<InstanceView*,FieldMask>::const_iterator finder = 
-        state.valid_views.find(view);
-      if (finder == state.valid_views.end())
+        state->valid_views.find(view);
+      if (finder == state->valid_views.end())
         needed_mask = user_mask;
       else
         needed_mask = user_mask - finder->second;
@@ -13008,7 +13047,7 @@ namespace LegionRuntime {
             // reduced and only issue copies for the difference.
             std::set<Event> pending_events;
             FieldMask actually_needed = needed_fields;
-            PhysicalState &state = 
+            PhysicalState *state = 
               acquire_physical_state(info->ctx, true/*exclusive*/);
             // Find any pending updates to this instance view
             find_pending_updates(state, new_view, 
@@ -13019,7 +13058,7 @@ namespace LegionRuntime {
             if (!!actually_needed)
             {
               UserEvent our_pending_event = UserEvent::create_user_event();
-              state.pending_updates[new_view][our_pending_event] = 
+              state->pending_updates[new_view][our_pending_event] = 
                                                           actually_needed;
               std::map<InstanceView*,FieldMask> valid_views;
               find_valid_instance_views(state, actually_needed, 
@@ -13037,10 +13076,10 @@ namespace LegionRuntime {
               // Then trigger our pending event and remove it 
               our_pending_event.trigger();
               std::map<Event,FieldMask> &pending = 
-                                            state.pending_updates[new_view];
+                                            state->pending_updates[new_view];
               pending.erase(our_pending_event);
               if (pending.empty())
-                state.pending_updates.erase(new_view);
+                state->pending_updates.erase(new_view);
             }
             // Now we're done so we can release the state
             release_physical_state(state);
@@ -13058,7 +13097,7 @@ namespace LegionRuntime {
           else
           {
             // This is the normal non-read-only case
-            PhysicalState &state = 
+            PhysicalState *state = 
               acquire_physical_state(info->ctx, false/*exclusive*/);
             std::map<InstanceView*,FieldMask> valid_views;
             find_valid_instance_views(state, needed_fields, needed_fields, 
@@ -13074,7 +13113,7 @@ namespace LegionRuntime {
         // this instance.  We only need to do this for 
         // non-read-only tasks, since the read-only close
         // operations happened during the pre-mapping step.
-        PhysicalState &state = 
+        PhysicalState *state = 
           acquire_physical_state(info->ctx, true/*exclusive*/);
         if (!IS_READ_ONLY(info->req))
         {
@@ -13140,7 +13179,7 @@ namespace LegionRuntime {
         // Flush any reductions that need to be flushed
         flush_reductions(user.field_mask,
                          info->req.redop, info);
-        PhysicalState &state = 
+        PhysicalState *state = 
           acquire_physical_state(info->ctx, true/*exclusive*/);
         // If there was a needed close for this reduction then
         // it was performed as part of the premapping operation
@@ -13158,7 +13197,7 @@ namespace LegionRuntime {
                                        Processor local_proc)
     //--------------------------------------------------------------------------
     {
-      PhysicalState &state = acquire_physical_state(ctx, true/*exclusive*/);
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       if (new_view->is_reduction_view())
       {
         ReductionView *view = new_view->as_reduction_view();
@@ -13205,17 +13244,17 @@ namespace LegionRuntime {
 #endif
         MaterializedView *target_view = 
                           view->as_instance_view()->as_materialized_view();
-        PhysicalState &state = 
+        PhysicalState *state = 
           acquire_physical_state(info->ctx, true/*exclusive*/);
         // First check to see if we are in the set of valid views, if
         // not then we need to issue updates for all of our fields
         std::map<InstanceView*,FieldMask>::const_iterator finder = 
-          state.valid_views.find(target_view);
-        if ((finder == state.valid_views.end()) || 
+          state->valid_views.find(target_view);
+        if ((finder == state->valid_views.end()) || 
             !!(user.field_mask - finder->second))
         {
           FieldMask update_mask = user.field_mask;
-          if (finder != state.valid_views.end())
+          if (finder != state->valid_views.end())
             update_mask -= finder->second;
           std::map<InstanceView*,FieldMask> valid_views;
           find_valid_instance_views(state, update_mask, update_mask,
@@ -13405,7 +13444,7 @@ namespace LegionRuntime {
       if (ctx < physical_states.size())
 #endif
       {
-        PhysicalState &state = acquire_physical_state(ctx, false/*exclusive*/);
+        PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
         print_physical_state(state, capture_mask, to_traverse, logger);
         release_physical_state(state);
       }
@@ -13464,7 +13503,7 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void RegionNode::print_physical_state(PhysicalState &state,
+    void RegionNode::print_physical_state(PhysicalState *state,
                                          const FieldMask &capture_mask,
                                          std::map<Color,FieldMask> &to_traverse,
                                          TreeStateLogger *logger)
@@ -13472,7 +13511,7 @@ namespace LegionRuntime {
     {
       // Dirty Mask
       {
-        FieldMask overlap = state.dirty_mask & capture_mask;
+        FieldMask overlap = state->dirty_mask & capture_mask;
         char *dirty_buffer = overlap.to_string();
         logger->log("Dirty Mask: %s",dirty_buffer);
         free(dirty_buffer);
@@ -13481,7 +13520,7 @@ namespace LegionRuntime {
       {
         unsigned num_valid = 0;
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              state.valid_views.begin(); it != state.valid_views.end(); it++)
+              state->valid_views.begin(); it != state->valid_views.end(); it++)
         {
           if (it->second * capture_mask)
             continue;
@@ -13490,7 +13529,7 @@ namespace LegionRuntime {
         logger->log("Valid Instances (%d)", num_valid);
         logger->down();
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              state.valid_views.begin(); it != state.valid_views.end(); it++)
+              state->valid_views.begin(); it != state->valid_views.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -13510,8 +13549,8 @@ namespace LegionRuntime {
       {
         unsigned num_valid = 0;
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           if (it->second * capture_mask)
             continue;
@@ -13520,8 +13559,8 @@ namespace LegionRuntime {
         logger->log("Valid Reduction Instances (%d)", num_valid);
         logger->down();
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -13538,11 +13577,11 @@ namespace LegionRuntime {
       // Open Children
       {
         logger->log("Open Children (%ld)", 
-            state.children.open_children.size());
+            state->children.open_children.size());
         logger->down();
         for (std::map<Color,FieldMask>::const_iterator it = 
-              state.children.open_children.begin(); it !=
-              state.children.open_children.end(); it++)
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -13601,7 +13640,7 @@ namespace LegionRuntime {
       logger->down();
       std::map<Color,FieldMask> to_traverse;
       if (ctx < physical_state_size)
-        print_physical_state(physical_states[ctx], capture_mask,
+        print_physical_state(&(physical_states[ctx]), capture_mask,
                              to_traverse, logger);
       else
         logger->log("No state");
@@ -14130,7 +14169,7 @@ namespace LegionRuntime {
       if (ctx < physical_states.size())
 #endif
       {
-        PhysicalState &state = acquire_physical_state(ctx, false/*exclusive*/);
+        PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
         print_physical_state(state, capture_mask, to_traverse, logger);
         release_physical_state(state);    
       }
@@ -14189,7 +14228,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::print_physical_state(PhysicalState &state,
+    void PartitionNode::print_physical_state(PhysicalState *state,
                                          const FieldMask &capture_mask,
                                          std::map<Color,FieldMask> &to_traverse,
                                          TreeStateLogger *logger)
@@ -14197,7 +14236,7 @@ namespace LegionRuntime {
     {
       // Dirty Mask
       {
-        FieldMask overlap = state.dirty_mask & capture_mask;
+        FieldMask overlap = state->dirty_mask & capture_mask;
         char *dirty_buffer = overlap.to_string();
         logger->log("Dirty Mask: %s",dirty_buffer);
         free(dirty_buffer);
@@ -14206,7 +14245,7 @@ namespace LegionRuntime {
       {
         unsigned num_valid = 0;
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              state.valid_views.begin(); it != state.valid_views.end(); it++)
+              state->valid_views.begin(); it != state->valid_views.end(); it++)
         {
           if (it->second * capture_mask)
             continue;
@@ -14215,7 +14254,7 @@ namespace LegionRuntime {
         logger->log("Valid Instances (%d)", num_valid);
         logger->down();
         for (std::map<InstanceView*,FieldMask>::const_iterator it = 
-              state.valid_views.begin(); it != state.valid_views.end(); it++)
+              state->valid_views.begin(); it != state->valid_views.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -14235,8 +14274,8 @@ namespace LegionRuntime {
       {
         unsigned num_valid = 0;
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           if (it->second * capture_mask)
             continue;
@@ -14245,8 +14284,8 @@ namespace LegionRuntime {
         logger->log("Valid Reduction Instances (%d)", num_valid);
         logger->down();
         for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-              state.reduction_views.begin(); it != 
-              state.reduction_views.end(); it++)
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -14263,11 +14302,11 @@ namespace LegionRuntime {
       // Open Children
       {
         logger->log("Open Children (%ld)", 
-            state.children.open_children.size());
+            state->children.open_children.size());
         logger->down();
         for (std::map<Color,FieldMask>::const_iterator it = 
-              state.children.open_children.begin(); it !=
-              state.children.open_children.end(); it++)
+              state->children.open_children.begin(); it !=
+              state->children.open_children.end(); it++)
         {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
@@ -14337,7 +14376,7 @@ namespace LegionRuntime {
       if (ctx < physical_states.size())
 #endif
       {
-        PhysicalState &state = physical_states[ctx];
+        PhysicalState *state = &(physical_states[ctx]);
         print_physical_state(state, capture_mask, to_traverse, logger);
       }
       else
@@ -19773,7 +19812,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void CompositeNode::capture_physical_state(RegionTreeNode *tree_node,
-                                               PhysicalState &state,
+                                               PhysicalState *state,
                                                const FieldMask &capture_mask,
                                                CompositeCloser &closer,
                                                FieldMask &global_dirt,
@@ -19781,9 +19820,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Capture the global dirt we are passing back
-      global_dirt |= capture_mask & (state.dirty_mask | state.reduction_mask);
+      global_dirt |= capture_mask & (state->dirty_mask | state->reduction_mask);
       // Also track the fields that we have dirty data for
-      FieldMask local_dirty = capture_mask & state.dirty_mask;
+      FieldMask local_dirty = capture_mask & state->dirty_mask;
       // Record the local dirty fields
       dirty_mask |= local_dirty;
       // Also mark that we are complete for these fields
@@ -19803,8 +19842,8 @@ namespace LegionRuntime {
         update_instance_views(it->first, overlap);
       }
       for (std::map<ReductionView*,FieldMask>::const_iterator it = 
-            state.reduction_views.begin(); it != 
-            state.reduction_views.end(); it++)
+            state->reduction_views.begin(); it != 
+            state->reduction_views.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)

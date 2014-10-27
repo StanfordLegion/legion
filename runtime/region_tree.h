@@ -1028,6 +1028,20 @@ namespace LegionRuntime {
      */
     struct ChildState {
     public:
+      ChildState(void) { }
+      ChildState(const ChildState &rhs) 
+      {
+        valid_fields = rhs.valid_fields;
+        open_children = rhs.open_children;
+      }
+    public:
+      ChildState& operator=(const ChildState &rhs)
+      {
+        valid_fields = rhs.valid_fields;
+        open_children = rhs.open_children;
+        return *this;
+      }
+    public:
       FieldMask valid_fields;
       std::map<Color,FieldMask> open_children;
     };
@@ -1208,6 +1222,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalState(ContextID ctx, RegionTreeNode *node);
 #endif
+      PhysicalState(const PhysicalState &rhs);
+    public:
+      PhysicalState& operator=(const PhysicalState &rhs);
     public:
       FieldMask dirty_mask;
       FieldMask reduction_mask;
@@ -1253,7 +1270,7 @@ namespace LegionRuntime {
     public:
       void update_dirty_mask(const FieldMask &mask);
       const FieldMask& get_dirty_mask(void) const;
-      void update_node_views(RegionTreeNode *node, PhysicalState &state);
+      void update_node_views(RegionTreeNode *node, PhysicalState *state);
     public:
       MappableInfo *const info;
       const LogicalRegion handle;
@@ -1281,7 +1298,7 @@ namespace LegionRuntime {
                                         CompositeNode *parent);
       void update_reduction_views(ReductionView *view,
                                   const FieldMask &valid_fields);
-      void update_valid_views(PhysicalState &state,
+      void update_valid_views(PhysicalState *state,
                               CompositeNode *root,
                               const FieldMask &closed_mask);
     public:
@@ -1512,9 +1529,9 @@ namespace LegionRuntime {
     public:
       void reserve_contexts(unsigned num_contexts);
       LogicalState& get_logical_state(ContextID ctx);
-      PhysicalState& acquire_physical_state(ContextID ctx, bool exclusive);
-      void acquire_physical_state(PhysicalState &state, bool exclusive);
-      bool release_physical_state(PhysicalState &state);
+      PhysicalState* acquire_physical_state(ContextID ctx, bool exclusive);
+      void acquire_physical_state(PhysicalState *state, bool exclusive);
+      bool release_physical_state(PhysicalState *state);
     public:
       // Logical traversal operations
       void register_logical_node(ContextID ctx,
@@ -1579,12 +1596,12 @@ namespace LegionRuntime {
                           std::map<MaterializedView*,FieldMask> &update_views,
                                 bool &create_composite);
       bool siphon_physical_children(PhysicalCloser &closer,
-                                    PhysicalState &state,
+                                    PhysicalState *state,
                                     const FieldMask &closing_mask,
                                     int next_child,
                                     bool &create_composite); 
       bool close_physical_child(PhysicalCloser &closer,
-                                PhysicalState &state,
+                                PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 Color target_child,
                                 int next_child,
@@ -1597,13 +1614,13 @@ namespace LegionRuntime {
                                FieldMask &complete_mask);
       void siphon_physical_children(CompositeCloser &closer,
                                     CompositeNode *node,
-                                    PhysicalState &state,
+                                    PhysicalState *state,
                                     const FieldMask &closing_mask,
                                     FieldMask &dirty_mask,
                                     FieldMask &complete_mask);
       void close_physical_child(CompositeCloser &closer,
                                 CompositeNode *node,
-                                PhysicalState &state,
+                                PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 Color target_child,
                                 int next_child,
@@ -1611,21 +1628,21 @@ namespace LegionRuntime {
                                 FieldMask &complete_mask);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
-      void find_valid_instance_views(PhysicalState &state,
+      void find_valid_instance_views(PhysicalState *state,
                                      const FieldMask &valid_mask,
                                      const FieldMask &space_mask, 
                                      bool needs_space,
                              std::map<InstanceView*,FieldMask> &valid_views);
       static void remove_valid_references(
                        const std::map<InstanceView*,FieldMask> &valid_views);
-      void find_valid_reduction_views(PhysicalState &state,
+      void find_valid_reduction_views(PhysicalState *state,
                                       const FieldMask &valid_mask,
                                       std::set<ReductionView*> &valid_views);
       static void remove_valid_references(
                                 const std::set<ReductionView*> &valid_views);
-      void pull_valid_instance_views(PhysicalState &state,
+      void pull_valid_instance_views(PhysicalState *state,
                                      const FieldMask &mask);
-      void find_pending_updates(PhysicalState &state, 
+      void find_pending_updates(PhysicalState *state, 
                                 MaterializedView *target,
                                 FieldMask &needed_fields,
                                 std::set<Event> &pending_events);
@@ -1666,21 +1683,21 @@ namespace LegionRuntime {
                                    const FieldMask &update_mask,
                                    Processor local_proc,
                     const std::map<ReductionView*,FieldMask> &valid_reductions);
-      void invalidate_instance_views(PhysicalState &state,
+      void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask, 
                                      bool clean, bool force);
-      void invalidate_reduction_views(PhysicalState &state,
+      void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
-      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               bool dirty, InstanceView *new_view);
-      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               const FieldMask &dirty_mask, 
                               const std::vector<InstanceView*> &new_views);
       // I hate the container problem, somebody solve it please
-      void update_valid_views(PhysicalState &state, const FieldMask &valid_mask,
+      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               const FieldMask &dirty,
                               const std::vector<MaterializedView*> &new_views);
-      void update_reduction_views(PhysicalState &state, 
+      void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
       void flush_reductions(const FieldMask &flush_mask,
@@ -1852,7 +1869,7 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                                std::map<Color,FieldMask> &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(PhysicalState &state,
+      void print_physical_state(PhysicalState *state,
                                 const FieldMask &capture_mask,
                                 std::map<Color,FieldMask> &to_traverse,
                                 TreeStateLogger *logger);
@@ -1964,7 +1981,7 @@ namespace LegionRuntime {
                                const FieldMask &capture_mask,
                                std::map<Color,FieldMask> &to_traverse,
                                TreeStateLogger *logger);
-      void print_physical_state(PhysicalState &state,
+      void print_physical_state(PhysicalState *state,
                                 const FieldMask &capture_mask,
                                 std::map<Color,FieldMask> &to_traverse,
                                 TreeStateLogger *logger);
@@ -3171,7 +3188,7 @@ namespace LegionRuntime {
       CompositeNode& operator=(const CompositeNode &rhs);
     public:
       void capture_physical_state(RegionTreeNode *tree_node,
-                                  PhysicalState &state,
+                                  PhysicalState *state,
                                   const FieldMask &capture_mask,
                                   CompositeCloser &closer,
                                   FieldMask &global_dirty,
