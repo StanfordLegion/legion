@@ -121,8 +121,10 @@ void top_level_task(const Task *task,
                                  circuit.all_nodes, circuit.node_locator, launch_domain, local_args);
 
   printf("Starting main simulation loop\n");
-  struct timespec ts_start, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  //struct timespec ts_start, ts_end;
+  //clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  double ts_start, ts_end;
+  ts_start = LegionRuntime::TimeStamp::get_current_time_in_micros();
   // Run the main loop
   bool simulation_success = true;
   for (int i = 0; i < num_loops; i++)
@@ -135,14 +137,13 @@ void top_level_task(const Task *task,
                                                   perform_checks, simulation_success,
                                                   ((i+1)==num_loops));
   }
-  clock_gettime(CLOCK_MONOTONIC, &ts_end);
+  ts_end = LegionRuntime::TimeStamp::get_current_time_in_micros();
   if (simulation_success)
     printf("SUCCESS!\n");
   else
     printf("FAILURE!\n");
   {
-    double sim_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
-                       (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
+    double sim_time = 1e-6 * (ts_end - ts_start);
     printf("ELAPSED TIME = %7.3f s\n", sim_time);
 
     // Compute the floating point operations per second

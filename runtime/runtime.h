@@ -801,7 +801,6 @@ namespace LegionRuntime {
     public:
       const AddressSpaceID local_address_space;
       const AddressSpaceID remote_address_space;
-      const std::set<Processor> remote_address_procs;
     private:
       Runtime *const runtime;
       // State for sending messages
@@ -1524,20 +1523,12 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, Processor p);
       static void shutdown_runtime(
                           const void *args, size_t arglen, Processor p);
-      static void schedule_runtime(
-                          const void *args, size_t arglen, Processor p);
       static void high_level_runtime_task(
-                          const void *args, size_t arglen, Processor p);
-      static void trigger_op_task(
-                          const void *args, size_t arglen, Processor p);
-      static void trigger_task_task(
-                          const void *args, size_t arglen, Processor p);
-      static void deferred_recycle_task(
                           const void *args, size_t arglen, Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
-      void process_schedule_request(Processor p, bool first = false);
+      void process_schedule_request(Processor p);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The HighLevelRuntime wrapper for this class
@@ -1558,6 +1549,8 @@ namespace LegionRuntime {
       // Internal runtime state 
       // The local processor managed by this runtime
       const std::set<Processor> local_procs;
+      // The local utility processors owned by this runtime
+      const std::set<Processor> local_utils;
       // Processor managers for each of the local processors
       std::map<Processor,ProcessorManager*> proc_managers;
       // Reservation for looking up memory managers

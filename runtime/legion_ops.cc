@@ -4013,6 +4013,20 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       initialize_mapping_path(mapping_path, requirement, requirement.region);
 #endif
+#ifdef LEGION_SPY
+      LegionSpy::log_acquire_operation(parent_ctx->get_unique_task_id(),
+                                       unique_op_id);
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4476,6 +4490,20 @@ namespace LegionRuntime {
       initialize_privilege_path(privilege_path, requirement);
 #ifdef DEBUG_HIGH_LEVEL
       initialize_mapping_path(mapping_path, requirement, requirement.region);
+#endif
+#ifdef LEGION_SPY
+      LegionSpy::log_release_operation(parent_ctx->get_unique_task_id(),
+                                       unique_op_id);
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
 #endif
     }
 

@@ -35,6 +35,16 @@ enum { MSGID_LONG_EXTENSION = 253,
 static int payload_count = 0;
 #endif
 
+#ifdef ACTIVE_MESSAGE_TRACE
+LegionRuntime::Logger::Category log_active_message("amtrace");
+
+void record_am_handler(int handler_id, const char *description, bool reply)
+{
+  log_active_message.info("AM Handler: %d %s %s\n", handler_id, description,
+                          (reply ? "Reply" : "Request"));
+}
+#endif
+
 static const int DEFERRED_FREE_COUNT = 128;
 gasnet_hsl_t deferred_free_mutex;
 int deferred_free_pos;
@@ -599,7 +609,10 @@ public:
 		 flip_buffer, gasnet_mynode(), peer, lmb_w_bases[flip_buffer],
 		 lmb_w_bases[flip_buffer]+lmb_size, flip_count);
 #endif
-
+#ifdef ACTIVE_MESSAGE_TRACE
+          log_active_message.info("Active Message Request: %d %d 2 0",
+                                  MSGID_FLIP_REQ, peer);
+#endif
 	  CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_FLIP_REQ,
                                                flip_buffer, flip_count) );
 #ifdef TRACE_MESSAGES
@@ -818,6 +831,12 @@ protected:
 #ifdef TRACE_MESSAGES
     __sync_fetch_and_add(&sent_messages, 1);
 #endif
+#ifdef ACTIVE_MESSAGE_TRACE
+    log_active_message.info("Active Message Request: %d %d %d %ld",
+                            hdr->msgid, peer, hdr->num_args, 
+                            (hdr->payload_mode == PAYLOAD_NONE) ? 
+                              0 : hdr->payload_size);
+#endif
     switch(hdr->num_args) {
     case 1:
       if(hdr->payload_mode != PAYLOAD_NONE) {
@@ -1012,6 +1031,10 @@ protected:
 #endif
 #ifdef TRACE_MESSAGES
       __sync_fetch_and_add(&sent_messages, 1);
+#endif
+#ifdef ACTIVE_MESSAGE_TRACE
+      log_active_message.info("Active Message Request: %d %d %d %ld",
+                              hdr->msgid, peer, hdr->num_args, size); 
 #endif
       switch(hdr->num_args) {
       case 1:
@@ -1515,6 +1538,11 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   handlers[hcount].index = MSGID_RELEASE_SRCPTR;
   handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
   hcount++;
+#ifdef ACTIVE_MESSAGE_TRACE
+  record_am_handler(MSGID_FLIP_REQ, "Flip Request AM");
+  record_am_handler(MSGID_FLIP_ACK, "Flip Acknowledgement AM");
+  record_am_handler(MSGID_RELEASE_SRCPTR, "Release Source Pointer AM");
+#endif
 
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );

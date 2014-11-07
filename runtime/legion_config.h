@@ -268,6 +268,7 @@ typedef enum legion_error_t {
   ERROR_PREDICATE_RESULT_SIZE_MISMATCH = 117,
   ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
   ERROR_TRACING_ALLOCATION_WITH_SEPARATE = 119,
+  ERROR_EMPTY_INDEX_PARTITION = 120,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

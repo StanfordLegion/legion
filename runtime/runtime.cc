@@ -3104,10 +3104,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(AddressSpaceID remote,
                                    Runtime *rt, size_t max_message_size,
-                                   const std::set<Processor> &procs)
+                                   const std::set<Processor> &remote_util_procs)
       : local_address_space(rt->address_space), remote_address_space(remote),
-        remote_address_procs(procs), runtime(rt), 
-        sending_buffer((char*)malloc(max_message_size)), 
+        runtime(rt), sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size)
     //--------------------------------------------------------------------------
     {
@@ -3127,26 +3126,17 @@ namespace LegionRuntime {
       {
         unsigned idx = 0;
         const unsigned target_idx = local_address_space % 
-                                    remote_address_procs.size();
+                                    remote_util_procs.size();
         // Iterate over all the processors and either choose a 
         // utility processor to be our target or get the target processor
         target = Processor::NO_PROC;
-        Processor utility = Processor::NO_PROC;
         for (std::set<Processor>::const_iterator it = 
-              remote_address_procs.begin(); it !=
-              remote_address_procs.end(); it++,idx++)
+              remote_util_procs.begin(); it != 
+              remote_util_procs.end(); it++,idx++)
         {
           if (idx == target_idx)
             target = (*it);
-          utility = it->get_utility_processor();
-          // If we found a utility processor then we are done
-          if (utility != (*it))
-            break;
-          utility = Processor::NO_PROC;
         }
-        if (utility.exists())
-          target = utility;
-        // Otherwise we use the default target
 #ifdef DEBUG_HIGH_LEVEL
         assert(target.exists());
 #endif
@@ -3171,8 +3161,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : local_address_space(0), remote_address_space(0),
-        remote_address_procs(rhs.remote_address_procs), runtime(NULL),
+      : local_address_space(0), remote_address_space(0), runtime(NULL),
         sending_buffer(NULL), sending_buffer_size(0)
     //--------------------------------------------------------------------------
     {
@@ -4166,7 +4155,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Runtime::Runtime(Machine *m, AddressSpaceID unique,
                      const std::set<Processor> &locals,
-                     const std::set<Processor> &local_utils,
+                     const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces,
                      Processor cleanup, Processor gc, Processor message)
@@ -4176,7 +4165,8 @@ namespace LegionRuntime {
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
 #endif
-        local_procs(locals), proc_spaces(processor_spaces),
+        local_procs(locals), local_utils(local_utilities),
+        proc_spaces(processor_spaces),
         memory_manager_lock(Reservation::create_reservation()),
         unique_partition_id((unique == 0) ? runtime_stride : unique), 
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
@@ -4219,7 +4209,11 @@ namespace LegionRuntime {
                             address_space);
 #ifdef LEGION_LOGGING
       // Initialize a logger if we have one
-      LegionLogging::initialize_legion_logging(unique, locals);
+      {
+        std::set<Processor> all_locals(local_procsbegin(), local_procs.end());
+        all_locals.insert(local_utils.begin(), local_utils.end());
+        LegionLogging::initialize_legion_logging(unique, all_locals);
+      }
 #endif
 #ifdef LEGION_PROF
       {
@@ -4251,20 +4245,19 @@ namespace LegionRuntime {
         {
           LegionProf::register_task_variant(it->first, it->second->name);
         }
-        std::set<Processor> handled_util_procs;
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
           Processor::Kind kind = machine->get_processor_kind(*it);
+          assert(kind != Processor::UTIL_PROC);
           LegionProf::initialize_processor(*it, false/*util*/, kind);
-          Processor util = it->get_utility_processor();
-          if ((util != (*it)) && 
-              (handled_util_procs.find(util) == handled_util_procs.end()))
-          {
-            Processor::Kind util_kind = machine->get_processor_kind(util);
-            LegionProf::initialize_processor(util, true/*util*/, kind);
-            handled_util_procs.insert(util);
-          }
+        }
+        for (std::set<Processor>::const_iterator it = local_utils.begin();
+              it != local_utils.end(); it++)
+        {
+          Processor::Kind kind = machine->get_processor_kind(*it);
+          assert(kind == Processor::UTIL_PROC);
+          LegionProf::initialize_processor(*it, true/*util*/, kind);
         }
         // Tell the profiler about all the memories and their kinds
         const std::set<Memory> &all_mems = machine->get_all_memories();
@@ -4330,18 +4323,24 @@ namespace LegionRuntime {
           continue;
         // Construct the set of processors in the remote address space
         std::set<Processor> remote_procs;
+        std::set<Processor> remote_util_procs;
         for (std::map<Processor,AddressSpaceID>::const_iterator pit = 
               processor_spaces.begin(); pit != processor_spaces.end(); pit++)
         {
-          if (pit->second == (*it))
+          if (pit->second != (*it))
+            continue;
+          Processor::Kind k = machine->get_processor_kind(pit->first);
+          if (k == Processor::UTIL_PROC)
+            remote_util_procs.insert(pit->first);
+          else
             remote_procs.insert(pit->first);
         }
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!remote_procs.empty());
+        assert(!remote_procs.empty() || !remote_util_procs.empty());
 #endif
-        message_managers[(*it)] = new MessageManager(*it, this,
-                                                     max_message_size,
-                                                     remote_procs);
+        message_managers[(*it)] = new MessageManager(*it, this, 
+            max_message_size, (remote_util_procs.empty() ? 
+              remote_procs : remote_util_procs));
       }
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
@@ -4403,35 +4402,26 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       {
         std::set<Processor> all_procs;
-        for (std::set<Processor>::const_iterator it = local_procs.begin();
-                it != local_procs.end(); it++)
-        {
-          all_procs.insert(*it);
-          Processor util = it->get_utility_processor();
-          if ((util != (*it)) && 
-              (all_procs.find(util) == all_procs.end()))
-          {
-            all_procs.insert(util);
-          }
-        }
+        all_procs.insert(local_procs.begin(), local_procs.end());
+        all_procs.insert(local_utils.begin(), local_utils.end());
         LegionLogging::finalize_legion_logging(all_procs);
       }
 #endif
 #ifdef LEGION_PROF
       {
-        std::set<Processor> handled_util_procs;
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
           Processor::Kind kind = machine->get_processor_kind(*it);
+          assert(kind != Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
-          Processor util = it->get_utility_processor();
-          if ((util != (*it)) && 
-              (handled_util_procs.find(util) == handled_util_procs.end()))
-          {
-            LegionProf::finalize_processor(util);
-            handled_util_procs.insert(util);
-          }
+        }
+        for (std::set<Processor>::const_iterator it = local_utils.begin();
+              it != local_utils.end(); it++)
+        {
+          Processor::Kind kind = machine->get_processor_kind(*it);
+          assert(kind == Processor::UTIL_PROC);
+          LegionProf::finalize_processor(*it);
         }
       }
 #endif
@@ -5079,6 +5069,17 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
+      if (coloring.empty())
+      {
+        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+                            "colors in task %s (ID %lld). Index partitions "
+                            "must have at least one color.",
+                            ctx->variants->name, ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
       Point<1> lower_bound(coloring.begin()->first);
       Point<1> upper_bound(coloring.rbegin()->first);
       Rect<1> color_range(lower_bound,upper_bound);
@@ -5288,6 +5289,18 @@ namespace LegionRuntime {
         }
       }
 #endif
+      if (coloring.empty())
+      {
+        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+                            "colors in task %s (ID %lld). Index partitions "
+                            "must have at least one color.",
+                            ctx->variants->name, ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
+
       forest->create_index_partition(pid, parent, disjoint, 
                                      part_color, coloring, color_space);
 #ifdef LEGION_LOGGING
@@ -5390,6 +5403,17 @@ namespace LegionRuntime {
         }
       }
 #endif
+      if (coloring.empty())
+      {
+        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+                            "colors in task %s (ID %lld). Index partitions "
+                            "must have at least one color.",
+                            ctx->variants->name, ctx->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
       // Build all the convex hulls
       std::map<Color,Domain> convex_hulls;
       for (std::map<Color,std::set<Domain> >::const_iterator it = 
@@ -9284,13 +9308,9 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
-    void Runtime::process_schedule_request(Processor proc, bool first/*=false*/)
+    void Runtime::process_schedule_request(Processor proc)
     //--------------------------------------------------------------------------
     {
-      // If this is the first time through disable all further invocations
-      // of the idle task since we do our own scheduling calls
-      if (first)
-        proc.disable_idle_task();
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_procs.find(proc) != local_procs.end());
 #endif
@@ -12139,7 +12159,6 @@ namespace LegionRuntime {
       }
       table[INIT_FUNC_ID]          = Runtime::initialize_runtime;
       table[SHUTDOWN_FUNC_ID]      = Runtime::shutdown_runtime;
-      table[SCHEDULER_ID]          = Runtime::schedule_runtime;
       table[HLR_TASK_ID]           = Runtime::high_level_runtime_task;
     }
 
@@ -12156,22 +12175,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
-      std::set<Processor> utility_procs;
       const std::set<Processor> &all_procs = machine->get_all_processors();
-      // Find all the utility processors
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
-            it != all_procs.end(); it++)
-        utility_procs.insert(it->get_utility_processor());
-      // Log utility processors
-      for (std::set<Processor>::const_iterator it = utility_procs.begin();
-            it != utility_procs.end(); it++)
-        LegionSpy::log_utility_processor(it->id);
       // Log processors
       for (std::set<Processor>::const_iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
         Processor::Kind k = machine->get_processor_kind(*it);
-        LegionSpy::log_processor(it->id, it->get_utility_processor().id, k); 
+        if (k == Processor::UTIL_PROC)
+          LegionSpy::log_utility_processor(it->id);
+        else
+          LegionSpy::log_processor(it->id, k); 
       }
       // Log memories
       const std::set<Memory> &all_mems = machine->get_all_memories();
@@ -12280,8 +12293,6 @@ namespace LegionRuntime {
       Machine *machine = Machine::get_machine();
       const std::set<Processor> &all_procs = machine->get_all_processors();
       Processor::Kind proc_kind = machine->get_processor_kind(p);
-      if (proc_kind != Processor::UTIL_PROC)
-        p.enable_idle_task();
       // Make separate runtime instances if they are requested,
       // otherwise only make a runtime instances for each of the
       // separate nodes in the machine.  To do this we exploit a
@@ -12317,17 +12328,12 @@ namespace LegionRuntime {
           // If we are doing separate runtime instances then each
           // processor effectively gets its own address space
           local_procs.insert(p);
-          local_procs.insert(p.get_utility_processor());
           AddressSpaceID sid = 0;
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++,sid++)
           {
-            if (p == (*it))
-              local_space_id = sid;
-            address_spaces.insert(sid); 
-            proc_spaces[*it] = sid;
-            Processor util = it->get_utility_processor();
-            if (util != (*it))
+            Processor::Kind k = machine->get_processor_kind(*it);
+            if (k == Processor::UTIL_PROC)
             {
               log_run(LEVEL_ERROR,"Separate runtime instances are not "
                                   "supported when running with explicit "
@@ -12337,6 +12343,10 @@ namespace LegionRuntime {
 #endif
               exit(ERROR_SEPARATE_UTILITY_PROCS);
             }
+            if (p == (*it))
+              local_space_id = sid;
+            address_spaces.insert(sid); 
+            proc_spaces[*it] = sid;
           }
         }
         else
@@ -12484,14 +12494,6 @@ namespace LegionRuntime {
         if (result == 0)
           delete get_runtime(p);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::schedule_runtime(
-                                  const void *args, size_t arglen, Processor p)
-    //--------------------------------------------------------------------------
-    {
-      Runtime::get_runtime(p)->process_schedule_request(p, true/*first*/);
     }
 
     //--------------------------------------------------------------------------

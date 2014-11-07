@@ -30,9 +30,6 @@ using namespace LegionRuntime::Accessor;
 
 #include "lowlevel_dma.h"
 
-GASNETT_THREADKEY_DEFINE(cur_thread);
-GASNETT_THREADKEY_DEFINE(gpu_thread);
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -51,6 +48,12 @@ GASNETT_THREADKEY_DEFINE(gpu_thread);
 // Implementation of Detailed Timer
 namespace LegionRuntime {
   namespace LowLevel {
+
+    GASNETT_THREADKEY_DEFINE(cur_thread);
+    GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
+#ifdef USE_CUDA
+    GASNETT_THREADKEY_DECLARE(gpu_thread);
+#endif
     
     Logger::Category log_gpu("gpu");
     Logger::Category log_mutex("mutex");
@@ -59,6 +62,9 @@ namespace LegionRuntime {
     Logger::Category log_malloc("malloc");
     Logger::Category log_machine("machine");
     Logger::Category log_inst("inst");
+#ifdef EVENT_GRAPH_TRACE
+    Logger::Category log_event_graph("graph");
+#endif
 
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
@@ -89,6 +95,17 @@ namespace LegionRuntime {
       MACHINE_SHUTDOWN_MSGID,
       BARRIER_ADJUST_MSGID,
     };
+
+#ifdef EVENT_GRAPH_TRACE
+    static inline Event find_enclosing_termination_event(void)
+    {
+      void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
+      if (tls_val == NULL)
+        return Event::NO_EVENT;
+      PreemptableThread *me = (PreemptableThread*)tls_val;
+      return me->find_enclosing();
+    }
+#endif
 
     // detailed timer stuff
 
@@ -463,6 +480,9 @@ namespace LegionRuntime {
     }
 
     /*static*/ Runtime *Runtime::runtime = 0;
+#ifdef NODE_LOGGING
+    /*static*/ const char* Runtime::prefix = ".";
+#endif
 
     //static const unsigned MAX_LOCAL_EVENTS = 300000;
     //static const unsigned MAX_LOCAL_LOCKS = 100000;
@@ -1192,13 +1212,29 @@ namespace LegionRuntime {
       log_event(LEVEL_INFO, "merging events - at least %d not triggered",
 		wait_count);
 
+      // Avoid these optimizations if we are doing event graph tracing
+#ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
+#endif
 
       // counts of 2+ require building a new event and a merger to trigger it
       Event finish_event = Event::Impl::create_event();
       EventMerger *m = new EventMerger(finish_event);
+
+#ifdef EVENT_GRAPH_TRACE
+      const int base_size = 1024;
+      char base_buffer[base_size];
+      char *buffer;
+      int buffer_size = (wait_for.size() * 28);
+      if (buffer_size >= base_size)
+        buffer = (char*)malloc(buffer_size+1);
+      else
+        buffer = base_buffer;
+      buffer[0] = '\0';
+      int offset = 0;
+#endif
 
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
@@ -1206,7 +1242,20 @@ namespace LegionRuntime {
 	log_event(LEVEL_INFO, "merged event " IDFMT "/%d waiting for " IDFMT "/%d",
 		  finish_event.id, finish_event.gen, (*it).id, (*it).gen);
 	m->add_event(*it);
+#ifdef EVENT_GRAPH_TRACE
+        int written = snprintf(buffer+offset,buffer_size-offset, 
+                               " (" IDFMT ",%d)", it->id, it->gen);
+        // make sure that output wasn't truncated
+        assert(written < (buffer_size-offset));
+        offset += written;
+#endif
       }
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld%s", 
+                          finish_event.id, finish_event.gen, wait_for.size(), buffer);
+      if (buffer_size >= base_size)
+        free(buffer);
+#endif
 
       // once they're all added - arm the thing (it might go off immediately)
       if(m->arm())
@@ -1231,9 +1280,12 @@ namespace LegionRuntime {
       if(!ev2.has_triggered()) { first_wait = ev2; wait_count++; }
       if(!ev1.has_triggered()) { first_wait = ev1; wait_count++; }
 
+      // Avoid these optimizations if we are doing event graph tracing
+#ifndef EVENT_GRAPH_TRACING
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
+#endif
 
       // counts of 2+ require building a new event and a merger to trigger it
       Event finish_event = Event::Impl::create_event();
@@ -1245,6 +1297,14 @@ namespace LegionRuntime {
       m->add_event(ev4);
       m->add_event(ev5);
       m->add_event(ev6);
+
+#ifdef EVENT_GRAPH_TRACING
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) (" IDFMT ",%d) (" IDFMT ",%d) "
+                           "(" IDFMT ",%d) (" IDFMT ",%d) (" IDFMT ",%d)",
+                           finish_event.id, finish_event.gen, ev1.id, ev1.gen,
+                           ev2.id, ev2.gen, ev3.id, ev3.gen, 
+                           ev4.id, ev4.gen, ev5.id, ev5.gen);
+#endif
 
       // once they're all added - arm the thing (it might go off immediately)
       if(m->arm())
@@ -1282,6 +1342,13 @@ namespace LegionRuntime {
     void UserEvent::trigger(Event wait_on) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+#ifdef EVENT_GRAPH_TRACE
+      Event enclosing = find_enclosing_termination_event();
+      log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
+                           ",%d) (" IDFMT ",%d)",
+                            id, gen, wait_on.id, wait_on.gen,
+                            enclosing.id, enclosing.gen);
+#endif
       impl()->trigger(gen, gasnet_mynode(), wait_on);
       //Runtime::get_runtime()->get_event_impl(*this)->trigger();
     }
@@ -1890,6 +1957,9 @@ namespace LegionRuntime {
 
       // start by getting a free event
       Event e = Event::Impl::create_event();
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Barrier Creation: " IDFMT " %d", e.id, expected_arrivals);
+#endif
 
       // now turn it into a barrier
       Event::Impl *impl = e.impl();
@@ -1930,6 +2000,11 @@ namespace LegionRuntime {
     Barrier Barrier::alter_arrival_count(int delta) const
     {
       timestamp_t timestamp = __sync_fetch_and_add(&barrier_adjustment_timestamp, 1);
+#ifdef EVENT_GRAPH_TRACE
+      Event enclosing = find_enclosing_termination_event();
+      log_event_graph.info("Barrier Alter: (" IDFMT ",%d) (" IDFMT
+                           ",%d) %d", id, gen, enclosing.id, enclosing.gen, delta);
+#endif
       impl()->adjust_arrival(gen, delta, timestamp);
 
       Barrier with_ts;
@@ -1949,6 +2024,13 @@ namespace LegionRuntime {
 
     void Barrier::arrive(unsigned count /*= 1*/, Event wait_on /*= Event::NO_EVENT*/) const
     {
+#ifdef EVENT_GRAPH_TRACE
+      Event enclosing = find_enclosing_termination_event();
+      log_event_graph.info("Barrier Arrive: (" IDFMT ",%d) (" IDFMT
+                           ",%d) (" IDFMT ",%d) %d",
+                           id, gen, wait_on.id, wait_on.gen,
+                           enclosing.id, enclosing.gen, count);
+#endif
       // arrival uses the timestamp stored in this barrier object
       impl()->adjust_arrival(gen, -count, timestamp, wait_on);
     }
@@ -4264,7 +4346,7 @@ namespace LegionRuntime {
 	log_util.info("delegating idle task handling for " IDFMT " to " IDFMT "",
 		      me.id, util.id);
 	disable_idle_task();
-	_util_proc->enable_idle_task(this);
+	//_util_proc->enable_idle_task(this);
       }
 
       util_proc = _util_proc;
@@ -4486,23 +4568,6 @@ namespace LegionRuntime {
 
 	~Thread(void) {}
 
-	void run_task(Task *task, Processor actual_proc = Processor::NO_PROC)
-	{
-          Processor::TaskFuncPtr fptr = task_id_table[task->func_id];
-          char argstr[100];
-          argstr[0] = 0;
-          for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
-            sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
-          if(task->arglen > 40) strcpy(argstr+80, "...");
-          log_task(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-                   "task start: %d (%p) (%s)", task->func_id, fptr, argstr);
-          (*fptr)(task->args, task->arglen, (actual_proc.exists() ? actual_proc : task->proc));
-          log_task(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-                   "task end: %d (%p) (%s)", task->func_id, fptr, argstr);
-          if(task->finish_event.exists())
-            task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
-	}
-
 	virtual void sleep_on_event(Event wait_for, bool block = false)
 	{
 	  // create an entry to go on our event stack (on our stack)
@@ -4670,10 +4735,10 @@ namespace LegionRuntime {
 	      proc->init_done = true;
               // Enable the idle task
               if(proc->util_proc) {
-                log_task.info("idle task enabled for processor " IDFMT " on util proc " IDFMT "",
+                log_task.info("idle task DISabled for processor " IDFMT " on util proc " IDFMT "",
                               proc->me.id, proc->util.id);
 
-                proc->util_proc->enable_idle_task(proc);
+                //proc->util_proc->enable_idle_task(proc);
               } else {
                 assert(proc->kind != Processor::UTIL_PROC);
                 log_task.info("idle task enabled for processor " IDFMT "", proc->me.id);
@@ -5053,7 +5118,37 @@ namespace LegionRuntime {
 #endif
     }
 
-    GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
+    void PreemptableThread::run_task(Task *task, Processor actual_proc /*=NO_PROC*/)
+    {
+      Processor::TaskFuncPtr fptr = task_id_table[task->func_id];
+#if 0
+      char argstr[100];
+      argstr[0] = 0;
+      for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
+        sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
+      if(task->arglen > 40) strcpy(argstr+80, "...");
+      log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+               "utility task start: %d (%p) (%s)", task->func_id, fptr, argstr);
+#endif
+#ifdef EVENT_GRAPH_TRACE
+      start_enclosing(task->finish_event);
+      unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
+      (*fptr)(task->args, task->arglen, (actual_proc.exists() ? actual_proc : task->proc));
+#ifdef EVENT_GRAPH_TRACE
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+                            task->finish_event.id, task->finish_event.gen,
+                            (stop - start));
+#endif
+#if 0
+      log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
+               "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
+#endif
+      if(task->finish_event.exists())
+        task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
+    }
 
     /*static*/ bool PreemptableThread::preemptable_sleep(Event wait_for,
 							 bool block /*= false*/)
@@ -5091,23 +5186,6 @@ namespace LegionRuntime {
 	: proc(_proc) {}
 
       virtual ~UtilityThread(void) {}
-
-      void run_task(Task *task, Processor actual_proc = Processor::NO_PROC)
-      {
-	Processor::TaskFuncPtr fptr = task_id_table[task->func_id];
-	char argstr[100];
-	argstr[0] = 0;
-	for(size_t i = 0; (i < task->arglen) && (i < 40); i++)
-	  sprintf(argstr+2*i, "%02x", ((unsigned char *)(task->args))[i]);
-	if(task->arglen > 40) strcpy(argstr+80, "...");
-	log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-		 "utility task start: %d (%p) (%s)", task->func_id, fptr, argstr);
-	(*fptr)(task->args, task->arglen, (actual_proc.exists() ? actual_proc : task->proc));
-	log_util(((task->func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-		 "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
-	if(task->finish_event.exists())
-	  task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
-      }
 
       void sleep_on_event(Event wait_for, bool block = false)
       {
@@ -5226,7 +5304,7 @@ namespace LegionRuntime {
 		// run the idle task on behalf of the idle proc
 		log_util.debug("running idle task for " IDFMT "", idle_proc->me.id);
                 if (proc->idle_task)
-		run_task(proc->idle_task, idle_proc->me);
+                  run_task(proc->idle_task, idle_proc->me);
 		log_util.debug("done with idle task for " IDFMT "", idle_proc->me.id);
 
 		gasnet_hsl_lock(&proc->mutex);
@@ -5400,6 +5478,7 @@ namespace LegionRuntime {
 	return;
       }
       // maybe a GPU thread?
+#ifdef USE_CUDA
       ptr = gasnett_threadkey_get(gpu_thread);
       if(ptr != 0) {
 	//assert(0);
@@ -5415,6 +5494,7 @@ namespace LegionRuntime {
 	//printf("done\n");
 	return;
       }
+#endif
       // we're probably screwed here - try waiting and polling gasnet while
       //  we wait
       //printf("waiting on event, polling gasnet to hopefully not die\n");
@@ -5540,6 +5620,16 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = impl();
       Event finish_event = Event::Impl::create_event();
+#ifdef EVENT_GRAPH_TRACE
+      Event enclosing = find_enclosing_termination_event();
+      log_event_graph.info("Task Request: %d " IDFMT 
+                            " (" IDFMT ",%d) (" IDFMT ",%d)"
+                            " (" IDFMT ",%d) %d %p %ld",
+                            func_id, id, wait_on.id, wait_on.gen,
+                            finish_event.id, finish_event.gen,
+                            enclosing.id, enclosing.gen,
+                            priority, args, arglen);
+#endif
       p->spawn_task(func_id, args, arglen, //instances_needed, 
 		    wait_on, finish_event, priority);
       return finish_event;
@@ -8178,6 +8268,16 @@ namespace LegionRuntime {
 #endif
           continue;
         }
+
+        if (!strcmp((*argv)[i], "-ll:prefix"))
+        {
+#ifdef NODE_LOGGING
+          Runtime::prefix = strdup((*argv)[++i]);
+#else
+          fprintf(stderr,"WARNING: prefix set, but NODE_LOGGING not enabled at compile time!\n");
+#endif
+          continue;
+        }
       }
 
       if(bind_localproc_threads) {
@@ -8198,6 +8298,9 @@ namespace LegionRuntime {
         //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
         putenv(new_pmi_gni_cookie);  // libc now owns the memory
       }
+      // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
+      if(!getenv("GASNET_IB_SPAWNER"))
+	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
       CHECK_GASNET( gasnet_init(argc, argv) );
 
       // Check that we have enough resources for the number of nodes we are using
@@ -8231,31 +8334,31 @@ namespace LegionRuntime {
 
       gasnet_handlerentry_t handlers[128];
       int hcount = 0;
-      hcount += NodeAnnounceMessage::add_handler_entries(&handlers[hcount]);
-      hcount += SpawnTaskMessage::add_handler_entries(&handlers[hcount]);
-      hcount += LockRequestMessage::add_handler_entries(&handlers[hcount]);
-      hcount += LockReleaseMessage::add_handler_entries(&handlers[hcount]);
-      hcount += LockGrantMessage::add_handler_entries(&handlers[hcount]);
-      hcount += EventSubscribeMessage::add_handler_entries(&handlers[hcount]);
-      hcount += EventTriggerMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteMemAllocMessage::add_handler_entries(&handlers[hcount]);
-      hcount += CreateInstanceMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount]);
-      hcount += ValidMaskRequestMessage::add_handler_entries(&handlers[hcount]);
-      hcount += ValidMaskDataMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RollUpRequestMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RollUpDataMessage::add_handler_entries(&handlers[hcount]);
-      hcount += ClearTimerRequestMessage::add_handler_entries(&handlers[hcount]);
-      hcount += DestroyInstanceMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteWriteMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteReduceMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteWriteFenceMessage::add_handler_entries(&handlers[hcount]);
-      hcount += DestroyLockMessage::add_handler_entries(&handlers[hcount]);
-      hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount]);
-      hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount]);
-      hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount]);
-      //hcount += TestMessage::add_handler_entries(&handlers[hcount]);
-      //hcount += TestMessage2::add_handler_entries(&handlers[hcount]);
+      hcount += NodeAnnounceMessage::add_handler_entries(&handlers[hcount], "Node Announce AM");
+      hcount += SpawnTaskMessage::add_handler_entries(&handlers[hcount], "Spawn Task AM");
+      hcount += LockRequestMessage::add_handler_entries(&handlers[hcount], "Lock Request AM");
+      hcount += LockReleaseMessage::add_handler_entries(&handlers[hcount], "Lock Release AM");
+      hcount += LockGrantMessage::add_handler_entries(&handlers[hcount], "Lock Grant AM");
+      hcount += EventSubscribeMessage::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
+      hcount += EventTriggerMessage::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += RemoteMemAllocMessage::add_handler_entries(&handlers[hcount], "Remote Memory Allocation AM");
+      hcount += CreateInstanceMessage::add_handler_entries(&handlers[hcount], "Create Instance AM");
+      hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
+      hcount += ValidMaskRequestMessage::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
+      hcount += ValidMaskDataMessage::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
+      hcount += RollUpRequestMessage::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
+      hcount += RollUpDataMessage::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
+      hcount += ClearTimerRequestMessage::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
+      hcount += DestroyInstanceMessage::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
+      hcount += RemoteWriteMessage::add_handler_entries(&handlers[hcount], "Remote Write AM");
+      hcount += RemoteReduceMessage::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
+      hcount += RemoteWriteFenceMessage::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
+      hcount += DestroyLockMessage::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
+      hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
+      hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
+      hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
+      //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
+      //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
@@ -8721,9 +8824,29 @@ namespace LegionRuntime {
       log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
 
       // build old proc/mem lists from affinity data
+      for(int i = 0; i < gasnet_nodes(); i++)
+	for(std::vector<Processor::Impl *>::const_iterator it = Runtime::runtime->nodes[i].processors.begin();
+	    it != Runtime::runtime->nodes[i].processors.end();
+	    it++)
+        {
+#ifdef EVENT_GRAPH_TRACE
+          if (procs.find((*it)->me) == procs.end())
+            log_event_graph.info("Processor: " IDFMT " %d", 
+                                  (*it)->me.id, (*it)->kind);
+#endif
+	  procs.insert((*it)->me);
+        }
       for(std::vector<ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
+#ifdef EVENT_GRAPH_TRACE
+        if (procs.find((*it).p) == procs.end())
+          log_event_graph.info("Processor: " IDFMT " %d", 
+                                (*it).p.id, (*it).p.impl()->kind);
+        if (memories.find((*it).m) == memories.end())
+          log_event_graph.info("Memory: " IDFMT " %d", 
+                                (*it).m.id, (*it).m.impl()->get_kind());
+#endif
 	procs.insert((*it).p);
 	memories.insert((*it).m);
 	visible_memories_from_procs[(*it).p].insert((*it).m);
@@ -8732,6 +8855,14 @@ namespace LegionRuntime {
       for(std::vector<MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
+#ifdef EVENT_GRAPH_TRACE
+        if (memories.find((*it).m1) == memories.end())
+          log_event_graph.info("Memory: " IDFMT " %d", 
+                                (*it).m1.id, (*it).m1.impl()->get_kind());
+        if (memories.find((*it).m2) == memories.end())
+          log_event_graph.info("Memory: " IDFMT " %d", 
+                                (*it).m2.id, (*it).m2.impl()->get_kind());
+#endif
 	memories.insert((*it).m1);
 	memories.insert((*it).m2);
 	visible_memories_from_memory[(*it).m1].insert((*it).m2);
@@ -9037,9 +9168,8 @@ namespace LegionRuntime {
     static FILE *log_file = NULL;
     if (log_file == NULL)
     {
-      const char *prefix = ".";
       char file_name[1024];
-      sprintf(file_name,"%s/node_%d.log", prefix, gasnet_mynode());
+      sprintf(file_name,"%s/node_%d.log", LowLevel::Runtime::prefix, gasnet_mynode());
       log_file = fopen(file_name,"w");
       assert(log_file != NULL);
     }

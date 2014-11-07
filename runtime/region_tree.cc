@@ -5367,8 +5367,12 @@ namespace LegionRuntime {
         }
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
+#ifndef DISABLE_RECYCLING
         PhysicalInstance inst = context->runtime->find_physical_instance(
                           location, field_size, domain, depth, use_event);
+#else
+        PhysicalInstance inst = PhysicalInstance::NO_INST;
+#endif
         // If we couldn't recycle one, then try making one
         if (!inst.exists())
           inst = domain.create_instance(location, field_size);
@@ -5437,8 +5441,12 @@ namespace LegionRuntime {
         }
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
+#ifndef DISABLE_RECYCLING
         PhysicalInstance inst = context->runtime->find_physical_instance(
             location, field_sizes, domain, blocking_factor, depth, use_event);
+#else
+        PhysicalInstance inst = PhysicalInstance::NO_INST;
+#endif
         // If that didn't work, try making one
         if (!inst.exists())
           inst = domain.create_instance(location, field_sizes, blocking_factor);
@@ -16829,7 +16837,8 @@ namespace LegionRuntime {
           it++;
           continue;
         }
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
         // We're about to do a bunch of expensive tests,
         // so first do something cheap to see if we can
         // prune the user out of the list.
@@ -16936,7 +16945,8 @@ namespace LegionRuntime {
             it++;
             continue;
           }
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
           // Before we do a bunch of expensive operations,
           // do something cheap and check to see if the
           // event has already triggered.
@@ -17002,7 +17012,8 @@ namespace LegionRuntime {
       if (user.term_event.exists())
         curr_epoch_users.push_back(user);
       // See if we need to compress the lists
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
@@ -17122,7 +17133,8 @@ namespace LegionRuntime {
       {
         if (!ABOVE)
           observed |= it->field_mask;
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
         // We're about to do a bunch of expensive tests,
         // so first do something cheap to see if we can
         // prune the user out of the list.
@@ -17214,7 +17226,8 @@ namespace LegionRuntime {
               prev_epoch_users.begin(); it != 
               prev_epoch_users.end(); /*nothing*/)
         {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
           // Before we do a bunch of expensive operations,
           // do something cheap and check to see if the
           // event has already triggered.
@@ -17271,7 +17284,8 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < new_prev_users.size(); idx++)
         prev_epoch_users.push_back(new_prev_users[idx]);
       // See if we need to compress the lists
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
+      !defined(EVENT_GRAPH_TRACE)
       if (Runtime::max_filter_size > 0)
       {
         if (prev_epoch_users.size() >= Runtime::max_filter_size)
@@ -17588,7 +17602,8 @@ namespace LegionRuntime {
     {
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING)
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
+      !defined(EVENT_GRAPH_TRACE)
       // should already be holding the lock when this is called
 #ifndef PHYSICAL_FIELD_TREE
       for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
@@ -17622,7 +17637,8 @@ namespace LegionRuntime {
     {
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING)
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
+      !defined(EVENT_GRAPH_TRACE)
       for (std::list<PhysicalUser>::iterator it = curr_epoch_users.begin();
             it != curr_epoch_users.end(); /*nothing*/)
       {
@@ -21032,7 +21048,8 @@ namespace LegionRuntime {
           has_local_references = true;
         }
       }
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING)
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
+      !defined(EVENT_GRAPH_TRACE)
       if (has_local_references)
       {
         // Do not do this if we are in LegionSpy so we can see 

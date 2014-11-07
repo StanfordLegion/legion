@@ -1333,20 +1333,22 @@ class State(object):
 
     def create_instance(self, iid, mem, redop, bf, time):
         if iid not in self.instances:
-            self.instances[iid] = Instance(iid)
-        self.instances[iid].set_create(self.memories[mem],
+            self.instances[iid] = [Instance(iid)]
+        else:
+            self.instances[iid].append(Instance(iid))
+        self.instances[iid][-1].set_create(self.memories[mem],
                                        redop, bf, time)
         assert mem in self.memories
-        self.memories[mem].add_instance(self.instances[iid])
+        self.memories[mem].add_instance(self.instances[iid][-1])
 
     def add_instance_field(self, iid, fid, size):
         assert iid in self.instances
-        self.instances[iid].add_field(fid, size)
+        self.instances[iid][-1].add_field(fid, size)
 
     def destroy_instance(self, iid, time):
         if iid not in self.instances:
-            self.instances[iid] = Instance(iid)
-        self.instances[iid].set_destroy(time)
+            self.instances[iid] = [Instance(iid)]
+        self.instances[iid][-1].set_destroy(time)
 
     def build_time_ranges(self):
         assert self.last_time is not None
@@ -1405,14 +1407,17 @@ class State(object):
     def generate_mem_picture(self, file_name, html_file):
         # Check for any leaked instances
         # and generate colors
-        num_instances = len(self.instances)
+        num_instances = 0
+        for inst_list in self.instances.itervalues():
+            num_instances += len(inst_list)
         idx = 0
-        for i,inst in self.instances.iteritems():
-            if inst.destroy_time is None:
-                inst.set_destroy(self.last_time)
-                print 'INFO: Instance %u leaked' % inst.iid
-            inst.compute_color(idx, num_instances)
-            idx = idx + 1
+        for i,inst_list in self.instances.iteritems():
+            for inst in inst_list:
+                if inst.destroy_time is None:
+                    inst.set_destroy(self.last_time)
+                    print 'INFO: Instance %u leaked' % inst.iid
+                inst.compute_color(idx, num_instances)
+                idx = idx + 1
         printer = SVGPrinter(file_name, html_file)
         for m,mem in sorted(self.memories.iteritems(),key=lambda x: x[0]):
             mem.emit_svg(printer, self.last_time)

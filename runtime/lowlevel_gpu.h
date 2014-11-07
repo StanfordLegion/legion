@@ -38,8 +38,6 @@
   } \
 } while(0)
 
-GASNETT_THREADKEY_DECLARE(gpu_thread);
-
 namespace LegionRuntime {
   namespace LowLevel {
 

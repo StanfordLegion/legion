@@ -45,11 +45,10 @@ namespace LegionRuntime {
                 unique_id);
       }
 
-      static inline void log_processor(IDType unique_id, IDType util_id, 
-                                       unsigned kind)
+      static inline void log_processor(IDType unique_id, unsigned kind)
       {
-        log_spy(LEVEL_INFO, "Processor " IDFMT " " IDFMT " %u", 
-                unique_id, util_id, kind);
+        log_spy(LEVEL_INFO, "Processor " IDFMT " %u", 
+                unique_id, kind);
       }
 
       static inline void log_memory(IDType unique_id, size_t capacity)
@@ -163,6 +162,20 @@ namespace LegionRuntime {
                                             UniqueID unique_id)
       {
         log_spy(LEVEL_INFO,"Copy Operation %llu %llu",
+            context, unique_id);
+      }
+
+      static inline void log_acquire_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy(LEVEL_INFO,"Acquire Operation %llu %llu",
+            context, unique_id);
+      }
+
+      static inline void log_release_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy(LEVEL_INFO,"Release Operation %llu %llu",
             context, unique_id);
       }
 

@@ -6138,6 +6138,20 @@ namespace LegionRuntime {
         // Pass back our created and deleted operations
         if (!top_level_task)
           return_privilege_state(parent_ctx);
+#ifdef DEBUG_HIGH_LEVEL
+        else
+        {
+          // Pass back the leaked top-level regions so that the outtermost
+          // context knows how to clear its state when it is cleaning up
+          // Only need to do this in debug case since it won't matter otherwise
+          RemoteTask *outer = static_cast<RemoteTask*>(parent_ctx);
+          for (std::set<LogicalRegion>::const_iterator it = 
+                created_regions.begin(); it != created_regions.end(); it++)
+          {
+            outer->add_top_region(*it);
+          }
+        }
+#endif
 
         // The future has already been set so just trigger it
         result.impl->complete_future();
@@ -6155,7 +6169,7 @@ namespace LegionRuntime {
         pack_remote_complete(rez);
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
-      // Invalidate any state that we had 
+      // Invalidate any state that we had if we didn't already
       if (context.exists() && (!is_leaf() || (num_virtual_mappings > 0)))
         invalidate_region_tree_contexts();
 #ifdef LEGION_PROF

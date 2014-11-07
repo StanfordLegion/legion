@@ -278,6 +278,13 @@ extern "C" {
    * @see LegionRuntime::HighLevel::Coloring
    */
   void
+  legion_coloring_ensure_color(legion_coloring_t handle,
+                               legion_color_t color);
+
+  /**
+   * @see LegionRuntime::HighLevel::Coloring
+   */
+  void
   legion_coloring_add_point(legion_coloring_t handle,
                             legion_color_t color,
                             legion_ptr_t point);

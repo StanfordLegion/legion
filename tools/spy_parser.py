@@ -24,7 +24,7 @@ import sys, re
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
 # Logger calls for the shape of the machine
 utility_pat             = re.compile(prefix+"Utility (?P<pid>[0-9a-f]+)")
-processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<util>[0-9a-f]+) (?P<kind>[0-9]+)")
+processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
 memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+)")
 proc_mem_pat            = re.compile(prefix+"Processor Memory (?P<pid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
 mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (?P<mtwo>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
@@ -45,6 +45,8 @@ mapping_pat             = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (
 close_pat               = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fence_pat               = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat             = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+acquire_op_pat          = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+release_op_pat          = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 deletion_pat            = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 index_slice_pat         = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
 slice_slice_pat         = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
@@ -85,7 +87,7 @@ def parse_log_file(file_name, state):
             continue
         m = processor_pat.match(line)
         if m <> None:
-            if not state.add_processor(int(m.group('pid'),16), int(m.group('util'),16), int(m.group('kind'))):
+            if not state.add_processor(int(m.group('pid'),16), int(m.group('kind'))):
                 replay_lines.append(line)
             continue
         m = memory_pat.match(line)
@@ -164,6 +166,16 @@ def parse_log_file(file_name, state):
         m = copy_op_pat.match(line)
         if m <> None:
             if not state.add_copy_op(int(m.group('ctx')), int(m.group('uid'))):
+                replay_lines.append(line)
+            continue
+        m = acquire_op_pat.match(line)
+        if m <> None:
+            if not state.add_acquire_op(int(m.group('ctx')), int(m.group('uid'))):
+                replay_lines.append(line)
+            continue
+        m = release_op_pat.match(line)
+        if m <> None:
+            if not state.add_release_op(int(m.group('ctx')), int(m.group('uid'))):
                 replay_lines.append(line)
             continue
         m = deletion_pat.match(line)
@@ -258,7 +270,7 @@ def parse_log_file(file_name, state):
         for line in replay_lines:
             m = processor_pat.match(line)
             if m <> None:
-                if state.add_processor(int(m.group('pid'),16), int(m.group('util'),16), int(m.group('kind'))):
+                if state.add_processor(int(m.group('pid'),16), int(m.group('kind'))):
                     to_delete.add(line)
                 continue
             m = proc_mem_pat.match(line)

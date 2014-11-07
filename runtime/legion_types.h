@@ -87,7 +87,6 @@ namespace LegionRuntime {
     enum {
       INIT_FUNC_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
       SHUTDOWN_FUNC_ID      = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      SCHEDULER_ID          = LowLevel::Processor::TASK_ID_PROCESSOR_IDLE,
       HLR_TASK_ID           = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
       TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
     };

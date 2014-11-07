@@ -95,7 +95,7 @@ def compute_dependence_type(req1, req2):
             else:
                 return check_for_anti_dependence(req1,req2,TRUE_DEPENDENCE)
         elif req1.is_simult() or req2.is_simult():
-            return check_for_anti_dependence(req1,req2,SIMULTANEOUSE_DEPENDENCE)
+            return check_for_anti_dependence(req1,req2,SIMULTANEOUS_DEPENDENCE)
         elif req1.is_relaxed() and req2.is_relaxed():
             return check_for_anti_dependence(req1,req2,SIMULTANEOUS_DEPENDENCE)
         # Should never get here
@@ -104,15 +104,13 @@ def compute_dependence_type(req1, req2):
 
 
 class Processor(object):
-    def __init__(self, state, uid, util, kind):
+    def __init__(self, state, uid, kind):
         self.state = state
         self.uid = uid
-        self.utility = util
         self.kind = kind
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
         self.executed_tasks = list()
-        util.add_constituent(self)
 
     def add_memory(self, mem, bandwidth, latency):
         assert mem not in self.mem_latency
@@ -128,8 +126,16 @@ class UtilityProcessor(object):
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
-        self.kind = UTIL_PROC 
+        self.kind = UTIL_PROC
         self.constituents = set()
+        self.mem_latency = dict()
+        self.mem_bandwidth = dict()
+
+    def add_memory(self, mem, bandwidth, latency):
+        assert mem not in self.mem_latency
+        assert mem not in self.mem_bandwidth
+        self.mem_latency[mem] = latency
+        self.mem_bandwidth[mem] = bandwidth
 
     def add_constituent(self, proc):
         assert proc not in self.constituents
@@ -161,13 +167,13 @@ class Memory(object):
         self.mem_bandwidth[mem] = bandwidth
         self.mem_latency[mem] = latency
 
-    def add_physical_instance(self, inst):
-        assert inst.uid not in self.physical_instances
-        self.physical_instances[inst.uid] = inst
+    #def add_physical_instance(self, inst):
+    #    assert inst.uid not in self.physical_instances
+    #    self.physical_instances[inst.uid] = inst
 
-    def add_reduction_instance(self, inst):
-        assert inst.uid not in self.reduction_instances
-        self.reduction_instances[inst.uid] = inst
+    #def add_reduction_instance(self, inst):
+    #    assert inst.uid not in self.reduction_instances
+    #    self.reduction_instances[inst.uid] = inst
 
     def print_timeline(self):
         name = "memory_"+str(self.uid)+"_timeline"
@@ -549,8 +555,7 @@ class SingleTask(object):
                         if self.state.is_aliased(index1, index2):
                             def record_visit(node, traverser):
                                 # Get the last instance of the traverser
-                                last_idx = len(traverser.instance_stack) - 1
-                                last_inst = traverser.instance_stack[last_idx]
+                                last_inst = traverser.instance_stack[-1]
                                 # See if we have visited this node in this context before  
                                 if node in traverser.visited:
                                     contexts = traverser.visited[node]
@@ -601,9 +606,8 @@ class SingleTask(object):
                                     return False
                                 # Check to see if we have the matching
                                 # manager on the stack
-                                last_idx = len(traverser.instance_stack) - 1
-                                assert last_idx >= 0
-                                last_inst = traverser.instance_stack[last_idx]
+                                assert len(traverser.instance_stack) >= 1
+                                last_inst = traverser.instance_stack[-1]
                                 if ((last_inst == node.dst_inst) and 
                                     (traverser.field in node.fields)):
                                     traverser.instance_stack.append(node.src_inst)
@@ -1053,6 +1057,89 @@ class CopyOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
+class AcquireOp(object):
+    def __init__(self, state, uid, ctx):
+        assert ctx is not None
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.reqs = dict()
+        self.logical_marked = False
+
+    def add_requirement(self, idx, req):
+        assert idx not in self.reqs
+        self.reqs[idx] = req
+
+    def get_requirement(self, idx):
+        assert idx in self.reqs
+        return self.reqs[idx]
+
+    def add_req_field(self, idx, fid):
+        assert idx in self.reqs
+        self.reqs[idx].add_field(fid)
+
+    def unmark_logical(self):
+        self.logical_marked = False
+
+    def find_dependences(self, op):
+        for idx,req in self.reqs.iteritems():
+            op.find_individual_dependences(self, req)
+
+    def find_individual_dependences(self, other_op, other_req):
+        for idx,req in self.reqs.iteritems():
+            dtype = self.state.compute_dependence(other_req, req)
+            if is_mapping_dependence(dtype):
+                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def compute_dependence_diff(self, verbose):
+        # do nothing for the moment
+        pass
+
+    def check_data_flow(self):
+        # do nothing for the moment
+        pass
+
+class ReleaseOp(object):
+    def __init__(self, state, uid, ctx):
+        assert ctx is not None
+        self.state = state
+        self.uid = uid
+        self.ctx = ctx
+        self.reqs = dict()
+        self.logical_marked = False
+
+    def add_requirement(self, idx, req):
+        assert idx not in self.reqs
+        self.reqs[idx] = req
+
+    def get_requirement(self, idx):
+        assert idx in self.reqs
+        return self.reqs[idx]
+
+    def add_req_field(self, idx, fid):
+        assert idx in self.reqs
+        self.reqs[idx].add_field(fid)
+
+    def unmark_logical(self):
+        self.logical_marked = False
+
+    def find_dependences(self, op):
+        for idx,req in self.reqs.iteritems():
+            op.find_individual_dependences(self, req)
+
+    def find_individual_dependences(self, other_op, other_req):
+        for idx,req in self.reqs.iteritems():
+            dtype = self.state.compute_dependence(other_req, req)
+            if is_mapping_dependence(dtype):
+                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def compute_dependence_diff(self, verbose):
+        # do nothing for the moment
+        pass
+
+    def check_data_flow(self):
+        # do nothing for the moment
+        pass
 
 class Close(object):
     def __init__(self, state, uid, ctx):
@@ -1860,11 +1947,9 @@ class State(object):
         assert pid not in self.utilities
         self.utilities[pid] = UtilityProcessor(self, pid)
 
-    def add_processor(self, pid, util, kind):
+    def add_processor(self, pid, kind):
         assert pid not in self.processors
-        if util not in self.utilities:
-            return False
-        self.processors[pid] = Processor(self, pid, self.utilities[util], kind)
+        self.processors[pid] = Processor(self, pid, kind)
         return True
 
     def add_memory(self, mid, capacity):
@@ -1872,12 +1957,16 @@ class State(object):
         self.memories[mid] = Memory(self, mid, capacity)
 
     def set_proc_mem(self, pid, mid, bandwidth, latency):
-        if pid not in self.processors:
+        if pid not in self.processors and pid not in self.utilities:
             return False
         if mid not in self.memories:
             return False
-        self.processors[pid].add_memory(self.memories[mid], bandwidth, latency)
-        self.memories[mid].add_processor(self.processors[pid], bandwidth, latency)
+        if pid in self.processors:
+            processor = self.processors[pid]
+        else: # pid in self.utilities
+            processor = self.utilities[pid]
+        processor.add_memory(self.memories[mid], bandwidth, latency)
+        self.memories[mid].add_processor(processor, bandwidth, latency)
         return True
 
     def set_mem_mem(self, mem1, mem2, bandwidth, latency):
@@ -1981,6 +2070,22 @@ class State(object):
         if ctx not in self.ops:
             return False
         self.ops[uid] = CopyOp(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def add_acquire_op(self, ctx, uid):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = AcquireOp(self, uid, self.ops[ctx])
+        self.ops[ctx].add_operation(self.ops[uid])
+        return True
+
+    def add_release_op(self, ctx, uid):
+        assert uid not in self.ops
+        if ctx not in self.ops:
+            return False
+        self.ops[uid] = ReleaseOp(self, uid, self.ops[ctx])
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
@@ -2089,7 +2194,7 @@ class State(object):
         e1 = self.get_event(EventHandle(startid,startgen))
         e2 = self.get_event(EventHandle(termid,termgen))
         region = self.get_index_node(True, index).get_instance(tree)
-        copy = Copy(self, self.instances[srcman], self.instances[dstman], 
+        copy = Copy(self, self.instances[srcman][-1], self.instances[dstman][-1], 
                              e1, e2, region, redop, mask, self.copy_uid)
         self.copy_uid = self.copy_uid + 1
         self.copies.add(copy)
@@ -2098,8 +2203,8 @@ class State(object):
         return True
 
     def add_physical_instance(self, iid, mem, index, field, tree):
-        if iid in self.instances:
-            return True
+        #if iid in self.instances:
+        #    return True
         if mem not in self.memories:
             return False
         if index not in self.index_space_nodes:
@@ -2109,11 +2214,15 @@ class State(object):
         if tree not in self.region_trees:
             return False
         region = self.get_index_node(True, index).get_instance(tree)
-        self.instances[iid] = PhysicalInstance(self, iid, self.memories[mem], region)
+        inst = PhysicalInstance(self, iid, self.memories[mem], region)
+        if iid in self.instances:
+            self.instances[iid].append(inst)
+        else:
+            self.instances[iid] = [inst]
         return True
 
     def add_reduction_instance(self, iid, mem, index, field, tree, fold, indirect):
-        assert iid not in self.instances
+        #assert iid not in self.instances
         if mem not in self.memories:
             return False
         if index not in self.index_space_nodes:
@@ -2123,8 +2232,12 @@ class State(object):
         if tree not in self.region_trees:
             return False
         region = self.get_index_node(True, index).get_instance(tree)
-        self.instances[iid] = ReductionInstance(self, iid, self.memories[mem],
-                                                region, fold, indirect)
+        inst = ReductionInstance(self, iid, self.memories[mem],
+                                 region, fold, indirect)
+        if iid in self.instances:
+            self.instances[iid].append(inst)
+        else:
+            self.instances[iid] = [inst]
         return True
 
     def add_op_user(self, uid, idx, iid):
@@ -2132,8 +2245,8 @@ class State(object):
             return False
         if iid not in self.instances:
             return False
-        self.instances[iid].add_op_user(self.ops[uid], idx)
-        self.ops[uid].add_instance(idx, self.instances[iid])
+        self.instances[iid][-1].add_op_user(self.ops[uid], idx)
+        self.ops[uid].add_instance(idx, self.instances[iid][-1])
         return True
 
     def add_event_dependence(self, id1, gen1, id2, gen2):
@@ -2224,80 +2337,51 @@ class State(object):
             op.check_data_flow()
 
     def check_instance_dependences(self):
-        for instance in self.instances.itervalues():
-            print "Checking physical instance "+str(instance.iid)+"..."
-            for field, op_users in instance.op_users.iteritems():
-                for op1, reqs1 in op_users.iteritems():
-                    for req1 in reqs1:
-                        for op2, reqs2 in op_users.iteritems():
-                            for req2 in reqs2:
-                                if op1 != op2 and self.compute_dependence(req1, req2) in (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
-                                    def traverse_event(node, traverser):
-                                        if traverser.found:
-                                            return False
-                                        return True
-                                    def traverse_task(node, traverser):
-                                        if node == traverser.target:
-                                            traverser.found = True
-                                        if traverser.found:
-                                            return False
-                                        return True
-                                    def traverse_map(node, traverser):
-                                        if node == traverser.target:
-                                            traverser.found = True
-                                        if traverser.found:
-                                            return False
-                                        return True
-                                    def traverse_close(node, traverser):
-                                        if node == traverser.target:
-                                            traverser.found = True
-                                        if traverser.found:
-                                            return False
-                                        return True
-                                    def traverse_copy(node, traverser):
-                                        if node == traverser.target:
-                                            traverser.found = True
-                                        if traverser.found:
-                                            return False
-                                        return True
-                                    def post_traverse_event(node, traverser):
-                                        pass
-                                    def post_traverse_task(node, traverser):
-                                        pass
-                                    def post_traverse_map(node, traverser):
-                                        pass
-                                    def post_traverse_close(node, traverser):
-                                        pass
-                                    def post_traverse_copy(node, traverser):
-                                        pass
-                                    traverser = EventGraphTraverser(False, True, True,
-                                        self.get_next_traverser_gen(), traverse_event,
-                                        traverse_task, traverse_map, traverse_close,
-                                        traverse_copy, post_traverse_event,
-                                        post_traverse_task, post_traverse_map,
-                                        post_traverse_close, post_traverse_copy)
-                                    traverser.found = False
-                                    traverser.target = op1
-                                    # Traverse and see if we find op1 from op2
-                                    op2.event_graph_traverse(traverser)
-                                    if not traverser.found:
+        for versions in self.instances.itervalues():
+            for instance in versions:
+                print "Checking physical instance "+str(instance.iid)+"..."
+                for field, op_users in instance.op_users.iteritems():
+                    for op1, reqs1 in op_users.iteritems():
+                        for req1 in reqs1:
+                            for op2, reqs2 in op_users.iteritems():
+                                for req2 in reqs2:
+                                    if op1 != op2 and self.compute_dependence(req1, req2) in (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
+                                        def traverse_event(node, traverser):
+                                            if traverser.found:
+                                                return False
+                                            return True
+                                        def traverse_op(node, traverser):
+                                            traverser.found = traverser.target == node or traverser.found
+                                            return not traverser.found
+                                        def post_traverse(node, traverser):
+                                            pass
+                                        traverser = EventGraphTraverser(False, True, True,
+                                                self.get_next_traverser_gen(), traverse_event,
+                                                traverse_op, traverse_op, traverse_op, traverse_op,
+                                                post_traverse, post_traverse, post_traverse,
+                                                post_traverse, post_traverse)
                                         traverser.found = False
-                                        traverser.target = op2
-                                        traverser.generation = self.get_next_traverser_gen()
-                                        # Otherwise flip around and try to find op2 from op1
-                                        op1.event_graph_traverse(traverser)
+                                        traverser.target = op1
+                                        # Traverse and see if we find op1 from op2
+                                        op2.event_graph_traverse(traverser)
                                         if not traverser.found:
-                                            print "   ERROR: Potential data race between "+\
-                                                "requirement "+str(req1.index)+" of "+\
-                                                op1.get_name()+" (UID "+str(op1.uid)+") "+\
-                                                "and requirement "+str(req2.index)+" of "+\
-                                                op2.get_name()+" (UID "+str(op2.uid)+") "+\
-                                                "for field "+str(field)
-                                            if self.verbose:
-                                                print "      First Requirement:"
-                                                req1.print_requirement()
-                                                print "      Second Requirement:"
-                                                req2.print_requirement()
+                                            traverser.found = False
+                                            traverser.target = op2
+                                            traverser.generation = self.get_next_traverser_gen()
+                                            # Otherwise flip around and try to find op2 from op1
+                                            op1.event_graph_traverse(traverser)
+                                            if not traverser.found:
+                                                print "   ERROR: Potential data race between "+\
+                                                        "requirement "+str(req1.index)+" of "+\
+                                                        op1.get_name()+" (UID "+str(op1.uid)+") "+\
+                                                        "and requirement "+str(req2.index)+" of "+\
+                                                        op2.get_name()+" (UID "+str(op2.uid)+") "+\
+                                                        "for field "+str(field)
+                                                if self.verbose:
+                                                    print "      First Requirement:"
+                                                    req1.print_requirement()
+                                                    print "      Second Requirement:"
+                                                    req2.print_requirement()
 
     def print_pictures(self, path):
         components = list()

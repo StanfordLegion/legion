@@ -974,7 +974,12 @@ namespace LegionRuntime {
     
     class PreemptableThread {
     public:
-      PreemptableThread(void) {}
+      PreemptableThread(void) 
+      {
+#ifdef EVENT_GRAPH_TRACE
+        enclosing_stack.push_back(Event::NO_EVENT);
+#endif
+      }
       virtual ~PreemptableThread(void) {}
 
       void start_thread(size_t stack_size, int core_id, const char *debug_name);
@@ -983,6 +988,15 @@ namespace LegionRuntime {
 
       virtual Processor get_processor(void) const = 0;
 
+#ifdef EVENT_GRAPH_TRACE
+      inline Event find_enclosing(void) 
+      { assert(!enclosing_stack.empty()); return enclosing_stack.back(); }
+      inline void start_enclosing(const Event &term_event)
+      { enclosing_stack.push_back(term_event); }
+      inline void finish_enclosing(void)
+      { assert(enclosing_stack.size() > 1); enclosing_stack.pop_back(); }
+#endif
+
     protected:
       static void *thread_entry(void *data);
 
@@ -990,7 +1004,13 @@ namespace LegionRuntime {
 
       virtual void sleep_on_event(Event wait_for, bool block = false) = 0;
 
+      void run_task(Task *task, Processor actual_proc = Processor::NO_PROC);
+
       pthread_t thread;
+
+#ifdef EVENT_GRAPH_TRACE
+      std::deque<Event> enclosing_stack; 
+#endif
     };
 
     class UtilityProcessor : public Processor::Impl {
@@ -1377,6 +1397,9 @@ namespace LegionRuntime {
     protected:
     public:
       static Runtime *runtime;
+#ifdef NODE_LOGGING
+      static const char *prefix;
+#endif
 
       std::vector<Realm::Module *> modules;
       Node *nodes;

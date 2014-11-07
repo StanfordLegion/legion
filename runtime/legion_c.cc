@@ -81,6 +81,15 @@ legion_coloring_destroy(legion_coloring_t handle_)
 }
 
 void
+legion_coloring_ensure_color(legion_coloring_t handle_,
+                             legion_color_t color)
+{
+  Coloring *handle = CObjectWrapper::unwrap(handle_);
+
+  (*handle)[color];
+}
+
+void
 legion_coloring_add_point(legion_coloring_t handle_,
                           legion_color_t color,
                           legion_ptr_t point_)

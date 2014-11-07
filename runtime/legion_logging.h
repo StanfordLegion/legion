@@ -703,9 +703,6 @@ namespace LegionRuntime {
         }
         ProcessorProfiler &p = get_profiler();
         msgs_processor.push_back(LogMsgProcessor(sid, processor));
-
-        Processor utility_proc = processor.get_utility_processor();
-        initialize_legion_logging(sid, utility_proc);
       }
       // Sequential
       // Called in Runtime constructor in runtime.cc

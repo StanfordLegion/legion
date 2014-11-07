@@ -83,7 +83,6 @@ ifeq ($(findstring titan,$(shell uname -n)),titan)
 GCC=CC
 CC_FLAGS += -march=bdver1 -DGASNETI_BUG1389_WORKAROUND=1
 GASNET = ${GASNET_ROOT}
-#GASNET=/ccs/home/mebauer/gasnet-1.20.2-build
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
@@ -172,7 +171,7 @@ LD_FLAGS	+= -lgasnet-udp-par -lamudp
 endif
 
 #Extra options for MPI
-ifdef USE_MPI
+ifeq ($(strip $(USE_MPI)),1)
 CC 	:= mpicc
 CXX	:= mpicxx
 GCC	:= $(CXX)

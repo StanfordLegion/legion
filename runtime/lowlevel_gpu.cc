@@ -19,6 +19,8 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
+    GASNETT_THREADKEY_DEFINE(gpu_thread);
+
     extern Logger::Category log_gpu;
 
     class GPUJob : public Event::Impl::EventWaiter {
