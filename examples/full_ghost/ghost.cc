@@ -218,22 +218,22 @@ void top_level_task(const Task *task,
       // Left Ghost
       if (color == 0)
         spmd_launcher.add_region_requirement(
-            RegionRequirement(ghost_left[num_subregions-1], READ_ONLY,
-                              SIMULTANEOUS, ghost_left[num_subregions-1]));
+            RegionRequirement(ghost_right[num_subregions-1], READ_ONLY,
+                              SIMULTANEOUS, ghost_right[num_subregions-1]));
       else
         spmd_launcher.add_region_requirement(
-            RegionRequirement(ghost_left[color-1], READ_ONLY,
-                              SIMULTANEOUS, ghost_left[color-1]));
+            RegionRequirement(ghost_right[color-1], READ_ONLY,
+                              SIMULTANEOUS, ghost_right[color-1]));
       spmd_launcher.region_requirements[2].flags |= NO_ACCESS_FLAG;
       // Right Ghost
       if (color == (num_subregions-1))
         spmd_launcher.add_region_requirement(
-            RegionRequirement(ghost_right[0], READ_ONLY,
-                              SIMULTANEOUS, ghost_right[0]));
+            RegionRequirement(ghost_left[0], READ_ONLY,
+                              SIMULTANEOUS, ghost_left[0]));
       else
         spmd_launcher.add_region_requirement(
-            RegionRequirement(ghost_right[color+1], READ_ONLY,
-                              SIMULTANEOUS, ghost_right[color+1]));
+            RegionRequirement(ghost_left[color+1], READ_ONLY,
+                              SIMULTANEOUS, ghost_left[color+1]));
       spmd_launcher.region_requirements[3].flags |= NO_ACCESS_FLAG;
       for (unsigned idx = 0; idx < 4; idx++)
         spmd_launcher.add_field(idx, FID_GHOST);
@@ -343,6 +343,7 @@ void spmd_task(const Task *task,
       AcquireLauncher acquire_launcher(ghosts_lr[idx],
                                        ghosts_lr[idx],
                                        regions[2+idx]);
+      acquire_launcher.add_field(FID_GHOST);
       // The acquire operation needs to wait for the data to
       // be ready to consume, so wait on the ready barrier.
       acquire_launcher.add_wait_barrier(args->wait_ready[idx]);
@@ -375,6 +376,7 @@ void spmd_task(const Task *task,
       ReleaseLauncher release_launcher(ghosts_lr[idx],
                                        ghosts_lr[idx],
                                        regions[2+idx]);
+      release_launcher.add_field(FID_GHOST);
       // On all but the last iteration we need to signal that
       // we have now consumed the ghost instances and it is
       // safe to issue the next copy.
@@ -501,13 +503,17 @@ int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
   HighLevelRuntime::register_legion_task<spmd_task>(SPMD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*single*/);
+      Processor::LOC_PROC, true/*single*/, true/*single*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(), "spmd");
   HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*single*/);
+      Processor::LOC_PROC, true/*single*/, true/*single*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "init");
   HighLevelRuntime::register_legion_task<stencil_field_task>(STENCIL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*single*/);
+      Processor::LOC_PROC, true/*single*/, true/*single*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "stencil");
 
   return HighLevelRuntime::start(argc, argv);
 }
