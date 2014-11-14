@@ -7392,6 +7392,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Barrier result = Barrier::create_barrier(participants);
+#ifdef LEGION_SPY
+      LegionSpy::log_phase_barrier(result);
+#endif
       return PhaseBarrier(result, participants);
     }
 

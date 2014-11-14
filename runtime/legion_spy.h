@@ -327,6 +327,12 @@ namespace LegionRuntime {
         log_spy(LEVEL_INFO, "Op Instance User %llu %u " IDFMT "", 
                               user, idx, inst_id);
       }
+
+      static inline void log_phase_barrier(Barrier barrier)
+      {
+        log_spy(LEVEL_INFO,"Phase Barrier " IDFMT, barrier.id);
+      }
+
     };
 
     class TreeStateLogger {

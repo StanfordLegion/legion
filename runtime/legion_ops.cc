@@ -2904,7 +2904,7 @@ namespace LegionRuntime {
                 copy_complete_event, it->phase_barrier);
 #endif
 #ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(copy_complete_event, 
+            LegionSpy::log_event_dependence(completion_event, 
                                             it->phase_barrier);
 #endif
           }
@@ -2920,6 +2920,10 @@ namespace LegionRuntime {
         LegionLogging::log_event_dependence(Machine::get_executing_processor(),
                                             copy_complete_event,
                                             completion_event);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(copy_complete_event,
+                                        completion_event);
 #endif
         // Handle the case for marking when the copy completes
         if (!copy_complete_event.has_triggered())
@@ -3981,6 +3985,14 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region);
+      if (launcher.fields.empty())
+      {
+        log_task(LEVEL_WARNING,"WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
+                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                               "FIELDS! DID YOU FORGET THEM?!?",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id());
+      }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
       parent_region = launcher.parent_region;
@@ -4003,6 +4015,10 @@ namespace LegionRuntime {
                          it->participants));
 #else
         arrive_barriers.push_back(*it);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(it->phase_barrier,
+                                arrive_barriers.back().phase_barrier);
 #endif
       }
       map_id = launcher.map_id;
@@ -4187,7 +4203,29 @@ namespace LegionRuntime {
         }
       }
       Event acquire_complete = Event::merge_events(acquire_preconditions);
-        
+#ifdef LEGION_SPY
+      if (!acquire_complete.exists())
+      {
+        UserEvent new_acquire_complete = UserEvent::create_user_event();
+        new_acquire_complete.trigger();
+        acquire_complete = new_acquire_complete;
+      }
+      LegionSpy::log_event_dependences(acquire_preconditions, acquire_complete);
+      for (std::vector<PhaseBarrier>::const_iterator it =
+          wait_barriers.begin(); it != wait_barriers.end(); it++)
+      {
+        LegionSpy::log_event_dependence(it->phase_barrier, acquire_complete);
+      }
+      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
+          acquire_complete);
+      LegionSpy::log_op_events(unique_op_id, acquire_complete,
+          completion_event);
+      LegionSpy::log_implicit_dependence(acquire_complete,
+          parent_ctx->get_task_completion());
+      LegionSpy::log_op_user(unique_op_id, 0,
+          result.get_handle().get_view()->get_manager()->get_instance().id);
+      LegionSpy::log_event_dependence(acquire_complete, completion_event);
+#endif
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -4195,6 +4233,10 @@ namespace LegionRuntime {
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
           it->phase_barrier.arrive(1/*count*/, acquire_complete);
+#ifdef LEGION_SPY
+          LegionSpy::log_event_dependence(completion_event,
+              it->phase_barrier);
+#endif
         }
       }
       
@@ -4460,6 +4502,14 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region);
+      if (launcher.fields.empty())
+      {
+        log_task(LEVEL_WARNING,"WARNING: PRIVILEGE FIELDS OF RELEASE OPERATION"
+                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                               "FIELDS! DID YOU FORGET THEM?!?",
+                               parent_ctx->variants->name, 
+                               parent_ctx->get_unique_task_id());
+      }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
       parent_region = launcher.parent_region;
@@ -4481,6 +4531,10 @@ namespace LegionRuntime {
                          it->participants));
 #else
         arrive_barriers.push_back(*it);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(it->phase_barrier,
+                                arrive_barriers.back().phase_barrier);
 #endif
       }
       map_id = launcher.map_id;
@@ -4645,13 +4699,37 @@ namespace LegionRuntime {
         }
       }
       Event release_complete = Event::merge_events(release_preconditions);
-      
+#ifdef LEGION_SPY
+      if (!release_complete.exists())
+      {
+        UserEvent new_release_complete = UserEvent::create_user_event();
+        new_release_complete.trigger();
+        release_complete = new_release_complete;
+      }
+      LegionSpy::log_event_dependences(release_preconditions, release_complete);
+      for (std::vector<PhaseBarrier>::const_iterator it =
+          wait_barriers.begin(); it != wait_barriers.end(); it++)
+      {
+        LegionSpy::log_event_dependence(it->phase_barrier, release_complete);
+      }
+      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
+          release_complete);
+      LegionSpy::log_op_events(unique_op_id, release_complete,
+          completion_event);
+      LegionSpy::log_implicit_dependence(release_complete,
+          parent_ctx->get_task_completion());
+      LegionSpy::log_event_dependence(release_complete, completion_event);
+#endif
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
+#ifdef LEGION_SPY
+          LegionSpy::log_event_dependence(completion_event,
+              it->phase_barrier.get_previous_phase());
+#endif
           it->phase_barrier.arrive(1/*count*/, release_complete);
         }
       }

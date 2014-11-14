@@ -53,6 +53,9 @@ slice_slice_pat         = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<
 slice_point_pat         = re.compile(prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 point_point_pat         = re.compile(prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 
+# Logger calls for phase barriers
+phase_barrier_pat       = re.compile(prefix+"Phase Barrier (?P<uid>[0-9a-f]+)")
+
 # Logger calls for logical mapping dependence analysis
 requirement_pat         = re.compile(prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) (?P<ispace>[0-9a-f]+) (?P<fspace>[0-9]+) (?P<tid>[0-9]+) (?P<priv>[0-9]+) (?P<coher>[0-9]+) (?P<redop>[0-9]+)")
 req_field_pat           = re.compile(prefix+"Logical Requirement Field (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
@@ -201,6 +204,12 @@ def parse_log_file(file_name, state):
         m = point_point_pat.match(line)
         if m <> None:
             if not state.add_point_point(int(m.group('point1')),int(m.group('point2'))):
+                replay_lines.append(line)
+            continue
+        # Phase Barriers
+        m = phase_barrier_pat.match(line)
+        if m <> None:
+            if not state.add_phase_barrier(int(m.group('uid'), 16)):
                 replay_lines.append(line)
             continue
         # Mapping dependence analysis
