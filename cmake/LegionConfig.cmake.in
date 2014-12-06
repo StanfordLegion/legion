@@ -1,4 +1,5 @@
 set(Legion_LOG_LEVEL 6 CACHE STRING "The maximum output log level to use")
+mark_as_advanced(Legion_LOG_LEVEL)
 if(NOT (Legion_LOG_LEVEL LESS "7" AND Legion_LOG_LEVEL GREATER "-1"))
   set(Legion_LOG_LEVEL 6
     CACHE STRING "The maximum output log level to use" FORCE
@@ -12,6 +13,8 @@ endif()
 
 # Create a dummy library to always be able to use legion-rt but with the
 # appropriate dependencies to link the correctly specified log level
-add_library(legion-rt INTERFACE)
-target_link_libraries(legion-rt INTERFACE ${Legion_TARGET})
+if(NOT TARGET legion-rt)
+  add_library(legion-rt INTERFACE)
+  target_link_libraries(legion-rt INTERFACE ${Legion_TARGET})
+endif()
 unset(Legion_TARGET)
