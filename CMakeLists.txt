@@ -35,7 +35,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(BUILD_SHARED_LIBS "Whether to build shared or static libraries" OFF)
-option(BUILD_EXAMPLES "Whether or not to build examples" ON)
 
 set(LEGION_INSTALL_CMAKE_DIR "lib/cmake/Legion"
   CACHE STRING "The install location for the CMake package config files"
@@ -68,7 +67,12 @@ install(FILES ${Legion_BINARY_DIR}/LegionConfig.cmake
 # sub-projects
 set(Legion_DIR ${Legion_BINARY_DIR})
 
+option(BUILD_EXAMPLES "Whether or not to build tutorial examples" ON)
 if(BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
+option(BUILD_APPS "Whether or not to build application examples" ON)
+if(BUILD_APPS)
+  add_subdirectory(apps)
+endif()
