@@ -1,0 +1,2 @@
+add_executable(05_physical_regions_and_accessors physical_regions.cc)
+target_link_libraries(05_physical_regions_and_accessors legion-rt)

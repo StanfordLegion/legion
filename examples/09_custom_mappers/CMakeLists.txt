@@ -1,0 +1,2 @@
+add_executable(09_custom_mappers custom_mapper.cc)
+target_link_libraries(09_custom_mappers legion-rt)
