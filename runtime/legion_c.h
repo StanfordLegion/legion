@@ -1099,6 +1099,16 @@ extern "C" {
     const char *task_name /* = NULL*/,
     legion_task_pointer_t task_pointer);
 
+  // -----------------------------------------------------------------------
+  // Timing Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::TimeStamp::get_current_time_in_micros()
+   */
+  unsigned long long
+  legion_get_current_time_in_micros(void);
+
 #ifdef __cplusplus
 }
 #endif

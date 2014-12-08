@@ -2744,6 +2744,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::issue_frame(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->issue_frame(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap HighLevelRuntime::execute_must_epoch(Context ctx,
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -2813,6 +2820,128 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->replace_default_mapper(mapper, proc);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(IndexSpace handle,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(IndexPartition handle,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(FieldSpace handle,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(FieldSpace handle,
+                                                       FieldID fid,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, fid, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(LogicalRegion handle,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_semantic_information(LogicalPartition handle,
+                                                       SemanticTag tag,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(handle, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(IndexSpace handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(IndexPartition handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(FieldSpace handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(FieldSpace handle,
+                                                         FieldID fid,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(handle, fid, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(LogicalRegion handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_semantic_information(LogicalPartition part,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(part, tag, result, size);
     }
 
     //--------------------------------------------------------------------------

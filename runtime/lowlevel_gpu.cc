@@ -22,6 +22,9 @@ namespace LegionRuntime {
     GASNETT_THREADKEY_DEFINE(gpu_thread);
 
     extern Logger::Category log_gpu;
+#ifdef EVENT_GRAPH_TRACE
+    extern Logger::Category log_event_graph;
+#endif
 
     class GPUJob : public Event::Impl::EventWaiter {
     public:
@@ -142,7 +145,7 @@ namespace LegionRuntime {
 
       void thread_main(void)
       {
-	gasnett_threadkey_set(gpu_thread, this);
+	gasnett_threadkey_set(gpu_thread, gpu);
 
         // Push our context onto the stack
         CHECK_CU( cuCtxPushCurrent(proc_ctx) );
@@ -514,7 +517,32 @@ namespace LegionRuntime {
 	sprintf(argstr+2*i, "%02x", ((unsigned char *)args)[i]);
       if(arglen > 40) strcpy(argstr+80, "...");
       log_gpu(LEVEL_DEBUG, "task start: %d (%p) (%s)", func_id, fptr, argstr);
+
+      // make sure CUDA driver's state is ok before we start
+      assert(cudaGetLastError() == cudaSuccess);
+#ifdef EVENT_GRAPH_TRACE
+      assert(finish_event.exists());
+      gpu->start_enclosing(finish_event); 
+      unsigned long long start = TimeStamp::get_current_time_in_micros();
+#endif
       (*fptr)(args, arglen, gpu->me);
+#ifdef EVENT_GRAPH_TRACE
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      gpu->finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+                            finish_event.id, finish_event.gen,
+                            (stop - start));
+#endif
+
+      // check for any uncaught driver errors after the task finishes
+      {
+	cudaError_t result = cudaGetLastError();
+	if (result != cudaSuccess) {
+	  log_gpu.error("CUDA: uncaught driver error in task %d: %d (%s)",
+			func_id, result, cudaGetErrorString(result));
+	}
+      }
+
       log_gpu(LEVEL_DEBUG, "task end: %d (%p) (%s)", func_id, fptr, argstr);
     }
 
@@ -918,9 +946,16 @@ namespace LegionRuntime {
 
       // enqueue a GPU init job before we do anything else
       Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+#ifndef EVENT_GRAPH_TRACE
       if(it != task_id_table.end())
 	internal->enqueue_task(new GPUTask(this, Event::NO_EVENT,
 					  Processor::TASK_ID_PROCESSOR_INIT, 0, 0, 0));
+#else
+      enclosing_stack.push_back(Event::NO_EVENT);
+      if(it != task_id_table.end())
+        internal->enqueue_task(new GPUTask(this, Event::Impl::create_event(), 
+                                           Processor::TASK_ID_PROCESSOR_INIT, 0, 0, 0));
+#endif
 
       internal->create_gpu_thread(_stack_size);
     }
@@ -935,8 +970,8 @@ namespace LegionRuntime {
       void *tls_val = gasnett_threadkey_get(gpu_thread);
       // If this happens there is a case we're not handling
       assert(tls_val != NULL);
-      Internal *me = (Internal*)tls_val;
-      return me->get_processor();
+      GPUProcessor *gpu = (GPUProcessor*)tls_val;
+      return gpu->me;
     }
 
     void GPUProcessor::start_worker_thread(void)

@@ -138,6 +138,15 @@ namespace LegionRuntime {
       void enable_peer_access(GPUProcessor *peer);
       bool can_access_peer(GPUProcessor *peer) const;
       void handle_copies(void);
+#ifdef EVENT_GRAPH_TRACE
+    public:
+      inline Event find_enclosing(void)
+      { assert(!enclosing_stack.empty()); return enclosing_stack.back(); }
+      inline void start_enclosing(const Event &term_event)
+      { enclosing_stack.push_back(term_event); }
+      inline void finish_enclosing(void)
+      { assert(enclosing_stack.size() > 1); enclosing_stack.pop_back(); }
+#endif
     public:
       // Helper method for getting a thread's processor value
       static Processor get_processor(void);
@@ -153,6 +162,9 @@ namespace LegionRuntime {
 
       GPUProcessor::Internal *internal;
       std::set<GPUProcessor*> peer_gpus;
+#ifdef EVENT_GRAPH_TRACE
+      std::deque<Event> enclosing_stack;
+#endif
     };
 
     class GPUFBMemory : public Memory::Impl {

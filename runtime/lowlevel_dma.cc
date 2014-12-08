@@ -45,6 +45,7 @@ namespace LegionRuntime {
     Logger::Category log_dma("dma");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
+    extern Event find_enclosing_termination_event(void);
 #endif
 
     typedef std::pair<Memory, Memory> MemPair;
@@ -3785,9 +3786,11 @@ namespace LegionRuntime {
 
 	  Event ev = Event::Impl::create_event();
 #ifdef EVENT_GRAPH_TRACE
+          Event enclosing = find_enclosing_termination_event();
           log_event_graph.info("Copy Request: (" IDFMT ",%d) (" IDFMT ",%d) "
-                                IDFMT " " IDFMT "",
+                                "(" IDFMT ",%d) " IDFMT " " IDFMT "",
                                 ev.id, ev.gen, wait_on.id, wait_on.gen,
+                                enclosing.id, enclosing.gen,
                                 src_mem.id, dst_mem.id);
 #endif
 

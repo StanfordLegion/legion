@@ -1663,12 +1663,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(Processor proc, Processor::Kind kind,
-                                       Runtime *rt, unsigned min_out,
-                                       unsigned width, unsigned def_mappers,
-                                       bool no_steal, unsigned max_steals)
+                                       Runtime *rt, unsigned width, 
+                                       unsigned def_mappers, bool no_steal, 
+                                       unsigned max_steals)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        utility_proc(rt->find_utility_group()),
-        superscalar_width(width), min_outstanding(min_out), 
+        utility_proc(rt->find_utility_group()), superscalar_width(width), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         next_local_index(0),
         task_scheduler_enabled(false), pending_shutdown(false),
@@ -1701,8 +1700,8 @@ namespace LegionRuntime {
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
         proc_kind(Processor::LOC_PROC), utility_proc(Processor::NO_PROC),
-        superscalar_width(0), min_outstanding(0), 
-        stealing_disabled(false), max_outstanding_steals(0),next_local_index(0),
+        superscalar_width(0), stealing_disabled(false), 
+        max_outstanding_steals(0), next_local_index(0),
         task_scheduler_enabled(false), pending_shutdown(false),
         total_active_contexts(0)
     //--------------------------------------------------------------------------
@@ -2079,6 +2078,31 @@ namespace LegionRuntime {
       if (!messages.empty())
         send_mapper_messages(op->map_id, messages);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::invoke_mapper_configure_context(TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(task->map_id < mapper_objects.size());
+      assert(mapper_objects[task->map_id] != NULL);
+#endif
+      std::vector<MapperMessage> messages;
+      {
+        AutoLock m_lock(mapper_locks[task->map_id]);
+        inside_mapper_call[task->map_id] = true;
+        mapper_objects[task->map_id]->configure_context(task);
+        AutoLock g_lock(message_lock);
+        inside_mapper_call[task->map_id] = false;
+        if (!mapper_messages[task->map_id].empty())
+        {
+          messages = mapper_messages[task->map_id];
+          mapper_messages[task->map_id].clear();
+        }
+      }
+      if (!messages.empty())
+        send_mapper_messages(task->map_id, messages);
     }
 
     //--------------------------------------------------------------------------
@@ -3571,6 +3595,54 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_index_space_semantic_info(Serializer &rez, 
+                                                        bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_index_partition_semantic_info(Serializer &rez, 
+                                                            bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_PARTITION_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_field_space_semantic_info(Serializer &rez, 
+                                                        bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_field_semantic_info(Serializer &rez, 
+                                                  bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FIELD_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_logical_region_semantic_info(Serializer &rez, 
+                                                           bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_LOGICAL_REGION_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_logical_partition_semantic_info(Serializer &rez, 
+                                                              bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_LOGICAL_PARTITION_SEMANTIC_INFO, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::package_message(Serializer &rez, MessageKind k,
                                          bool flush)
     //--------------------------------------------------------------------------
@@ -4011,6 +4083,36 @@ namespace LegionRuntime {
               runtime->handle_mapper_message(derez);
               break;
             }
+          case SEND_INDEX_SPACE_SEMANTIC_INFO:
+            {
+              runtime->handle_index_space_semantic_info(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_SEMANTIC_INFO:
+            {
+              runtime->handle_index_partition_semantic_info(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_SEMANTIC_INFO:
+            {
+              runtime->handle_field_space_semantic_info(derez);
+              break;
+            }
+          case SEND_FIELD_SEMANTIC_INFO:
+            {
+              runtime->handle_field_semantic_info(derez);
+              break;
+            }
+          case SEND_LOGICAL_REGION_SEMANTIC_INFO:
+            {
+              runtime->handle_logical_region_semantic_info(derez);
+              break;
+            }
+          case SEND_LOGICAL_PARTITION_SEMANTIC_INFO:
+            {
+              runtime->handle_logical_partition_semantic_info(derez);
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -4192,6 +4294,7 @@ namespace LegionRuntime {
         map_op_lock(Reservation::create_reservation()), 
         copy_op_lock(Reservation::create_reservation()), 
         fence_op_lock(Reservation::create_reservation()),
+        frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         close_op_lock(Reservation::create_reservation()), 
         future_pred_op_lock(Reservation::create_reservation()), 
@@ -4303,8 +4406,7 @@ namespace LegionRuntime {
         assert(machine->get_processor_kind(*it) != Processor::UTIL_PROC);
 #endif
         ProcessorManager *manager = new ProcessorManager(*it,
-                                    machine->get_processor_kind(*it),
-                                    this, min_tasks_to_schedule,
+                                    machine->get_processor_kind(*it), this,
                                     superscalar_width,
                                     DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
@@ -4540,6 +4642,15 @@ namespace LegionRuntime {
       available_fence_ops.clear();
       fence_op_lock.destroy_reservation();
       fence_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<FrameOp*>::const_iterator it = 
+            available_frame_ops.begin(); it !=
+            available_frame_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_frame_ops.clear();
+      frame_op_lock.destroy_reservation();
+      frame_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<DeletionOp*>::const_iterator it = 
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
@@ -4748,6 +4859,7 @@ namespace LegionRuntime {
         assert(proc_managers.find(proc) != proc_managers.end());
 #endif
         proc_managers[proc]->invoke_mapper_set_task_options(top_task);
+        invoke_mapper_configure_context(proc, top_task);
 #ifdef LEGION_LOGGING
         LegionLogging::log_top_level_task(Runtime::legion_main_id,
                                           top_task->get_unique_task_id());
@@ -7415,6 +7527,9 @@ namespace LegionRuntime {
       // TODO: put this back in once Sean fixes barriers
       //bar.arrive();
       Barrier new_bar = bar.advance_barrier();
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(bar, new_bar);
+#endif
       return PhaseBarrier(new_bar, pb.participant_count());
     }
 
@@ -7715,6 +7830,39 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::issue_frame(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      FrameOp *frame_op = get_available_frame_op();
+#ifdef DEBUG_HIGH_LEVEL
+      log_run(LEVEL_DEBUG,"Issuing a frame in task %s (ID %lld)",
+                          ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task(LEVEL_ERROR,"Illegal Legion end trace call in leaf "
+                             "task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      frame_op->initialize(ctx);
+#ifdef INORDER_EXECUTION
+      Event term_event = frame_op->get_completion_event();
+#endif
+      add_to_dependence_queue(ctx->get_executing_processor(), frame_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        Processor proc = ctx->get_executing_processor();
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap Runtime::execute_must_epoch(Context ctx, 
                                           const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -7934,6 +8082,132 @@ namespace LegionRuntime {
       proc_managers[proc]->replace_default_mapper(mapper);
       AutoLock m_lock(mapper_info_lock);
       mapper_infos[mapper] = MapperInfo(proc, 0/*mapper id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(IndexSpace handle, 
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(IndexPartition handle, 
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(FieldSpace handle, 
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(FieldSpace handle, FieldID fid,
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, fid, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(LogicalRegion handle, 
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(LogicalPartition handle, 
+                                              SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      NodeMask mask;
+      mask.set_bit(address_space);
+      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(IndexSpace handle,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(IndexPartition handle,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(FieldSpace handle,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(FieldSpace handle, FieldID fid,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, fid, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(LogicalRegion handle,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(LogicalPartition handle,
+                                                SemanticTag tag,
+                                                const void *&result, 
+                                                size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      forest->retrieve_semantic_information(handle, tag, result, size);
     }
 
     //--------------------------------------------------------------------------
@@ -8808,6 +9082,57 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_semantic_info(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_space_semantic_info(rez,true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_semantic_info(AddressSpaceID target,
+                                                     Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_partition_semantic_info(rez,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_semantic_info(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_field_space_semantic_info(rez,true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_semantic_info(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_field_semantic_info(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_logical_region_semantic_info(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_logical_region_semantic_info(rez,
+                                                                true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_logical_partition_semantic_info(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_logical_partition_semantic_info(rez,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -9267,6 +9592,48 @@ namespace LegionRuntime {
       invoke_mapper_handle_message(target, map_id, source, message, length);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_semantic_info(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_semantic_info(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_semantic_info(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_field_semantic_info(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_logical_region_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode::handle_semantic_info(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_logical_partition_semantic_info(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PartitionNode::handle_semantic_info(forest, derez);
+    }
+
 #ifdef SPECIALIZED_UTIL_PROCS
     //--------------------------------------------------------------------------
     Processor Runtime::get_cleanup_proc(Processor p) const
@@ -9619,6 +9986,22 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       return proc_managers[proc]->invoke_mapper_speculate(mappable, value);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::invoke_mapper_configure_context(Processor proc, TaskOp *task)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(proc) != proc_managers.end());
+#endif     
+      // Values are initialized in SingleTask::activate_single
+      proc_managers[proc]->invoke_mapper_configure_context(task);
+      // Should only be using one of these at a time
+      // Frames are the less common case so if we see them then use them
+      if ((task->max_outstanding_frames > 0) && 
+          (task->max_window_size > 0))
+        task->max_window_size = -1;
     }
 
     //--------------------------------------------------------------------------
@@ -10309,6 +10692,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    FrameOp* Runtime::get_available_frame_op(void)
+    //--------------------------------------------------------------------------
+    {
+      FrameOp *result = NULL;
+      {
+        AutoLock f_lock(frame_op_lock);
+        if (!available_frame_ops.empty())
+        {
+          result = available_frame_ops.front();
+          available_frame_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<FrameOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     DeletionOp* Runtime::get_available_deletion_op(void)
     //--------------------------------------------------------------------------
     {
@@ -10647,6 +11052,14 @@ namespace LegionRuntime {
     {
       AutoLock f_lock(fence_op_lock);
       available_fence_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_frame_op(FrameOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(frame_op_lock);
+      available_frame_ops.push_back(op);
     }
 
     //--------------------------------------------------------------------------
@@ -11153,6 +11566,8 @@ namespace LegionRuntime {
           return "Task Local Fields";
         case TASK_INLINE_ALLOC:
           return "Task Inline Tasks";
+        case SEMANTIC_INFO_ALLOC:
+          return "Semantic Information";
         default:
           assert(false); // should never get here
       }
@@ -11401,9 +11816,11 @@ namespace LegionRuntime {
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ const long long Runtime::init_time = 
                                       TimeStamp::get_current_time_in_micros();
-    /*static*/ unsigned Runtime::max_task_window_per_context = 
+    /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
-    /*static*/ unsigned Runtime::min_tasks_to_schedule = 
+    /*static*/ unsigned Runtime::initial_task_window_hysteresis =
+                                      DEFAULT_TASK_WINDOW_HYSTERESIS;
+    /*static*/ unsigned Runtime::initial_tasks_to_schedule = 
                                       DEFAULT_MIN_TASKS_TO_SCHEDULE;
     /*static*/ unsigned Runtime::superscalar_width = 
                                       DEFAULT_SUPERSCALAR_WIDTH;
@@ -11509,8 +11926,9 @@ namespace LegionRuntime {
         separate_runtime_instances = false;
         stealing_disabled = false;
         resilient_mode = false;
-        max_task_window_per_context = DEFAULT_MAX_TASK_WINDOW;
-        min_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
+        initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
+        initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
+        initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         max_filter_size = DEFAULT_MAX_FILTER_SIZE;
@@ -11543,8 +11961,9 @@ namespace LegionRuntime {
           if (!strcmp(argv[i],"-hl:outorder"))
             program_order_execution = false;
 #endif
-          INT_ARG("-hl:window", max_task_window_per_context);
-          INT_ARG("-hl:sched", min_tasks_to_schedule);
+          INT_ARG("-hl:window", initial_task_window_size);
+          INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
+          INT_ARG("-hl:sched", initial_tasks_to_schedule);
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
           INT_ARG("-hl:filter", max_filter_size);
@@ -11592,7 +12011,7 @@ namespace LegionRuntime {
 #undef INT_ARG
 #undef BOOL_ARG
 #ifdef DEBUG_HIGH_LEVEL
-        assert(max_task_window_per_context > 0);
+        assert(initial_task_window_hysteresis <= 100);
 #endif
       }
       // Now we can set out input args

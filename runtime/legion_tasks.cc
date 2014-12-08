@@ -1936,6 +1936,11 @@ namespace LegionRuntime {
       current_trace = NULL;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
+      // Set some of the default values for a context
+      max_window_size = Runtime::initial_task_window_size;
+      hysteresis_percentage = Runtime::initial_task_window_hysteresis;
+      max_outstanding_frames = -1;
+      min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
     }
 
     //--------------------------------------------------------------------------
@@ -1956,6 +1961,7 @@ namespace LegionRuntime {
       complete_children.clear();
       mapping_paths.clear();
       premapping_events.clear();
+      frame_events.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -2365,8 +2371,8 @@ namespace LegionRuntime {
         // Put this in the list of child operations that need to map
         executing_children.insert(op);
         // Check to see if we have too many active children
-        if (executing_children.size() >=
-            Runtime::max_task_window_per_context)
+        if ((max_window_size > 0) && 
+            (executing_children.size() >= max_window_size))
         {
           // Check to see if we have an active wait, if not make
           // one and then wait on it
@@ -2427,8 +2433,9 @@ namespace LegionRuntime {
       // Add some hysteresis here so that we have some runway for when
       // the paused task resumes it can run for a little while.
       executed_children.insert(op);
-      if (valid_wait_event && (executing_children.size() <
-                                (3*Runtime::max_task_window_per_context) >> 2))
+      if (valid_wait_event && (max_window_size > 0) &&
+          (executing_children.size() <=
+           (hysteresis_percentage * max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2505,8 +2512,9 @@ namespace LegionRuntime {
       executing_children.erase(op);
       executed_children.erase(op);
       complete_children.erase(op);
-      if (valid_wait_event && (executing_children.size() < 
-                                Runtime::max_task_window_per_context))
+      if (valid_wait_event && (max_window_size > 0) &&
+          (executing_children.size() <=
+           (hysteresis_percentage * max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2671,12 +2679,66 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::issue_frame(Event frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      Event wait_on = Event::NO_EVENT; 
+      // Only do this if we have a maximum number of outstanding frames
+      if (max_outstanding_frames > 0)
+      {
+        AutoLock o_lock(op_lock);
+        const size_t current_frames = frame_events.size();
+        if (current_frames > max_outstanding_frames)
+          wait_on = frame_events[current_frames - max_outstanding_frames];
+        frame_events.push_back(frame_termination); 
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+      {
+#ifdef LEGION_LOGGING
+        LegionLogging::log_timing_event(executing_processor,
+                                        get_unique_task_id(), 
+                                        BEGIN_WINDOW_WAIT);
+#endif
+#ifdef LEGION_PROF
+        LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_WAIT);
+#endif
+        runtime->pre_wait(executing_processor);
+        wait_on.wait();
+        runtime->post_wait(executing_processor);
+#ifdef LEGION_LOGGING
+        LegionLogging::log_timing_event(executing_processor,
+                                        get_unique_task_id(), 
+                                        END_WINDOW_WAIT);
+#endif
+#ifdef LEGION_PROF
+        LegionProf::register_event(get_unique_task_id(),
+                                   PROF_END_WAIT);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::finish_frame(Event frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      // Pull off all the frame events until we reach ours
+      AutoLock o_lock(op_lock);
+      while (!frame_events.empty())
+      {
+        Event next = frame_events.front();
+        frame_events.pop_front();
+        if (next == frame_termination)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::increment_outstanding(void)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       if ((outstanding_subtasks == 0) && 
-          (pending_subtasks < Runtime::min_tasks_to_schedule))
+          (pending_subtasks < min_tasks_to_schedule))
         runtime->activate_context(this);
       outstanding_subtasks++;
     }
@@ -2691,7 +2753,7 @@ namespace LegionRuntime {
 #endif
       outstanding_subtasks--;
       if ((outstanding_subtasks == 0) && 
-          (pending_subtasks < Runtime::min_tasks_to_schedule))
+          (pending_subtasks < min_tasks_to_schedule))
         runtime->deactivate_context(this);
     }
 
@@ -2702,7 +2764,7 @@ namespace LegionRuntime {
       AutoLock o_lock(op_lock);
       pending_subtasks++;
       if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == Runtime::min_tasks_to_schedule))
+          (pending_subtasks == min_tasks_to_schedule))
         runtime->deactivate_context(this);
     }
 
@@ -2715,7 +2777,7 @@ namespace LegionRuntime {
       assert(pending_subtasks > 0);
 #endif
       if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == Runtime::min_tasks_to_schedule))
+          (pending_subtasks == min_tasks_to_schedule))
         runtime->activate_context(this);
       pending_subtasks--;
     }
@@ -4622,6 +4684,8 @@ namespace LegionRuntime {
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
+          // Have the mapper configure the properties of the context
+          runtime->invoke_mapper_configure_context(current_proc, this);
 #ifdef DEBUG_HIGH_LEVEL
           assert(context.exists());
           runtime->forest->check_context_state(context);
@@ -4836,6 +4900,10 @@ namespace LegionRuntime {
            physical_instances[idx].get_handle().get_view()->
                                 get_manager()->get_instance().id);
         }
+      }
+      {
+        Processor proc = Machine::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
 #ifdef LEGION_LOGGING

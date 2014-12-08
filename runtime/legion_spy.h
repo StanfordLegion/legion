@@ -77,11 +77,25 @@ namespace LegionRuntime {
         log_spy(LEVEL_INFO,"Index Space " IDFMT "", unique_id);
       }
 
+      static inline void log_index_space_name(IDType unique_id,
+                                              const char* name)
+      {
+        log_spy(LEVEL_INFO,"Index Space Name " IDFMT " %s",
+            unique_id, name);
+      }
+
       static inline void log_index_partition(IDType parent_id, 
                 IDType unique_id, bool disjoint, unsigned color)
       {
         log_spy(LEVEL_INFO,"Index Partition " IDFMT " " IDFMT " %u %u", 
                     parent_id, unique_id, disjoint, color);
+      }
+
+      static inline void log_index_partition_name(IDType unique_id,
+                                                  const char* name)
+      {
+        log_spy(LEVEL_INFO,"Index Partition Name " IDFMT " %s",
+            unique_id, name);
       }
 
       static inline void log_index_subspace(IDType parent_id, 
@@ -96,6 +110,13 @@ namespace LegionRuntime {
         log_spy(LEVEL_INFO,"Field Space %u", unique_id);
       }
 
+      static inline void log_field_space_name(unsigned unique_id,
+                                              const char* name)
+      {
+        log_spy(LEVEL_INFO,"Field Space Name %u %s",
+            unique_id, name);
+      }
+
       static inline void log_field_creation(unsigned unique_id, 
                                             unsigned field_id)
       {
@@ -103,11 +124,35 @@ namespace LegionRuntime {
                             unique_id, field_id);
       }
 
+      static inline void log_field_name(unsigned unique_id,
+                                        unsigned field_id,
+                                        const char* name)
+      {
+        log_spy(LEVEL_INFO,"Field Name %u %u %s",
+            unique_id, field_id, name);
+      }
+
       static inline void log_top_region(IDType index_space, 
                       unsigned field_space, unsigned tree_id)
       {
         log_spy(LEVEL_INFO,"Region " IDFMT " %u %u", 
               index_space, field_space, tree_id);
+      }
+
+      static inline void log_logical_region_name(IDType index_space, 
+                      unsigned field_space, unsigned tree_id,
+                      const char* name)
+      {
+        log_spy(LEVEL_INFO,"Logical Region Name " IDFMT " %u %u %s", 
+              index_space, field_space, tree_id, name);
+      }
+
+      static inline void log_logical_partition_name(IDType index_partition,
+                      unsigned field_space, unsigned tree_id,
+                      const char* name)
+      {
+        log_spy(LEVEL_INFO,"Logical Partition Name " IDFMT " %u %u %s", 
+              index_partition, field_space, tree_id, name);
       }
 
       // Logger calls for operations 
@@ -291,13 +336,18 @@ namespace LegionRuntime {
                                             Event start_event,
                                             Event term_event,
                                             unsigned redop,
-                                            const char *mask)
+                                            std::set<FieldID> fields)
+                                            //const char *mask)
       {
         log_spy(LEVEL_INFO,"Copy Events " IDFMT " " IDFMT " " IDFMT 
-                           " %u %u " IDFMT " %u " IDFMT " %u %u %s",
+                           " %u %u " IDFMT " %u " IDFMT " %u %u",
             src_inst, dst_inst, index_handle, field_handle,
             tree_id, start_event.id, start_event.gen, term_event.id,
-            term_event.gen, redop, mask);
+            term_event.gen, redop);
+        for (std::set<FieldID>::iterator it = fields.begin();
+             it != fields.end(); ++it)
+          log_spy(LEVEL_INFO,"Copy Field " IDFMT " %u " IDFMT " %u %u",
+              start_event.id, start_event.gen, term_event.id, term_event.gen, *it);
       }
 
       // Logger calls for physical instances
@@ -331,6 +381,13 @@ namespace LegionRuntime {
       static inline void log_phase_barrier(Barrier barrier)
       {
         log_spy(LEVEL_INFO,"Phase Barrier " IDFMT, barrier.id);
+      }
+
+      static inline void log_op_proc_user(UniqueID user,
+                                          IDType proc_id)
+      {
+        log_spy(LEVEL_INFO, "Op Processor User %llu " IDFMT "",
+                              user, proc_id);
       }
 
     };

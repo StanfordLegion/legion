@@ -763,6 +763,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::configure_context(Task *task)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper(LEVEL_SPEW,"Configure context for task %s (ID %lld) in "
+                            "default mapper for processor " IDFMT "",
+                            task->variants->name, 
+                            task->get_unique_task_id(), task->target_proc.id);
+      // Do nothing so we just use the preset defaults
+    }
+
+    //--------------------------------------------------------------------------
     int DefaultMapper::get_tunable_value(const Task *task, TunableID tid,
                                          MappingTagID tag)
     //--------------------------------------------------------------------------

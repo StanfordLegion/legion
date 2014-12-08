@@ -1953,6 +1953,10 @@ namespace LegionRuntime {
                                          parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
           result.get_handle().get_view()->get_manager()->get_instance().id);
+      {
+        Processor proc = Machine::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+      }
 #endif
       // Have to do this before triggering the mapped event
       region.impl->reset_reference(result, termination_event);
@@ -2889,6 +2893,10 @@ namespace LegionRuntime {
                                          copy_complete_event);
         LegionSpy::log_event_dependence(copy_complete_event,
                                         completion_event);
+        {
+          Processor proc = Machine::get_executing_processor();
+          LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+        }
 #endif
         // Chain all the unlock and barrier arrivals off of the
         // copy complete event
@@ -3322,7 +3330,7 @@ namespace LegionRuntime {
         // Go through and launch a completion task dependent upon
         // all the completion events of our incoming dependences.
         // Make sure that the events that we pulled out our still valid.
-        // Not since we are performing this operation, then we know
+        // Note since we are performing this operation, then we know
         // that we are mapped and therefore our set of input dependences
         // have been fixed so we can read them without holding the lock.
         std::set<Event> trigger_events;
@@ -3363,6 +3371,147 @@ namespace LegionRuntime {
       complete_mapping();
       complete_execution();
     } 
+
+    /////////////////////////////////////////////////////////////
+    // Frame Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FrameOp::FrameOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FrameOp::FrameOp(const FrameOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FrameOp::~FrameOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FrameOp& FrameOp::operator=(const FrameOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::initialize(SingleTask *ctx)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      parent_ctx->issue_frame(completion_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_frame_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* FrameOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Frame Op";
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Analysis works very similar to a fence except we 
+      // don't update the context like we are a fence
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
+#endif
+      begin_dependence_analysis();
+      // Register this fence with all previous users in the parent's context
+      RegionTreeContext ctx = parent_ctx->get_context();
+      for (unsigned idx = 0; idx < parent_ctx->regions.size(); idx++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(parent_ctx->regions[idx].handle_type == SINGULAR);
+#endif
+        runtime->forest->perform_fence_analysis(ctx, this, 
+                                  parent_ctx->regions[idx].region);
+      }
+      end_dependence_analysis();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool FrameOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      // Go through and launch a completion task dependent upon
+      // all the completion events of our incoming dependences.
+      // Make sure that the events that we pulled out our still valid.
+      // Note since we are performing this operation, then we know
+      // that we are mapped and therefore our set of input dependences
+      // have been fixed so we can read them without holding the lock.
+      std::set<Event> trigger_events;
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            incoming.begin(); it != incoming.end(); it++)
+      {
+        Event complete = it->first->get_completion_event();
+        if (it->second == it->first->get_generation())
+          trigger_events.insert(complete);
+      }
+      Event wait_on = Event::merge_events(trigger_events);
+      if (!wait_on.has_triggered())
+      {
+#ifdef SPECIALIZED_UTIL_PROCS
+        Processor util = runtime->get_cleanup_proc(
+                          parent_ctx->get_executing_processor());
+#else
+        Processor util = runtime->find_utility_group();
+#endif
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                   sizeof(deferred_complete_args), wait_on);
+      }
+      else
+        deferred_complete();
+      // If we successfully performed the operation return true
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void FrameOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx->finish_frame(completion_event);
+      complete_mapping();
+      complete_execution();
+    }
 
     /////////////////////////////////////////////////////////////
     // Deletion Operation 
@@ -3900,6 +4049,10 @@ namespace LegionRuntime {
                                parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
           reference.get_handle().get_view()->get_manager()->get_instance().id);
+      {
+        Processor proc = Machine::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+      }
 
 #endif
       complete_mapping();
@@ -4183,6 +4336,9 @@ namespace LegionRuntime {
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
+#ifdef LEGION_SPY
+      std::set<Event> acquire_preconditions_spy;
+#endif
       acquire_preconditions.insert(result.get_ready_event());
       if (!wait_barriers.empty())
       {
@@ -4191,6 +4347,9 @@ namespace LegionRuntime {
         {
           Event e = it->phase_barrier.get_previous_phase();
           acquire_preconditions.insert(e);
+#ifdef LEGION_SPY
+          acquire_preconditions_spy.insert(it->phase_barrier);
+#endif
         }
       }
       if (!grants.empty())
@@ -4200,6 +4359,9 @@ namespace LegionRuntime {
         {
           Event e = it->impl->acquire_grant();
           acquire_preconditions.insert(e);
+#ifdef LEGION_SPY
+          acquire_preconditions_spy.insert(e);
+#endif
         }
       }
       Event acquire_complete = Event::merge_events(acquire_preconditions);
@@ -4210,12 +4372,8 @@ namespace LegionRuntime {
         new_acquire_complete.trigger();
         acquire_complete = new_acquire_complete;
       }
-      LegionSpy::log_event_dependences(acquire_preconditions, acquire_complete);
-      for (std::vector<PhaseBarrier>::const_iterator it =
-          wait_barriers.begin(); it != wait_barriers.end(); it++)
-      {
-        LegionSpy::log_event_dependence(it->phase_barrier, acquire_complete);
-      }
+      LegionSpy::log_event_dependences(acquire_preconditions_spy,
+          acquire_complete);
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
           acquire_complete);
       LegionSpy::log_op_events(unique_op_id, acquire_complete,
@@ -4225,6 +4383,10 @@ namespace LegionRuntime {
       LegionSpy::log_op_user(unique_op_id, 0,
           result.get_handle().get_view()->get_manager()->get_instance().id);
       LegionSpy::log_event_dependence(acquire_complete, completion_event);
+      {
+        Processor proc = Machine::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+      }
 #endif
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
@@ -4662,6 +4824,14 @@ namespace LegionRuntime {
       // If we couldn't premap, then we need to try again later
       if (!requirement.premapped)
         return false;
+#ifdef LEGION_SPY
+      LegionSpy::IDType inst_id;
+      {
+        const InstanceRef& ref = region.impl->get_reference();
+        inst_id =
+          ref.get_handle().get_view()->get_manager()->get_instance().id;
+      }
+#endif
       // Now all we need to do is close the physical context to
       // the logical region that we are releasing.  Since we
       // are read-write-exclusive, it will invalidate all other
@@ -4679,6 +4849,9 @@ namespace LegionRuntime {
 #endif
                                                 );
       std::set<Event> release_preconditions;
+#ifdef LEGION_SPY
+      std::set<Event> release_preconditions_spy;
+#endif
       release_preconditions.insert(release_event);
       if (!wait_barriers.empty())
       {
@@ -4687,6 +4860,9 @@ namespace LegionRuntime {
         {
           Event e = it->phase_barrier.get_previous_phase();
           release_preconditions.insert(e);
+#ifdef LEGION_SPY
+          release_preconditions_spy.insert(it->phase_barrier);
+#endif
         }
       }
       if (!grants.empty())
@@ -4696,6 +4872,9 @@ namespace LegionRuntime {
         {
           Event e = it->impl->acquire_grant();
           release_preconditions.insert(e);
+#ifdef LEGION_SPY
+          release_preconditions_spy.insert(e);
+#endif
         }
       }
       Event release_complete = Event::merge_events(release_preconditions);
@@ -4706,19 +4885,20 @@ namespace LegionRuntime {
         new_release_complete.trigger();
         release_complete = new_release_complete;
       }
-      LegionSpy::log_event_dependences(release_preconditions, release_complete);
-      for (std::vector<PhaseBarrier>::const_iterator it =
-          wait_barriers.begin(); it != wait_barriers.end(); it++)
-      {
-        LegionSpy::log_event_dependence(it->phase_barrier, release_complete);
-      }
+      LegionSpy::log_event_dependences(release_preconditions_spy,
+          release_complete);
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
           release_complete);
       LegionSpy::log_op_events(unique_op_id, release_complete,
           completion_event);
+      LegionSpy::log_op_user(unique_op_id, 0, inst_id);
       LegionSpy::log_implicit_dependence(release_complete,
           parent_ctx->get_task_completion());
       LegionSpy::log_event_dependence(release_complete, completion_event);
+      {
+        Processor proc = Machine::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+      }
 #endif
       // Chain any arrival barriers
       if (!arrive_barriers.empty())

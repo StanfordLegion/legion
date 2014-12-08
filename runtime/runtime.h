@@ -443,7 +443,7 @@ namespace LegionRuntime {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Runtime *rt, unsigned min_out,
+                       Runtime *rt,
                        unsigned width, unsigned default_mappers,  
                        bool no_steal, unsigned max_steals);
       ProcessorManager(const ProcessorManager &rhs);
@@ -467,6 +467,7 @@ namespace LegionRuntime {
       bool invoke_mapper_map_inline(Inline *op);
       bool invoke_mapper_map_copy(Copy *op);
       bool invoke_mapper_speculate(Mappable *op, bool &value); 
+      void invoke_mapper_configure_context(TaskOp *task);
       bool invoke_mapper_rank_copy_targets(Mappable *mappable,
                                            LogicalRegion handle, 
                                            const std::set<Memory> &memories,
@@ -530,8 +531,6 @@ namespace LegionRuntime {
       const Processor utility_proc;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
-      // Minimum number of tasks that must be scheduled to disable idle task
-      const unsigned min_outstanding;
       // Is stealing disabled 
       const bool stealing_disabled;
       // Maximum number of outstanding steals permitted by any mapper
@@ -716,6 +715,12 @@ namespace LegionRuntime {
         SEND_FUTURE_SUBSCRIPTION,
         SEND_MAKE_PERSISTENT,
         SEND_MAPPER_MESSAGE,
+        SEND_INDEX_SPACE_SEMANTIC_INFO,
+        SEND_INDEX_PARTITION_SEMANTIC_INFO,
+        SEND_FIELD_SPACE_SEMANTIC_INFO,
+        SEND_FIELD_SEMANTIC_INFO,
+        SEND_LOGICAL_REGION_SEMANTIC_INFO,
+        SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -788,6 +793,12 @@ namespace LegionRuntime {
       void send_future_subscription(Serializer &rez, bool flush);
       void send_make_persistent(Serializer &rez, bool flush);
       void send_mapper_message(Serializer &rez, bool flush);
+      void send_index_space_semantic_info(Serializer &rez, bool flush);
+      void send_index_partition_semantic_info(Serializer &rez, bool flush);
+      void send_field_space_semantic_info(Serializer &rez, bool flush);
+      void send_field_semantic_info(Serializer &rez, bool flush);
+      void send_logical_region_semantic_info(Serializer &rez, bool flush);
+      void send_logical_partition_semantic_info(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -873,7 +884,7 @@ namespace LegionRuntime {
     private:
       int ctx;
     };
-
+ 
     /**
      * \class Runtime
      * This is the actual implementation of the Legion runtime functionality
@@ -1141,6 +1152,7 @@ namespace LegionRuntime {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
+      void issue_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
       int get_tunable_value(Context ctx, TunableID tid, 
@@ -1156,6 +1168,34 @@ namespace LegionRuntime {
     public:
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
+    public:
+      void attach_semantic_information(IndexSpace handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(IndexPartition handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(FieldSpace handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(FieldSpace handle, FieldID fid,
+                                       SemanticTag tag,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+    public:
+      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+                                         SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size);
     public:
       FieldID allocate_field(Context ctx, FieldSpace space, 
                              size_t field_size, FieldID fid, bool local);
@@ -1267,6 +1307,17 @@ namespace LegionRuntime {
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
+      void send_index_space_semantic_info(AddressSpaceID target, 
+                                          Serializer &rez);
+      void send_index_partition_semantic_info(AddressSpaceID target,
+                                              Serializer &rez);
+      void send_field_space_semantic_info(AddressSpaceID target,
+                                          Serializer &rez);
+      void send_field_semantic_info(AddressSpaceID target, Serializer &rez);
+      void send_logical_region_semantic_info(AddressSpaceID target,
+                                             Serializer &rez);
+      void send_logical_partition_semantic_info(AddressSpaceID target,
+                                                Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1344,6 +1395,12 @@ namespace LegionRuntime {
       void handle_future_subscription(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
+      void handle_index_space_semantic_info(Deserializer &derez);
+      void handle_index_partition_semantic_info(Deserializer &derez);
+      void handle_field_space_semantic_info(Deserializer &derez);
+      void handle_field_semantic_info(Deserializer &derez);
+      void handle_logical_region_semantic_info(Deserializer &derez);
+      void handle_logical_partition_semantic_info(Deserializer &derez);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1388,6 +1445,7 @@ namespace LegionRuntime {
       bool invoke_mapper_map_copy(Processor target, Copy *op);
       bool invoke_mapper_speculate(Processor target, 
                                    Mappable *mappable, bool &value);
+      void invoke_mapper_configure_context(Processor target, TaskOp *task);
       bool invoke_mapper_rank_copy_targets(Processor target, Mappable *mappable,
                                            LogicalRegion handle, 
                                            const std::set<Memory> &memories,
@@ -1454,6 +1512,7 @@ namespace LegionRuntime {
       MapOp*           get_available_map_op(void);
       CopyOp*          get_available_copy_op(void);
       FenceOp*         get_available_fence_op(void);
+      FrameOp*         get_available_frame_op(void);
       DeletionOp*      get_available_deletion_op(void);
       CloseOp*         get_available_close_op(void);
       FuturePredOp*    get_available_future_pred_op(void);
@@ -1475,6 +1534,7 @@ namespace LegionRuntime {
       void free_map_op(MapOp *op);
       void free_copy_op(CopyOp *op);
       void free_fence_op(FenceOp *op);
+      void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_close_op(CloseOp *op); 
       void free_future_predicate_op(FuturePredOp *op);
@@ -1653,6 +1713,7 @@ namespace LegionRuntime {
       Reservation map_op_lock;
       Reservation copy_op_lock;
       Reservation fence_op_lock;
+      Reservation frame_op_lock;
       Reservation deletion_op_lock;
       Reservation close_op_lock;
       Reservation future_pred_op_lock;
@@ -1674,6 +1735,7 @@ namespace LegionRuntime {
       std::deque<MapOp*>           available_map_ops;
       std::deque<CopyOp*>          available_copy_ops;
       std::deque<FenceOp*>         available_fence_ops;
+      std::deque<FrameOp*>         available_frame_ops;
       std::deque<DeletionOp*>      available_deletion_ops;
       std::deque<CloseOp*>         available_close_ops;
       std::deque<FuturePredOp*>    available_future_pred_ops;
@@ -1777,8 +1839,9 @@ namespace LegionRuntime {
       static unsigned startup_arrivals;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
-      static unsigned max_task_window_per_context;
-      static unsigned min_tasks_to_schedule;
+      static int initial_task_window_size;
+      static unsigned initial_task_window_hysteresis;
+      static unsigned initial_tasks_to_schedule;
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;

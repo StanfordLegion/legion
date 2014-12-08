@@ -430,6 +430,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const BitMask &rhs) const;
       inline bool operator<(const BitMask &rhs) const;
@@ -502,6 +503,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const TLBitMask &rhs) const;
       inline bool operator<(const TLBitMask &rhs) const;
@@ -568,6 +570,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
       inline bool operator<(const SSEBitMask &rhs) const;
@@ -633,6 +636,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
       inline bool operator<(const SSETLBitMask &rhs) const;
@@ -702,6 +706,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
       inline bool operator<(const AVXBitMask &rhs) const;
@@ -776,6 +781,7 @@ namespace LegionRuntime {
       inline void assign_bit(unsigned bit, bool val);
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
+      inline void clear(void);
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
       inline bool operator<(const AVXTLBitMask &rhs) const;
@@ -1447,6 +1453,17 @@ namespace LegionRuntime {
     }
 
     //-------------------------------------------------------------------------
+    template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
+    inline void BitMask<T,MAX,SHIFT,MASK>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bit_vector[idx] = 0;
+      }
+    }
+
+    //-------------------------------------------------------------------------
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
     inline const T& BitMask<T,MAX,SHIFT,MASK>::operator[](
                                                     const unsigned &idx) const
@@ -2037,6 +2054,18 @@ namespace LegionRuntime {
         }
       }
       return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void TLBitMask<T,MAX,SHIFT,MASK>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        bit_vector[idx] = 0;
+      }
+      sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------
@@ -2679,6 +2708,17 @@ namespace LegionRuntime {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline void SSEBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_set1_epi32(0);
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     inline const __m128i& SSEBitMask<MAX>::operator()(
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
@@ -3242,6 +3282,18 @@ namespace LegionRuntime {
         }
       }
       return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void SSETLBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      {
+        bits.sse_vector[idx] = _mm_set1_epi32(0); 
+      }
+      sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------
@@ -3893,6 +3945,17 @@ namespace LegionRuntime {
         }
       }
       return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_set1_epi32(0);
+      }
     }
 
     //-------------------------------------------------------------------------
@@ -4603,6 +4666,18 @@ namespace LegionRuntime {
         }
       }
       return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void AVXTLBitMask<MAX>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
+      {
+        bits.avx_vector[idx] = _mm256_set1_epi32(0);
+      }
+      sum_mask = 0;
     }
 
     //-------------------------------------------------------------------------

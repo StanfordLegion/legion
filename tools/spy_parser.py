@@ -31,11 +31,17 @@ mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (
 
 # Calls for the shape of region trees
 top_index_pat           = re.compile(prefix+"Index Space (?P<uid>[0-9a-f]+)")
+top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
 index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<color>[0-9]+)")
+index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
 index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<color>[0-9]+)")
 field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
+field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>\w+)")
 field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
+field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>\w+)")
 region_pat              = re.compile(prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
+region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>\w+)")
+partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>\w+)")
 
 # Logger calls for operations
 top_task_pat            = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
@@ -68,12 +74,205 @@ task_inst_req_pat       = re.compile(prefix+"Task Instance Requirement (?P<uid>[
 event_event_pat         = re.compile(prefix+"Event Event (?P<idone>[0-9a-f]+) (?P<genone>[0-9]+) (?P<idtwo>[0-9a-f]+) (?P<gentwo>[0-9]+)")
 implicit_event_pat      = re.compile(prefix+"Implicit Event (?P<idone>[0-9a-f]+) (?P<genone>[0-9]+) (?P<idtwo>[0-9a-f]+) (?P<gentwo>[0-9]+)")
 op_event_pat            = re.compile(prefix+"Op Events (?P<uid>[0-9]+) (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+)")
-copy_event_pat          = re.compile(prefix+"Copy Events (?P<srcman>[0-9a-f]+) (?P<dstman>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tree>[0-9]+) (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<redop>[0-9]+) (?P<mask>[0-9\,]+)")
+copy_event_pat          = re.compile(prefix+"Copy Events (?P<srcman>[0-9a-f]+) (?P<dstman>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tree>[0-9]+) (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<redop>[0-9]+)")
+copy_field_pat          = re.compile(prefix+"Copy Field (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<fid>[0-9]+)")
 
 # Logger calls for physical instance usage 
 physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 physical_reduc_pat      = re.compile(prefix+"Reduction Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<fold>[0-1]) (?P<indirect>[0-9]+)")
 op_user_pat             = re.compile(prefix+"Op Instance User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+)")
+op_proc_user_pat        = re.compile(prefix+"Op Processor User (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+)")
+
+def parse_log_line(line, state):
+    # Machine shapes
+    m = utility_pat.match(line)
+    if m <> None:
+        if state.add_utility(int(m.group('pid'),16)):
+            return True
+    m = processor_pat.match(line)
+    if m <> None:
+        if state.add_processor(int(m.group('pid'),16), int(m.group('kind'))):
+            return True
+    m = memory_pat.match(line)
+    if m <> None:
+        if state.add_memory(int(m.group('mid'),16), int(m.group('capacity'))):
+            return True
+    m = proc_mem_pat.match(line)
+    if m <> None:
+        if state.set_proc_mem(int(m.group('pid'),16), int(m.group('mid'),16), int(m.group('band')), int(m.group('lat'))):
+            return True
+    m = mem_mem_pat.match(line)
+    if m <> None:
+        if state.set_mem_mem(int(m.group('mone'),16), int(m.group('mtwo'),16), int(m.group('band')), int(m.group('lat'))):
+            return True
+    # Region tree shapes
+    m = top_index_pat.match(line)
+    if m <> None:
+        if state.add_index_space(int(m.group('uid'),16)):
+            return True
+    m = top_index_name_pat.match(line)
+    if m <> None:
+        if state.add_index_space_name(int(m.group('uid'),16), m.group('name')):
+            return True
+    m = index_part_pat.match(line)
+    if m <> None:
+        if state.add_index_partition(int(m.group('pid'),16), int(m.group('uid'),16), True if (int(m.group('disjoint'))) == 1 else False, int(m.group('color'))):
+            return True
+    m = index_part_name_pat.match(line)
+    if m <> None:
+        if state.add_index_partition_name(int(m.group('uid'),16), m.group('name')):
+            return True
+    m = index_subspace_pat.match(line)
+    if m <> None:
+        if state.add_index_subspace(int(m.group('pid'),16), int(m.group('uid'),16), int(m.group('color'))):
+            return True
+    m = field_space_pat.match(line)
+    if m <> None:
+        if state.add_field_space(int(m.group('uid'))):
+            return True
+    m = field_space_name_pat.match(line)
+    if m <> None:
+        if state.add_field_space_name(int(m.group('uid')), m.group('name')):
+            return True
+    m = field_create_pat.match(line)
+    if m <> None:
+        if state.add_field(int(m.group('uid')), int(m.group('fid'))):
+            return True
+    m = field_name_pat.match(line)
+    if m <> None:
+        if state.add_field_name(int(m.group('uid')), int(m.group('fid')), m.group('name')):
+            return True
+    m = region_pat.match(line)
+    if m <> None:
+        if state.add_region(int(m.group('iid'),16), int(m.group('fid')), int(m.group('tid'))):
+            return True 
+    m = region_name_pat.match(line)
+    if m <> None:
+        if state.add_region_name(int(m.group('iid'),16), int(m.group('fid')), int(m.group('tid')), m.group('name')):
+            return True
+    m = partition_name_pat.match(line)
+    if m <> None:
+        if state.add_partition_name(int(m.group('iid'),16), int(m.group('fid')), int(m.group('tid')), m.group('name')):
+            return True
+    # Operations
+    m = top_task_pat.match(line)
+    if m <> None:
+        if state.add_top_task(int(m.group('tid')), int(m.group('uid')), m.group('name')):
+            return True
+    m = single_task_pat.match(line)
+    if m <> None:
+        if state.add_single_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
+            return True
+    m = index_task_pat.match(line)
+    if m <> None:
+        if state.add_index_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
+            return True
+    m = mapping_pat.match(line)
+    if m <> None:
+        if state.add_mapping(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = close_pat.match(line)
+    if m <> None:
+        if state.add_close(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = fence_pat.match(line)
+    if m <> None:
+        if state.add_fence(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = copy_op_pat.match(line)
+    if m <> None:
+        if state.add_copy_op(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = acquire_op_pat.match(line)
+    if m <> None:
+        if state.add_acquire_op(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = release_op_pat.match(line)
+    if m <> None:
+        if state.add_release_op(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = deletion_pat.match(line)
+    if m <> None:
+        if state.add_deletion(int(m.group('ctx')), int(m.group('uid'))):
+            return True
+    m = index_slice_pat.match(line)
+    if m <> None:
+        if state.add_index_slice(int(m.group('index')),int(m.group('slice'))):
+            return True
+    m = slice_slice_pat.match(line)
+    if m <> None:
+        if state.add_slice_slice(int(m.group('slice1')),int(m.group('slice2'))):
+            return True
+    m = slice_point_pat.match(line)
+    if m <> None:
+        if state.add_slice_point(int(m.group('slice')),int(m.group('point')), int(m.group('dim')), int(m.group('val1')), int(m.group('val2')), int(m.group('val3'))):
+            return True
+    m = point_point_pat.match(line)
+    if m <> None:
+        if state.add_point_point(int(m.group('point1')),int(m.group('point2'))):
+            return True
+    # Phase Barriers
+    m = phase_barrier_pat.match(line)
+    if m <> None:
+        if state.add_phase_barrier(int(m.group('uid'), 16)):
+            return True
+    # Mapping dependence analysis
+    m = requirement_pat.match(line)
+    if m <> None:
+        if state.add_requirement(int(m.group('uid')), int(m.group('index')), True if (int(m.group('is_reg')))==1 else False, int(m.group('ispace'),16), int(m.group('fspace')), int(m.group('tid')), int(m.group('priv')), int(m.group('coher')), int(m.group('redop'))):
+            return True
+    m = req_field_pat.match(line)
+    if m <> None:
+        if state.add_req_field(int(m.group('uid')), int(m.group('index')), int(m.group('fid'))):
+            return True
+    m = mapping_dep_pat.match(line)
+    if m <> None:
+        if state.add_mapping_dependence(int(m.group('ctx')), int(m.group('prev_id')), int(m.group('pidx')), int(m.group('next_id')), int(m.group('nidx')), int(m.group('dtype'))):
+            return True
+    # Physical dependence analysis
+    m = task_inst_req_pat.match(line)
+    if m <> None:
+        if state.add_instance_requirement(int(m.group('uid')), int(m.group('idx')), int(m.group('index'))):
+            return True
+    # Physical Analysis
+    m = event_event_pat.match(line)
+    if m <> None:
+        if state.add_event_dependence(int(m.group('idone'),16), int(m.group('genone')), int(m.group('idtwo'),16), int(m.group('gentwo'))):
+            return True
+    m = implicit_event_pat.match(line)
+    if m <> None:
+        if state.add_implicit_dependence(int(m.group('idone'),16), int(m.group('genone')), int(m.group('idtwo'),16), int(m.group('gentwo'))):
+            return True
+    m = op_event_pat.match(line)
+    if m <> None:
+        if state.add_op_events(int(m.group('uid')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen'))):
+            return True
+    m = copy_event_pat.match(line)
+    if m <> None:
+        if state.add_copy_events(int(m.group('srcman'),16), int(m.group('dstman'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tree')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('redop'))):
+            return True
+    m = copy_field_pat.match(line)
+    if m <> None:
+        if state.add_copy_field_to_copy_event(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('fid'))):
+            return True
+    # Physical instance usage
+    m = physical_inst_pat.match(line)
+    if m <> None:
+        if state.add_physical_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid'))):
+            return True
+    m = physical_reduc_pat.match(line)
+    if m <> None:
+        if state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
+            return True
+    m = op_user_pat.match(line)
+    if m <> None:
+        if state.add_op_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16)):
+            return True
+    m = op_proc_user_pat.match(line)
+    if m <> None:
+        if state.add_op_proc_user(int(m.group('uid')), int(m.group('pid'),16)):
+            return True
+    return False
 
 def parse_log_file(file_name, state):
     log = open(file_name, 'r')
@@ -82,311 +281,19 @@ def parse_log_file(file_name, state):
     # printed to the log file in weird orders, try reparsing lines
     replay_lines = list()
     for line in log:
-        matches = matches + 1
-        # Machine shapes
-        m = utility_pat.match(line)
-        if m <> None:
-            state.add_utility(int(m.group('pid'),16))
-            continue
-        m = processor_pat.match(line)
-        if m <> None:
-            if not state.add_processor(int(m.group('pid'),16), int(m.group('kind'))):
-                replay_lines.append(line)
-            continue
-        m = memory_pat.match(line)
-        if m <> None:
-            state.add_memory(int(m.group('mid'),16), int(m.group('capacity')))
-            continue
-        m = proc_mem_pat.match(line)
-        if m <> None:
-            if not state.set_proc_mem(int(m.group('pid'),16), int(m.group('mid'),16), int(m.group('band')), int(m.group('lat'))):
-                replay_lines.append(line)
-            continue
-        m = mem_mem_pat.match(line)
-        if m <> None:
-            if not state.set_mem_mem(int(m.group('mone'),16), int(m.group('mtwo'),16), int(m.group('band')), int(m.group('lat'))):
-                replay_lines.append(line)
-            continue
-        # Region tree shapes
-        m = top_index_pat.match(line)
-        if m <> None:
-            state.add_index_space(int(m.group('uid'),16))
-            continue
-        m = index_part_pat.match(line)
-        if m <> None:
-            if not state.add_index_partition(int(m.group('pid'),16), int(m.group('uid'),16), True if (int(m.group('disjoint'))) == 1 else False, int(m.group('color'))):
-                replay_lines.append(line)
-            continue
-        m = index_subspace_pat.match(line)
-        if m <> None:
-            if not state.add_index_subspace(int(m.group('pid'),16), int(m.group('uid'),16), int(m.group('color'))):
-                replay_lines.append(line)
-            continue
-        m = field_space_pat.match(line)
-        if m <> None:
-            state.add_field_space(int(m.group('uid')))
-            continue
-        m = field_create_pat.match(line)
-        if m <> None:
-            if not state.add_field(int(m.group('uid')), int(m.group('fid'))):
-                replay_lines.append(line)
-            continue
-        m = region_pat.match(line)
-        if m <> None:
-            if not state.add_region(int(m.group('iid'),16), int(m.group('fid')), int(m.group('tid'))):
-                replay_lines.append(line)
-            continue 
-        # Operations
-        m = top_task_pat.match(line)
-        if m <> None:
-            state.add_top_task(int(m.group('tid')), int(m.group('uid')), m.group('name'))
-            continue
-        m = single_task_pat.match(line)
-        if m <> None:
-            if not state.add_single_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
-                replay_lines.append(line)
-            continue
-        m = index_task_pat.match(line)
-        if m <> None:
-            if not state.add_index_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
-                replay_lines.append(line)
-            continue
-        m = mapping_pat.match(line)
-        if m <> None:
-            if not state.add_mapping(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = close_pat.match(line)
-        if m <> None:
-            if not state.add_close(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = fence_pat.match(line)
-        if m <> None:
-            if not state.add_fence(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = copy_op_pat.match(line)
-        if m <> None:
-            if not state.add_copy_op(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = acquire_op_pat.match(line)
-        if m <> None:
-            if not state.add_acquire_op(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = release_op_pat.match(line)
-        if m <> None:
-            if not state.add_release_op(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = deletion_pat.match(line)
-        if m <> None:
-            if not state.add_deletion(int(m.group('ctx')), int(m.group('uid'))):
-                replay_lines.append(line)
-            continue
-        m = index_slice_pat.match(line)
-        if m <> None:
-            if not state.add_index_slice(int(m.group('index')),int(m.group('slice'))):
-              replay_lines.append(line)
-            continue
-        m = slice_slice_pat.match(line)
-        if m <> None:
-            if not state.add_slice_slice(int(m.group('slice1')),int(m.group('slice2'))):
-                replay_lines.append(line)
-            continue
-        m = slice_point_pat.match(line)
-        if m <> None:
-            if not state.add_slice_point(int(m.group('slice')),int(m.group('point')), int(m.group('dim')), int(m.group('val1')), int(m.group('val2')), int(m.group('val3'))):
-                replay_lines.append(line)
-            continue
-        m = point_point_pat.match(line)
-        if m <> None:
-            if not state.add_point_point(int(m.group('point1')),int(m.group('point2'))):
-                replay_lines.append(line)
-            continue
-        # Phase Barriers
-        m = phase_barrier_pat.match(line)
-        if m <> None:
-            if not state.add_phase_barrier(int(m.group('uid'), 16)):
-                replay_lines.append(line)
-            continue
-        # Mapping dependence analysis
-        m = requirement_pat.match(line)
-        if m <> None:
-            if not state.add_requirement(int(m.group('uid')), int(m.group('index')), True if (int(m.group('is_reg')))==1 else False, int(m.group('ispace'),16), int(m.group('fspace')), int(m.group('tid')), int(m.group('priv')), int(m.group('coher')), int(m.group('redop'))):
-                replay_lines.append(line)
-            continue
-        m = req_field_pat.match(line)
-        if m <> None:
-            if not state.add_req_field(int(m.group('uid')), int(m.group('index')), int(m.group('fid'))):
-                replay_lines.append(line)
-            continue
-        m = mapping_dep_pat.match(line)
-        if m <> None:
-            if not state.add_mapping_dependence(int(m.group('ctx')), int(m.group('prev_id')), int(m.group('pidx')), int(m.group('next_id')), int(m.group('nidx')), int(m.group('dtype'))):
-                replay_lines.append(line)
-            continue
-        # Physical dependence analysis
-        m = task_inst_req_pat.match(line)
-        if m <> None:
-            if not state.add_instance_requirement(int(m.group('uid')), int(m.group('idx')), int(m.group('index'))):
-                replay_lines.append(line)
-            continue
-        # Physical Analysis
-        m = event_event_pat.match(line)
-        if m <> None:
-            state.add_event_dependence(int(m.group('idone'),16), int(m.group('genone')), int(m.group('idtwo'),16), int(m.group('gentwo')))
-            continue
-        m = implicit_event_pat.match(line)
-        if m <> None:
-            state.add_implicit_dependence(int(m.group('idone'),16), int(m.group('genone')), int(m.group('idtwo'),16), int(m.group('gentwo')))
-            continue
-        m = op_event_pat.match(line)
-        if m <> None:
-            if not state.add_op_events(int(m.group('uid')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen'))):
-                replay_lines.append(line)
-            continue
-        m = copy_event_pat.match(line)
-        if m <> None:
-            if not state.add_copy_events(int(m.group('srcman'),16), int(m.group('dstman'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tree')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('redop')), m.group('mask')):
-                replay_lines.append(line)
-            continue
-        # Physical instance usage
-        m = physical_inst_pat.match(line)
-        if m <> None:
-            if not state.add_physical_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid'))):
-                replay_lines.append(line)
-            continue
-        m = physical_reduc_pat.match(line)
-        if m <> None:
-            if not state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
-                replay_lines.append(line)
-            continue
-        m = op_user_pat.match(line)
-        if m <> None:
-            if not state.add_op_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16)):
-                replay_lines.append(line)
-            continue
         # If we made it here then we failed to match
-        matches = matches - 1
-        print "Skipping unmatched line: "+line
+        if parse_log_line(line, state):
+            matches += 1
+        else:
+            replay_lines.append(line)
     log.close()
     # Now see if we have lines that need to be replayed
     while len(replay_lines) > 0:
         to_delete = set()
         for line in replay_lines:
-            m = processor_pat.match(line)
-            if m <> None:
-                if state.add_processor(int(m.group('pid'),16), int(m.group('kind'))):
-                    to_delete.add(line)
-                continue
-            m = proc_mem_pat.match(line)
-            if m <> None:
-                if state.set_proc_mem(int(m.group('pid'),16), int(m.group('mid'),16), int(m.group('band')), int(m.group('lat'))):
-                    to_delete.add(line)
-                continue
-            m = mem_mem_pat.match(line)
-            if m <> None:
-                if state.set_mem_mem(int(m.group('mone')), int(m.group('mtwo')), int(m.group('band')), int(m.group('lat'))):
-                    to_delete.add(line)
-                continue
-            m = index_part_pat.match(line)
-            if m <> None:
-                if state.add_index_partition(int(m.group('pid'),16), int(m.group('uid'),16), True if (int(m.group('disjoint'))) == 1 else False, int(m.group('color'))):
-                    to_delete.add(line)
-                continue
-            m = index_subspace_pat.match(line)
-            if m <> None:
-                if state.add_index_subspace(int(m.group('pid')), int(m.group('uid')), int(m.group('color'))):
-                    to_delete.add(line)
-                continue
-            m = single_task_pat.match(line)
-            if m <> None:
-                if state.add_single_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
-                    to_delete.add(line)
-                continue
-            m = index_task_pat.match(line)
-            if m <> None:
-                if state.add_index_task(int(m.group('ctx')), int(m.group('tid')), int(m.group('uid')), m.group('name')):
-                    to_delete.add(line)
-                continue
-            m = mapping_pat.match(line)
-            if m <> None:
-                if state.add_mapping(int(m.group('ctx')), int(m.group('uid'))):
-                    to_delete.add(line)
-                continue
-            m = close_pat.match(line)
-            if m <> None:
-                if state.add_close(int(m.group('ctx')), int(m.group('uid'))):
-                    to_delete.add(line)
-                continue
-            m = fence_pat.match(line)
-            if m <> None:
-                if state.add_fence(int(m.group('ctx')), int(m.group('uid'))):
-                    to_delete.add(line)
-                continue
-            m = copy_op_pat.match(line)
-            if m <> None:
-                if state.add_copy_op(int(m.group('ctx')), int(m.group('uid'))):
-                    to_delete.add(line)
-                continue
-            m = slice_point_pat.match(line)
-            if m <> None:
-                if state.add_slice_point(int(m.group('slice')),int(m.group('point')), int(m.group('dim')), int(m.group('val1')), int(m.group('val2')), int(m.group('val3'))):
-                    to_delete.add(line)
-                continue
-            m = point_point_pat.match(line)
-            if m <> None:
-                if state.add_point_point(int(m.group('point1')),int(m.group('point2'))):
-                    to_delete.add(line)
-                continue
-            m = requirement_pat.match(line)
-            if m <> None:
-                if state.add_requirement(int(m.group('uid')), int(m.group('index')), True if (int(m.group('is_reg')))==1 else False, int(m.group('ispace'),16), int(m.group('fspace')), int(m.group('tid')), int(m.group('priv')), int(m.group('coher')), int(m.group('redop'))):
-                    to_delete.add(line)
-                continue
-            m = req_field_pat.match(line)
-            if m <> None:
-                if state.add_req_field(int(m.group('uid')), int(m.group('index')), int(m.group('fid'))):
-                    to_delete.add(line)
-                continue
-            m = mapping_dep_pat.match(line)
-            if m <> None:
-                if state.add_mapping_dependence(int(m.group('ctx')), int(m.group('prev_id')), int(m.group('pidx')), int(m.group('next_id')), int(m.group('nidx')), int(m.group('dtype'))):
-                    to_delete.add(line)
-                continue
-            m = task_inst_req_pat.match(line)
-            if m <> None:
-                if state.add_instance_requirement(int(m.group('uid')), int(m.group('idx')), int(m.group('index'))):
-                    to_delete.add(line)
-                continue
-            m = op_event_pat.match(line)
-            if m <> None:
-                if state.add_op_events(int(m.group('uid')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen'))):
-                    to_delete.add(line)
-                continue
-            m = copy_event_pat.match(line)
-            if m <> None:
-                if state.add_copy_events(int(m.group('srcman'),16), int(m.group('dstman'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tree')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('redop')), m.group('mask')):
-                    to_delete.add(line)
-                continue
-            m = physical_inst_pat.match(line)
-            if m <> None:
-                if state.add_physical_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid'))):
-                    to_delete.add(line)
-                continue
-            m = physical_reduc_pat.match(line)
-            if m <> None:
-                if state.add_reduction_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), True if (int(m.group('fold')) == 1) else False, int(m.group('indirect'))):
-                    to_delete.add(line)
-                continue
-            m = op_user_pat.match(line)
-            if m <> None:
-                if state.add_op_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16)):
-                    to_delete.add(line)
-                continue
+            if parse_log_line(line, state):
+                to_delete.add(line)
+
         # Now check to make sure we actually did something
         # If not then we're not making forward progress which is bad
         if len(to_delete) == 0:

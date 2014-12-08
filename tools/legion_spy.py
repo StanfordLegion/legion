@@ -26,20 +26,22 @@ from spy_analysis import *
 temp_dir = ".cent/"
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -d -v] <file_name>"
+    print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -s -v -P] <file_name>"
     print "  -l : perform logical analyses"
     print "  -c : perform physical analyses"
     print "  -p : make task pictures"
     print "  -k : keep temporary files"
-    print "  -d : delete transitive connections in task pictures"
+    print "  -s : generate simplified graphs"
     print "  -v : verbose"
+    print "  -P : make partition graphs"
+    print "  -i : make instance graphs"
     sys.exit(1)
 
 def main():
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lipckrmvd')
+    opts, args = getopt(sys.argv[1:],'lipckrmvsP')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -52,8 +54,9 @@ def main():
     print_instances = False
     print_processor_graphs = False 
     print_memory_graphs = False 
-    suppress_transitive_connections = False 
+    simplify_graphs = False 
     verbose = False
+    make_partition_graphs = False
     for opt in opts:
         if opt == '-l':
             logical_checks = True
@@ -76,11 +79,14 @@ def main():
         if opt == '-m':
             print_memory_graphs = True
             continue
-        if opt == '-d':
-            suppress_transitive_connections = True
+        if opt == '-s':
+            simplify_graphs = True
             continue
         if opt == '-v':
             verbose = True
+            continue
+        if opt == '-P':
+            make_partition_graphs = True
             continue
 
     state = State(verbose)
@@ -97,7 +103,7 @@ def main():
         state.check_logical()
     if make_pictures:
         print "Printing event graphs..."
-        state.print_pictures(temp_dir, suppress_transitive_connections)
+        state.print_pictures(temp_dir, simplify_graphs)
     if physical_checks:
         print "Performing physical checks..."
         state.check_data_flow()
@@ -113,6 +119,9 @@ def main():
         state.print_memory_graphs(temp_dir)
     #if verbose:
     #    state.print_instances()
+    if make_partition_graphs:
+        print "Print partition graphs..."
+        state.print_partition_graphs(temp_dir, simplify_graphs)
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
@@ -124,7 +133,7 @@ def main():
 if __name__ == "__main__":
     try:
         os.mkdir(temp_dir)
-        sys.setrecursionlimit(5000)
+        sys.setrecursionlimit(10000)
         main()
         shutil.rmtree(temp_dir)
     except:

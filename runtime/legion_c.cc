@@ -16,6 +16,7 @@
 #include "legion.h"
 #include "legion_c.h"
 #include "legion_c_util.h"
+#include "utilities.h"
 
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
@@ -1170,4 +1171,14 @@ legion_runtime_register_task(
   return HighLevelRuntime::register_legion_task<
     TaskResult, legion_task_pointer_t, task_wrapper>(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
+}
+
+// -----------------------------------------------------------------------
+// Timing Operations
+// -----------------------------------------------------------------------
+
+unsigned long long
+legion_get_current_time_in_micros(void)
+{
+  return TimeStamp::get_current_time_in_micros();
 }

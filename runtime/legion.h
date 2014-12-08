@@ -1527,6 +1527,12 @@ namespace LegionRuntime {
       bool                                profile_task;
       TaskPriority                        task_priority;
     public:
+      // Options for configuring this task's context
+      int                                 max_window_size;
+      unsigned                            hysteresis_percentage;
+      int                                 max_outstanding_frames;
+      unsigned                            min_tasks_to_schedule;
+    public:
       // Profiling information for the task
       unsigned long long                  start_time;
       unsigned long long                  stop_time;
@@ -2269,6 +2275,54 @@ namespace LegionRuntime {
        * then placed back onto the mapper's ready queue.
        */
       virtual void notify_mapping_failed(const Mappable *mappable) = 0;
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Targets 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked when a non-leaf task is launched in order
+       * to set up the configuration of the context for this task to manage
+       * how far deferred execution can progress. There are two components
+       * to managing this: first controlling the number of outstanding 
+       * operations in the context, and second controlling how many of 
+       * these need to be mapped before the scheduler stops being invoked
+       * by the runtime. By setting the following fields, the mapper 
+       * can control both of these characteristics.
+       *
+       * max_window_size - set the maximum number of operations that can
+       *                   be outstanding in a context. The default value
+       *                   is set to either 1024 or whatever value was
+       *                   passed on the command line to the -hl:window flag.
+       *                   Setting the value less than or equal to zero will
+       *                   disable the maximum.
+       * hystersis_percentage - set the percentage of the maximum task window
+       *                   that should be outstanding before a context starts
+       *                   issuing tasks again. Hysteresis avoids jitter and
+       *                   enables a more efficient execution at the potential
+       *                   cost of latency in a single task. The default value
+       *                   is 75% indicating that a context will start 
+       *                   launching new sub-tasks after the current number of
+       *                   tasks drains to 75% of the max_window_size.  If the
+       *                   max_window_size is disabled then this parameter has
+       *                   no effect on the execution.
+       * max_outstanding_frames - instead of specifying the maximum window size
+       *                   applications can also launch frames corresponding
+       *                   to application specific groups of tasks (see the
+       *                   'issue_frame' runtime call for more information). 
+       *                   The 'max_outstanding_frames' field allows mappers 
+       *                   to specify the maximum number of outstanding frames 
+       *                   instead. Setting this parameter subsumes the 
+       *                   max_window_size.
+       * min_tasks_to_schedule - specify the minimum number of pending mapped
+       *                   tasks that must be issued before calls to 
+       *                   select_tasks_to_schedule are stopped for this 
+       *                   context. The default is set to 32 or the value
+       *                   passed on the command line to the -hl:sched flag.
+       *                   Any value of 0 or less will disable the check
+       *                   causing select_tasks_to_schedule to be polled as
+       *                   long as there are tasks to map.
+       */
+      virtual void configure_context(Task *task) = 0;
 
       /**
        * ----------------------------------------------------------------------
@@ -3541,6 +3595,23 @@ namespace LegionRuntime {
       void end_trace(Context ctx, TraceID tid);
     public:
       //------------------------------------------------------------------------
+      // Frame Operations 
+      //------------------------------------------------------------------------
+      /**
+       * Frames are a very simple way to control the number of 
+       * outstanding operations in a task context. By default, mappers
+       * have control over this by saying how many outstanding operations
+       * each task context can have using the 'configure_context' mapper
+       * call. However, in many cases, it is easier for custom mappers to
+       * reason about how many iterations or some other application-specific
+       * set of operations are in flight. To facilitate this, applications can 
+       * create 'frames' of tasks. Using the 'configure_context' mapper
+       * call, custom mappers can specify the maximum number of outstanding
+       * frames that make up the operation window.
+       */
+      void issue_frame(Context ctx);
+    public:
+      //------------------------------------------------------------------------
       // Must Parallelism 
       //------------------------------------------------------------------------
       /**
@@ -3663,6 +3734,135 @@ namespace LegionRuntime {
        * @param proc the processor to associate the mapper with
        */
       void replace_default_mapper(Mapper *mapper, Processor proc);
+    public:
+      //------------------------------------------------------------------------
+      // Semantic Information 
+      //------------------------------------------------------------------------
+      /**
+       * Attach semantic information to an index space
+       * @param handle index space handle
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(IndexSpace handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+
+      /**
+       * Attach semantic information to an index partition 
+       * @param handle index partition handle
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(IndexPartition handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+
+      /**
+       * Attach semantic information to a field space
+       * @param handle field space handle
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(FieldSpace handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+
+      /**
+       * Attach semantic information to a specific field 
+       * @param handle field space handle
+       * @param fid field ID
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(FieldSpace handle, FieldID fid, 
+                                       SemanticTag tag,
+                                       const void *buffer, size_t size);
+
+      /**
+       * Attach semantic information to a logical region 
+       * @param handle logical region handle
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      
+      /**
+       * Attach semantic information to a logical partition 
+       * @param handle logical partition handle
+       * @param tag semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(LogicalPartition handle, 
+                                       SemanticTag tag,
+                                       const void *buffer, size_t size);
+
+      /**
+       * Retrieve semantic information for an index space
+       * @param handle index space handle
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+
+      /**
+       * Retrieve semantic information for an index partition 
+       * @param handle index partition handle
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+
+      /**
+       * Retrieve semantic information for a field space
+       * @param handle field space handle
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+
+      /**
+       * Retrieve semantic information for a specific field 
+       * @param handle field space handle
+       * @param fid field ID
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(FieldSpace handle, FieldID fid, 
+                                         SemanticTag tag,
+                                         const void *&result, size_t &size);
+
+      /**
+       * Retrieve semantic information for a logical region 
+       * @param handle logical region handle
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+
+      /**
+       * Retrieve semantic information for a logical partition
+       * @param handle logical partition handle
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(LogicalPartition handle, 
+                                         SemanticTag tag,
+                                         const void *&result, size_t &size);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations

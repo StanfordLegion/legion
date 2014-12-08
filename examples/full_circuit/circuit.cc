@@ -80,19 +80,35 @@ void top_level_task(const Task *task,
     int num_circuit_wires = num_pieces * wires_per_piece;
     // Make index spaces
     IndexSpace node_index_space = runtime->create_index_space(ctx,num_circuit_nodes);
+    runtime->attach_semantic_information(node_index_space,
+        NAME_SEMANTIC_TAG, "node_index_space", 17);
     IndexSpace wire_index_space = runtime->create_index_space(ctx,num_circuit_wires);
+    runtime->attach_semantic_information(wire_index_space,
+        NAME_SEMANTIC_TAG, "wire_index_space", 17);
     // Make field spaces
     FieldSpace node_field_space = runtime->create_field_space(ctx);
+    runtime->attach_semantic_information(node_field_space,
+        NAME_SEMANTIC_TAG, "node_field_space", 17);
     FieldSpace wire_field_space = runtime->create_field_space(ctx);
+    runtime->attach_semantic_information(wire_field_space,
+        NAME_SEMANTIC_TAG, "wire_field_space", 17);
     FieldSpace locator_field_space = runtime->create_field_space(ctx);
+    runtime->attach_semantic_information(locator_field_space,
+        NAME_SEMANTIC_TAG, "locator_field_space", 20);
     // Allocate fields
     allocate_node_fields(ctx, runtime, node_field_space);
     allocate_wire_fields(ctx, runtime, wire_field_space);
     allocate_locator_fields(ctx, runtime, locator_field_space);
     // Make logical regions
     circuit.all_nodes = runtime->create_logical_region(ctx,node_index_space,node_field_space);
+    runtime->attach_semantic_information(circuit.all_nodes,
+        NAME_SEMANTIC_TAG, "all_nodes", 10);
     circuit.all_wires = runtime->create_logical_region(ctx,wire_index_space,wire_field_space);
+    runtime->attach_semantic_information(circuit.all_wires,
+        NAME_SEMANTIC_TAG, "all_wires", 10);
     circuit.node_locator = runtime->create_logical_region(ctx,node_index_space,locator_field_space);
+    runtime->attach_semantic_information(circuit.node_locator,
+        NAME_SEMANTIC_TAG, "node_locator", 13);
   }
 
   // Load the circuit
@@ -191,7 +207,8 @@ int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
   // If we're running on the shared low-level then only register cpu tasks
 #ifdef SHARED_LOWLEVEL
   TaskHelper::register_cpu_variants<CalcNewCurrentsTask>();
@@ -276,31 +293,67 @@ void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace nod
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, node_space);
   allocator.allocate_field(sizeof(float), FID_NODE_CAP);
+  runtime->attach_semantic_information(node_space, FID_NODE_CAP,
+      NAME_SEMANTIC_TAG, "node capacitance", 17);
   allocator.allocate_field(sizeof(float), FID_LEAKAGE);
+  runtime->attach_semantic_information(node_space, FID_LEAKAGE,
+      NAME_SEMANTIC_TAG, "leakage", 8);
   allocator.allocate_field(sizeof(float), FID_CHARGE);
+  runtime->attach_semantic_information(node_space, FID_CHARGE,
+      NAME_SEMANTIC_TAG, "charge", 7);
   allocator.allocate_field(sizeof(float), FID_NODE_VOLTAGE);
+  runtime->attach_semantic_information(node_space, FID_NODE_VOLTAGE,
+      NAME_SEMANTIC_TAG, "node voltage", 13);
 }
 
 void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, wire_space);
   allocator.allocate_field(sizeof(ptr_t), FID_IN_PTR);
+  runtime->attach_semantic_information(wire_space, FID_IN_PTR,
+      NAME_SEMANTIC_TAG, "in_ptr", 7);
   allocator.allocate_field(sizeof(ptr_t), FID_OUT_PTR);
+  runtime->attach_semantic_information(wire_space, FID_OUT_PTR,
+      NAME_SEMANTIC_TAG, "out_ptr", 8);
   allocator.allocate_field(sizeof(PointerLocation), FID_IN_LOC);
+  runtime->attach_semantic_information(wire_space, FID_IN_LOC,
+      NAME_SEMANTIC_TAG, "in_loc", 7);
   allocator.allocate_field(sizeof(PointerLocation), FID_OUT_LOC);
+  runtime->attach_semantic_information(wire_space, FID_OUT_LOC,
+      NAME_SEMANTIC_TAG, "out_loc", 8);
   allocator.allocate_field(sizeof(float), FID_INDUCTANCE);
+  runtime->attach_semantic_information(wire_space, FID_INDUCTANCE,
+      NAME_SEMANTIC_TAG, "inductance", 11);
   allocator.allocate_field(sizeof(float), FID_RESISTANCE);
+  runtime->attach_semantic_information(wire_space, FID_RESISTANCE,
+      NAME_SEMANTIC_TAG, "resistance", 11);
   allocator.allocate_field(sizeof(float), FID_WIRE_CAP);
+  runtime->attach_semantic_information(wire_space, FID_WIRE_CAP,
+      NAME_SEMANTIC_TAG, "wire capacitance", 17);
   for (int i = 0; i < WIRE_SEGMENTS; i++)
+  {
+    char field_name[10];
     allocator.allocate_field(sizeof(float), FID_CURRENT+i);
+    sprintf(field_name, "current_%d", i);
+    runtime->attach_semantic_information(wire_space,
+        FID_CURRENT+i, NAME_SEMANTIC_TAG, field_name, 10);
+  }
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+  {
+    char field_name[15];
     allocator.allocate_field(sizeof(float), FID_WIRE_VOLTAGE+i);
+    sprintf(field_name, "wire_voltage_%d", i);
+    runtime->attach_semantic_information(wire_space,
+        FID_WIRE_VOLTAGE+i, NAME_SEMANTIC_TAG, field_name, 15);
+  }
 }
 
 void allocate_locator_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace locator_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, locator_space);
   allocator.allocate_field(sizeof(float), FID_LOCATOR);
+  runtime->attach_semantic_information(locator_space, FID_LOCATOR,
+      NAME_SEMANTIC_TAG, "locator", 8);
 }
 
 PointerLocation find_location(ptr_t ptr, const std::set<ptr_t> &private_nodes,
@@ -562,33 +615,66 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 
   // first create the privacy partition that splits all the nodes into either shared or private
   IndexPartition privacy_part = runtime->create_index_partition(ctx, ckt.all_nodes.get_index_space(), privacy_map, true/*disjoint*/);
+  runtime->attach_semantic_information(privacy_part, NAME_SEMANTIC_TAG,
+      "is_private", 9);
   
   IndexSpace all_private = runtime->get_index_subspace(ctx, privacy_part, 0);
+  runtime->attach_semantic_information(all_private, NAME_SEMANTIC_TAG,
+      "private", 8);
   IndexSpace all_shared  = runtime->get_index_subspace(ctx, privacy_part, 1);
-  
+  runtime->attach_semantic_information(all_shared, NAME_SEMANTIC_TAG,
+      "shared", 7);
 
   // Now create partitions for each of the subregions
   Partitions result;
   IndexPartition priv = runtime->create_index_partition(ctx, all_private, private_node_map, true/*disjoint*/);
+  runtime->attach_semantic_information(priv, NAME_SEMANTIC_TAG, "private", 8);
   result.pvt_nodes = runtime->get_logical_partition_by_tree(ctx, priv, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
+  runtime->attach_semantic_information(result.pvt_nodes, NAME_SEMANTIC_TAG,
+      "private_nodes", 14);
   IndexPartition shared = runtime->create_index_partition(ctx, all_shared, shared_node_map, true/*disjoint*/);
+  runtime->attach_semantic_information(shared, NAME_SEMANTIC_TAG, "shared", 7);
   result.shr_nodes = runtime->get_logical_partition_by_tree(ctx, shared, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
+  runtime->attach_semantic_information(result.shr_nodes, NAME_SEMANTIC_TAG,
+      "shared_nodes", 13);
   IndexPartition ghost = runtime->create_index_partition(ctx, all_shared, ghost_node_map, false/*disjoint*/);
+  runtime->attach_semantic_information(ghost, NAME_SEMANTIC_TAG, "ghost", 6);
   result.ghost_nodes = runtime->get_logical_partition_by_tree(ctx, ghost, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
+  runtime->attach_semantic_information(result.ghost_nodes, NAME_SEMANTIC_TAG,
+      "ghost_nodes", 12);
 
   IndexPartition pvt_wires = runtime->create_index_partition(ctx, ckt.all_wires.get_index_space(), wire_owner_map, true/*disjoint*/);
+  runtime->attach_semantic_information(pvt_wires, NAME_SEMANTIC_TAG, "private", 8);
   result.pvt_wires = runtime->get_logical_partition_by_tree(ctx, pvt_wires, ckt.all_wires.get_field_space(), ckt.all_wires.get_tree_id()); 
+  runtime->attach_semantic_information(result.pvt_wires, NAME_SEMANTIC_TAG,
+      "private_wires", 14);
 
   IndexPartition locs = runtime->create_index_partition(ctx, ckt.node_locator.get_index_space(), locator_node_map, true/*disjoint*/);
+  runtime->attach_semantic_information(locs, NAME_SEMANTIC_TAG, "locs", 8);
   result.node_locations = runtime->get_logical_partition_by_tree(ctx, locs, ckt.node_locator.get_field_space(), ckt.node_locator.get_tree_id());
+  runtime->attach_semantic_information(result.node_locations, NAME_SEMANTIC_TAG,
+      "node_locations", 14);
 
+  char buf[100];
   // Build the pieces
   for (int n = 0; n < num_pieces; n++)
   {
     pieces[n].pvt_nodes = runtime->get_logical_subregion_by_color(ctx, result.pvt_nodes, n);
+    sprintf(buf, "private_nodes_of_piece_%d", n);
+    runtime->attach_semantic_information(pieces[n].pvt_nodes, NAME_SEMANTIC_TAG,
+        buf, strlen(buf) + 1);
     pieces[n].shr_nodes = runtime->get_logical_subregion_by_color(ctx, result.shr_nodes, n);
+    sprintf(buf, "shared_nodes_of_piece_%d", n);
+    runtime->attach_semantic_information(pieces[n].shr_nodes, NAME_SEMANTIC_TAG,
+        buf, strlen(buf) + 1);
     pieces[n].ghost_nodes = runtime->get_logical_subregion_by_color(ctx, result.ghost_nodes, n);
+    sprintf(buf, "ghost_nodes_of_piece_%d", n);
+    runtime->attach_semantic_information(pieces[n].ghost_nodes, NAME_SEMANTIC_TAG,
+        buf, strlen(buf) + 1);
     pieces[n].pvt_wires = runtime->get_logical_subregion_by_color(ctx, result.pvt_wires, n);
+    sprintf(buf, "private_wires_of_piece_%d", n);
+    runtime->attach_semantic_information(pieces[n].pvt_wires, NAME_SEMANTIC_TAG,
+        buf, strlen(buf) + 1);
     pieces[n].num_wires = wires_per_piece;
     pieces[n].first_wire = first_wires[n];
     pieces[n].num_nodes = nodes_per_piece;

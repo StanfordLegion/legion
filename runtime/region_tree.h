@@ -350,6 +350,39 @@ namespace LegionRuntime {
       void dump_physical_state(LogicalRegion region, ContextID ctx);
 #endif
     public:
+      void attach_semantic_information(IndexSpace handle, SemanticTag tag,
+                                       const NodeMask &source_mask,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(IndexPartition handle, SemanticTag tag,
+                                       const NodeMask &source_mask,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(FieldSpace handle, SemanticTag tag,
+                                       const NodeMask &source_mask,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(FieldSpace handle, FieldID fid,
+                                       SemanticTag tag, const NodeMask &source,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                       const NodeMask &source_mask,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
+                                       const NodeMask &source_mask,
+                                       const void *buffer, size_t size);
+    public:
+      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+                                         SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size);
+    public:
       Runtime *const runtime;
     protected:
       Reservation forest_lock;
@@ -571,6 +604,22 @@ namespace LegionRuntime {
 #endif
 
     /**
+     * \struct SemanticInfo
+     * A struct for storing semantic information for various things
+     */
+    struct SemanticInfo {
+    public:
+      SemanticInfo(void)
+        : buffer(NULL), size(0) { }  
+      SemanticInfo(void *buf, size_t s, const NodeMask &init)
+        : buffer(buf), size(s), node_mask(init) { }
+    public:
+      void *buffer;
+      size_t size;
+      NodeMask node_mask;
+    };
+
+    /**
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
@@ -597,6 +646,14 @@ namespace LegionRuntime {
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
+      void attach_semantic_information(SemanticTag tag, const NodeMask &mask,
+                                       const void *buffer, size_t size);
+      void retrieve_semantic_information(SemanticTag tag,
+                                         const void *&result, size_t &size);
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size, 
+                                      const NodeMask &current) = 0;
+    public:
       static bool compute_intersections(const std::set<Domain> &left,
                                         const std::set<Domain> &right,
                                         std::set<Domain> &result);
@@ -620,6 +677,8 @@ namespace LegionRuntime {
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
       std::map<IndexTreeNode*,bool> dominators;
+    protected:
+      std::map<SemanticTag,SemanticInfo> semantic_info;
     };
 
     /**
@@ -636,6 +695,12 @@ namespace LegionRuntime {
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
     public:
       virtual IndexTreeNode* get_parent(void) const;
+    public:
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size,
+                                      const NodeMask &current);
+      static void handle_semantic_info(RegionTreeForest *forest,
+                                       Deserializer &derez);
     public:
       bool has_child(Color c);
       IndexPartNode* get_child(Color c);
@@ -709,6 +774,12 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const;
     public:
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size,
+                                      const NodeMask &current);
+      static void handle_semantic_info(RegionTreeForest *forest,
+                                       Deserializer &derez);
+    public:
       bool has_child(Color c);
       IndexSpaceNode* get_child(Color c);
       void add_child(IndexSpaceNode *child);
@@ -781,6 +852,21 @@ namespace LegionRuntime {
       ~FieldSpaceNode(void);
     public:
       FieldSpaceNode& operator=(const FieldSpaceNode &rhs);
+    public:
+      void attach_semantic_information(SemanticTag tag, 
+                                       const NodeMask &sources,
+                                       const void *buffer, size_t size);
+      void attach_semantic_information(FieldID fid, SemanticTag tag,
+                                       const NodeMask &sources,
+                                       const void *buffer, size_t size);
+      void retrieve_semantic_information(SemanticTag tag,
+                                         const void *&result, size_t &size);
+      void retrieve_semantic_information(FieldID fid, SemanticTag tag,
+                                         const void *&result, size_t &size);
+      static void handle_semantic_info(RegionTreeForest *forest,
+                                       Deserializer &derez);
+      static void handle_field_semantic_info(RegionTreeForest *forest,
+                                             Deserializer &derez);
     public:
       void allocate_field(FieldID fid, size_t size, bool local);
       void allocate_field_index(FieldID fid, size_t size, 
@@ -859,6 +945,9 @@ namespace LegionRuntime {
       // differentiate them.
       std::map<FIELD_TYPE,LegionContainer<LayoutDescription*,
                           LAYOUT_DESCRIPTION_ALLOC>::deque> layouts;
+    private:
+      std::map<SemanticTag,SemanticInfo> semantic_info;
+      std::map<std::pair<FieldID,SemanticTag>,SemanticInfo> semantic_field_info;
     };
  
     /**
@@ -1533,6 +1622,14 @@ namespace LegionRuntime {
       void acquire_physical_state(PhysicalState *state, bool exclusive);
       bool release_physical_state(PhysicalState *state);
     public:
+      void attach_semantic_information(SemanticTag tag, const NodeMask &mask,
+                                       const void *buffer, size_t size);
+      void retrieve_semantic_information(SemanticTag tag,
+                                         const void *&result, size_t &size);
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size,
+                                      const NodeMask &current) = 0;
+    public:
       // Logical traversal operations
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
@@ -1804,6 +1901,8 @@ namespace LegionRuntime {
       size_t logical_state_size;
       size_t physical_state_size;
 #endif
+    protected:
+      std::map<SemanticTag,SemanticInfo> semantic_info;
     };
 
     /**
@@ -1857,6 +1956,12 @@ namespace LegionRuntime {
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
+    public:
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size,
+                                      const NodeMask &current);
+      static void handle_semantic_info(RegionTreeForest *forest,
+                                       Deserializer &derez);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
@@ -1969,6 +2074,12 @@ namespace LegionRuntime {
                                               bool reduction_list,
                                               ReductionOpID redop);
       virtual void send_node(AddressSpaceID target);
+    public:
+      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+                                      const void *buffer, size_t size,
+                                      const NodeMask &current);
+      static void handle_semantic_info(RegionTreeForest *forest,
+                                       Deserializer &derez);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

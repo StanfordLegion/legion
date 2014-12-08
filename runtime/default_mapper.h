@@ -82,6 +82,7 @@ namespace LegionRuntime {
       virtual void notify_profiling_info(const Task *task);
       virtual bool speculate_on_predicate(const Mappable *mappable,
                                           bool &spec_value);
+      virtual void configure_context(Task *task);
       virtual int get_tunable_value(const Task *task, 
                                     TunableID tid,
                                     MappingTagID tag);

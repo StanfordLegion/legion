@@ -82,6 +82,11 @@
 #ifndef DEFAULT_MAX_TASK_WINDOW
 #define DEFAULT_MAX_TASK_WINDOW         1024
 #endif
+// Default amount of hysteresis on the task window in the
+// form of a percentage (must be between 0 and 100)
+#ifndef DEFAULT_TASK_WINDOW_HYSTERESIS
+#define DEFAULT_TASK_WINDOW_HYSTERESIS  75
+#endif
 // How many tasks to group together for runtime operations
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
@@ -269,6 +274,8 @@ typedef enum legion_error_t {
   ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED = 118,
   ERROR_TRACING_ALLOCATION_WITH_SEPARATE = 119,
   ERROR_EMPTY_INDEX_PARTITION = 120,
+  ERROR_INCONSISTENT_SEMANTIC_TAG = 121,
+  ERROR_INVALID_SEMANTIC_TAG = 122,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -321,6 +328,11 @@ typedef enum legion_dependence_type_t {
   PROMOTED_DEPENDENCE = 5,
 } legion_dependence_type_t;
 
+enum {
+  NAME_SEMANTIC_TAG = 0,
+  FIRST_AVAILABLE_SEMANTIC_TAG = 1,
+};
+
 //==========================================================================
 //                                Types
 //==========================================================================
@@ -347,6 +359,7 @@ typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
+typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;

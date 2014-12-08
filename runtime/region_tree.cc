@@ -1538,10 +1538,12 @@ namespace LegionRuntime {
             precondition, copy_pre);
       }
 #endif
+#if 0
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
       LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
       LegionSpy::log_event_dependence(precondition, copy_pre);
+#endif
 #endif
       RegionNode *dst_node = get_node(dst_req.region);
       // See if we have component domains or whether there is only
@@ -1566,6 +1568,7 @@ namespace LegionRuntime {
       }
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
+#if 0
 #ifdef LEGION_SPY
       if (!result.exists())
       {
@@ -1589,6 +1592,7 @@ namespace LegionRuntime {
                                       field_mask);
         free(field_mask);
       }
+#endif
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Runtime::perf_trace_tolerance);
@@ -2786,6 +2790,166 @@ namespace LegionRuntime {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(IndexSpace handle,
+                                                       SemanticTag tag,
+                                                       const NodeMask &source,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(tag, source, buffer, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_index_space_name(handle.id,
+            reinterpret_cast<const char*>(buffer));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(IndexPartition handle,
+                                                       SemanticTag tag,
+                                                       const NodeMask &source,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(tag, source, buffer, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_index_partition_name(handle,
+            reinterpret_cast<const char*>(buffer));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(FieldSpace handle,
+                                                       SemanticTag tag,
+                                                       const NodeMask &source,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(tag, source, buffer, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_field_space_name(handle.id,
+            reinterpret_cast<const char*>(buffer));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(FieldSpace handle,
+                                                       FieldID fid,
+                                                       SemanticTag tag,
+                                                       const NodeMask &src,
+                                                       const void *buf,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(fid, tag, src, buf, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_field_name(handle.id, fid,
+            reinterpret_cast<const char*>(buf));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(LogicalRegion handle,
+                                                       SemanticTag tag,
+                                                       const NodeMask &source,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(tag, source, buffer, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_logical_region_name(handle.index_space.id,
+            handle.field_space.id, handle.tree_id,
+            reinterpret_cast<const char*>(buffer));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::attach_semantic_information(LogicalPartition handle,
+                                                       SemanticTag tag,
+                                                       const NodeMask &source,
+                                                       const void *buffer,
+                                                       size_t size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->attach_semantic_information(tag, source, buffer, size);
+#ifdef LEGION_SPY
+      if (NAME_SEMANTIC_TAG == tag)
+        LegionSpy::log_logical_partition_name(handle.index_partition,
+            handle.field_space.id, handle.tree_id,
+            reinterpret_cast<const char*>(buffer));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(IndexSpace handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->retrieve_semantic_information(tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(IndexPartition handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->retrieve_semantic_information(tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->retrieve_semantic_information(tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
+                                                         FieldID fid,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->retrieve_semantic_information(fid, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(LogicalRegion handle,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(handle)->retrieve_semantic_information(tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::retrieve_semantic_information(LogicalPartition part,
+                                                         SemanticTag tag,
+                                                         const void *&result,
+                                                         size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      get_node(part)->retrieve_semantic_information(tag, result, size);
+    }
+
 #ifdef DYNAMIC_TESTS
     //--------------------------------------------------------------------------
     bool RegionTreeForest::perform_dynamic_tests(unsigned num_tests)
@@ -3526,6 +3690,98 @@ namespace LegionRuntime {
     {
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
+      for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+            semantic_info.begin(); it != semantic_info.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::attach_semantic_information(SemanticTag tag,
+                                                    const NodeMask &mask,
+                                                    const void *buffer, 
+                                                    size_t size)
+    //--------------------------------------------------------------------------
+    {
+      // Make a copy
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      NodeMask diff, current;
+      {
+        AutoLock n_lock(node_lock); 
+        // See if it already exists
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          // Check to make sure that the bits are the same
+          if (size != finder->second.size)
+          {
+            log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                "for tag %ld with different sizes of %ld"
+                                " and %ld for index tree node", 
+                                tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
+          }
+          // Otherwise do a bitwise comparison
+          {
+            const char *orig = (const char*)finder->second.buffer;
+            const char *next = (const char*)buffer;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              char diff = orig[idx] ^ next[idx];
+              if (diff)
+              {
+                log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                    "for tag %ld with different values at"
+                                    "byte %d for index tree node, %x != %x", 
+                                    tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+            }
+          }
+          finder->second.node_mask |= mask;
+          diff = creation_set - finder->second.node_mask;
+          current = finder->second.node_mask;
+        }
+        else
+        {
+          semantic_info[tag] = SemanticInfo(local, size, mask);
+          diff = creation_set - mask;
+          current = mask;
+        }
+      }
+      if (!!diff)
+        send_semantic_info(diff, tag, local, size, current);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::retrieve_semantic_information(SemanticTag tag,
+                                                      const void *&result,
+                                                      size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+        semantic_info.find(tag);
+      if (finder == semantic_info.end())
+      {
+        log_run(LEVEL_ERROR,"ERROR: invalid semantic tag %ld for "
+                            "index tree node", tag);   
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
     }
 
     //--------------------------------------------------------------------------
@@ -3881,6 +4137,52 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return parent;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::send_semantic_info(const NodeMask &targets,
+                                            SemanticTag tag,
+                                            const void *buffer, size_t size,
+                                            const NodeMask &current)
+    //--------------------------------------------------------------------------
+    {
+      // Package up the message first
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(handle);
+        rez.serialize(tag);
+        rez.serialize(current);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+      }
+      // Then send the messages
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (!targets.is_set(idx))
+          continue;
+        AddressSpaceID target = idx;
+        context->runtime->send_index_space_semantic_info(target, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_semantic_info(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, tag, sources, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -4392,6 +4694,16 @@ namespace LegionRuntime {
             {
               rez.serialize(*it);
             }
+            rez.serialize<size_t>(semantic_info.size());
+            for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+                  semantic_info.begin(); it != semantic_info.end(); it++)
+            {
+              it->second.node_mask.set_bit(target);
+              rez.serialize(it->first);
+              rez.serialize(it->second.node_mask);
+              rez.serialize(it->second.size);
+              rez.serialize(it->second.buffer, it->second.size);
+            }
           }
           context->runtime->send_index_space_node(target, rez); 
           creation_set.set_bit(target);
@@ -4452,6 +4764,21 @@ namespace LegionRuntime {
       node->add_creation_source(source);
       if (components > 0)
         node->update_component_domains(component_domains);
+      size_t num_semantic;
+      derez.deserialize(num_semantic);
+      for (unsigned idx = 0; idx < num_semantic; idx++)
+      {
+        SemanticTag tag;
+        derez.deserialize(tag);
+        NodeMask source_mask;
+        derez.deserialize(source_mask);
+        size_t buffer_size;
+        derez.deserialize(buffer_size);
+        const void *buffer = derez.get_current_pointer();
+        derez.advance_pointer(buffer_size);
+        node->attach_semantic_information(tag, source_mask, 
+                                          buffer, buffer_size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4514,6 +4841,51 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return parent;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::send_semantic_info(const NodeMask &targets, 
+                                           SemanticTag tag, const void *buffer,
+                                           size_t size, const NodeMask &current)
+    //--------------------------------------------------------------------------
+    {
+      // Package up the message first
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(handle);
+        rez.serialize(tag);
+        rez.serialize(current);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+      }
+      // Then send the messages
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (!targets.is_set(idx))
+          continue;
+        AddressSpaceID target = idx;
+        context->runtime->send_index_partition_semantic_info(target, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_semantic_info(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, tag, sources, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -4945,6 +5317,16 @@ namespace LegionRuntime {
             rez.serialize(parent->handle); 
             rez.serialize(color);
             rez.serialize(disjoint);
+            rez.serialize<size_t>(semantic_info.size());
+            for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+                  semantic_info.begin(); it != semantic_info.end(); it++)
+            {
+              it->second.node_mask.set_bit(target);
+              rez.serialize(it->first);
+              rez.serialize(it->second.node_mask);
+              rez.serialize(it->second.size);
+              rez.serialize(it->second.buffer, it->second.size);
+            }
           }
           context->runtime->send_index_partition_node(target, rez);
           creation_set.set_bit(target);
@@ -4994,6 +5376,21 @@ namespace LegionRuntime {
       assert(node != NULL);
 #endif
       node->add_creation_source(source);
+      size_t num_semantic;
+      derez.deserialize(num_semantic);
+      for (unsigned idx = 0; idx < num_semantic; idx++)
+      {
+        SemanticTag tag;
+        derez.deserialize(tag);
+        NodeMask source_mask;
+        derez.deserialize(source_mask);
+        size_t buffer_size;
+        derez.deserialize(buffer_size);
+        const void *buffer = derez.get_current_pointer();
+        derez.advance_pointer(buffer_size);
+        node->attach_semantic_information(tag, source_mask,
+                                          buffer, buffer_size);
+      }
     } 
 
     /////////////////////////////////////////////////////////////
@@ -5034,6 +5431,16 @@ namespace LegionRuntime {
           delete descs[idx];
       }
       layouts.clear();
+      for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+            semantic_info.begin(); it != semantic_info.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
+      }
+      for (std::map<std::pair<FieldID,SemanticTag>,SemanticInfo>::iterator it =
+            semantic_field_info.begin(); it != semantic_field_info.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5043,6 +5450,256 @@ namespace LegionRuntime {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::attach_semantic_information(SemanticTag tag,
+                                                     const NodeMask &sources,
+                                                     const void *buffer, 
+                                                     size_t size)
+    //--------------------------------------------------------------------------
+    {
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      NodeMask diff, current;
+      {
+        AutoLock n_lock(node_lock); 
+        // See if it already exists
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          // Check to make sure that the bits are the same
+          if (size != finder->second.size)
+          {
+            log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                "for tag %ld with different sizes of %ld"
+                                " and %ld for index tree node", 
+                                tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
+          }
+          // Otherwise do a bitwise comparison
+          {
+            const char *orig = (const char*)finder->second.buffer;
+            const char *next = (const char*)buffer;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              char diff = orig[idx] ^ next[idx];
+              if (diff)
+              {
+                log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                    "for tag %ld with different values at"
+                                    "byte %d for index tree node, %x != %x", 
+                                    tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+            }
+          }
+          finder->second.node_mask |= sources;
+          diff = creation_set - finder->second.node_mask;
+          current = finder->second.node_mask;
+        }
+        else
+        {
+          semantic_info[tag] = SemanticInfo(local, size, sources);
+          diff = creation_set - sources;
+          current = sources;
+        }
+      }
+      if (!!diff)
+      {
+        // Package up the message and then send it out
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(tag);
+          rez.serialize(current);
+          rez.serialize(size);
+          rez.serialize(buffer, size);
+        }
+        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        {
+          if (!diff.is_set(idx))
+            continue;
+          AddressSpaceID target = idx;
+          context->runtime->send_field_space_semantic_info(target, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::attach_semantic_information(FieldID fid,
+                                                     SemanticTag tag,
+                                                     const NodeMask &sources,
+                                                     const void *buffer,
+                                                     size_t size)
+    //--------------------------------------------------------------------------
+    {
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      NodeMask diff, current;
+      {
+        AutoLock n_lock(node_lock); 
+        // See if it already exists
+        std::map<std::pair<FieldID,SemanticTag>,SemanticInfo>::iterator finder =
+          semantic_field_info.find(std::pair<FieldID,SemanticTag>(fid,tag));
+        if (finder != semantic_field_info.end())
+        {
+          // Check to make sure that the bits are the same
+          if (size != finder->second.size)
+          {
+            log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                "for tag %ld with different sizes of %ld"
+                                " and %ld for index tree node", 
+                                tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
+          }
+          // Otherwise do a bitwise comparison
+          {
+            const char *orig = (const char*)finder->second.buffer;
+            const char *next = (const char*)buffer;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              char diff = orig[idx] ^ next[idx];
+              if (diff)
+              {
+                log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                    "for tag %ld with different values at"
+                                    "byte %d for index tree node, %x != %x", 
+                                    tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+            }
+          }
+          finder->second.node_mask |= sources;
+          diff = creation_set - finder->second.node_mask;
+          current = finder->second.node_mask;
+        }
+        else
+        {
+          semantic_field_info[std::pair<FieldID,SemanticTag>(fid,tag)] = 
+            SemanticInfo(local, size, sources);
+          diff = creation_set - sources;
+          current = sources;
+        }
+      }
+      if (!!diff)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(fid);
+          rez.serialize(tag);
+          rez.serialize(current);
+          rez.serialize(size);
+          rez.serialize(buffer, size);
+        }
+        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        {
+          if (!diff.is_set(idx))
+            continue;
+          AddressSpaceID target = idx;
+          context->runtime->send_field_semantic_info(target, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::retrieve_semantic_information(SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/); 
+      std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+        semantic_info.find(tag);
+      if (finder == semantic_info.end())
+      {
+        log_run(LEVEL_ERROR,"ERROR: invalid semantic tag %ld for "
+                            "field space %d", tag, handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::retrieve_semantic_information(FieldID fid,
+                             SemanticTag tag, const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/); 
+      std::map<std::pair<FieldID,SemanticTag>,SemanticInfo>::const_iterator
+        finder = semantic_field_info.find(
+                                  std::pair<FieldID,SemanticTag>(fid,tag));
+      if (finder == semantic_field_info.end())
+      {
+        log_run(LEVEL_ERROR,"ERROR: invalid semantic tag %ld for field %d "
+                            "of field space %d", tag, fid, handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_semantic_info(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, tag, sources, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_field_semantic_info(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      FieldID fid;
+      derez.deserialize(fid);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, fid, tag, 
+                                          sources, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -5674,6 +6331,28 @@ namespace LegionRuntime {
         {
           RezCheck z(rez);
           rez.serialize(handle);
+          rez.serialize<size_t>(semantic_info.size());
+          for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+                semantic_info.begin(); it != semantic_info.end(); it++)
+          {
+            it->second.node_mask.set_bit(target);
+            rez.serialize(it->first);
+            rez.serialize(it->second.node_mask);
+            rez.serialize(it->second.size);
+            rez.serialize(it->second.buffer, it->second.size);
+          }
+          rez.serialize<size_t>(semantic_field_info.size());
+          for (std::map<std::pair<FieldID,SemanticTag>,SemanticInfo>::iterator
+                it = semantic_field_info.begin(); 
+                it != semantic_field_info.end(); it++)
+          {
+            it->second.node_mask.set_bit(target);
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize(it->second.node_mask);
+            rez.serialize(it->second.size);
+            rez.serialize(it->second.buffer, it->second.size);
+          }
         }
         context->runtime->send_field_space_node(target, rez);
         // Send all the field allocations
@@ -5711,6 +6390,38 @@ namespace LegionRuntime {
       assert(node != NULL);
 #endif
       node->add_creation_source(source);
+      size_t num_semantic;
+      derez.deserialize(num_semantic);
+      for (unsigned idx = 0; idx < num_semantic; idx++)
+      {
+        SemanticTag tag;
+        derez.deserialize(tag);
+        NodeMask source_mask;
+        derez.deserialize(source_mask);
+        size_t buffer_size;
+        derez.deserialize(buffer_size);
+        const void *buffer = derez.get_current_pointer();
+        derez.advance_pointer(buffer_size);
+        node->attach_semantic_information(tag, source_mask, 
+                                          buffer, buffer_size);
+      }
+      size_t num_field_semantic;
+      derez.deserialize(num_field_semantic);
+      for (unsigned idx = 0; idx < num_field_semantic; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        SemanticTag tag;
+        derez.deserialize(tag);
+        NodeMask source_mask;
+        derez.deserialize(source_mask);
+        size_t buffer_size;
+        derez.deserialize(buffer_size);
+        const void *buffer = derez.get_current_pointer();
+        derez.advance_pointer(buffer_size);
+        node->attach_semantic_information(fid, tag, source_mask,
+                                          buffer, buffer_size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8830,6 +9541,11 @@ namespace LegionRuntime {
     {
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
+      for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+            semantic_info.begin(); it != semantic_info.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8984,6 +9700,94 @@ namespace LegionRuntime {
         }
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::attach_semantic_information(SemanticTag tag,
+                                                     const NodeMask &mask,
+                                                     const void *buffer,
+                                                     size_t size)
+    //--------------------------------------------------------------------------
+    {
+      // Make a copy
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      NodeMask diff, current;
+      {
+        AutoLock n_lock(node_lock); 
+        // See if it already exists
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          // Check to make sure that the bits are the same
+          if (size != finder->second.size)
+          {
+            log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                "for tag %ld with different sizes of %ld"
+                                " and %ld for region tree node", 
+                                tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
+          }
+          // Otherwise do a bitwise comparison
+          {
+            const char *orig = (const char*)finder->second.buffer;
+            const char *next = (const char*)buffer;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              char diff = orig[idx] ^ next[idx];
+              if (diff)
+              {
+                log_run(LEVEL_ERROR,"ERROR: Inconsistent Semantic Tag value "
+                                    "for tag %ld with different values at"
+                                    "byte %d for region tree node, %x != %x", 
+                                    tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+            }
+          }
+          finder->second.node_mask |= mask;
+          diff = creation_set - finder->second.node_mask;
+          current = finder->second.node_mask;
+        }
+        else
+        {
+          semantic_info[tag] = SemanticInfo(local, size, mask);
+          diff = creation_set - mask;
+          current = mask;
+        }
+      }
+      if (!!diff)
+        send_semantic_info(diff, tag, local, size, current);
+
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::retrieve_semantic_information(SemanticTag tag,
+                                                       const void *&result,
+                                                       size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+        semantic_info.find(tag);
+      if (finder == semantic_info.end())
+      {
+        log_run(LEVEL_ERROR,"ERROR: invalid semantic tag %ld for "
+                            "index tree node", tag);   
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
     }
 
     //--------------------------------------------------------------------------
@@ -11490,13 +12294,17 @@ namespace LegionRuntime {
           RegionNode *manager_node = dst->manager->region_node;
           char *string_mask = 
             manager_node->column_source->to_string(it->second);
-          LegionSpy::log_copy_operation(
-              it->first->manager->get_instance().id,
-              dst->manager->get_instance().id,
-              copy_index_space.id,
-              manager_node->column_source->handle.id,
-              manager_node->handle.tree_id, copy_pre, copy_post,
-              0/*redop*/, string_mask);
+          {
+            std::set<FieldID> field_set;
+            manager_node->column_source->to_field_set(it->second, field_set);
+            LegionSpy::log_copy_operation(
+                it->first->manager->get_instance().id,
+                dst->manager->get_instance().id,
+                copy_index_space.id,
+                manager_node->column_source->handle.id,
+                manager_node->handle.tree_id, copy_pre, copy_post,
+                0/*redop*/, field_set);
+          }
           free(string_mask);
 #endif
         }
@@ -12953,7 +13761,26 @@ namespace LegionRuntime {
       if (continue_up)
       {
         if (parent != NULL)
+        {
+          // Send the parent node first
           parent->send_node(target);
+          AutoLock n_lock(node_lock);
+          for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+                semantic_info.begin(); it != semantic_info.end(); it++)
+          {
+            it->second.node_mask.set_bit(target);
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(it->first);
+              rez.serialize(it->second.node_mask);
+              rez.serialize(it->second.size);
+              rez.serialize(it->second.buffer, it->second.size);
+            }
+            context->runtime->send_logical_region_semantic_info(target, rez);
+          }
+        }
         else
         {
           // We've made it to the top, send this node
@@ -12961,6 +13788,15 @@ namespace LegionRuntime {
           {
             RezCheck z(rez);
             rez.serialize(handle);
+            rez.serialize<size_t>(semantic_info.size());
+            for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+                  semantic_info.begin(); it != semantic_info.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second.size);
+              rez.serialize(it->second.buffer, it->second.size);
+              it->second.node_mask.set_bit(target);
+            }
           }
           context->runtime->send_logical_region_node(target, rez);
         }
@@ -12985,6 +13821,25 @@ namespace LegionRuntime {
       assert(node != NULL);
 #endif
       node->add_creation_source(source);
+      size_t num_semantic;
+      derez.deserialize(num_semantic);
+      if (num_semantic > 0)
+      {
+        NodeMask source_mask;
+        source_mask.set_bit(source);
+        source_mask.set_bit(context->runtime->address_space);
+        for (unsigned idx = 0; idx < num_semantic; idx++)
+        {
+          SemanticTag tag;
+          derez.deserialize(tag);
+          size_t buffer_size;
+          derez.deserialize(buffer_size);
+          const void *buffer = derez.get_current_pointer();
+          derez.advance_pointer(buffer_size);
+          node->attach_semantic_information(tag, source_mask, 
+                                            buffer, buffer_size);
+        }
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -13394,6 +14249,52 @@ namespace LegionRuntime {
       
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::send_semantic_info(const NodeMask &targets,
+                                        SemanticTag tag,
+                                        const void *buffer, size_t size,
+                                        const NodeMask &current)
+    //--------------------------------------------------------------------------
+    {
+      // Package up the message first
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(handle);
+        rez.serialize(tag);
+        rez.serialize(current);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+      }
+      // Then send the messages
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (!targets.is_set(idx))
+          continue;
+        AddressSpaceID target = idx;
+        context->runtime->send_logical_region_semantic_info(target, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionNode::handle_semantic_info(RegionTreeForest *forest,
+                                                     Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, tag, sources, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -14017,7 +14918,24 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(parent != NULL);
 #endif
+        // Send the parent node first
         parent->send_node(target);
+        AutoLock n_lock(node_lock);
+        for (std::map<SemanticTag,SemanticInfo>::iterator it = 
+              semantic_info.begin(); it != semantic_info.end(); it++)
+        {
+          it->second.node_mask.set_bit(target);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(it->first);
+            rez.serialize(it->second.node_mask);
+            rez.serialize(it->second.size);
+            rez.serialize(it->second.buffer, it->second.size);
+          }
+          context->runtime->send_logical_partition_semantic_info(target, rez);
+        }
       }
       if (send_deletion)
       {
@@ -14118,6 +15036,52 @@ namespace LegionRuntime {
       
       // Note we don't need a separate routine for unpack send back state
       node->unpack_send_state(ctx, derez, node->column_source, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::send_semantic_info(const NodeMask &targets,
+                                           SemanticTag tag,
+                                           const void *buffer, size_t size,
+                                           const NodeMask &current)
+    //--------------------------------------------------------------------------
+    {
+      // Package up the message first
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(handle);
+        rez.serialize(tag);
+        rez.serialize(current);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+      }
+      // Then send the messages
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (!targets.is_set(idx))
+          continue;
+        AddressSpaceID target = idx;
+        context->runtime->send_logical_partition_semantic_info(target, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PartitionNode::handle_semantic_info(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LogicalPartition handle;
+      derez.deserialize(handle);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      NodeMask sources;
+      derez.deserialize(sources);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      forest->attach_semantic_information(handle, tag, sources, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -20616,11 +21580,16 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       char *string_mask = 
         manager->region_node->column_source->to_string(reduce_mask);
-      LegionSpy::log_copy_operation(manager->get_instance().id,
-          target->get_manager()->get_instance().id, reduce_index_space.id,
-          manager->region_node->column_source->handle.id,
-          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-          manager->redop, string_mask);
+      {
+        std::set<FieldID> field_set;
+        manager->region_node->column_source->to_field_set(reduce_mask,
+            field_set);
+        LegionSpy::log_copy_operation(manager->get_instance().id,
+            target->get_manager()->get_instance().id, reduce_index_space.id,
+            manager->region_node->column_source->handle.id,
+            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
+            manager->redop, field_set);
+      }
 #endif
     } 
 
@@ -20710,11 +21679,15 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       char *string_mask = 
         manager->region_node->column_source->to_string(red_mask);
-      LegionSpy::log_copy_operation(manager->get_instance().id,
-          target->get_manager()->get_instance().id, reduce_index_space.id,
-          manager->region_node->column_source->handle.id,
-          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-          manager->redop, string_mask);
+      {
+        std::set<FieldID> field_set;
+        manager->region_node->column_source->to_field_set(red_mask, field_set);
+        LegionSpy::log_copy_operation(manager->get_instance().id,
+            target->get_manager()->get_instance().id, reduce_index_space.id,
+            manager->region_node->column_source->handle.id,
+            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
+            manager->redop, field_set);
+      }
 #endif
       return reduce_post;
     }
@@ -20807,11 +21780,15 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       char *string_mask = 
         manager->region_node->column_source->to_string(red_mask);
-      LegionSpy::log_copy_operation(manager->get_instance().id,
-          target->get_manager()->get_instance().id, reduce_index_space.id,
-          manager->region_node->column_source->handle.id,
-          manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-          manager->redop, string_mask);
+      {
+        std::set<FieldID> field_set;
+        manager->region_node->column_source->to_field_set(red_mask, field_set);
+        LegionSpy::log_copy_operation(manager->get_instance().id,
+            target->get_manager()->get_instance().id, reduce_index_space.id,
+            manager->region_node->column_source->handle.id,
+            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
+            manager->redop, field_set);
+      }
 #endif
       return reduce_post;
     }

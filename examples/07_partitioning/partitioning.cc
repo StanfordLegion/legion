@@ -67,21 +67,36 @@ void top_level_task(const Task *task,
   Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
   IndexSpace is = runtime->create_index_space(ctx, 
                           Domain::from_rect<1>(elem_rect));
+  runtime->attach_semantic_information(is, NAME_SEMANTIC_TAG, "is", 3);
   FieldSpace input_fs = runtime->create_field_space(ctx);
+  runtime->attach_semantic_information(input_fs, NAME_SEMANTIC_TAG,
+      "input_fs", 9);
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, input_fs);
     allocator.allocate_field(sizeof(double),FID_X);
+    runtime->attach_semantic_information(input_fs, FID_X,
+        NAME_SEMANTIC_TAG, "X", 2);
     allocator.allocate_field(sizeof(double),FID_Y);
+    runtime->attach_semantic_information(input_fs, FID_Y,
+        NAME_SEMANTIC_TAG, "Y", 2);
   }
   FieldSpace output_fs = runtime->create_field_space(ctx);
+  runtime->attach_semantic_information(output_fs, NAME_SEMANTIC_TAG,
+      "output_fs", 10);
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, output_fs);
     allocator.allocate_field(sizeof(double),FID_Z);
+    runtime->attach_semantic_information(output_fs, FID_Z,
+        NAME_SEMANTIC_TAG, "Z", 2);
   }
   LogicalRegion input_lr = runtime->create_logical_region(ctx, is, input_fs);
+  runtime->attach_semantic_information(input_lr, NAME_SEMANTIC_TAG,
+      "input_lr", 9);
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
+  runtime->attach_semantic_information(output_lr, NAME_SEMANTIC_TAG,
+      "output_lr", 10);
 
   // In addition to using rectangles and domains for launching index spaces
   // of tasks (see example 02), Legion also uses them for performing 
@@ -184,6 +199,8 @@ void top_level_task(const Task *task,
     Blockify<1> coloring(num_elements/num_subregions);
     ip = runtime->create_index_partition(ctx, is, coloring);
   }
+  runtime->attach_semantic_information(ip, NAME_SEMANTIC_TAG,
+      "ip", 3);
 
   // The index space 'is' was used in creating two logical regions: 'input_lr'
   // and 'output_lr'.  By creating an IndexPartitiong of 'is' we implicitly
@@ -194,7 +211,11 @@ void top_level_task(const Task *task,
   // and returns the LogicalPartition of the given LogicalRegion that corresponds
   // to the given IndexPartition.  
   LogicalPartition input_lp = runtime->get_logical_partition(ctx, input_lr, ip);
+  runtime->attach_semantic_information(input_lp, NAME_SEMANTIC_TAG,
+      "input_lp", 9);
   LogicalPartition output_lp = runtime->get_logical_partition(ctx, output_lr, ip);
+  runtime->attach_semantic_information(output_lp, NAME_SEMANTIC_TAG,
+      "output_lp", 10);
 
   // Create our launch domain.  Note that is the same as color domain
   // as we are going to launch one task for each subregion we created.

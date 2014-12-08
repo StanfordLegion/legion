@@ -64,6 +64,7 @@ namespace LegionRuntime {
       MAP_OP_ALLOC,
       COPY_OP_ALLOC,
       FENCE_OP_ALLOC,
+      FRAME_OP_ALLOC,
       DELETION_OP_ALLOC,
       CLOSE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
@@ -111,6 +112,7 @@ namespace LegionRuntime {
       TASK_BARRIER_ALLOC,
       TASK_LOCAL_FIELD_ALLOC,
       TASK_INLINE_ALLOC,
+      SEMANTIC_INFO_ALLOC,
       LAST_ALLOC, // must be last
     };
 

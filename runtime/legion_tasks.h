@@ -302,6 +302,9 @@ namespace LegionRuntime {
       void begin_trace(TraceID tid);
       void end_trace(TraceID tid);
     public:
+      void issue_frame(Event frame_termination);
+      void finish_frame(Event frame_termination);
+    public:
       void increment_outstanding(void);
       void decrement_outstanding(void);
       void increment_pending(void);
@@ -473,6 +476,7 @@ namespace LegionRuntime {
       // child operations has grown too large.
       bool valid_wait_event;
       UserEvent window_wait;
+      std::deque<Event> frame_events;
       Event deferred_map;
       Event deferred_complete;
     protected:

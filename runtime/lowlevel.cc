@@ -55,7 +55,9 @@ namespace LegionRuntime {
     GASNETT_THREADKEY_DECLARE(gpu_thread);
 #endif
     
+#ifdef USE_CUDA
     Logger::Category log_gpu("gpu");
+#endif
     Logger::Category log_mutex("mutex");
     Logger::Category log_timer("timer");
     Logger::Category log_region("region");
@@ -97,13 +99,21 @@ namespace LegionRuntime {
     };
 
 #ifdef EVENT_GRAPH_TRACE
-    static inline Event find_enclosing_termination_event(void)
+    Event find_enclosing_termination_event(void)
     {
       void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
-      if (tls_val == NULL)
-        return Event::NO_EVENT;
-      PreemptableThread *me = (PreemptableThread*)tls_val;
-      return me->find_enclosing();
+      if (tls_val != NULL) {
+        PreemptableThread *me = (PreemptableThread*)tls_val;
+        return me->find_enclosing();
+      }
+#ifdef USE_CUDA
+      tls_val = gasnett_threadkey_get(gpu_thread);
+      if (tls_val != NULL) {
+        GPUProcessor *me = (GPUProcessor*)tls_val;
+        return me->find_enclosing();
+      }
+#endif
+      return Event::NO_EVENT;
     }
 #endif
 
@@ -1218,22 +1228,12 @@ namespace LegionRuntime {
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
 #endif
-
       // counts of 2+ require building a new event and a merger to trigger it
       Event finish_event = Event::Impl::create_event();
       EventMerger *m = new EventMerger(finish_event);
-
 #ifdef EVENT_GRAPH_TRACE
-      const int base_size = 1024;
-      char base_buffer[base_size];
-      char *buffer;
-      int buffer_size = (wait_for.size() * 28);
-      if (buffer_size >= base_size)
-        buffer = (char*)malloc(buffer_size+1);
-      else
-        buffer = base_buffer;
-      buffer[0] = '\0';
-      int offset = 0;
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
+                          finish_event.id, finish_event.gen, wait_for.size());
 #endif
 
       for(std::set<Event>::const_iterator it = wait_for.begin();
@@ -1243,19 +1243,11 @@ namespace LegionRuntime {
 		  finish_event.id, finish_event.gen, (*it).id, (*it).gen);
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
-        int written = snprintf(buffer+offset,buffer_size-offset, 
-                               " (" IDFMT ",%d)", it->id, it->gen);
-        // make sure that output wasn't truncated
-        assert(written < (buffer_size-offset));
-        offset += written;
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
+                             finish_event.id, finish_event.gen,
+                             it->id, it->gen);
 #endif
       }
-#ifdef EVENT_GRAPH_TRACE
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld%s", 
-                          finish_event.id, finish_event.gen, wait_for.size(), buffer);
-      if (buffer_size >= base_size)
-        free(buffer);
-#endif
 
       // once they're all added - arm the thing (it might go off immediately)
       if(m->arm())
@@ -4570,6 +4562,9 @@ namespace LegionRuntime {
 
 	virtual void sleep_on_event(Event wait_for, bool block = false)
 	{
+#ifdef EVENT_GRAPH_TRACE
+          unsigned long long start = TimeStamp::get_current_time_in_micros(); 
+#endif
 	  // create an entry to go on our event stack (on our stack)
 	  EventStackEntry *entry = new EventStackEntry(this, wait_for, event_stack);
 	  event_stack = entry;
@@ -4677,8 +4672,14 @@ namespace LegionRuntime {
             assert(event_stack == entry);
             event_stack = entry->next;
 	  }
-	  
 	  delete entry;
+#ifdef EVENT_GRAPH_TRACE
+          unsigned long long stop = TimeStamp::get_current_time_in_micros();
+          Event enclosing = find_enclosing_termination_event();
+          log_event_graph.debug("Task Wait: (" IDFMT ",%d) (" IDFMT ",%d) %lld",
+                                enclosing.id, enclosing.gen,
+                                wait_for.id, wait_for.gen, (stop - start));
+#endif
 	}
 
 	virtual void thread_main(void)
@@ -5189,6 +5190,9 @@ namespace LegionRuntime {
 
       void sleep_on_event(Event wait_for, bool block = false)
       {
+#ifdef EVENT_GRAPH_TRACE
+        unsigned long long start = TimeStamp::get_current_time_in_micros(); 
+#endif
         Event::Impl *impl = Runtime::get_runtime()->get_event_impl(wait_for);
         
         while(!impl->has_triggered(wait_for.gen)) {
@@ -5218,6 +5222,13 @@ namespace LegionRuntime {
 			wait_for.id, wait_for.gen);
 	  //usleep(1000);
 	}
+#ifdef EVENT_GRAPH_TRACE
+        unsigned long long stop = TimeStamp::get_current_time_in_micros();
+        Event enclosing = find_enclosing_termination_event();
+        log_event_graph.debug("Task Wait: (" IDFMT ",%d) (" IDFMT ",%d) %lld",
+                              enclosing.id, enclosing.gen,
+                              wait_for.id, wait_for.gen, (stop - start));
+#endif
       }
 
       virtual Processor get_processor(void) const
@@ -5593,6 +5604,32 @@ namespace LegionRuntime {
       if((members.size() == 0) || (ID(members[0]).node() == gasnet_mynode())) {
 	ProcessorGroup *grp = Runtime::runtime->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
+#ifdef EVENT_GRAPH_TRACE
+        {
+          const int base_size = 1024;
+          char base_buffer[base_size];
+          char *buffer;
+          int buffer_size = (members.size() * 20);
+          if (buffer_size >= base_size)
+            buffer = (char*)malloc(buffer_size+1);
+          else
+            buffer = base_buffer;
+          buffer[0] = '\0';
+          int offset = 0;
+          for (std::vector<Processor>::const_iterator it = members.begin();
+                it != members.end(); it++)
+          {
+            int written = snprintf(buffer+offset,buffer_size-offset,
+                                   " " IDFMT, it->id);
+            assert(written < (buffer_size-offset));
+            offset += written;
+          }
+          log_event_graph.info("Group: " IDFMT " %ld%s",
+                                grp->me.id, members.size(), buffer); 
+          if (buffer_size >= base_size)
+            free(buffer);
+        }
+#endif
 	return grp->me;
       }
 
@@ -5625,8 +5662,8 @@ namespace LegionRuntime {
       log_event_graph.info("Task Request: %d " IDFMT 
                             " (" IDFMT ",%d) (" IDFMT ",%d)"
                             " (" IDFMT ",%d) %d %p %ld",
-                            func_id, id, wait_on.id, wait_on.gen,
-                            finish_event.id, finish_event.gen,
+                            func_id, id, finish_event.id, finish_event.gen,
+                            wait_on.id, wait_on.gen,
                             enclosing.id, enclosing.gen,
                             priority, args, arglen);
 #endif
@@ -9185,11 +9222,24 @@ namespace LegionRuntime {
 
   /*static*/ void Logger::logvprintf(LogLevel level, int category, const char *fmt, va_list args)
   {
-    char buffer[1000];
-    sprintf(buffer, "[%d - %lx] {%d}{%s}: ",
+    char base_buffer[1024];
+    int pre_len = sprintf(base_buffer, "[%d - %lx] {%d}{%s}: ",
             gasnet_mynode(), pthread_self(), level, Logger::get_categories_by_id()[category].c_str());
-    int len = strlen(buffer);
-    vsnprintf(buffer+len, 999-len, fmt, args);
+    int full_len = vsnprintf(base_buffer+pre_len, 1023-pre_len, fmt, args);
+    assert(full_len >= 0);
+    char *buffer;
+    bool allocated;
+    if (full_len < (1023-pre_len)) {
+      buffer = base_buffer;
+      allocated = false;
+    } else { 
+      buffer = (char*)malloc(pre_len+full_len+2);
+      sprintf(buffer, "[%d - %lx] {%d}{%s}: ",
+            gasnet_mynode(), pthread_self(), level, 
+            Logger::get_categories_by_id()[category].c_str());
+      vsnprintf(buffer+pre_len, full_len+1, fmt, args);
+      allocated = true;
+    }
     strcat(buffer, "\n");
 #ifdef ORDERED_LOGGING 
     // Update the length to reflect the newline character
@@ -9271,6 +9321,8 @@ namespace LegionRuntime {
     fputs(buffer, stderr);
 #endif
 #endif
+    if (allocated)
+      free(buffer);
   }
 }; // namespace LegionRuntime
 

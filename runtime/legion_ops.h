@@ -536,6 +536,35 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class FrameOp
+     * Frame operations provide a mechanism for grouping 
+     * operations within the same context into frames. Frames
+     * provide an application directed way of controlling the
+     * number of outstanding operations in flight in a context
+     * at any given time through the mapper interface.
+     */
+    class FrameOp : public Operation {
+    public:
+      static const AllocationType alloc_type = FRAME_OP_ALLOC;
+    public:
+      FrameOp(Runtime *rt);
+      FrameOp(const FrameOp &rhs);
+      virtual ~FrameOp(void);
+    public:
+      FrameOp& operator=(const FrameOp &rhs);
+    public:
+      void initialize(SingleTask *ctx);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
+    };
+
+    /**
      * \class DeletionOp
      * In keeping with the deferred execution model, deletions
      * must be deferred until all other operations that were
