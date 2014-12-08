@@ -19,10 +19,15 @@
 #ifndef ACTIVEMSG_H
 #define ACTIVEMSG_H
 
-#define GASNET_PAR
+#if !(defined(GASNET_SEQ) || defined(GASNET_PAR) || defined(GASNET_PARSYNC))
+  #define GASNET_PAR
+#endif
 #include <gasnet.h>
 
-#define GASNETT_THREAD_SAFE
+#if !defined(GASNETT_THREAD_SAFE) && \
+    (defined(GASNET_SEQ) || defined(GASNET_PAR))
+  #define GASNETT_THREAD_SAFE
+#endif
 #include <gasnet_tools.h>
 
 #ifdef CHECK_REENTRANT_MESSAGES

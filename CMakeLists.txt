@@ -36,21 +36,21 @@ endif()
 
 option(BUILD_SHARED_LIBS "Whether to build shared or static libraries" OFF)
 
-set(LEGION_INSTALL_CMAKE_DIR "lib/cmake/Legion"
+set(Legion_INSTALL_CMAKE_DIR "lib/cmake/Legion"
   CACHE STRING "The install location for the CMake package config files"
 )
 mark_as_advanced(LEGION_INSTALL_CMAKE_DIR)
 
 # The CUDA backend can only be enabled if the shared backend is disabled
 include(CMakeDependentOption)
-option(LEGION_USE_BACKEND_SHARED "Whether or not to enable shared memory support" ON)
+option(Legion_USE_GASNet "Whether or not to enable GASNet support" OFF)
 CMAKE_DEPENDENT_OPTION(
-  LEGION_USE_BACKEND_CUDA "Whether or not to enable CUDA support" OFF
-  "NOT LEGION_USE_BACKEND_SHARED" ON
+  Legion_USE_CUDA "Whether or not to enable CUDA support" OFF
+  "Legion_USE_GASNet" ON
 )
-option(LEGION_USE_ALTERNATE_MAPPERS
+option(Legion_USE_ALTERNATE_MAPPERS
   "Whether or not to enable alternate mappers" ON)
-set(LEGION_RT_NAME "legion-rt" CACHE STRING
+set(Legion_RT_NAME "legion-rt" CACHE STRING
   "Output name of the runtime library")
 
 add_subdirectory(runtime)
@@ -60,7 +60,7 @@ configure_file(
   @ONLY
 )
 install(FILES ${Legion_BINARY_DIR}/LegionConfig.cmake
-  DESTINATION ${LEGION_INSTALL_CMAKE_DIR}
+  DESTINATION ${Legion_INSTALL_CMAKE_DIR}
 )
 
 # Set the Legion_DIR variable so find_package can be used by all the other
