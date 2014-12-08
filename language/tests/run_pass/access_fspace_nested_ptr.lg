@@ -1,0 +1,54 @@
+-- Copyright 2014 Stanford University
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+import "legion"
+
+fspace subsubspace {
+  a : int,
+}
+
+fspace subspace(r : region(subsubspace)) {
+  b : ptr(subsubspace, r),
+}
+
+fspace space(s : region(subsubspace), t : region(subspace(s))) {
+  c : ptr(subspace(s), t)
+}
+
+task f(u : region(subsubspace), v : region(subspace(u)),
+       w : region(space(u, v)), x : ptr(space(u, v), w))
+  : int, reads(u, v, w)
+
+  return x.c.b.a
+end
+
+task g()
+  var m = region(subsubspace, 5)
+  var n = region(subspace(m), 5)
+  var o = region(space(m, n), 5)
+  var p = new(ptr(subsubspace, m))
+  var q = new(ptr(subspace(m), n))
+  var r = new(ptr(space(m, n), o))
+
+  r.c = q
+  r.c.b = p
+  r.c.b.a = 17
+
+  return f(m, n, o, r)
+end
+
+task main()
+  assert(g() == 17)
+end
+legionlib.start(main)
