@@ -3802,6 +3802,49 @@ namespace LegionRuntime {
                                        const void *buffer, size_t size);
 
       /**
+       * Attach a name to an index space
+       * @param handle index space handle
+       * @param name pointer to a name
+       */
+      void attach_name(IndexSpace handle, const char *name);
+
+      /**
+       * Attach a name to an index partition
+       * @param handle index partition handle
+       * @param name pointer to a name
+       */
+      void attach_name(IndexPartition handle, const char *name);
+
+      /**
+       * Attach a name to a field space
+       * @param handle field space handle
+       * @param name pointer to a name
+       */
+      void attach_name(FieldSpace handle, const char *name);
+
+      /**
+       * Attach a name to a specific field
+       * @param handle field space handle
+       * @param fid field ID
+       * @param name pointer to a name
+       */
+      void attach_name(FieldSpace handle, FieldID fid, const char *name);
+
+      /**
+       * Attach a name to a logical region
+       * @param handle logical region handle
+       * @param name pointer to a name
+       */
+      void attach_name(LogicalRegion handle, const char *name);
+
+      /**
+       * Attach a name to a logical partition
+       * @param handle logical partition handle
+       * @param name pointer to a name
+       */
+      void attach_name(LogicalPartition handle, const char *name);
+
+      /**
        * Retrieve semantic information for an index space
        * @param handle index space handle
        * @param tag semantic tag
@@ -3863,6 +3906,50 @@ namespace LegionRuntime {
       void retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
                                          const void *&result, size_t &size);
+
+      /**
+       * Retrieve the name of an index space
+       * @param handle index space handle
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(IndexSpace handle, const char *&result);
+
+      /**
+       * Retrieve the name of an index partition
+       * @param handle index partition handle
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(IndexPartition handle, const char *&result);
+
+      /**
+       * Retrieve the name of a field space
+       * @param handle field space handle
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(FieldSpace handle, const char *&result);
+
+      /**
+       * Retrieve the name of a specific field
+       * @param handle field space handle
+       * @param fid field ID
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(FieldSpace handle, FieldID fid, const char *&result);
+
+      /**
+       * Retrieve the name of a logical region
+       * @param handle logical region handle
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(LogicalRegion handle, const char *&result);
+
+      /**
+       * Retrieve the name of a logical partition
+       * @param handle logical partition handle
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(LogicalPartition handle, const char *&result);
+
     public:
       //------------------------------------------------------------------------
       // Start-up Operations

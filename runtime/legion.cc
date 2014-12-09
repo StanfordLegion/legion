@@ -2884,6 +2884,57 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(IndexSpace handle, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(IndexPartition handle, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(FieldSpace handle, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(FieldSpace handle,
+                                       FieldID fid,
+                                       const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle, fid,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(LogicalRegion handle, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::attach_name(LogicalPartition handle,
+                                       const char *name)
+    //--------------------------------------------------------------------------
+    {
+      HighLevelRuntime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::retrieve_semantic_information(IndexSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
@@ -2942,6 +2993,71 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->retrieve_semantic_information(part, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(IndexSpace handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(handle,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(IndexPartition handle,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(handle,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(FieldSpace handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(handle,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(FieldSpace handle,
+                                         FieldID fid,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(handle,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(LogicalRegion handle,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(handle,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::retrieve_name(LogicalPartition part,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      HighLevelRuntime::retrieve_semantic_information(part,
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
