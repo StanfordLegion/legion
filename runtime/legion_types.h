@@ -153,6 +153,7 @@ namespace LegionRuntime {
     class Mapper; 
     template<typename T> struct ColoredPoints; 
     struct InputArgs;
+    class ProjectionFunctor;
     class HighLevelRuntime;
 
     // Forward declarations for compiler level objects

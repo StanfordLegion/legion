@@ -1513,11 +1513,21 @@ namespace LegionRuntime {
           }
           else
           {
-            PartitionProjectionFnptr projfn = 
-              Runtime::find_partition_projection_function(
-                  regions[idx].projection);
-            regions[idx].region = 
-              (*projfn)(regions[idx].partition,index_point,runtime->high_level);
+            ProjectionFunctor *functor = 
+              runtime->find_projection_functor(regions[idx].projection);
+            if (functor == NULL)
+            {
+              PartitionProjectionFnptr projfn = 
+                Runtime::find_partition_projection_function(
+                    regions[idx].projection);
+              regions[idx].region = 
+                (*projfn)(regions[idx].partition,
+                          index_point,runtime->high_level);
+            }
+            else
+              regions[idx].region = 
+                functor->project(DUMMY_CONTEXT, this, idx,
+                                 regions[idx].partition, index_point);
           }
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
@@ -1533,11 +1543,20 @@ namespace LegionRuntime {
 #endif
           if (regions[idx].projection != 0)
           {
-            RegionProjectionFnptr projfn = 
-              Runtime::find_region_projection_function(
-                  regions[idx].projection);
-            regions[idx].region = 
-              (*projfn)(regions[idx].region,index_point,runtime->high_level);
+            ProjectionFunctor *functor = 
+              runtime->find_projection_functor(regions[idx].projection);
+            if (functor == NULL)
+            {
+              RegionProjectionFnptr projfn = 
+                Runtime::find_region_projection_function(
+                    regions[idx].projection);
+              regions[idx].region = 
+                (*projfn)(regions[idx].region,index_point,runtime->high_level);
+            }
+            else
+              regions[idx].region = 
+                functor->project(DUMMY_CONTEXT, this, idx, 
+                                 regions[idx].region, index_point);
           }
           // Otherwise we are the default case in which 
           // case we don't need to do anything

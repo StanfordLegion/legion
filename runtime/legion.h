@@ -1020,8 +1020,10 @@ namespace LegionRuntime {
                    MapperID id = 0,
                    MappingTagID tag = 0);
     public:
-      inline void add_index_requirement(const IndexSpaceRequirement &req);
-      inline void add_region_requirement(const RegionRequirement &req);
+      inline IndexSpaceRequirement&
+              add_index_requirement(const IndexSpaceRequirement &req);
+      inline RegionRequirement&
+              add_region_requirement(const RegionRequirement &req);
       inline void add_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       inline void add_future(Future f);
@@ -1074,8 +1076,10 @@ namespace LegionRuntime {
                     MapperID id = 0,
                     MappingTagID tag = 0);
     public:
-      inline void add_index_requirement(const IndexSpaceRequirement &req);
-      inline void add_region_requirement(const RegionRequirement &req);
+      inline IndexSpaceRequirement&
+                  add_index_requirement(const IndexSpaceRequirement &req);
+      inline RegionRequirement&
+                  add_region_requirement(const RegionRequirement &req);
       inline void add_field(unsigned idx, FieldID fid, bool inst = true);
     public:
       inline void add_future(Future f);
@@ -1161,8 +1165,8 @@ namespace LegionRuntime {
       CopyLauncher(Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0, MappingTagID tag = 0);
     public:
-      inline void add_copy_requirements(const RegionRequirement &src,
-					const RegionRequirement &dst);
+      inline unsigned add_copy_requirements(const RegionRequirement &src,
+					    const RegionRequirement &dst);
       inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
       inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
     public:
@@ -2491,7 +2495,7 @@ namespace LegionRuntime {
        * @param message a pointer to a buffer containing the message
        * @param the size of the message to be sent in bytes
        */
-      void send_message(Processor target, const void *message, size_t length);
+      void send_message(Processor target, const void *message, size_t length); 
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
@@ -2663,6 +2667,59 @@ namespace LegionRuntime {
       bool leaf;
       bool inner;
       bool idempotent;
+    };
+
+    /**
+     * \interface ProjectionFunctor
+     * This defines an interface for objects that need to be
+     * able to handle projection requests for an application.
+     * Whenever index space tasks are launched with projection
+     * region requirements, instances of this object are used
+     * to handle the lowering down to individual regions for
+     * specific task instances in the index space of task.
+     * No more than one query of this interface will be made
+     * per object at a time.
+     *
+     * Note also that the interface inherits from the 
+     * RegionTreeInspector class which gives it access to 
+     * all of the functions in that class for discovering
+     * the shape of index space trees, field spaces, and
+     * logical region trees.
+     */
+    class ProjectionFunctor {
+    public:
+      ProjectionFunctor(HighLevelRuntime *rt);
+    public:
+      /**
+       * Compute the projection for a logical region projection
+       * requirement down to a specific logical region.
+       * @param ctx the context for this projection
+       * @param task the task for the requested projection
+       * @param index which region requirement we are projecting
+       * @param upper_bound the upper bound logical region
+       * @param point the point of the task in the index space
+       * @return logical region to be used by the child task
+       */
+      virtual LogicalRegion project(Context ctx, Task *task, 
+                                    unsigned index,
+                                    LogicalRegion upper_bound,
+                                    const DomainPoint &point) = 0;
+      /**
+       * Compute the projection for a logical partition projection
+       * requirement down to a specific logical region.
+       * @param ctx the context for this projection
+       * @param task the task for the requested projection
+       * @param index which region requirement we are projecting
+       * @param upper_bound the upper bound logical partition
+       * @param point the point of the task in the index space
+       * @return logical region to be used by the child task
+       */
+      virtual LogicalRegion project(Context ctx, Task *task, 
+                                    unsigned index,
+                                    LogicalPartition upper_bound,
+                                    const DomainPoint &point) = 0;
+    protected:
+      HighLevelRuntime *const runtime;
     };
 
     /**
@@ -3709,33 +3766,6 @@ namespace LegionRuntime {
       const std::map<AddressSpace,int/*rank*/>& find_reverse_MPI_mapping(void);
     public:
       //------------------------------------------------------------------------
-      // Registration Callback Operations
-      //------------------------------------------------------------------------
-      /**
-       * Add a mapper at the given mapper ID for the runtime
-       * to use when mapping tasks.  Note that this call should
-       * only be used in the mapper registration callback function
-       * that occurs before tasks begin executing.  It can have
-       * undefined results if used during regular runtime execution.
-       * @param map_id the mapper ID to associate with the mapper
-       * @param mapper pointer to the mapper object
-       * @param proc the processor to associate the mapper with
-       */
-      void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
-      
-      /**
-       * Replace the default mapper for a given processor with
-       * a new mapper.  Note that this call should only be used
-       * in the mapper registration callback function that occurs
-       * before tasks begin executing.  It can have undefined
-       * results if used during regular runtime execution.
-       * @param mapper pointer to the mapper object to use
-       *    as the new default mapper
-       * @param proc the processor to associate the mapper with
-       */
-      void replace_default_mapper(Mapper *mapper, Processor proc);
-    public:
-      //------------------------------------------------------------------------
       // Semantic Information 
       //------------------------------------------------------------------------
       /**
@@ -3949,7 +3979,48 @@ namespace LegionRuntime {
        * @param result pointer to assign to the name
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
+    public:
+      //------------------------------------------------------------------------
+      // Registration Callback Operations
+      // All of these calls must be made while in the registration
+      // function called before start-up.  This function is specified
+      // by calling the 'set_registration_callback' static method.
+      //------------------------------------------------------------------------
+      /**
+       * Add a mapper at the given mapper ID for the runtime
+       * to use when mapping tasks.  Note that this call should
+       * only be used in the mapper registration callback function
+       * that occurs before tasks begin executing.  It can have
+       * undefined results if used during regular runtime execution.
+       * @param map_id the mapper ID to associate with the mapper
+       * @param mapper pointer to the mapper object
+       * @param proc the processor to associate the mapper with
+       */
+      void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
+      
+      /**
+       * Replace the default mapper for a given processor with
+       * a new mapper.  Note that this call should only be used
+       * in the mapper registration callback function that occurs
+       * before tasks begin executing.  It can have undefined
+       * results if used during regular runtime execution.
+       * @param mapper pointer to the mapper object to use
+       *    as the new default mapper
+       * @param proc the processor to associate the mapper with
+       */
+      void replace_default_mapper(Mapper *mapper, Processor proc);
 
+      /**
+       * Register a projection functor for handling projection
+       * queries. The ProjectionID must be non-zero because 
+       * zero is the identity projection. Unlike mappers which
+       * require a separate instance per processor, only
+       * one of these must be registered per projection ID.
+       * @param pid the projection ID to use for the registration
+       * @param functor the object to register for handle projections
+       */
+      void register_projection_functor(ProjectionID pid, 
+                                       ProjectionFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
@@ -4931,19 +5002,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_index_requirement(
+    inline IndexSpaceRequirement& TaskLauncher::add_index_requirement(
                                               const IndexSpaceRequirement &req)
     //--------------------------------------------------------------------------
     {
       index_requirements.push_back(req);
+      return index_requirements.back();
     }
 
     //--------------------------------------------------------------------------
-    inline void TaskLauncher::add_region_requirement(
+    inline RegionRequirement& TaskLauncher::add_region_requirement(
                                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       region_requirements.push_back(req);
+      return region_requirements.back();
     }
 
     //--------------------------------------------------------------------------
@@ -4999,19 +5072,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_index_requirement(
+    inline IndexSpaceRequirement& IndexLauncher::add_index_requirement(
                                               const IndexSpaceRequirement &req)
     //--------------------------------------------------------------------------
     {
       index_requirements.push_back(req);
+      return index_requirements.back();
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_region_requirement(
+    inline RegionRequirement& IndexLauncher::add_region_requirement(
                                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       region_requirements.push_back(req);
+      return region_requirements.back();
     }
 
     //--------------------------------------------------------------------------
@@ -5074,12 +5149,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void CopyLauncher::add_copy_requirements(
+    inline unsigned CopyLauncher::add_copy_requirements(
                      const RegionRequirement &src, const RegionRequirement &dst)
     //--------------------------------------------------------------------------
     {
+      unsigned result = src_requirements.size();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result == dst_requirements.size());
+#endif
       src_requirements.push_back(src);
       dst_requirements.push_back(dst);
+      return result;
     }
 
     //--------------------------------------------------------------------------

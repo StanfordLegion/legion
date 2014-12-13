@@ -276,6 +276,7 @@ typedef enum legion_error_t {
   ERROR_EMPTY_INDEX_PARTITION = 120,
   ERROR_INCONSISTENT_SEMANTIC_TAG = 121,
   ERROR_INVALID_SEMANTIC_TAG = 122,
+  ERROR_DUMMY_CONTEXT_OPERATION = 123,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

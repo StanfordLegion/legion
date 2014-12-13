@@ -26,6 +26,9 @@
 namespace LegionRuntime {
   namespace HighLevel { 
 
+    // Special helper for when we need a dummy context
+#define DUMMY_CONTEXT       0
+
     /**
      * A class for deduplicating memory used with task arguments
      * and knowing when to collect the data associated with it
@@ -453,7 +456,7 @@ namespace LegionRuntime {
     public:
       void add_mapper(MapperID mid, Mapper *m, bool check);
       void replace_default_mapper(Mapper *m);
-      Mapper* find_mapper(MapperID mid) const;
+      Mapper* find_mapper(MapperID mid) const; 
     public:
       // Functions that perform mapping calls
       void invoke_mapper_set_task_options(TaskOp *task);
@@ -1169,6 +1172,10 @@ namespace LegionRuntime {
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
     public:
+      void register_projection_functor(ProjectionID pid,
+                                       ProjectionFunctor *func);
+      ProjectionFunctor* find_projection_functor(ProjectionID pid);
+    public:
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                                        const void *buffer, size_t size);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1645,6 +1652,8 @@ namespace LegionRuntime {
       unsigned unique_tree_id;
       unsigned unique_operation_id;
       unsigned unique_field_id;
+    protected:
+      std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;

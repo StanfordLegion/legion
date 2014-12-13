@@ -2823,6 +2823,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::register_projection_functor(ProjectionID pid,
+                                                       ProjectionFunctor *func)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_projection_functor(pid, func);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
@@ -3343,8 +3351,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_index_space_partition_colors(IndexSpace handle,
-                                                  std::set<Color> &colors) const
+    void Mapper::get_index_space_partition_colors(
+                              IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
     {
       runtime->runtime->get_index_space_partition_colors(handle, colors);
@@ -3416,8 +3424,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::get_logical_partition_by_tree(IndexPartition part,
-                                     FieldSpace fspace, RegionTreeID tid) const
+    LogicalPartition Mapper::get_logical_partition_by_tree(
+                                                        IndexPartition part,
+                                                        FieldSpace fspace, 
+                                                        RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
       return runtime->runtime->get_logical_partition_by_tree(part, fspace, tid);
