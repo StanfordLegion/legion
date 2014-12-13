@@ -658,6 +658,9 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.ExprDeref) then
     return type_check.expr_deref(cx, node)
 
+  elseif node:is(ast.specialized.ExprLuaTable) then
+    log.error("unable to specialize value of type table")
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end

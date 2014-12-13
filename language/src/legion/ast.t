@@ -190,6 +190,7 @@ ast.specialized("ExprFunction", {"value"})
 ast.specialized("ExprUnary", {"op", "rhs"})
 ast.specialized("ExprBinary", {"op", "lhs", "rhs"})
 ast.specialized("ExprDeref", {"value"})
+ast.specialized("ExprLuaTable", {"value"})
 
 ast.specialized("Block", {"stats"})
 

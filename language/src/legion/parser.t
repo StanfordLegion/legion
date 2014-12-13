@@ -107,6 +107,10 @@ function parser.fnargs(p)
     local arg = p:expr_ctor()
     return terralib.newlist({arg})
 
+  elseif p:matches(p.string) then
+    local arg = p:expr_simple()
+    return terralib.newlist({arg})
+
   else
     p:error("unexpected token in fnargs expression")
   end
@@ -140,7 +144,7 @@ function parser.expr_primary(p)
         args = args,
       }
 
-    elseif p:matches("(") or p:matches("{") then
+    elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
       local args = p:fnargs()
       expr = ast.unspecialized.ExprCall {
         fn = expr,
@@ -161,6 +165,13 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprConstant {
       value = token.value,
       expr_type = token.valuetype,
+    }
+
+  elseif p:matches(p.string) then
+    local token = p:next(p.string)
+    return ast.unspecialized.ExprConstant {
+      value = token.value,
+      expr_type = rawstring,
     }
 
   elseif p:nextif("true") then

@@ -83,6 +83,10 @@ function convert_lua_value(cx, value)
     return ast.specialized.ExprID {
       value = value,
     }
+  elseif type(value) == "table" then
+    return ast.specialized.ExprLuaTable {
+      value = value,
+    }
   else
     log.error("unable to specialize value of type " .. tostring(type(value)))
   end
@@ -106,10 +110,15 @@ function specialize.expr_constant(cx, node)
 end
 
 function specialize.expr_field_access(cx, node)
-  return ast.specialized.ExprFieldAccess {
-    value = specialize.expr(cx, node.value),
-    field_name = node.field_name,
-  }
+  local value = specialize.expr(cx, node.value)
+  if value:is(ast.specialized.ExprLuaTable) then
+    return convert_lua_value(cx, value.value[node.field_name])
+  else
+    return ast.specialized.ExprFieldAccess {
+      value = value,
+      field_name = node.field_name,
+    }
+  end
 end
 
 function specialize.expr_index_access(cx, node)
