@@ -41,38 +41,35 @@ CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 
 # Handle some of the common machines we frequent
 
+# machine architecture (generally "native" unless cross-compiling)
+MARCH ?= native
+
 ifeq ($(shell uname -n),sapling)
-CC_FLAGS += -march=native
 CONDUIT=ibv
 GPU_ARCH=fermi
 USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0000)
-CC_FLAGS += -march=native
 CONDUIT=ibv
 GPU_ARCH=fermi
 USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0001)
-CC_FLAGS += -march=native
 CONDUIT=ibv
 GPU_ARCH=fermi
 USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0002)
-CC_FLAGS += -march=native
 CONDUIT=ibv
 GPU_ARCH=fermi
 USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0003)
-CC_FLAGS += -march=native
 CONDUIT=ibv
 GPU_ARCH=fermi
 USE_MPI=1
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
-CC_FLAGS += -march=native
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
 MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
 CUDA=/sw/kfs/cuda/4.2/linux_binary
@@ -81,13 +78,18 @@ GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
 GCC=CC
-CC_FLAGS += -march=bdver1 -DGASNETI_BUG1389_WORKAROUND=1
+MARCH=bdver1
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 GASNET = ${GASNET_ROOT}
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
 LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
+
+ifneq (${MARCH},)
+  CC_FLAGS += -march=${MARCH}
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR)

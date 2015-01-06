@@ -76,7 +76,7 @@
 // by a Legion runtime instance on a given node. Powers of
 // 2 are encouraged.
 #ifndef MAX_CONTEXTS
-#define MAX_CONTEXTS                    128
+#define MAX_CONTEXTS                    1024
 #endif
 // Maximum number of sub-tasks per task at a time
 #ifndef DEFAULT_MAX_TASK_WINDOW

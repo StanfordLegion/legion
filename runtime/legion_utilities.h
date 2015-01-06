@@ -4976,7 +4976,7 @@ namespace LegionRuntime {
     {
 #ifdef __AVX2__
       __m256i temp_sum = _mm_set1_epi32(0);
-      for (unsigned idx = 0; idx < SSE_ELMTS; idx++)
+      for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));
         temp_sum = _mm256_or_si256(temp_sum, bits.avx_vector[idx]);

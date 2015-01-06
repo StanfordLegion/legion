@@ -1207,6 +1207,8 @@ namespace LegionRuntime {
     // creates an event that won't trigger until all input events have
     /*static*/ Event Event::Impl::merge_events(const std::set<Event>& wait_for)
     {
+      if (wait_for.empty())
+        return Event::NO_EVENT;
       // scan through events to see how many exist/haven't fired - we're
       //  interested in counts of 0, 1, or 2+ - also remember the first
       //  event we saw for the count==1 case
@@ -1291,11 +1293,35 @@ namespace LegionRuntime {
       m->add_event(ev6);
 
 #ifdef EVENT_GRAPH_TRACING
-      log_event_graph.info("Event Merge: (" IDFMT ",%d) (" IDFMT ",%d) (" IDFMT ",%d) "
-                           "(" IDFMT ",%d) (" IDFMT ",%d) (" IDFMT ",%d)",
-                           finish_event.id, finish_event.gen, ev1.id, ev1.gen,
-                           ev2.id, ev2.gen, ev3.id, ev3.gen, 
-                           ev4.id, ev4.gen, ev5.id, ev5.gen);
+      int existential_count = 0;
+      if (ev1.exists()) existential_count++;
+      if (ev2.exists()) existential_count++;
+      if (ev3.exists()) existential_count++;
+      if (ev4.exists()) existential_count++;
+      if (ev5.exists()) existential_count++;
+      if (ev6.exists()) existential_count++;
+      if (existential_count > 0) {
+        log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
+                 finish_event.id, finish_event.gen, existential_count);
+        if (ev1.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev1.id, ev1.gen);
+        if (ev2.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev2.id, ev2.gen);
+        if (ev3.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev3.id, ev3.gen);
+        if (ev4.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev4.id, ev4.gen);
+        if (ev5.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev5.id, ev5.gen);
+        if (ev6.exists)
+          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+              finish_event.id, finish_event.gen, ev6.id, ev6.gen);
+      }
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)

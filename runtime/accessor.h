@@ -259,6 +259,8 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_internal, off_t _field_offset = 0) : Untyped(_internal, _field_offset) {}
 
+          bool valid(void) const { return internal != 0; }
+
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
           inline void set_region(void *r) { region = r; }
 #endif
