@@ -1825,7 +1825,6 @@ namespace LegionRuntime {
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
-	//printf("gpu write of %zd bytes\n", bytes);
 	gpu->copy_to_fb(dst_offset, src_base + src_offset, bytes, Event::NO_EVENT, e);
 #ifdef EVENT_GRAPH_TRACE
         record_bytes(bytes);
@@ -1873,7 +1872,6 @@ namespace LegionRuntime {
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
-	//printf("gpu read of %zd bytes\n", bytes);
 	gpu->copy_from_fb(dst_base + dst_offset, src_offset, bytes, Event::NO_EVENT, e);
 #ifdef EVENT_GRAPH_TRACE
         record_bytes(bytes);
@@ -1919,7 +1917,6 @@ namespace LegionRuntime {
       void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
       {
 	Event e = Event::Impl::create_event();
-	//printf("gpu write of %zd bytes\n", bytes);
 	gpu->copy_within_fb(dst_offset, src_offset, bytes, Event::NO_EVENT, e);
 #ifdef EVENT_GRAPH_TRACE
         record_bytes(bytes);

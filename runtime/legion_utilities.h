@@ -4939,7 +4939,7 @@ namespace LegionRuntime {
     {
       if (sum_mask & rhs.sum_mask)
       {
-#ifdef __AVX2__
+#if defined(__AVX2__) and not defined(__MACH__)
         __m256i temp_sum = _mm_set1_epi32(0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
@@ -4974,7 +4974,7 @@ namespace LegionRuntime {
                                                        const AVXTLBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-#ifdef __AVX2__
+#if defined(__AVX2__) and not defined(__MACH__)
       __m256i temp_sum = _mm_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {

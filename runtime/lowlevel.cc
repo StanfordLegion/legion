@@ -40,6 +40,10 @@ using namespace LegionRuntime::Accessor;
 #include <signal.h>
 #include <execinfo.h>
 #endif
+#ifdef LEGION_BACKTRACE
+#include <signal.h>
+#include <execinfo.h>
+#endif
 
 #ifdef __SSE2__
 #include <emmintrin.h>
@@ -1229,6 +1233,9 @@ namespace LegionRuntime {
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
+#else
+      if (wait_for.size() == 1)
+        return *(wait_for.begin());
 #endif
       // counts of 2+ require building a new event and a merger to trigger it
       Event finish_event = Event::Impl::create_event();
@@ -1275,10 +1282,29 @@ namespace LegionRuntime {
       if(!ev1.has_triggered()) { first_wait = ev1; wait_count++; }
 
       // Avoid these optimizations if we are doing event graph tracing
-#ifndef EVENT_GRAPH_TRACING
+#ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
       if(wait_count == 1) return first_wait;
+#else
+      int existential_count = 0;
+      if (ev1.exists()) existential_count++;
+      if (ev2.exists()) existential_count++;
+      if (ev3.exists()) existential_count++;
+      if (ev4.exists()) existential_count++;
+      if (ev5.exists()) existential_count++;
+      if (ev6.exists()) existential_count++;
+      if (existential_count == 0)
+        return Event::NO_EVENT;
+      if (existential_count == 1)
+      {
+        if (ev1.exists()) return ev1;
+        if (ev2.exists()) return ev2;
+        if (ev3.exists()) return ev3;
+        if (ev4.exists()) return ev4;
+        if (ev5.exists()) return ev5;
+        if (ev6.exists()) return ev6;
+      }
 #endif
 
       // counts of 2+ require building a new event and a merger to trigger it
@@ -1292,36 +1318,27 @@ namespace LegionRuntime {
       m->add_event(ev5);
       m->add_event(ev6);
 
-#ifdef EVENT_GRAPH_TRACING
-      int existential_count = 0;
-      if (ev1.exists()) existential_count++;
-      if (ev2.exists()) existential_count++;
-      if (ev3.exists()) existential_count++;
-      if (ev4.exists()) existential_count++;
-      if (ev5.exists()) existential_count++;
-      if (ev6.exists()) existential_count++;
-      if (existential_count > 0) {
-        log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
-                 finish_event.id, finish_event.gen, existential_count);
-        if (ev1.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev1.id, ev1.gen);
-        if (ev2.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev2.id, ev2.gen);
-        if (ev3.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev3.id, ev3.gen);
-        if (ev4.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev4.id, ev4.gen);
-        if (ev5.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev5.id, ev5.gen);
-        if (ev6.exists)
-          log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
-              finish_event.id, finish_event.gen, ev6.id, ev6.gen);
-      }
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) %d",
+               finish_event.id, finish_event.gen, existential_count);
+      if (ev1.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev1.id, ev1.gen);
+      if (ev2.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev2.id, ev2.gen);
+      if (ev3.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev3.id, ev3.gen);
+      if (ev4.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev4.id, ev4.gen);
+      if (ev5.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev5.id, ev5.gen);
+      if (ev6.exists())
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ", %d)",
+            finish_event.id, finish_event.gen, ev6.id, ev6.gen);
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)
@@ -8224,6 +8241,27 @@ namespace LegionRuntime {
     }
 #endif
 
+#ifdef LEGION_BACKTRACE
+    static void legion_backtrace(int signal)
+    {
+      assert((signal == SIGTERM) || (signal == SIGINT) || 
+             (signal == SIGABRT) || (signal == SIGSEGV));
+      void *bt[256];
+      int bt_size = backtrace(bt, 256);
+      char **bt_syms = backtrace_symbols(bt, bt_size);
+      size_t buffer_size = 1;
+      for (int i = 0; i < bt_size; i++)
+        buffer_size += (strlen(bt_syms[i]) + 1);
+      char *buffer = (char*)malloc(buffer_size);
+      int offset = 0;
+      for (int i = 0; i < bt_size; i++)
+        offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
+      fprintf(stderr,"BACKTRACE\n----------\n%s\n----------\n", buffer);
+      fflush(stderr);
+      free(buffer);
+    }
+#endif
+
     ProcessorAssignment *proc_assignment = 0;
 
     Machine::Machine(int *argc, char ***argv,
@@ -8448,6 +8486,12 @@ namespace LegionRuntime {
       signal(SIGTERM, sigterm_catch);
       signal(SIGINT, sigterm_catch);
       signal(SIGABRT, sigabrt_catch);
+#endif
+#ifdef LEGION_BACKTRACE
+      signal(SIGSEGV, legion_backtrace);
+      signal(SIGTERM, legion_backtrace);
+      signal(SIGINT, legion_backtrace);
+      signal(SIGABRT, legion_backtrace);
 #endif
       
       start_polling_threads(active_msg_worker_threads);
@@ -9135,6 +9179,12 @@ namespace LegionRuntime {
         log_machine.info("total proc groups: %d", rt->local_proc_group_free_list->next_alloc);
 #endif
       }
+#ifdef EVENT_GRAPH_TRACE
+      {
+        FILE *log_file = Logger::get_log_file();
+        show_event_waiters(log_file);
+      }
+#endif
 #if defined(ORDERED_LOGGING) || defined(NODE_LOGGING)
       Logger::finalize();
 #endif
