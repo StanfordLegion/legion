@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -56,6 +56,10 @@ local language = {
     "fspace",
   },
   keywords = {
+    "__context",
+    "__fields",
+    "__physical",
+    "__runtime",
     "isnull",
     "new",
     "null",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2014 Stanford University
+# Copyright 2015 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,12 +16,10 @@
 #
 
 from __future__ import print_function
-import multiprocessing, os, platform, subprocess
+import multiprocessing, os, platform, subprocess, sys
 
 # Requires:
 #   * Terra-compatible LLVM installation on PATH
-#   * Boost including tools (Ubuntu packages libboost-dev and
-#     libboost-tools-dev, or equivalent)
 
 os_name = platform.system()
 
@@ -49,6 +47,22 @@ def git_update(repo_dir):
         ['git', 'pull', '--ff-only'],
         cwd = repo_dir)
 
+def check_luabind(luabind_dir):
+    if os.path.exists(luabind_dir):
+        print('Is this your first time installing the new Terra bindings? You seem to')
+        print('have a luabind directory left over from the old install script. If so,')
+        print('that\'s not a problem. Just remove the directory and run this script')
+        print('again to continue:')
+        print()
+        print('    mv terra terra_old')
+        print('    mv luabind luabind_old')
+        print('    ./install.py')
+        print()
+        print('(You can remove both *_old directories once you\'re sure it works.)')
+        print()
+        print('(Or you can continue to use the old bindings with ./install_old.py.)')
+        sys.exit()
+
 def build_terra(terra_dir):
     subprocess.check_call(
         ['make', 'all', '-j', str(multiprocessing.cpu_count())],
@@ -65,63 +79,12 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def build_luabind(bindings_dir, terra_dir, luabind_dir):
-    diff_filename = os.path.join(bindings_dir, 'Jamroot.diff')
-    # Check to see if the patch has been applied before applying it.
-    with open(diff_filename, 'rb') as diff:
-        patched = subprocess.call(
-            ['patch', '-p0', '--forward', '--dry-run', '--silent', 'Jamroot'],
-            stdin = diff,
-            stdout = subprocess.PIPE,
-            stderr = subprocess.PIPE,
-            cwd = luabind_dir)
-    if patched == 0:
-        print('patching Jamroot')
-        with open(diff_filename, 'rb') as diff:
-            subprocess.check_call(
-                ['patch', '-p0', 'Jamroot'],
-                stdin = diff,
-                cwd = luabind_dir)
-    else:
-        print('patch to Jamroot already applied')
-
-    luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3', 'src')
-    fake_luajit_dir = os.path.join(luabind_dir, 'fake_luajit_dir')
-
-    if not os.path.exists(fake_luajit_dir):
-        os.mkdir(fake_luajit_dir)
-    symlink(luajit_dir, os.path.join(fake_luajit_dir, 'include'))
-    symlink(luajit_dir, os.path.join(fake_luajit_dir, 'lib'))
-    # So apparently, when LuaJIT gets built on Mac OS X, it completely
-    # ignores the system and saves its dynamic libraries with a .so
-    # extension. Great.
-    symlink(os.path.join(luajit_dir, 'libluajit.so'),
-            os.path.join(luajit_dir, 'libluajit-5.1%s' % dylib_ext))
-    # For Linux:
-    symlink(os.path.join(luajit_dir, 'libluajit.so'),
-            os.path.join(luajit_dir, 'libluajit-5.1%s.2' % dylib_ext))
-    # For Mac OS X:
-    symlink(os.path.join(luajit_dir, 'libluajit.so'),
-            os.path.join(luajit_dir, 'libluajit-5.1.2%s' % dylib_ext))
-
-    luabind_install_dir = os.path.join(luabind_dir, 'install_dir')
+def install_bindings(bindings_dir, terra_dir):
+    luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
-        ('LUAJIT_PATH', fake_luajit_dir),                   # for luabind
-        ('LUAJIT_DIR', fake_luajit_dir),                    # for bindings
-        ('LUABIND_DIR', luabind_install_dir),               # for bindings
-        ('WITH_TERRA', '1'),                                # for bindings
+        ('LUAJIT_DIR', luajit_dir),                         # for bindings
         ('TERRA_DIR', terra_dir),                           # for bindings
-        ('WITH_TERRA_STATIC_LINKING', '1'),                 # for bindings
     ])
-
-    subprocess.check_call(
-        ['bjam', '--prefix=%s' % luabind_install_dir, 'install'],
-        cwd = luabind_dir,
-        env = env)
-    symlink(os.path.join(luabind_install_dir, 'lib',
-                         'libluabindd%s' % dylib_ext),
-            os.path.join(luabind_install_dir, 'lib',
-                         'libluabind%s' % dylib_ext))
 
     subprocess.check_call(
         ['make', 'clean'],
@@ -131,8 +94,8 @@ def build_luabind(bindings_dir, terra_dir, luabind_dir):
         ['make', '-j', str(multiprocessing.cpu_count())],
         cwd = bindings_dir,
         env = env)
-    symlink(os.path.join(bindings_dir, 'libbinding.so'),
-            os.path.join(bindings_dir, 'libbinding%s' % dylib_ext))
+    symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
+            os.path.join(bindings_dir, 'liblegion_terra%s' % dylib_ext))
 
     # This last bit is necessary because Mac OS X shared libraries
     # have paths hard-coded into them, and in this case those paths
@@ -142,33 +105,28 @@ def build_luabind(bindings_dir, terra_dir, luabind_dir):
     # You can sanity check that this step actually worked with the
     # commands:
     #
-    # otool -L libbinding.so
+    # otool -L liblegion_terra.so
     # ./legion.py
-    #   =package.loadlib('libbinding.so', 'init')
+    #   =package.loadlib('liblegion_terra.so', 'init')
 
     if os_name == 'Darwin':
         subprocess.check_call(
             ['install_name_tool', '-change',
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
-             os.path.join(bindings_dir, 'libbinding.so')])
-
-def install_luabind(legion_dir, terra_dir, luabind_dir):
-    if not os.path.exists(luabind_dir):
-        git_clone(luabind_dir, 'https://github.com/elliottslaughter/luabind.git')
-    else:
-        git_update(luabind_dir)
-    build_luabind(legion_dir, terra_dir, luabind_dir)
+             os.path.join(bindings_dir, 'liblegion_terra.so')])
 
 def install():
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
 
+    luabind_dir = os.path.join(root_dir, 'luabind')
+    check_luabind(luabind_dir)
+
     terra_dir = os.path.join(root_dir, 'terra')
     install_terra(terra_dir)
 
-    bindings_dir = os.path.join(legion_dir, 'bindings', 'lua')
-    luabind_dir = os.path.join(root_dir, 'luabind')
-    install_luabind(bindings_dir, terra_dir, luabind_dir)
+    bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
+    install_bindings(bindings_dir, terra_dir)
 
 if __name__ == '__main__':
     install()

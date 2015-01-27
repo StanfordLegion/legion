@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 import "legion"
 
 task main()
-  assert(true and true)
-  assert(true or false)
-  assert(not false)
-  assert(true and (not false))
-  assert(not (false and true))
+  legionlib.assert(true and true)
+  legionlib.assert(true or false)
+  legionlib.assert(not false)
+  legionlib.assert(true and (not false))
+  legionlib.assert(not (false and true))
 end
 legionlib.start(main)

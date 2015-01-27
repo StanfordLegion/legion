@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -62,6 +62,6 @@ task f() : int
 end
 
 task main()
-  assert(f() == 42122311)
+  legionlib.assert(f() == 42122311)
 end
 legionlib.start(main)

@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,9 +16,28 @@
 
 import "legion"
 
+-- Compile and link pennant.cc
+local cpennant
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local pennant_cc = root_dir .. "pennant.cc"
+  local pennant_so = root_dir .. "pennant.so"
+  if os.execute("c++ -std=c++11 -Wall -shared -fPIC " .. pennant_cc .. " -o " .. pennant_so) ~= 0 then
+    print("Error: failed to compile " .. pennant_cc)
+    assert(false)
+  end
+  terralib.linklibrary(pennant_so)
+  cpennant = terralib.includec("pennant.h", "-I", root_dir)
+end
+
+-- Include other headers
 local c = legionlib.c
+local cmath = terralib.includec("math.h")
+local cstring = terralib.includec("string.h")
 
 local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
+
+(terra() c.printf("Compiling from top (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- #####################################
 -- ## Data Structures
@@ -89,67 +108,79 @@ terra project(a : vec2, b : vec2)
   return a - b*dot(a, b)
 end
 
-struct config {
+local config_fields_input = terralib.newlist({
   -- Configuration variables.
-  alfa : double,
-  bcx_0 : double,
-  bcx_1 : double,
-  bcy_0 : double,
-  bcy_1 : double,
-  bcx_n : int,
-  bcy_n : int,
-  cfl : double,
-  cflv : double,
-  chunksize : int,
-  cstop : int,
-  dtfac : double,
-  dtinit : double,
-  dtmax : double,
-  dtreport : double,
-  einit : double,
-  einitsub : double,
-  gamma : double,
-  meshscale : double,
-  q1 : double,
-  q2 : double,
-  qgamma : double,
-  rinit : double,
-  rinitsub : double,
-  ssmin : double,
-  subregion_0 : double,
-  subregion_1 : double,
-  subregion_2 : double,
-  subregion_3 : double,
-  tstop : double,
-  uinitradial : double,
+  {field = "alfa", type = double, default_value = 0.5},
+  {field = "bcx", type = double[2], default_value = `array(0.0, 0.0), linked_field = "bcx_n"},
+  {field = "bcx_n", type = int64, default_value = 0, is_linked_field = true},
+  {field = "bcy", type = double[2], default_value = `array(0.0, 0.0), linked_field = "bcy_n"},
+  {field = "bcy_n", type = int64, default_value = 0, is_linked_field = true},
+  {field = "cfl", type = double, default_value = 0.6},
+  {field = "cflv", type = double, default_value = 0.1},
+  {field = "chunksize", type = int64, default_value = 99999999},
+  {field = "cstop", type = int64, default_value = 999999},
+  {field = "dtfac", type = double, default_value = 1.2},
+  {field = "dtinit", type = double, default_value = 1.0e99},
+  {field = "dtmax", type = double, default_value = 1.0e99},
+  {field = "dtreport", type = double, default_value = 10},
+  {field = "einit", type = double, default_value = 0.0},
+  {field = "einitsub", type = double, default_value = 0.0},
+  {field = "gamma", type = double, default_value = 5.0 / 3.0},
+  {field = "meshscale", type = double, default_value = 1.0},
+  {field = "q1", type = double, default_value = 0.0},
+  {field = "q2", type = double, default_value = 2.0},
+  {field = "qgamma", type = double, default_value = 5.0 / 3.0},
+  {field = "rinit", type = double, default_value = 1.0},
+  {field = "rinitsub", type = double, default_value = 1.0},
+  {field = "ssmin", type = double, default_value = 0.0},
+  {field = "subregion", type = double[4], default_value = `arrayof(double, 0, 0, 0, 0), linked_field = "subregion_n"},
+  {field = "subregion_n", type = int64, default_value = 0, is_linked_field = true},
+  {field = "tstop", type = double, default_value = 1.0e99},
+  {field = "uinitradial", type = double, default_value = 0.0},
+  {field = "meshparams", type = double[4], default_value = `arrayof(double, 0, 0, 0, 0), linked_field = "meshparams_n"},
+  {field = "meshparams_n", type = int64, default_value = 0, is_linked_field = true},
+})
 
+local config_fields_meshgen = terralib.newlist({
   -- Mesh generator variables.
-  meshtype : int,
-  meshparams_0 : double,
-  meshparams_1 : double,
-  meshparams_2 : double,
-  meshparams_3 : double,
-  meshparams_n : int,
-  nzx : int,
-  nzy : int,
-  numpcx : int,
-  numpcy : int,
-  lenx : double,
-  leny : double,
+  {field = "meshtype", type = int64, default_value = 0},
+  {field = "nzx", type = int64, default_value = 0},
+  {field = "nzy", type = int64, default_value = 0},
+  {field = "numpcx", type = int64, default_value = 0},
+  {field = "numpcy", type = int64, default_value = 0},
+  {field = "lenx", type = double, default_value = 0.0},
+  {field = "leny", type = double, default_value = 0.0},
+})
 
+local config_fields_mesh = terralib.newlist({
   -- Mesh variables.
-  nz : int,
-  np : int,
-  ns : int,
-  maxznump : int,
+  {field = "nz", type = int64, default_value = 0},
+  {field = "np", type = int64, default_value = 0},
+  {field = "ns", type = int64, default_value = 0},
+  {field = "maxznump", type = int64, default_value = 0},
+})
 
+local config_fields_cmd = terralib.newlist({
   -- Command-line parameters.
-  npieces : int,
-  use_foreign : bool,
-}
+  {field = "npieces", type = int64, default_value = 1},
+  {field = "use_foreign", type = bool, default_value = false},
+})
+
+local config_fields_all = terralib.newlist()
+config_fields_all:insertall(config_fields_input)
+config_fields_all:insertall(config_fields_meshgen)
+config_fields_all:insertall(config_fields_mesh)
+config_fields_all:insertall(config_fields_cmd)
+
+local config = terralib.types.newstruct("config")
+config.entries:insertall(config_fields_all)
+
+local MESH_PIE = 0
+local MESH_RECT = 1
+local MESH_HEX = 2
 
 fspace zone {
-  znump :  int,          -- number of points in zone
+  znump :  int64,        -- number of points in zone
   zxp :    vec2,         -- zone center coordinates, middle of cycle
   zx :     vec2,         -- zone center coordinates, end of cycle
   zareap : double,       -- zone area, middle of cycle
@@ -243,13 +274,13 @@ fspace mesh(rz : region(zone),
   rsp : region(side(rzp, rpp, rpg, rsp)),
 
   -- Coloring
-  mcolor : int,          -- mesh piece color
+  mcolor : int64,          -- mesh piece color
 
   -- Index bounds for C++ kernels
-  zstart : int,          -- zone start index
-  zend : int,            -- zone end index (exclusive)
-  sstart : int,          -- side start index
-  send : int,            -- side end index (exclusive)
+  zstart : int64,          -- zone start index
+  zend : int64,            -- zone end index (exclusive)
+  sstart : int64,          -- side start index
+  send : int64,            -- side end index (exclusive)
 } where
   rzp <= rz, rpp <= rp, rpg <= rp, rps <= rp,
   -- rpp * rpg, rpp * rps, -- FIXME
@@ -258,6 +289,9 @@ fspace mesh(rz : region(zone),
 -- #####################################
 -- ## Initialization
 -- #################
+
+function _t1() end -- seems like I need this to break up the statements
+(terra() c.printf("Compiling kernels (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- Hack: This exists to make the compiler recompute the bitmasks for
 -- each pointer. This needs to happen here (rather than at
@@ -273,7 +307,6 @@ task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
     s.mapsp2 = s.mapsp2 -- downregion<rpp, rpg>(s->mapsp2)
   end
 end
-init_pointers:compile()
 
 task init_mesh_zones(rz : region(zone)),
   writes(rz.{zx, zarea, zvol})
@@ -283,7 +316,6 @@ task init_mesh_zones(rz : region(zone)),
     z.zvol = 0.0
   end
 end
-init_mesh_zones:compile()
 
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
@@ -298,7 +330,6 @@ task init_side_fracs(rz : region(zone), rpp : region(point), rpg : region(point)
     s.smf = s.sarea / z.zarea
   end
 end
-init_side_fracs:compile()
 
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
@@ -329,7 +360,6 @@ task init_hydro(rz : region(zone), rinit : double, einit : double,
     z.zetot = ze * zm
   end
 end
-init_hydro:compile()
 
 task init_radial_velocity(rp : region(point), vel : double)
   , reads(rp.px)
@@ -343,7 +373,6 @@ task init_radial_velocity(rp : region(point), vel : double)
     end
   end
 end
-init_radial_velocity:compile()
 
 -- #####################################
 -- ## Main simulation loop
@@ -363,7 +392,6 @@ task init_step_points(rp : region(point))
     p.pf = {x = 0.0, y = 0.0}
   end
 end
-init_step_points:compile()
 
 --
 -- 1. Advance mesh to center of time step.
@@ -377,11 +405,10 @@ task adv_pos_half(rp : region(point), dt : double)
     p.pxp = p.px0 + dth*p.pu0
   end
 end
-adv_pos_half:compile()
 
 -- Save off zone variable value from previous cycle.
 task init_step_zones(rz : region(zone),
-                     zstart : int, zend : int, use_foreign : bool)
+                     zstart : int64, zend : int64, use_foreign : bool)
   , reads(rz.zvol)
   , writes(rz.{zxp, zx, zareap, zarea, zvol0, zvolp, zvol, zdl, zw, zuc})
   if use_foreign then
@@ -404,7 +431,6 @@ task init_step_zones(rz : region(zone),
     end
   end
 end
-init_step_zones:compile()
 
 --
 -- 1a. Compute new mesh geometry.
@@ -413,7 +439,7 @@ init_step_zones:compile()
 -- Compute centers of zones and edges.
 task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  sstart : int, send : int, use_foreign : bool)
+                  sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{znump, zxp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
   , writes(rz.zxp, rs.exp)
   if use_foreign then
@@ -431,12 +457,11 @@ task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-calc_centers:compile()
 
 -- Compute volumes of zones and sides.
 task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  sstart : int, send : int, use_foreign : bool)
+                  sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zxp, zareap, zvolp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2})
   , writes(rz.{zareap, zvolp}, rs.{sareap, svolp})
   if use_foreign then
@@ -455,16 +480,15 @@ task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
       z.zareap += sa
       z.zvolp += sv
 
-      assert(sv > 0.0)
+      legionlib.assert(sv > 0.0)
     end
   end
 end
-calc_volumes:compile()
 
 -- Compute surface vectors of sides.
 task calc_surface_vecs(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       sstart : int, send : int, use_foreign : bool)
+                       sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.zxp, rs.{mapsz, exp})
   , writes(rs.ssurfp)
   if use_foreign then
@@ -478,12 +502,11 @@ task calc_surface_vecs(rz : region(zone), rpp : region(point), rpg : region(poin
     end
   end
 end
-calc_surface_vecs:compile()
 
 -- Compute edge lengths.
 task calc_edge_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
-                   sstart : int, send : int, use_foreign : bool)
+                   sstart : int64, send : int64, use_foreign : bool)
   , reads(rpp.pxp, rpg.pxp, rs.{mapsp1, mapsp2})
   , writes(rs.elen)
   if use_foreign then
@@ -498,12 +521,11 @@ task calc_edge_len(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-calc_edge_len:compile()
 
 -- Compute zone characteristic lengths.
 task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
-                   sstart : int, send : int, use_foreign : bool)
+                   sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{znump, zdl}, rs.{mapsz, sareap, elen})
   , writes(rz.zdl)
   if use_foreign then
@@ -526,7 +548,6 @@ task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-calc_char_len:compile()
 
 --
 -- 2. Compute point masses.
@@ -534,7 +555,7 @@ calc_char_len:compile()
 
 -- Compute zone densities.
 task calc_rho_half(rz : region(zone),
-                   zstart : int, zend : int, use_foreign : bool)
+                   zstart : int64, zend : int64, use_foreign : bool)
   , reads(rz.{zvolp, zm})
   , writes(rz.zrp)
   if use_foreign then
@@ -545,12 +566,11 @@ task calc_rho_half(rz : region(zone),
     end
   end
 end
-calc_rho_half:compile()
 
 -- Reduce masses into points.
 task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
-                    sstart : int, send : int, use_foreign : bool)
+                    sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf})
   , writes(rpp.pmaswt)
   , reduces +(rpg.pmaswt)
@@ -567,7 +587,6 @@ task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-sum_point_mass:compile()
 
 --
 -- 3. Compute material state (half-advanced).
@@ -575,7 +594,7 @@ sum_point_mass:compile()
 
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
-                        zstart : int, zend : int, use_foreign : bool)
+                        zstart : int64, zend : int64, use_foreign : bool)
   , reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate})
   , writes(rz.{zp, zss})
   if use_foreign then
@@ -605,7 +624,6 @@ task calc_state_at_half(rz : region(zone),
     end
   end
 end
-calc_state_at_half:compile()
 
 --
 -- 4. Compute forces.
@@ -614,7 +632,7 @@ calc_state_at_half:compile()
 -- Compute PolyGas forces.
 task calc_force_pgas(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
-                     sstart : int, send : int, use_foreign : bool)
+                     sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.zp, rs.{mapsz, ssurfp})
   , writes(rs.sfp)
   if use_foreign then
@@ -627,13 +645,12 @@ task calc_force_pgas(rz : region(zone), rpp : region(point), rpg : region(point)
     end
   end
 end
-calc_force_pgas:compile()
 
 -- Compute TTS forces.
 task calc_force_tts(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     alfa : double, ssmin : double,
-                    sstart : int, send : int, use_foreign : bool)
+                    sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zareap, zrp, zss}, rs.{mapsz, sareap, smf, ssurfp})
   , writes(rs.sft)
   if use_foreign then
@@ -652,11 +669,10 @@ task calc_force_tts(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-calc_force_tts:compile()
 
 task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : region(point),
                               rs : region(side(rz, rpp, rpg, rs)),
-                              sstart : int, send : int, use_foreign : bool)
+                              sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{znump, zuc}, rpp.pu, rpg.pu, rs.{mapsz, mapsp1})
   , writes(rz.zuc)
   if use_foreign then
@@ -672,11 +688,10 @@ task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : regi
     end
   end
 end
-qcs_zone_center_velocity:compile()
 
 task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(point),
                            rs : region(side(rz, rpp, rpg, rs)),
-                           sstart : int, send : int, use_foreign : bool)
+                           sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zxp, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
           rs.{mapsz, mapsp1, mapsp2, mapss3, exp, elen})
   , writes(rs.{carea, ccos, cdiv, cevol, cdu})
@@ -766,12 +781,11 @@ task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(
     end
   end
 end
-qcs_corner_divergence:compile()
 
 task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    gamma : double, q1 : double, q2 : double,
-                   sstart : int, send : int, use_foreign : bool)
+                   sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zrp, zss}, rpp.pu, rpg.pu,
           rs.{mapsz, mapsp1, mapsp2, mapss3, elen, cdiv, cdu, cevol})
   , writes(rs.{cqe1, cqe2})
@@ -804,11 +818,10 @@ task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-qcs_qcn_force:compile()
 
 task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
-               sstart : int, send : int, use_foreign : bool)
+               sstart : int64, send : int64, use_foreign : bool)
   , reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2})
   , writes(rs.sfq)
   if use_foreign then
@@ -841,12 +854,11 @@ task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-qcs_force:compile()
 
 task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   q1 : double, q2 : double,
-                  zstart : int, zend : int, sstart : int, send : int,
+                  zstart : int64, zend : int64, sstart : int64, send : int64,
                   use_foreign : bool)
   , reads(rz.{zss, z0tmp}, rpp.{pxp, pu}, rpg.{pxp, pu},
           rs.{mapsp1, mapsp2, mapsz, elen})
@@ -877,14 +889,13 @@ task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
     z.zdu = q1 * z.zss + 2.0 * q2 * z.z0tmp
   end
 end
-qcs_vel_diff:compile()
 
 -- Compute QCS forces.
 task calc_force_qcs(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     gamma : double, q1 : double, q2 : double,
-                    zstart : int, zend : int,
-                    sstart : int, send : int,
+                    zstart : int64, zend : int64,
+                    sstart : int64, send : int64,
                     use_foreign : bool)
   , reads(rz.{zxp, zrp, znump, zss, zuc, zdu, z0tmp},
           rpp.{pxp, pu}, rpg.{pxp, pu},
@@ -897,12 +908,11 @@ task calc_force_qcs(rz : region(zone), rpp : region(point), rpg : region(point),
   qcs_force(rz, rpp, rpg, rs, sstart, send, use_foreign)
   qcs_vel_diff(rz, rpp, rpg, rs, q1, q2, zstart, zend, sstart, send, use_foreign)
 end
-calc_force_qcs:compile()
 
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
-                     sstart : int, send : int, use_foreign : bool)
+                     sstart : int64, send : int64, use_foreign : bool)
   , reads(rpp.pf, rs.{mapsz, mapsp1, mapss3, sfp, sfq, sft})
   , writes(rpp.pf)
   , reduces +(rpg.pf.{x, y})
@@ -920,7 +930,6 @@ task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point)
     end
   end
 end
-sum_point_force:compile()
 
 --
 -- 4a. Apply boundary conditions.
@@ -942,7 +951,6 @@ task apply_boundary_conditions(rp : region(point))
     end
   end
 end
-apply_boundary_conditions:compile()
 
 --
 -- 5. Compute accelerations.
@@ -956,7 +964,6 @@ task calc_accel(rp : region(point))
     p.pap = (1.0 / max(p.pmaswt, fuzz))*(p.pf)
   end
 end
-calc_accel:compile()
 
 --
 -- 6. Advance mesh to end of time step.
@@ -971,7 +978,6 @@ task adv_pos_full(rp : region(point), dt : double)
     p.px = p.px0 + (0.5 * dt)*(pu + p.pu0)
   end
 end
-adv_pos_full:compile()
 
 --
 -- 6a. Compute new mesh geometry.
@@ -982,7 +988,7 @@ adv_pos_full:compile()
 -- in both cases.
 task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       sstart : int, send : int, use_foreign : bool)
+                       sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{znump, zx}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
   , writes(rz.zx, rs.ex)
   if use_foreign then
@@ -1000,14 +1006,13 @@ task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(poin
     end
   end
 end
-calc_centers_full:compile()
 
 -- FIXME: This is a duplicate of calc_volumes but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
 task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       sstart : int, send : int, use_foreign : bool)
+                       sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zx, zarea, zvol}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2})
   , writes(rz.{zarea, zvol}, rs.{sarea, svol})
   if use_foreign then
@@ -1026,11 +1031,10 @@ task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(poin
       z.zarea += sa
       z.zvol += sv
 
-      assert(sv > 0.0)
+      legionlib.assert(sv > 0.0)
     end
   end
 end
-calc_volumes_full:compile()
 
 --
 -- 7. Compute work
@@ -1039,7 +1043,7 @@ calc_volumes_full:compile()
 task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                dt : double,
-               sstart : int, send : int, use_foreign : bool)
+               sstart : int64, send : int64, use_foreign : bool)
   , reads(rz.{zw, zetot}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
           rs.{mapsz, mapsp1, mapsp2, sfp, sfq})
   , writes(rz.{zw, zetot})
@@ -1061,7 +1065,6 @@ task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
     end
   end
 end
-calc_work:compile()
 
 --
 -- 7a. Compute work rate.
@@ -1077,7 +1080,6 @@ task calc_work_rate(rz : region(zone), dt : double)
     z.zwrate = (z.zw + z.zp * dvol) * dtiny
   end
 end
-calc_work_rate:compile()
 
 --
 -- 8. Update state variables.
@@ -1092,7 +1094,6 @@ task calc_energy(rz : region(zone))
     z.ze = z.zetot / (z.zm + fuzz)
   end
 end
-calc_energy:compile()
 
 task calc_rho_full(rz : region(zone))
   , reads(rz.{zvol, zm})
@@ -1101,7 +1102,6 @@ task calc_rho_full(rz : region(zone))
     z.zr = z.zm / z.zvol
   end
 end
-calc_rho_full:compile()
 
 --
 -- 9. Compute timstep for next cycle.
@@ -1121,7 +1121,6 @@ task calc_dt_courant(rz : region(zone), dtmax : double, cfl : double)
 
   return dtnew
 end
-calc_dt_courant:compile()
 
 task calc_dt_volume(rz : region(zone), dtlast : double, cflv : double)
   : double
@@ -1133,7 +1132,6 @@ task calc_dt_volume(rz : region(zone), dtlast : double, cflv : double)
   end
   return dtlast * cflv / dvovmax
 end
-calc_dt_volume:compile()
 
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double, cfl : double, cflv : double)
   : double
@@ -1146,11 +1144,10 @@ task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double, cfl : dou
 
   return dthydro
 end
-calc_dt_hydro:compile()
 
 terra calc_global_dt(dt : double, dtfac : double, dtinit : double,
                      dtmax : double, dthydro : double,
-                     time : double, tstop : double, cycle : int) : double
+                     time : double, tstop : double, cycle : int64) : double
   var dtlast = dt
 
   dt = dtmax
@@ -1168,20 +1165,21 @@ terra calc_global_dt(dt : double, dtfac : double, dtinit : double,
   return dt
 end
 
+function _t2() end -- seems like I need this to break up the statements
+(terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+
 task initialize(rz_all : region(zone), rp_all : region(point),
                 rs_all : region(side(wild, wild, wild, wild)),
                 rm_all : region(mesh(rz_all, rp_all, rs_all)),
                 conf : config)
   , reads(rz_all, rp_all, rs_all, rm_all)
   , writes(rz_all, rp_all, rs_all, rm_all)
+
   var einit = conf.einit
   var einitsub = conf.einitsub
   var rinit = conf.rinit
   var rinitsub = conf.rinitsub
-  var subregion_0 = conf.subregion_0
-  var subregion_1 = conf.subregion_1
-  var subregion_2 = conf.subregion_2
-  var subregion_3 = conf.subregion_3
+  var subregion = conf.subregion
   var uinitradial = conf.uinitradial
 
   var use_foreign = conf.use_foreign
@@ -1213,7 +1211,7 @@ task initialize(rz_all : region(zone), rp_all : region(point),
 
   for m in rm_all do
     var {rz = rzp, rpp, rpg, rps, rs = rsp} = @m
-    init_hydro(rz, rinit, einit, rinitsub, einitsub, subregion_0, subregion_1, subregion_2, subregion_3)
+    init_hydro(rz, rinit, einit, rinitsub, einitsub, subregion[0], subregion[1], subregion[2], subregion[3])
   end
 
   for m in rm_all do
@@ -1222,7 +1220,6 @@ task initialize(rz_all : region(zone), rp_all : region(point),
     init_radial_velocity(rps, uinitradial)
   end
 end
-initialize:compile()
 
 task simulate(rz_all : region(zone), rp_all : region(point),
               rs_all : region(side(wild, wild, wild, wild)),
@@ -1400,138 +1397,743 @@ task simulate(rz_all : region(zone), rp_all : region(point),
     time += dt
   end
 end
-simulate:compile()
 
-task all_zones_coloring(rz_all : region(zone), rp_all : region(point),
-                        rs_all : region(side(wild, wild, wild, wild)),
-                        rm_all : region(mesh(rz_all, rp_all, rs_all)),
-                        conf : config)
-  : c.legion_coloring_t -- coloring(rz_all)
-  , reads(rm_all.{zstart, zend})
-  return [c.legion_coloring_create]() -- return foreign_all_zones_coloring(conf, rm_all)
+function _t20() end -- seems like I need this to break up the statements
+(terra() c.printf("Compiling main (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+
+--
+-- Command Line Processing
+--
+
+terra get_positional_arg()
+  var args = c.legion_runtime_get_input_args()
+  var i = 1
+  while i < args.argc do
+    if args.argv[i][0] == ('-')[0] then
+      i = i + 1
+    else
+      return args.argv[i]
+    end
+    i = i + 1
+  end
+  return nil
 end
-all_zones_coloring:compile()
 
--- task all_points_coloring(rp_all : region(point),
---                          pcolor_is : ispace(int), pcolor_a : array(pcolor_is, int),
---                          conf : config)
---   : int -- coloring(rp_all)
---   , reads(pcolor_a)
---   return 0 -- return foreign_all_points_coloring(conf, pcolor_a)
--- end
--- all_points_coloring:compile()
-
--- task private_points_coloring(rp_all_private : region(point),
---                              pcolor_is : ispace(int), pcolor_a : array(pcolor_is, int),
---                              conf : config)
---   : int -- coloring(rp_all_private)
---   , reads(pcolor_a)
---   return 0 -- return foreign_private_points_coloring(conf, pcolor_a)
--- end
--- private_points_coloring:compile()
-
--- task ghost_points_coloring(rp_all_ghost : region(point),
---                            pcolor_is : ispace(int), pcolor_a : array(pcolor_is, int),
---                            pcolors_is : ispace(int), pcolors_a : array(pcolors_is, uint64),
---                            conf : config)
---   : int -- coloring(rp_all_ghost)
---   , reads(pcolor_a, pcolors_a)
---   return 0 -- return foreign_ghost_points_coloring(conf, pcolor_a, pcolors_a)
--- end
--- ghost_points_coloring:compile()
-
--- task shared_points_coloring(rp_all_shared : region(point),
---                             pcolor_shared_is : ispace(int), pcolor_shared_a : array(pcolor_shared_is, int),
---                             conf : config)
---   : int -- coloring(rp_all_shared)
---   , reads(pcolor_shared_a)
---   return 0 -- return foreign_shared_points_coloring(conf, pcolor_shared_a)
--- end
--- shared_points_coloring:compile()
-
-task all_sides_coloring(rz_all : region(zone), rp_all : region(point),
-                        rs_all : region(side(wild, wild, wild, wild)),
-                        rm_all : region(mesh(rz_all, rp_all, rs_all)),
-                        conf : config)
-  : c.legion_coloring_t -- coloring(rs_all)
-  , reads(rm_all.{sstart, send})
-  return [c.legion_coloring_create]() -- return foreign_all_sides_coloring(conf, rm_all)
+terra get_optional_arg(key : rawstring)
+  var args = c.legion_runtime_get_input_args()
+  var i = 1
+  while i < args.argc do
+    if cstring.strcmp(args.argv[i], key) == 0 then
+      if i + 1 < args.argc then
+        return args.argv[i + 1]
+      else
+        return nil
+      end
+    elseif args.argv[i][0] == ('-')[0] then
+      i = i + 1
+    end
+    i = i + 1
+  end
+  return nil
 end
-all_sides_coloring:compile()
 
--- task read_input(conf : config,
---                 rz_all : region(zone), rp_all : region(point), rs_all : region(side(wild, wild, wild, wild)),
---                 rm_all : region(mesh(rz_all, rp_all, rs_all)),
---                 pcolor_is : ispace(int), pcolor_a : array(pcolor_is, int),
---                 pcolors_is : ispace(int), pcolors_a : array(pcolors_is, uint64),
---                 pcolor_shared_is : ispace(int), pcolor_shared_a : array(pcolor_shared_is, int))
---   , reads(rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a)
---   , writes(rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a)
---   foreign_read_input(conf, rz_all, rp_all, rs_all, rm_all, pcolor_a, pcolors_a, pcolor_shared_a)
--- end
--- read_input:compile()
+--
+-- Configuration
+--
 
-task validate_output(conf : config,
-                     rz_all : region(zone), rp_all : region(point), rs_all : region(side(wild, wild, wild, wild)))
-  , reads(rz_all, rp_all, rs_all)
-  -- foreign_validate_output(conf, rz_all, rp_all, rs_all)
+terra init_mesh(conf : &config)
+  conf.nzx = conf.meshparams[0]
+  if conf.meshparams_n >= 2 then
+    conf.nzy = conf.meshparams[1]
+  else
+    conf.nzy = conf.nzx
+  end
+  if conf.meshtype ~= MESH_PIE then
+    if conf.meshparams_n >= 3 then
+      conf.lenx = conf.meshparams[2]
+    else
+      conf.lenx = 1.0
+    end
+  else
+    -- convention:  x = theta, y = r
+    if conf.meshparams_n >= 3 then
+      conf.lenx = conf.meshparams[2] * cmath.M_PI / 180.0
+    else
+      conf.lenx = 90.0 * cmath.M_PI / 180.0
+    end
+  end
+  if conf.meshparams_n >= 4 then
+    conf.leny = conf.meshparams[3]
+  else
+    conf.leny = 1.0
+  end
+
+  if conf.nzx <= 0 or conf.nzy <= 0 or conf.lenx <= 0. or conf.leny <= 0. then
+    c.printf("Error: meshparams values must be positive\n")
+    c.abort()
+  end
+  if conf.meshtype == MESH_PIE and conf.lenx >= 2. * cmath.M_PI then
+    c.printf("Error: meshparams theta must be < 360\n")
+    c.abort()
+  end
+
+  -- Calculate approximate nz, np, ns for region size upper bound.
+  conf.nz = conf.nzx * conf.nzy
+  conf.np = (conf.nzx + 1) * (conf.nzy + 1)
+  if conf.meshtype ~= MESH_HEX then
+    conf.maxznump = 4
+  else
+    conf.maxznump = 6
+  end
+  conf.ns = conf.nz * conf.maxznump
+end
+
+do
+local max_items = 1024
+local max_item_len = 1024
+local fixed_string = int8[max_item_len]
+
+function get_type_specifier(t, as_input)
+  if t == fixed_string then
+    if as_input then
+      return "%" .. max_item_len .. "s", 1
+    else
+      return "%s"
+    end
+  elseif t == int64 then
+    return "%lld", 1
+  elseif t == bool then
+    return "%d", 1
+  elseif t == double then
+    if as_input then
+      return "%lf", 1
+    else
+      return "%.2e", 1
+    end
+  elseif t:isarray() then
+    local elt_type_specifier = get_type_specifier(t.type, as_input)
+    local type_specifier = ""
+    for i = 1, t.N do
+      if i > 1 then
+        type_specifier = type_specifier .. " "
+      end
+      type_specifier = type_specifier .. elt_type_specifier
+    end
+    return type_specifier, t.N
+  else
+    assert(false)
+  end
+end
+
+function explode_array(t, value)
+  if t == fixed_string then
+    return terralib.newlist({`@value})
+  elseif t:isarray() then
+    local values = terralib.newlist()
+    for i = 0, t.N - 1 do
+      values:insert(`&((@value)[i]))
+    end
+    return values
+  else
+    return terralib.newlist({value})
+  end
+end
+
+local extract = terralib.memoize(function(t)
+  local str_specifier = get_type_specifier(fixed_string, true)
+  local type_specifier, size = get_type_specifier(t, true)
+
+  return terra(items : &(fixed_string), nitems : int64, key : rawstring, result : &t)
+    var item_key : fixed_string
+    for i = 0, nitems do
+      var matched = c.sscanf(&(items[i][0]), [str_specifier], item_key)
+      if matched >= 1 and cstring.strncmp(key, item_key, max_item_len) == 0 then
+        var matched = c.sscanf(
+          &(items[i][0]), [str_specifier .. " " .. type_specifier],
+          item_key, [explode_array(t, result)])
+        if matched >= 1 then
+          return matched - 1
+        end
+      end
+    end
+  end
+end)
+
+terra read_config()
+  var input_filename = get_positional_arg()
+  if input_filename == nil then
+    c.printf("Usage: ./pennant <filename>\n")
+    -- FIXME: Fix the test harness so that this can get command-line
+    -- parameters.
+
+    -- c.abort()
+    input_filename = "pennant.tests/sedovsmall/sedovsmall.pnt"
+    c.printf("Continuing with filename = \"%s\"\n", input_filename)
+  end
+
+  c.printf("Reading \"%s\"...\n", input_filename)
+  var input_file = c.fopen(input_filename, "r")
+  if input_file == nil then
+    c.printf("Error: Failed to open \"%s\"\n", input_filename)
+    c.abort()
+  end
+
+  var items : fixed_string[max_items]
+
+  var nitems = 0
+  for i = 0, max_items do
+    if c.fgets(items[i], max_item_len, input_file) == nil then
+      nitems = i + 1
+      break
+    end
+  end
+
+  if c.fclose(input_file) ~= 0 then
+    c.printf("Error: Failed to close \"%s\"\n", input_filename)
+    c.abort()
+  end
+
+  var conf : config
+
+  -- Set defaults.
+  [config_fields_all:map(function(field)
+       return quote conf.[field.field] = [field.default_value] end
+     end)]
+
+  -- Read parameters from command line.
+  var npieces = get_optional_arg("-npieces")
+  if npieces ~= nil then
+    conf.npieces = c.atoll(npieces)
+  end
+  if conf.npieces <= 0 then
+    c.printf("Error: npieces (%lld) must be >= 0\n", conf.npieces)
+    c.abort()
+  end
+
+  var use_foreign = get_optional_arg("-foreign")
+  if use_foreign ~= nil then
+    conf.use_foreign = [bool](c.atoll(use_foreign))
+  end
+
+  -- Read parameters from input file.
+  [config_fields_input:map(function(field)
+       if field.is_linked_field then
+         return quote end
+       else
+         if field.linked_field then
+           return quote
+             conf.[field.linked_field] = [extract(field.type)](items, nitems, field.field, &(conf.[field.field]))
+           end
+         else
+           return quote
+             [extract(field.type)](items, nitems, field.field, &(conf.[field.field]))
+           end
+         end
+       end
+     end)]
+
+  -- Configure and run mesh generator.
+  var meshtype : fixed_string
+  if [extract(fixed_string)](items, nitems, "meshtype", &meshtype) < 1 then
+    c.printf("Error: Missing meshtype\n")
+    c.abort()
+  end
+  if cstring.strncmp(meshtype, "pie", max_item_len) == 0 then
+    conf.meshtype = MESH_PIE
+  elseif cstring.strncmp(meshtype, "rect", max_item_len) == 0 then
+    conf.meshtype = MESH_RECT
+  elseif cstring.strncmp(meshtype, "hex", max_item_len) == 0 then
+    conf.meshtype = MESH_HEX
+  else
+    c.printf("Error: Invalid meshtype \"%s\"\n", meshtype)
+    c.abort()
+  end
+
+  c.printf("Config meshtype = \"%s\"\n", meshtype)
+
+  init_mesh(&conf)
+
+  [config_fields_all:map(function(field)
+       return quote c.printf(
+         ["Config " .. field.field .. " = " .. get_type_specifier(field.type, false) .. "\n"],
+         [explode_array(field.type, `&(conf.[field.field])):map(
+            function(value)
+              return `@value
+            end)])
+       end
+     end)]
+
+  return conf
+end
+end
+
+--
+-- Mesh Generator
+--
+
+struct mesh_colorings {
+  rz_all_c : c.legion_coloring_t,
+  rp_all_c : c.legion_coloring_t,
+  rp_all_private_c : c.legion_coloring_t,
+  rp_all_ghost_c : c.legion_coloring_t,
+  rp_all_shared_c : c.legion_coloring_t,
+  rs_all_c : c.legion_coloring_t,
+}
+
+terra read_input(runtime : c.legion_runtime_t,
+                 ctx : c.legion_context_t,
+                 rz_physical : c.legion_physical_region_t[24],
+                 rz_fields : c.legion_field_id_t[24],
+                 rp_physical : c.legion_physical_region_t[19],
+                 rp_fields : c.legion_field_id_t[19],
+                 rs_physical : c.legion_physical_region_t[32],
+                 rs_fields : c.legion_field_id_t[32],
+                 rm_physical : c.legion_physical_region_t[20],
+                 rm_fields : c.legion_field_id_t[20],
+                 conf : config)
+
+  -- Allocate buffers for the mesh generator
+  var pointpos_x_size : c.size_t = conf.np
+  var pointpos_y_size : c.size_t = conf.np
+  var pointcolors_size : c.size_t = conf.np
+  var zonestart_size : c.size_t = conf.nz
+  var zonesize_size : c.size_t = conf.nz
+  var zonepoints_size : c.size_t = conf.nz * conf.maxznump
+  var zonecolors_size : c.size_t = conf.nz
+
+  var pointpos_x : &double = [&double](c.malloc(pointpos_x_size*sizeof(double)))
+  var pointpos_y : &double = [&double](c.malloc(pointpos_y_size*sizeof(double)))
+  var pointcolors : &int64 = [&int64](c.malloc(pointcolors_size*sizeof(int64)))
+  var zonestart : &int64 = [&int64](c.malloc(zonestart_size*sizeof(int64)))
+  var zonesize : &int64 = [&int64](c.malloc(zonesize_size*sizeof(int64)))
+  var zonepoints : &int64 = [&int64](c.malloc(zonepoints_size*sizeof(int64)))
+  var zonecolors : &int64 = [&int64](c.malloc(zonecolors_size*sizeof(int64)))
+
+  legionlib.assert(pointpos_x ~= nil)
+  legionlib.assert(pointpos_y ~= nil)
+  legionlib.assert(pointcolors ~= nil)
+  legionlib.assert(zonestart ~= nil)
+  legionlib.assert(zonesize ~= nil)
+  legionlib.assert(zonepoints ~= nil)
+  legionlib.assert(zonecolors ~= nil)
+
+  -- Call the mesh generator
+  cpennant.generate_mesh_raw(
+    conf.np,
+    conf.nz,
+    conf.nzx,
+    conf.nzy,
+    conf.lenx,
+    conf.leny,
+    conf.numpcx,
+    conf.numpcy,
+    conf.npieces,
+    conf.meshtype,
+    pointpos_x, &pointpos_x_size,
+    pointpos_y, &pointpos_y_size,
+    pointcolors, &pointcolors_size,
+    zonestart, &zonestart_size,
+    zonesize, &zonesize_size,
+    zonepoints, &zonepoints_size,
+    zonecolors, &zonecolors_size)
+
+  -- Allocate all the mesh data in regions
+  do
+    var rz_ispace = c.legion_physical_region_get_logical_region(rz_physical[0]).index_space
+    var rz_alloc = c.legion_index_allocator_create(runtime, ctx, rz_ispace)
+    legionlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0)
+    c.legion_index_allocator_destroy(rz_alloc)
+  end
+
+  do
+    var rp_ispace = c.legion_physical_region_get_logical_region(rp_physical[0]).index_space
+    var rp_alloc = c.legion_index_allocator_create(runtime, ctx, rp_ispace)
+    legionlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0)
+    c.legion_index_allocator_destroy(rp_alloc)
+  end
+
+  do
+    var rs_ispace = c.legion_physical_region_get_logical_region(rs_physical[0]).index_space
+    var rs_alloc = c.legion_index_allocator_create(runtime, ctx, rs_ispace)
+    legionlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0)
+    c.legion_index_allocator_destroy(rs_alloc)
+  end
+
+  do
+    var rm_ispace = c.legion_physical_region_get_logical_region(rm_physical[0]).index_space
+    var rm_alloc = c.legion_index_allocator_create(runtime, ctx, rm_ispace)
+    legionlib.assert(c.legion_index_allocator_alloc(rm_alloc, conf.npieces).value == 0)
+    c.legion_index_allocator_destroy(rm_alloc)
+  end
+
+  -- Write mesh data into regions
+  do
+    var rz_znump = c.legion_physical_region_get_field_accessor_array(
+      rz_physical[0], rz_fields[0])
+
+    for i = 0, conf.nz do
+      var p = c.legion_ptr_t { value = i }
+      @[&int64](c.legion_accessor_array_ref(rz_znump, p)) = zonesize[i]
+    end
+
+    c.legion_accessor_array_destroy(rz_znump)
+  end
+
+  do
+    var rp_px_x = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[4], rp_fields[4])
+    var rp_px_y = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[5], rp_fields[5])
+    var rp_has_bcx_0 = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[15], rp_fields[15])
+    var rp_has_bcx_1 = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[16], rp_fields[16])
+    var rp_has_bcy_0 = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[17], rp_fields[17])
+    var rp_has_bcy_1 = c.legion_physical_region_get_field_accessor_array(
+      rp_physical[18], rp_fields[18])
+
+    var eps : double = 1e-12
+    for i = 0, conf.np do
+      var p = c.legion_ptr_t { value = i }
+      @[&double](c.legion_accessor_array_ref(rp_px_x, p)) = pointpos_x[i]
+      @[&double](c.legion_accessor_array_ref(rp_px_y, p)) = pointpos_y[i]
+
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcx_0, p)) = conf.bcx_n > 0 and cmath.fabs(pointpos_x[i] - conf.bcx[0]) < eps
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcx_1, p)) = conf.bcx_n > 1 and cmath.fabs(pointpos_x[i] - conf.bcx[1]) < eps
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcy_0, p)) = conf.bcy_n > 0 and cmath.fabs(pointpos_y[i] - conf.bcy[0]) < eps
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcy_1, p)) = conf.bcy_n > 1 and cmath.fabs(pointpos_y[i] - conf.bcy[1]) < eps
+    end
+
+    c.legion_accessor_array_destroy(rp_px_x)
+    c.legion_accessor_array_destroy(rp_px_y)
+    c.legion_accessor_array_destroy(rp_has_bcx_0)
+    c.legion_accessor_array_destroy(rp_has_bcx_1)
+    c.legion_accessor_array_destroy(rp_has_bcy_0)
+    c.legion_accessor_array_destroy(rp_has_bcy_1)
+  end
+
+  do
+    var rs_mapsz = c.legion_physical_region_get_field_accessor_array(
+      rs_physical[0], rs_fields[0])
+    var rs_mapsp1 = c.legion_physical_region_get_field_accessor_array(
+      rs_physical[1], rs_fields[1])
+    var rs_mapsp2 = c.legion_physical_region_get_field_accessor_array(
+      rs_physical[2], rs_fields[2])
+    var rs_mapss3 = c.legion_physical_region_get_field_accessor_array(
+      rs_physical[3], rs_fields[3])
+    var rs_mapss4 = c.legion_physical_region_get_field_accessor_array(
+      rs_physical[4], rs_fields[4])
+
+    var sstart = 0
+    for iz = 0, conf.nz do
+      var zsize = zonesize[iz]
+      var zstart = zonestart[iz]
+      for izs = 0, zsize do
+        var izs3 = (izs + zsize - 1)%zsize
+        var izs4 = (izs + 1)%zsize
+
+        var p = c.legion_ptr_t { value = sstart + izs }
+        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, p)) = c.legion_ptr_t { value = iz }
+        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs] }
+        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs4] }
+        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss3, p)) = c.legion_ptr_t { value = sstart + izs3 }
+        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss4, p)) = c.legion_ptr_t { value = sstart + izs4 }
+      end
+      sstart = sstart + zsize
+    end
+
+    c.legion_accessor_array_destroy(rs_mapsz)
+    c.legion_accessor_array_destroy(rs_mapsp1)
+    c.legion_accessor_array_destroy(rs_mapsp2)
+    c.legion_accessor_array_destroy(rs_mapss3)
+    c.legion_accessor_array_destroy(rs_mapss4)
+  end
+
+  do
+    var rm_mcolor = c.legion_physical_region_get_field_accessor_array(
+      rm_physical[5], rm_fields[5])
+
+    for i = 0, conf.npieces do
+      var p = c.legion_ptr_t { value = i }
+      @[&int64](c.legion_accessor_array_ref(rm_mcolor, p)) = i
+    end
+
+    c.legion_accessor_array_destroy(rm_mcolor)
+  end
+
+  -- Create colorings
+  var result : mesh_colorings
+  result.rz_all_c = c.legion_coloring_create()
+  result.rp_all_c = c.legion_coloring_create()
+  result.rp_all_private_c = c.legion_coloring_create()
+  result.rp_all_ghost_c = c.legion_coloring_create()
+  result.rp_all_shared_c = c.legion_coloring_create()
+  result.rs_all_c = c.legion_coloring_create()
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rz_all_c, i)
+  end
+  for i = 0, conf.nz do
+    c.legion_coloring_add_point(
+      result.rz_all_c, zonecolors[i], c.legion_ptr_t { value = i })
+  end
+
+  c.legion_coloring_ensure_color(result.rp_all_c, 0)
+  c.legion_coloring_ensure_color(result.rp_all_c, 1)
+  for i = 0, conf.np do
+    c.legion_coloring_add_point(
+      result.rp_all_c,
+      [c.legion_color_t](pointcolors[i] == cpennant.MULTICOLOR),
+      c.legion_ptr_t { value = i })
+  end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_private_c, i)
+  end
+  for i = 0, conf.np do
+    if pointcolors[i] ~= cpennant.MULTICOLOR then
+      c.legion_coloring_add_point(
+        result.rp_all_private_c,
+        pointcolors[i],
+        c.legion_ptr_t { value = i })
+    end
+  end
+
+  -- FIXME: Need ghost/shared coloring
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_ghost_c, i)
+  end
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rp_all_shared_c, i)
+  end
+
+  for i = 0, conf.npieces do
+    c.legion_coloring_ensure_color(result.rs_all_c, i)
+  end
+  do
+    var sstart = 0
+    for i = 0, conf.nz do
+      var zsize = zonesize[i]
+
+      c.legion_coloring_add_range(
+        result.rs_all_c,
+        zonecolors[i],
+        c.legion_ptr_t { value = sstart },
+        c.legion_ptr_t { value = sstart + zsize - 1 })
+
+      sstart = sstart + zsize
+    end
+  end
+
+  -- Free buffers
+  c.free(pointpos_x)
+  c.free(pointpos_y)
+  c.free(pointcolors)
+  c.free(zonestart)
+  c.free(zonesize)
+  c.free(zonepoints)
+  c.free(zonecolors)
+
+  return result
+end
+
+do
+local solution_filename_maxlen = 1024
+terra validate_output(runtime : c.legion_runtime_t,
+                      ctx : c.legion_context_t,
+                      rz_physical : c.legion_physical_region_t[24],
+                      rz_fields : c.legion_field_id_t[24],
+                      rp_physical : c.legion_physical_region_t[19],
+                      rp_fields : c.legion_field_id_t[19],
+                      rs_physical : c.legion_physical_region_t[32],
+                      rs_fields : c.legion_field_id_t[32],
+                      conf : config)
+  c.printf("Running validate_output (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+
+  var solution_zr : &double = [&double](c.malloc(conf.nz*sizeof(double)))
+  var solution_ze : &double = [&double](c.malloc(conf.nz*sizeof(double)))
+  var solution_zp : &double = [&double](c.malloc(conf.nz*sizeof(double)))
+
+  legionlib.assert(solution_zr ~= nil)
+  legionlib.assert(solution_ze ~= nil)
+  legionlib.assert(solution_zp ~= nil)
+
+  var input_filename = get_positional_arg()
+  legionlib.assert(input_filename ~= nil)
+
+  var solution_filename : int8[solution_filename_maxlen]
+  do
+    var sep = cstring.strrchr(input_filename, (".")[0])
+    legionlib.assert(sep ~= nil)
+    var len : int64 = [int64](sep - input_filename)
+    legionlib.assert(len + 8 < solution_filename_maxlen)
+    cstring.strncpy(solution_filename, input_filename, len)
+    cstring.strncat(solution_filename, ".xy.std", 7)
+  end
+
+  c.printf("Reading \"%s\"...\n", solution_filename)
+  var solution_file = c.fopen(solution_filename, "r")
+  if solution_file == nil then
+    c.printf("Error: Failed to open \"%s\"\n", solution_filename)
+    c.abort()
+  end
+
+  c.fscanf(solution_file, " # zr")
+  for i = 0, conf.nz do
+    var iz : int64
+    var zr : double
+    var count = c.fscanf(
+      solution_file,
+      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
+      &iz, &zr)
+    if count ~= 2 then
+      c.printf("Error: malformed file, expected 2 and got %d\n", count)
+      c.abort()
+    end
+    solution_zr[i] = zr
+  end
+
+  c.fscanf(solution_file, " # ze")
+  for i = 0, conf.nz do
+    var iz : int64
+    var ze : double
+    var count = c.fscanf(
+      solution_file,
+      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
+      &iz, &ze)
+    if count ~= 2 then
+      c.printf("Error: malformed file, expected 2 and got %d\n", count)
+      c.abort()
+    end
+    solution_ze[i] = ze
+  end
+
+  c.fscanf(solution_file, " # zp")
+  for i = 0, conf.nz do
+    var iz : int64
+    var zp : double
+    var count = c.fscanf(
+      solution_file,
+      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
+      &iz, &zp)
+    if count ~= 2 then
+      c.printf("Error: malformed file, expected 2 and got %d\n", count)
+      c.abort()
+    end
+    solution_zp[i] = zp
+  end
+
+  var absolute_eps = 1e-12
+  var relative_eps = 1e-8
+
+  do
+    var rz_zr = c.legion_physical_region_get_field_accessor_array(
+      rz_physical[11], rz_fields[11])
+    for i = 0, conf.nz do
+      var p = c.legion_ptr_t { value = i }
+      var ck = @[&int64](c.legion_accessor_array_ref(rz_zr, p))
+      var sol = solution_zr[i]
+      if cmath.fabs(ck - sol) > absolute_eps or
+        cmath.fabs(ck - sol) / sol > relative_eps
+      then
+        c.printf("Error: zr value out of bounds, expected %.2e and got %.2e\n",
+                 sol, ck)
+        c.abort()
+      end
+    end
+    c.legion_accessor_array_destroy(rz_zr)
+  end
+
+  do
+    var rz_ze = c.legion_physical_region_get_field_accessor_array(
+      rz_physical[11], rz_fields[11])
+    for i = 0, conf.nz do
+      var p = c.legion_ptr_t { value = i }
+      var ck = @[&int64](c.legion_accessor_array_ref(rz_ze, p))
+      var sol = solution_ze[i]
+      if cmath.fabs(ck - sol) > absolute_eps or
+        cmath.fabs(ck - sol) / sol > relative_eps
+      then
+        c.printf("Error: ze value out of bounds, expected %.2e and got %.2e\n",
+                 sol, ck)
+        c.abort()
+      end
+    end
+    c.legion_accessor_array_destroy(rz_ze)
+  end
+
+  do
+    var rz_zp = c.legion_physical_region_get_field_accessor_array(
+      rz_physical[11], rz_fields[11])
+    for i = 0, conf.nz do
+      var p = c.legion_ptr_t { value = i }
+      var ck = @[&int64](c.legion_accessor_array_ref(rz_zp, p))
+      var sol = solution_zp[i]
+      if cmath.fabs(ck - sol) > absolute_eps or
+        cmath.fabs(ck - sol) / sol > relative_eps
+      then
+        c.printf("Error: zp value out of bounds, expected %.2e and got %.2e\n",
+                 sol, ck)
+        c.abort()
+      end
+    end
+    c.legion_accessor_array_destroy(rz_zp)
+  end
+
+  c.free(solution_zr)
+  c.free(solution_ze)
+  c.free(solution_zp)
 end
 validate_output:compile()
+end
 
 task test()
-  var conf : config -- = read_config()
+  c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+
+  var conf : config = read_config()
+
+  -- FIXME: this will break with npieces != 1
+  -- ghost/shared colorings won't work
+  -- non-constant partition access won't work
+  legionlib.assert(conf.npieces == 1)
 
   var rz_all = region(zone, conf.nz)
   var rp_all = region(point, conf.np)
   var rs_all = region(side(wild, wild, wild, wild), conf.ns)
   var rm_all = region(mesh(rz_all, rp_all, rs_all), conf.npieces)
 
-  -- Create temporary arrays for pointers to use while building the
-  -- regions.
-
-  -- -- Array for tracking number of colors per point:
-  -- var pcolor_is = ispace(int)(conf.np)
-  -- var pcolor_a = array(pcolor_is, int)()
-
-  -- -- Bitmask for colors of ghost points:
-  -- var bits = 64                                -- must match bitmask type
-  -- var words = (conf.npieces + bits - 1)/bits
-  -- var pcolors_is = ispace(int)(conf.np*words)
-  -- var pcolors_a = array(pcolors_is, uint64)()   -- must match bits
-
-  -- -- Array for colors of disjoint partition of shared points:
-  -- var pcolor_shared_is = ispace(int)(conf.np)
-  -- var pcolor_shared_a = array(pcolor_shared_is, int)()
-
-  -- -- Read simulation data into regions.
-  -- read_input(conf, rz_all, rp_all, rs_all, rm_all, pcolor_is, pcolor_a, pcolors_is, pcolors_a, pcolor_shared_is, pcolor_shared_a)
+  var colorings = read_input(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    __physical(rm_all), __fields(rm_all),
+    conf)
 
   -- Partition zones into disjoint pieces.
-  var rz_all_c = all_zones_coloring(rz_all, rp_all, rs_all, rm_all, conf)
-  var rz_all_p = partition(disjoint, rz_all, rz_all_c)
+  var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
 
   -- Partition points into private and ghost regions.
-  var rp_all_c : c.legion_coloring_t -- all_points_coloring(rp_all, pcolor_is, pcolor_a, conf)
-  var rp_all_p = partition(disjoint, rp_all, rp_all_c)
+  var rp_all_p = partition(disjoint, rp_all, colorings.rp_all_c)
   var rp_all_private = rp_all_p[0]
   var rp_all_ghost = rp_all_p[1]
 
   -- Partition private points into disjoint pieces by zone.
-  var rp_all_private_c : c.legion_coloring_t -- private_points_coloring(rp_all_private, pcolor_is, pcolor_a, conf)
-  var rp_all_private_p = partition(disjoint, rp_all_private, rp_all_private_c)
+  var rp_all_private_p = partition(
+    disjoint, rp_all_private, colorings.rp_all_private_c)
 
   -- Partition ghost points into aliased pieces by zone.
-  var rp_all_ghost_c : c.legion_coloring_t -- ghost_points_coloring(rp_all_ghost, pcolor_is, pcolor_a, pcolors_is, pcolors_a, conf)
-  var rp_all_ghost_p = partition(aliased, rp_all_ghost, rp_all_ghost_c)
+  var rp_all_ghost_p = partition(
+    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
 
   -- Partition ghost points into disjoint pieces, breaking ties
   -- between zones so that each point goes into one region only.
-  var rp_all_shared_c : c.legion_coloring_t -- shared_points_coloring(rp_all_ghost, pcolor_shared_is, pcolor_shared_a, conf)
-  var rp_all_shared_p = partition(disjoint, rp_all_ghost, rp_all_shared_c)
+  var rp_all_shared_p = partition(
+    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
 
   -- Partition sides into disjoint pieces by zone.
-  var rs_all_c = all_sides_coloring(rz_all, rp_all, rs_all, rm_all, conf)
-  var rs_all_p = partition(disjoint, rs_all, rs_all_c)
+  var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
   -- Stuff regions into mesh pieces.
   for m in rm_all do
@@ -1555,20 +2157,28 @@ task test()
     })
   end
 
+  c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   initialize(rz_all, rp_all, rs_all, rm_all, conf)
 
-  -- print_simulation_start()
-  -- var start_time = get_abs_time()
+  c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  var start_time = c.legion_get_current_time_in_micros()/1.e6
   simulate(rz_all, rp_all, rs_all, rm_all, conf)
-  -- var stop_time = get_abs_time()
-  -- print_global_elapsed_time(start_time, stop_time)
+  var stop_time = c.legion_get_current_time_in_micros()/1.e6
+  c.printf("Elapsed time = %.1fs\n", stop_time - start_time)
+
+  validate_output(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
 
   -- write_output(conf, rz_all, rp_all, rs_all)
-  validate_output(conf, rz_all, rp_all, rs_all)
 end
-test:compile()
 
 task toplevel()
   test()
 end
-toplevel:compile()
+function _t3() end -- seems like I need this to break up the statements
+(terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+legionlib.start(toplevel)

@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -217,6 +217,28 @@ function specialize.expr_ctor(cx, node)
   }
 end
 
+function specialize.expr_raw_context(cx, node)
+  return ast.specialized.ExprRawContext {
+  }
+end
+
+function specialize.expr_raw_fields(cx, node)
+  return ast.specialized.ExprRawFields {
+    region = specialize.expr(cx, node.region),
+  }
+end
+
+function specialize.expr_raw_physical(cx, node)
+  return ast.specialized.ExprRawPhysical {
+    region = specialize.expr(cx, node.region),
+  }
+end
+
+function specialize.expr_raw_runtime(cx, node)
+  return ast.specialized.ExprRawRuntime {
+  }
+end
+
 function specialize.expr_isnull(cx, node)
   local pointer = specialize.expr(cx, node.pointer)
   return ast.specialized.ExprIsnull {
@@ -314,6 +336,18 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.ExprCtor) then
     return specialize.expr_ctor(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprRawContext) then
+    return specialize.expr_raw_context(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprRawFields) then
+    return specialize.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprRawPhysical) then
+    return specialize.expr_raw_physical(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprRawRuntime) then
+    return specialize.expr_raw_runtime(cx, node)
 
   elseif node:is(ast.unspecialized.ExprIsnull) then
     return specialize.expr_isnull(cx, node)

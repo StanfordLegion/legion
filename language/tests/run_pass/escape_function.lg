@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ import "legion"
 x = false
 
 function g(y)
-  assert(y == 5)
+  legionlib.assert(y == 5)
   x = true
 end
 
@@ -29,6 +29,6 @@ task main()
   f(5)
 end
 
-assert(not x)
+legionlib.assert(not x)
 legionlib.start(main)
-assert(x)
+legionlib.assert(x)

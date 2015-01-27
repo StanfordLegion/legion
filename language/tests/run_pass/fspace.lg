@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -54,17 +54,17 @@ task u2ct() : s2c var x = s2c { 2, 1, } return x end
 
 task main()
   s0t()
-  assert(s1t().x == 1)
-  assert(u1t().x == 1)
-  assert(s1ct().x == 1)
-  assert(u1ct().x == 1)
+  legionlib.assert(s1t().x == 1)
+  legionlib.assert(u1t().x == 1)
+  legionlib.assert(s1ct().x == 1)
+  legionlib.assert(u1ct().x == 1)
   var s2r = s2t()
-  assert(s2r.x == 1 and s2r.y == 2)
+  legionlib.assert(s2r.x == 1 and s2r.y == 2)
   var u2r = u2t()
-  assert(u2r.x == 1 and u2r.y == 2)
+  legionlib.assert(u2r.x == 1 and u2r.y == 2)
   var s2cr = s2ct()
-  assert(s2cr.x == 1 and s2cr.y == 2)
+  legionlib.assert(s2cr.x == 1 and s2cr.y == 2)
   var u2cr = u2ct()
-  assert(u2cr.x == 2 and u2cr.y == 1)
+  legionlib.assert(u2cr.x == 2 and u2cr.y == 1)
 end
 legionlib.start(main)

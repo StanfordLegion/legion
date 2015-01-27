@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -38,6 +38,6 @@ task g() : int
 end
 
 task main()
-  assert(g() == 7)
+  legionlib.assert(g() == 7)
 end
 legionlib.start(main)

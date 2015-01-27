@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -39,23 +39,23 @@ task ge(a : int, b : int) : bool
 end
 
 task main()
-  assert(false == eq(5, 3))
-  assert(eq(5, 5))
-  assert(false == eq(3, 5))
-  assert(ne(5, 3))
-  assert(false == ne(5, 5))
-  assert(ne(3, 5))
-  assert(false == lt(5, 3))
-  assert(false == lt(5, 5))
-  assert(lt(3, 5))
-  assert(false == le(5, 3))
-  assert(le(5, 5))
-  assert(le(3, 5))
-  assert(gt(5, 3))
-  assert(false == gt(5, 5))
-  assert(false == gt(3, 5))
-  assert(ge(5, 3))
-  assert(ge(5, 5))
-  assert(false == ge(3, 5))
+  legionlib.assert(false == eq(5, 3))
+  legionlib.assert(eq(5, 5))
+  legionlib.assert(false == eq(3, 5))
+  legionlib.assert(ne(5, 3))
+  legionlib.assert(false == ne(5, 5))
+  legionlib.assert(ne(3, 5))
+  legionlib.assert(false == lt(5, 3))
+  legionlib.assert(false == lt(5, 5))
+  legionlib.assert(lt(3, 5))
+  legionlib.assert(false == le(5, 3))
+  legionlib.assert(le(5, 5))
+  legionlib.assert(le(3, 5))
+  legionlib.assert(gt(5, 3))
+  legionlib.assert(false == gt(5, 5))
+  legionlib.assert(false == gt(3, 5))
+  legionlib.assert(ge(5, 3))
+  legionlib.assert(ge(5, 5))
+  legionlib.assert(false == ge(3, 5))
 end
 legionlib.start(main)

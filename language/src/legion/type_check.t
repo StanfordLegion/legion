@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -412,6 +412,58 @@ function type_check.expr_ctor(cx, node)
   }
 end
 
+function type_check.expr_raw_context(cx, node)
+  return ast.typed.ExprRawContext {
+    expr_type = std.c.legion_context_t,
+  }
+end
+
+function type_check.expr_raw_fields(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region.expr_type)
+
+  local field_paths, _ = std.flatten_struct_fields(region_type.element_type)
+  local privilege_fields = terralib.newlist()
+  for _, field_path in ipairs(field_paths) do
+    if std.check_any_privilege(cx, region_type, field_path) then
+      privilege_fields:insert(field_path)
+    end
+  end
+  local fields_type = std.c.legion_field_id_t[#privilege_fields]
+
+  return ast.typed.ExprRawFields {
+    region = region,
+    fields = privilege_fields,
+    expr_type = fields_type,
+  }
+end
+
+function type_check.expr_raw_physical(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region.expr_type)
+
+  local field_paths, _ = std.flatten_struct_fields(region_type.element_type)
+  local privilege_fields = terralib.newlist()
+  for _, field_path in ipairs(field_paths) do
+    if std.check_any_privilege(cx, region_type, field_path) then
+      privilege_fields:insert(field_path)
+    end
+  end
+  local physical_type = std.c.legion_physical_region_t[#privilege_fields]
+
+  return ast.typed.ExprRawPhysical {
+    region = region,
+    fields = privilege_fields,
+    expr_type = physical_type,
+  }
+end
+
+function type_check.expr_raw_runtime(cx, node)
+  return ast.typed.ExprRawRuntime {
+    expr_type = std.c.legion_runtime_t,
+  }
+end
+
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer.expr_type)
@@ -633,6 +685,18 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprCtor) then
     return type_check.expr_ctor(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawContext) then
+    return type_check.expr_raw_context(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawFields) then return
+    type_check.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawPhysical) then return
+    type_check.expr_raw_physical(cx, node)
+
+  elseif node:is(ast.specialized.ExprRawRuntime) then
+    return type_check.expr_raw_runtime(cx, node)
 
   elseif node:is(ast.specialized.ExprIsnull) then
     return type_check.expr_isnull(cx, node)

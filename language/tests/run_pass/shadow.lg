@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -40,10 +40,10 @@ task g(n : int) : int
 end
 
 task main()
-  assert(f(false) == 5)
-  assert(f(true) == 15)
-  assert(g(1) == 1)
-  assert(g(2) == 2)
-  assert(g(3) == 3)
+  legionlib.assert(f(false) == 5)
+  legionlib.assert(f(true) == 15)
+  legionlib.assert(g(1) == 1)
+  legionlib.assert(g(2) == 2)
+  legionlib.assert(g(3) == 3)
 end
 legionlib.start(main)

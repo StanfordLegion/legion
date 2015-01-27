@@ -1,2 +1,3 @@
+*.so
 /luabind
 /terra

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2014 Stanford University
+# Copyright 2015 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,11 +23,9 @@ root_dir = os.path.realpath(os.path.dirname(__file__))
 legion_dir = os.path.dirname(root_dir)
 
 terra_dir = os.path.join(root_dir, 'terra')
-luabind_dir = os.path.join(root_dir, 'luabind', 'install_dir')
-luajit_dir = os.path.join(root_dir, 'luabind', 'fake_luajit_dir')
 
 runtime_dir = os.path.join(legion_dir, 'runtime')
-bindings_dir = os.path.join(legion_dir, 'bindings', 'lua')
+bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
 
 terra_path = [
     '?.lua',
@@ -44,8 +42,6 @@ include_path = [
 ]
 
 lib_path = [
-    os.path.join(luabind_dir, 'lib'),
-    os.path.join(luajit_dir, 'lib'),
     os.path.join(terra_dir, 'build'),
     bindings_dir,
 ]

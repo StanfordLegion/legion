@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ task f(x : bool)
 end
 
 task main()
-  assert(f(true) == 5.0)
-  assert(f(false) == 9.75)
+  legionlib.assert(f(true) == 5.0)
+  legionlib.assert(f(false) == 9.75)
 end
 legionlib.start(main)

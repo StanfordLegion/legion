@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ struct t {
 }
 
 s.metamethods.__cast = function(from, to, expr)
-  assert(from == s and to == t)
+  legionlib.assert(from == s and to == t)
   return `(t { y = [expr].x })
 end
 
@@ -37,7 +37,7 @@ task g(x : double) : int
 end
 
 task main()
-  assert(f(4.1) == 4)
-  assert(g(5.7) == 5)
+  legionlib.assert(f(4.1) == 4)
+  legionlib.assert(g(5.7) == 5)
 end
 legionlib.start(main)

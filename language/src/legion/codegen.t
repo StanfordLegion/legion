@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ local std = terralib.require("legion/std")
 local codegen = {}
 
 -- load Legion dynamic library
-terralib.require('legionlib-terra')
 local c = std.c
 
 local regions = {}
@@ -756,6 +755,72 @@ function codegen.expr_ctor(cx, node)
   end
 end
 
+function codegen.expr_raw_context(cx, node)
+  local value_type = std.as_read(node.expr_type)
+  return values.value(
+    expr.just(quote end, cx.context),
+    value_type)
+end
+
+function codegen.expr_raw_fields(cx, node)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local region_type = std.as_read(node.region.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local region = cx.regions[region_type]
+  local field_ids = terralib.newlist()
+  for i, field_path in ipairs(node.fields) do
+    field_ids:insert({i-1, region:field_id(field_path)})
+  end
+
+  local result = terralib.newsymbol("raw_fields")
+  local actions = quote
+    var [result] : expr_type
+    [field_ids:map(
+       function(pair)
+         local i, field_id = unpack(pair)
+         return quote [result][ [i] ] = [field_id] end
+       end)]
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_raw_physical(cx, node)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local region_type = std.as_read(node.region.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local region = cx.regions[region_type]
+  local physical_regions = terralib.newlist()
+  for i, field_path in ipairs(node.fields) do
+    physical_regions:insert({i-1, region:physical_region(field_path)})
+  end
+
+  local result = terralib.newsymbol("raw_physical")
+  local actions = quote
+    var [result] : expr_type
+    [physical_regions:map(
+       function(pair)
+         local i, physical_region = unpack(pair)
+         return quote [result][ [i] ] = [physical_region] end
+       end)]
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_raw_runtime(cx, node)
+  local value_type = std.as_read(node.expr_type)
+  return values.value(
+    expr.just(quote end, cx.runtime),
+    value_type)
+end
+
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
   local expr_type = std.as_read(node.expr_type)
@@ -944,6 +1009,18 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.ExprCtor) then
     return codegen.expr_ctor(cx, node)
+
+  elseif node:is(ast.typed.ExprRawContext) then
+    return codegen.expr_raw_context(cx, node)
+
+  elseif node:is(ast.typed.ExprRawFields) then
+    return codegen.expr_raw_fields(cx, node)
+
+  elseif node:is(ast.typed.ExprRawPhysical) then
+    return codegen.expr_raw_physical(cx, node)
+
+  elseif node:is(ast.typed.ExprRawRuntime) then
+    return codegen.expr_raw_runtime(cx, node)
 
   elseif node:is(ast.typed.ExprIsnull) then
     return codegen.expr_isnull(cx, node)
@@ -1347,21 +1424,15 @@ function codegen.stat_task(cx, node)
       local isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
 
-      local _, privilege_field_paths = std.find_task_privileges(
+      local _privileges, privilege_field_paths = std.find_task_privileges(
         region_type, task:getprivileges())
 
       local field_paths, field_types =
         std.flatten_struct_fields(region_type.element_type)
-      local field_ids = terralib.newlist()
       local field_ids_by_field_path = {}
-      for _, field_paths in ipairs(privilege_field_paths) do
-        local physical_region_field_ids = terralib.newlist()
-        for _, field_path in ipairs(field_paths) do
-          physical_region_field_ids:insert(param_field_ids[param_field_id_i])
-          field_ids_by_field_path[field_path:hash()] = param_field_ids[param_field_id_i]
-          param_field_id_i = param_field_id_i + 1
-        end
-        field_ids:insert(physical_region_field_ids)
+      for _, field_path in ipairs(field_paths) do
+        field_ids_by_field_path[field_path:hash()] = param_field_ids[param_field_id_i]
+        param_field_id_i = param_field_id_i + 1
       end
 
       local physical_regions = terralib.newlist()
@@ -1409,7 +1480,7 @@ function codegen.stat_task(cx, node)
 
         for j, field_path in ipairs(field_paths) do
           local accessor = accessors[i][j]
-          local field_id = field_ids[i][j]
+          local field_id = field_ids_by_field_path[field_path:hash()]
           assert(accessor and field_id)
 
           region_args_setup:insert(quote

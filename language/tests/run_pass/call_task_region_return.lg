@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -30,6 +30,6 @@ task h() : int
 end
 
 task main()
-  assert(h() == 5)
+  legionlib.assert(h() == 5)
 end
 legionlib.start(main)

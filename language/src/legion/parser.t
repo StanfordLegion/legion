@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -184,6 +184,34 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprConstant {
       value = false,
       expr_type = bool,
+    }
+
+  elseif p:nextif("__context") then
+    p:expect("(")
+    p:expect(")")
+    return ast.unspecialized.ExprRawContext {
+    }
+
+  elseif p:nextif("__fields") then
+    p:expect("(")
+    local region = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprRawFields {
+      region = region,
+    }
+
+  elseif p:nextif("__physical") then
+    p:expect("(")
+    local region = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprRawPhysical {
+      region = region,
+    }
+
+  elseif p:nextif("__runtime") then
+    p:expect("(")
+    p:expect(")")
+    return ast.unspecialized.ExprRawRuntime {
     }
 
   elseif p:nextif("isnull") then

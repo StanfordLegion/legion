@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -22,9 +22,10 @@ local std = {}
 -- ## Legion Bindings
 -- #################
 
-terralib.require('legionlib-terra')
+terralib.require('legionlib')
 local c = terralib.includecstring([[
 #include "legion_c.h"
+#include <stdio.h>
 #include <stdlib.h>
 ]])
 std.c = c
@@ -99,8 +100,9 @@ function std.hash(x)
   end
 end
 
-terra std.assert(c : bool)
-  if not c then
+terra std.assert(x : bool)
+  if not x then
+    c.printf("assertion failed!\n")
     c.abort()
   end
 end
@@ -146,7 +148,7 @@ end
 
 function std.tuple:starts_with(t)
   assert(std.is_tuple(t))
-  return self:slice(1, std.min(#self, #t))
+  return self:slice(1, std.min(#self, #t)) == t
 end
 
 function std.tuple:__tostring()
@@ -240,6 +242,30 @@ function std.check_privilege(cx, privilege, region, field_path)
       then
         return true
       end
+    end
+  end
+  return false
+end
+
+function std.search_any_privilege(cx, region, field_path, visited)
+  assert(std.is_region(region) and std.is_tuple(field_path))
+  return std.search_constraint_predicate(
+    cx, region, visited,
+    function(cx, region)
+      for _, regions in pairs(cx.privileges) do
+        if regions[region] and regions[region][field_path:hash()] then
+          return true
+        end
+      end
+      return false
+    end)
+end
+
+function std.check_any_privilege(cx, region, field_path)
+  assert(std.is_region(region) and std.is_tuple(field_path))
+  for i = #field_path, 0, -1 do
+    if std.search_any_privilege(cx, region, field_path:slice(1, i), {}) then
+      return true
     end
   end
   return false

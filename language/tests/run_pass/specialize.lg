@@ -1,4 +1,4 @@
--- Copyright 2014 Stanford University
+-- Copyright 2015 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ end
 xp2 = local_scope()
 
 task main()
-  assert(xp1() == 6)
-  assert(xp2() == 3.6)
+  legionlib.assert(xp1() == 6)
+  legionlib.assert(xp2() == 3.6)
 end
 legionlib.start(main)
