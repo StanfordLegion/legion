@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,6 +81,12 @@ extern "C" {
   NEW_RECT_TYPE(legion_rect_3d_t, legion_point_3d_t);
 #undef NEW_RECT_TYPE
 
+#define NEW_BLOCKIFY_TYPE(T, PT) typedef struct T { PT block_size; } T
+  NEW_BLOCKIFY_TYPE(legion_blockify_1d_t, legion_point_1d_t);
+  NEW_BLOCKIFY_TYPE(legion_blockify_2d_t, legion_point_2d_t);
+  NEW_BLOCKIFY_TYPE(legion_blockify_3d_t, legion_point_3d_t);
+#undef NEW_BLOCKIFY_TYPE
+
   /**
    * @see LegionRuntime::HighLevel::Domain
    */
@@ -89,6 +95,14 @@ extern "C" {
     int dim;
     int rect_data[2 * MAX_RECT_DIM];
   } legion_domain_t;
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPoint
+   */
+  typedef struct legion_domain_point_t {
+    int dim;
+    int point_data[MAX_POINT_DIM];
+  } legion_domain_point_t;
 
   /**
    * @see LegionRuntime::HighLevel::IndexSpace
@@ -138,7 +152,26 @@ extern "C" {
     legion_index_partition_t index_partition;
     legion_field_space_t field_space;
   } legion_logical_partition_t;
- 
+
+  /**
+   * @see LegionRuntime::HighLevel::LogicalRequirement
+   */
+  typedef struct legion_region_requirement_t {
+      legion_logical_region_t region;
+      legion_logical_partition_t partition;
+      legion_field_id_t *privilege_fields;
+      unsigned num_privilege_fields;
+      legion_field_id_t *instance_fields;
+      unsigned num_instance_fields;
+      legion_privilege_mode_t privilege;
+      legion_coherence_property_t prop;
+      legion_logical_region_t parent;
+      legion_reduction_op_id_t redop;
+      legion_mapping_tag_id_t tag;
+      legion_handle_type_t handle_type;
+      legion_projection_id_t projection;
+  } legion_region_requirement_t;
+
   /**
    * @see LegionRuntime::HighLevel::TaskArgument
    */
@@ -248,11 +281,51 @@ extern "C" {
   legion_domain_from_rect_3d(legion_rect_3d_t r);
 
   /**
+   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   */
+  legion_rect_1d_t
+  legion_domain_get_rect_1d(legion_domain_t d);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   */
+  legion_rect_2d_t
+  legion_domain_get_rect_2d(legion_domain_t d);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   */
+  legion_rect_3d_t
+  legion_domain_get_rect_3d(legion_domain_t d);
+
+  /**
    * @see LegionRuntime::HighLevel::Domain::Domain(
    *        LegionRuntime::HighLevel::IndexSpace)
    */
   legion_domain_t
   legion_domain_from_index_space(legion_index_space_t is);
+
+  // -----------------------------------------------------------------------
+  // Domain Point Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   */
+  legion_domain_point_t
+  legion_domain_point_from_point_1d(legion_point_1d_t p);
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   */
+  legion_domain_point_t
+  legion_domain_point_from_point_2d(legion_point_2d_t p);
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   */
+  legion_domain_point_t
+  legion_domain_point_from_point_3d(legion_point_3d_t p);
 
   // -----------------------------------------------------------------------
   // Coloring Operations
@@ -299,6 +372,34 @@ extern "C" {
                             legion_ptr_t end /**< inclusive */);
 
   // -----------------------------------------------------------------------
+  // Domain Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::DomainColoring
+   */
+  legion_domain_coloring_t
+  legion_domain_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::DomainColoring
+   */
+  void
+  legion_domain_coloring_destroy(legion_domain_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainColoring
+   */
+  void
+  legion_domain_coloring_color_domain(legion_domain_coloring_t handle,
+                                      legion_color_t color,
+                                      legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
 
@@ -321,6 +422,16 @@ extern "C" {
   legion_index_space_create_domain(legion_runtime_t runtime,
                                    legion_context_t ctx,
                                    legion_domain_t domain);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::get_index_space_domain()
+   */
+  legion_domain_t
+  legion_index_space_get_domain(legion_runtime_t runtime,
+                                legion_context_t ctx,
+                                legion_index_space_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -350,6 +461,42 @@ extern "C" {
                                          bool disjoint,
                                          int part_color /* = -1 */);
 
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_1d(legion_runtime_t runtime,
+                                            legion_context_t ctx,
+                                            legion_index_space_t parent,
+                                            legion_blockify_1d_t blockify,
+                                            int part_color /* = -1 */);
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_2d(legion_runtime_t runtime,
+                                            legion_context_t ctx,
+                                            legion_index_space_t parent,
+                                            legion_blockify_2d_t blockify,
+                                            int part_color /* = -1 */);
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_index_partition<T>(
+   *        Context, IndexSpace, const T&, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_blockify_3d(legion_runtime_t runtime,
+                                            legion_context_t ctx,
+                                            legion_index_space_t parent,
+                                            legion_blockify_3d_t blockify,
+                                            int part_color /* = -1 */);
   /**
    * @return Caller takes ownership of return value.
    *
@@ -474,6 +621,18 @@ extern "C" {
     legion_color_t c);
 
   // -----------------------------------------------------------------------
+  // Region Requirement Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::~RegionRequirement()
+   */
+  void
+  legion_region_requirement_destroy(legion_region_requirement_t handle);
+
+  // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
   // -----------------------------------------------------------------------
 
@@ -552,6 +711,31 @@ extern "C" {
     legion_field_allocator_t allocator,
     size_t field_size,
     legion_field_id_t desired_fieldid /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::ArgumentMap::ArgumentMap()
+   */
+  legion_argument_map_t
+  legion_argument_map_create();
+
+  /**
+   * @see LegionRuntime::HighLevel::ArgumentMap::set_point()
+   */
+  void
+  legion_argument_map_set_point(legion_argument_map_t map,
+                                legion_domain_point_t dp,
+                                legion_task_argument_t arg,
+                                bool replace /* = true */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::ArgumentMap::~ArgumentMap()
+   */
+  void
+  legion_argument_map_destroy(legion_argument_map_t handle);
 
   // -----------------------------------------------------------------------
   // Predicate Operations
@@ -637,6 +821,42 @@ extern "C" {
   legion_task_result_destroy(legion_task_result_t handle);
 
   // -----------------------------------------------------------------------
+  // Future Map Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::FutureMap::~FutureMap()
+   */
+  void
+  legion_future_map_destroy(legion_future_map_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::FutureMap::wait_all_results()
+   */
+  void
+  legion_future_map_wait_all_results(legion_future_map_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::get_future()
+   */
+  legion_future_t
+  legion_future_map_get_future(legion_future_map_t handle,
+                               legion_domain_point_t point);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::get_result()
+   */
+  legion_task_result_t
+  legion_future_map_get_result(legion_future_map_t handle,
+                               legion_domain_point_t point);
+
+  // -----------------------------------------------------------------------
   // Task Launch Operations
   // -----------------------------------------------------------------------
 
@@ -692,6 +912,13 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::TaskLauncher::add_future()
+   */
+  void
+  legion_task_launcher_add_future(legion_task_launcher_t launcher,
+                                  legion_future_t future);
 
   /**
    * @return Caller takes ownership of return value.
@@ -878,6 +1105,12 @@ extern "C" {
   legion_physical_region_is_valid(legion_physical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_logical_region()
+   */
+  legion_logical_region_t
+  legion_physical_region_get_logical_region(legion_physical_region_t handle);
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
@@ -920,6 +1153,24 @@ extern "C" {
                                 legion_ptr_t ptr,
                                 const void *src,
                                 size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::read_untyped()
+   */
+  void
+  legion_accessor_generic_read_dp(legion_accessor_generic_t handle,
+                                  legion_domain_point_t dp,
+                                  void *dst,
+                                  size_t bytes);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::write_untyped()
+   */
+  void
+  legion_accessor_generic_write_dp(legion_accessor_generic_t handle,
+                                   legion_domain_point_t dp,
+                                   const void *src,
+                                   size_t bytes);
 
   /**
    * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
@@ -1024,6 +1275,12 @@ extern "C" {
   legion_task_get_arglen(legion_task_t task);
 
   /**
+   * @see LegionRuntime::HighLevel::Task::index_point
+   */
+  legion_domain_point_t
+  legion_task_get_index_point(legion_task_t task);
+
+  /**
    * @see LegionRuntime::HighLevel::Task::is_index_space
    */
   bool
@@ -1040,6 +1297,31 @@ extern "C" {
    */
   size_t
   legion_task_get_local_arglen(legion_task_t task);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::regions
+   */
+  unsigned
+  legion_task_get_num_requirements(legion_task_t task);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::regions
+   */
+  legion_region_requirement_t
+  legion_task_get_region_requirement(legion_task_t task, unsigned idx);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::futures
+   */
+  unsigned
+  legion_task_get_num_futures(legion_task_t task);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::futures
+   */
+  legion_future_t
+  legion_task_get_future(legion_task_t task, unsigned idx);
+
 
   // -----------------------------------------------------------------------
   // Start-up Operations

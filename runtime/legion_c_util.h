@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -177,6 +177,16 @@ namespace LegionRuntime {
       NEW_RECT_WRAPPER(legion_rect_3d_t, Rect<3>);
 #undef NEW_RECT_WRAPPER
 
+#define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
+      static T unwrap(T_ t_) {                          \
+        T t(unwrap(t_.block_size));                     \
+        return t;                                       \
+      }
+
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
+#undef NEW_RECT_WRAPPER
       static legion_domain_t
       wrap(Domain domain) {
         legion_domain_t domain_;
@@ -193,6 +203,22 @@ namespace LegionRuntime {
         domain.dim = domain_.dim;
         std::copy(domain_.rect_data, domain_.rect_data + 2 * MAX_RECT_DIM, domain.rect_data);
         return domain;
+      }
+
+      static legion_domain_point_t
+      wrap(DomainPoint dp) {
+        legion_domain_point_t dp_;
+        dp_.dim = dp.dim;
+        std::copy(dp.point_data, dp.point_data + MAX_POINT_DIM, dp_.point_data);
+        return dp_;
+      }
+
+      static DomainPoint
+      unwrap(legion_domain_point_t dp_) {
+        DomainPoint dp;
+        dp.dim = dp_.dim;
+        std::copy(dp_.point_data, dp_.point_data + MAX_POINT_DIM, dp.point_data);
+        return dp;
       }
 
       static legion_index_space_t
@@ -279,6 +305,34 @@ namespace LegionRuntime {
                            r_.index_partition,
                            unwrap(r_.field_space));
         return r;
+      }
+
+      static legion_region_requirement_t
+      wrap(const RegionRequirement& req)
+      {
+        legion_region_requirement_t req_;
+        req_.region = CObjectWrapper::wrap(req.region);
+        req_.partition = CObjectWrapper::wrap(req.partition);
+        req_.num_privilege_fields = req.privilege_fields.size();
+        req_.privilege_fields =
+          (legion_field_id_t*)malloc(sizeof(legion_field_id_t) *
+              req_.num_privilege_fields);
+        std::copy(req.privilege_fields.begin(), req.privilege_fields.end(),
+            req_.privilege_fields);
+        req_.num_instance_fields = req.instance_fields.size();
+        req_.instance_fields =
+          (legion_field_id_t*)malloc(sizeof(legion_field_id_t) *
+              req_.num_instance_fields);
+        std::copy(req.instance_fields.begin(), req.instance_fields.end(),
+            req_.instance_fields);
+        req_.privilege = req.privilege;
+        req_.prop = req.prop;
+        req_.parent = CObjectWrapper::wrap(req.parent);
+        req_.redop = req.redop;
+        req_.tag = req.tag;
+        req_.handle_type = req.handle_type;
+        req_.projection = req.projection;
+        return req_;
       }
 
       static legion_field_allocator_t

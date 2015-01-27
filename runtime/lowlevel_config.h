@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ typedef enum legion_lowlevel_processor_kind_t {
 
 // Keep this in sync with Domain::MAX_RECT_DIM in lowlevel.h
 typedef enum legion_lowlevel_domain_max_rect_dim_t {
+  MAX_POINT_DIM = 3,
   MAX_RECT_DIM = 3,
 } legion_lowlevel_domain_max_rect_dim_t;
 
