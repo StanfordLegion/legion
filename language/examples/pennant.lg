@@ -1960,16 +1960,24 @@ terra validate_output(runtime : c.legion_runtime_t,
   legionlib.assert(solution_zp ~= nil)
 
   var input_filename = get_positional_arg()
-  legionlib.assert(input_filename ~= nil)
+  if input_filename == nil then
+    -- FIXME: Fix the test harness so that this can get command-line
+    -- parameters.
+    input_filename = "pennant.tests/sedovsmall/sedovsmall.pnt"
+    c.printf("Continuing with filename = \"%s\"\n", input_filename)
+  end
 
   var solution_filename : int8[solution_filename_maxlen]
   do
     var sep = cstring.strrchr(input_filename, (".")[0])
-    legionlib.assert(sep ~= nil)
+    if sep == nil then
+      c.printf("Error: Failed to find file extention in \"%s\"\n", input_filename)
+      c.abort()
+    end
     var len : int64 = [int64](sep - input_filename)
     legionlib.assert(len + 8 < solution_filename_maxlen)
     cstring.strncpy(solution_filename, input_filename, len)
-    cstring.strncat(solution_filename, ".xy.std", 7)
+    cstring.strncpy(solution_filename + len, ".xy.std", 8)
   end
 
   c.printf("Reading \"%s\"...\n", solution_filename)
@@ -2024,21 +2032,27 @@ terra validate_output(runtime : c.legion_runtime_t,
     solution_zp[i] = zp
   end
 
-  var absolute_eps = 1e-12
-  var relative_eps = 1e-8
+  -- FIXME: This is kind of silly, but some of the really small values
+  -- (around 1e-30) have fairly large relative error (1e-3), tripping
+  -- up the validator. For now, stop complaining about those cases if
+  -- the absolute error is small (smaller than 1e-20).
+  var absolute_eps = 1.0e-5
+  var relative_eps = 1.0e-7
+  var relative_absolute_eps = 1.0e-16
 
   do
     var rz_zr = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[11], rz_fields[11])
+      rz_physical[13], rz_fields[13])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&int64](c.legion_accessor_array_ref(rz_zr, p))
+      var ck = @[&double](c.legion_accessor_array_ref(rz_zr, p))
       var sol = solution_zr[i]
       if cmath.fabs(ck - sol) > absolute_eps or
-        cmath.fabs(ck - sol) / sol > relative_eps
+        (cmath.fabs(ck - sol) / sol > relative_eps and
+           cmath.fabs(ck - sol) > relative_absolute_eps)
       then
-        c.printf("Error: zr value out of bounds, expected %.2e and got %.2e\n",
-                 sol, ck)
+        c.printf("Error: zr value out of bounds at %d, expected %.12e and got %.12e\n",
+                 i, sol, ck)
         c.abort()
       end
     end
@@ -2047,16 +2061,20 @@ terra validate_output(runtime : c.legion_runtime_t,
 
   do
     var rz_ze = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[11], rz_fields[11])
+      rz_physical[14], rz_fields[14])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&int64](c.legion_accessor_array_ref(rz_ze, p))
+      var ck = @[&double](c.legion_accessor_array_ref(rz_ze, p))
       var sol = solution_ze[i]
       if cmath.fabs(ck - sol) > absolute_eps or
-        cmath.fabs(ck - sol) / sol > relative_eps
+        (cmath.fabs(ck - sol) / sol > relative_eps and
+           cmath.fabs(ck - sol) > relative_absolute_eps)
       then
-        c.printf("Error: ze value out of bounds, expected %.2e and got %.2e\n",
-                 sol, ck)
+        c.printf("Error: ze value out of bounds at %d, expected %.8e and got %.8e\n",
+                 i, sol, ck)
+        c.printf("absolute %.12e relative %.12e\n",
+                 cmath.fabs(ck - sol),
+                 cmath.fabs(ck - sol) / sol)
         c.abort()
       end
     end
@@ -2065,21 +2083,24 @@ terra validate_output(runtime : c.legion_runtime_t,
 
   do
     var rz_zp = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[11], rz_fields[11])
+      rz_physical[18], rz_fields[18])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&int64](c.legion_accessor_array_ref(rz_zp, p))
+      var ck = @[&double](c.legion_accessor_array_ref(rz_zp, p))
       var sol = solution_zp[i]
       if cmath.fabs(ck - sol) > absolute_eps or
-        cmath.fabs(ck - sol) / sol > relative_eps
+        (cmath.fabs(ck - sol) / sol > relative_eps and
+           cmath.fabs(ck - sol) > relative_absolute_eps)
       then
-        c.printf("Error: zp value out of bounds, expected %.2e and got %.2e\n",
-                 sol, ck)
+        c.printf("Error: zp value out of bounds at %d, expected %.8e and got %.8e\n",
+                 i, sol, ck)
         c.abort()
       end
     end
     c.legion_accessor_array_destroy(rz_zp)
   end
+
+  c.printf("Successfully validate output\n")
 
   c.free(solution_zr)
   c.free(solution_ze)

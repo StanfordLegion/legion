@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import multiprocessing, os, platform, subprocess, sys
+import argparse, multiprocessing, os, platform, subprocess, sys
 
 # Requires:
 #   * Terra-compatible LLVM installation on PATH
@@ -61,14 +61,42 @@ def check_luabind(luabind_dir):
         print('(You can remove both *_old directories once you\'re sure it works.)')
         print()
         print('(Or you can continue to use the old bindings with ./install_old.py.)')
-        sys.exit()
+        sys.exit(1)
 
 def build_terra(terra_dir):
     subprocess.check_call(
         ['make', 'all', '-j', str(multiprocessing.cpu_count())],
         cwd = terra_dir)
 
-def install_terra(terra_dir):
+def install_terra(terra_dir, external_terra_dir):
+    if external_terra_dir is not None:
+        external_terra_dir = os.path.expanduser(external_terra_dir)
+        if not os.path.isdir(external_terra_dir):
+            print('Error: No such directory %s' %
+                  external_terra_dir)
+            sys.exit(1)
+        if os.path.lexists(terra_dir):
+            if not os.path.islink(terra_dir):
+                print('Error: Attempting build with external Terra when internal Terra')
+                print('already exists. Please remove the following directory to continue with')
+                print('an external Terra installation.')
+                print ('    %s' % terra_dir)
+                sys.exit(1)
+            if os.path.realpath(terra_dir) != os.path.realpath(external_terra_dir):
+                os.unlink(terra_dir)
+                os.symlink(external_terra_dir, terra_dir)
+        else:
+            print(external_terra_dir, terra_dir)
+            os.symlink(external_terra_dir, terra_dir)
+        return
+    else:
+        if os.path.islink(terra_dir):
+            print('Error: Attempting build with internal Terra when external Terra')
+            print('already exists. Please remove the following symlink to continue with')
+            print('an internal Terra installation.')
+            print ('    %s' % terra_dir)
+            sys.exit(1)
+
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
     else:
@@ -79,7 +107,7 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir):
+def install_bindings(bindings_dir, terra_dir, debug):
     luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
         ('LUAJIT_DIR', luajit_dir),                         # for bindings
@@ -91,7 +119,9 @@ def install_bindings(bindings_dir, terra_dir):
         cwd = bindings_dir,
         env = env)
     subprocess.check_call(
-        ['make', '-j', str(multiprocessing.cpu_count())],
+        ['make',
+         'DEBUG=%s' % (1 if debug else 0),
+         '-j', str(multiprocessing.cpu_count())],
         cwd = bindings_dir,
         env = env)
     symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
@@ -116,6 +146,16 @@ def install_bindings(bindings_dir, terra_dir):
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
 def install():
+    parser = argparse.ArgumentParser(
+        description = 'Install Legion/Terra front end.')
+    parser.add_argument(
+        '--with-terra', dest = 'terra', required = False,
+        help = 'Path to Terra installation directory (optional).')
+    parser.add_argument(
+        '--debug', dest = 'debug', action = 'store_true', required = False,
+        help = 'Build Legion with debugging enabled.')
+    args = parser.parse_args()
+
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
 
@@ -123,10 +163,10 @@ def install():
     check_luabind(luabind_dir)
 
     terra_dir = os.path.join(root_dir, 'terra')
-    install_terra(terra_dir)
+    install_terra(terra_dir, args.terra)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, terra_dir)
+    install_bindings(bindings_dir, terra_dir, args.debug)
 
 if __name__ == '__main__':
     install()
