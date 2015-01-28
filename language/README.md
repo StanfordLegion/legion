@@ -13,7 +13,7 @@ below for instructions for installing and running the compiler.
 
 Run the following command from the `language` directory:
 
-    ./install.py
+    ./install.py [-h] [--debug] [--with-terra TERRA]
 
 This command:
 
@@ -33,7 +33,7 @@ Notes:
 
 To use Legion, run:
 
-    ./legion.py [script]
+    ./legion.py [SCRIPT]
 
 This starts a Terra shell with the Legion dynamic library on
 LD_LIBRARY_PATH (or DYLD_LIBRARY_PATH on Max OS X). From this shell,
