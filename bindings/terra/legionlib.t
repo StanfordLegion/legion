@@ -819,40 +819,50 @@ function FutureMap:delete()
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::Task
+local function get_req_attr(req, attr)
+  return legion_c["legion_region_requirement_get_" .. attr](req);
+end
+
 function Task:from_cobj(cobj)
   local task = { impl = cobj.impl }
   task.is_task = true
 
   -- initialize RegionRequirement objects
   task.regions = Array:new {}
-  local num_regions = legion_c.legion_task_get_num_requirements(cobj)
+  local num_regions = legion_c.legion_task_get_regions_size(cobj)
   for i = 0, num_regions - 1 do
-    local req_cobj =
-      legion_c.legion_task_get_region_requirement(cobj, i)
+    local req_cobj = legion_c.legion_task_get_region(cobj, i)
     local req =
-      { region = LogicalRegion:from_cobj(req_cobj.region),
+      { region = LogicalRegion:from_cobj(get_req_attr(req_cobj, "region")),
         privilege_fields = Array:new {},
         instance_fields = Array:new {},
-        privilege = req_cobj.privilege,
-        prop = req_cobj.prop,
-        parent = LogicalRegion:from_cobj(req_cobj.parent),
-        redop = req_cobj.redop,
-        tag = req_cobj.tag,
-        handle_type = req_cobj.handle_type,
-        projection = req_cobj.projection }
-    for j = 0, req_cobj.num_privilege_fields - 1 do
-      req.privilege_fields:insert(req_cobj.privilege_fields[j])
+        privilege = get_req_attr(req_cobj, "privilege"),
+        prop = get_req_attr(req_cobj, "prop"),
+        parent = LogicalRegion:from_cobj(get_req_attr(req_cobj, "parent")),
+        redop = get_req_attr(req_cobj, "redop"),
+        tag = get_req_attr(req_cobj, "tag"),
+        handle_type = get_req_attr(req_cobj, "handle_type"),
+        projection = get_req_attr(req_cobj, "projection") }
+    local num_privilege_fields =
+      get_req_attr(req_cobj, "privilege_fields_size")
+    for j = 0, num_privilege_fields - 1 do
+      req.privilege_fields:insert(
+        legion_c.legion_region_requirement_get_privilege_field(
+          req_cobj, j))
     end
-    for j = 0, req_cobj.num_instance_fields - 1 do
-      req.instance_fields:insert(req_cobj.instance_fields[j])
+    local num_instance_fields =
+      get_req_attr(req_cobj, "instance_fields_size")
+    for j = 0, num_instance_fields - 1 do
+      req.instance_fields:insert(
+        legion_c.legion_region_requirement_get_instance_field(
+          req_cobj, j))
     end
     task.regions:insert(req)
-    legion_c.legion_region_requirement_destroy(req_cobj)
   end
 
   -- initialize Future objects
   task.futures = Array:new {}
-  local num_futures = legion_c.legion_task_get_num_futures(cobj)
+  local num_futures = legion_c.legion_task_get_futures_size(cobj)
   for i = 0, num_futures - 1 do
     local future_cobj =
       legion_c.legion_task_get_future(cobj, i)

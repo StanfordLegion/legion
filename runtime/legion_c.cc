@@ -479,11 +479,152 @@ legion_logical_partition_get_logical_subregion_by_color(
 // Region Requirement Operations
 // -----------------------------------------------------------------------
 
-void
-legion_region_requirement_destroy(legion_region_requirement_t handle)
+legion_logical_region_t
+legion_region_requirement_get_region(legion_region_requirement_t req_)
 {
-  free(handle.privilege_fields);
-  free(handle.instance_fields);
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->region);
+}
+
+legion_logical_region_t
+legion_region_requirement_get_parent(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->parent);
+}
+
+legion_logical_partition_t
+legion_region_requirement_get_partition(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return CObjectWrapper::wrap(req->partition);
+}
+
+unsigned
+legion_region_requirement_get_privilege_fields_size(
+    legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->privilege_fields.size();
+}
+
+template<typename DST, typename SRC>
+static void copy_n(DST dst, SRC src, size_t n)
+{
+  for(size_t i = 0; i < n; ++i)
+    *dst++ = *src++;
+}
+
+void
+legion_region_requirement_get_privilege_fields(
+    legion_region_requirement_t req_,
+    legion_field_id_t* fields,
+    unsigned fields_size)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  copy_n(fields, req->privilege_fields.begin(),
+         std::min(req->privilege_fields.size(),
+                  static_cast<size_t>(fields_size)));
+}
+
+
+legion_field_id_t
+legion_region_requirement_get_privilege_field(
+    legion_region_requirement_t req_,
+    unsigned idx)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+  assert(idx >= 0 && idx < req->instance_fields.size());
+
+  std::set<FieldID>::iterator itr = req->privilege_fields.begin();
+  for (unsigned i = 0; i < idx; ++i, ++itr);
+  return *itr;
+}
+
+unsigned
+legion_region_requirement_get_instance_fields_size(
+    legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->instance_fields.size();
+}
+
+void
+legion_region_requirement_get_instance_fields(
+    legion_region_requirement_t req_,
+    legion_field_id_t* fields,
+    unsigned fields_size)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  copy_n(fields, req->instance_fields.begin(),
+         std::min(req->instance_fields.size(),
+                  static_cast<size_t>(fields_size)));
+}
+
+legion_field_id_t
+legion_region_requirement_get_instance_field(
+    legion_region_requirement_t req_,
+    unsigned idx)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  assert(idx >= 0 && idx < req->instance_fields.size());
+  return req->instance_fields[idx];
+}
+
+legion_privilege_mode_t
+legion_region_requirement_get_privilege(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->privilege;
+}
+
+legion_coherence_property_t
+legion_region_requirement_get_prop(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->prop;
+}
+
+legion_reduction_op_id_t
+legion_region_requirement_get_redop(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->redop;
+}
+
+legion_mapping_tag_id_t
+legion_region_requirement_get_tag(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->tag;
+}
+
+legion_handle_type_t
+legion_region_requirement_get_handle_type(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->handle_type;
+}
+
+legion_projection_id_t
+legion_region_requirement_get_projection(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->projection;
 }
 
 // -------------------------------------------------------
@@ -1330,7 +1471,7 @@ legion_task_get_local_arglen(legion_task_t task_)
 }
 
 unsigned
-legion_task_get_num_requirements(legion_task_t task_)
+legion_task_get_regions_size(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
@@ -1338,15 +1479,15 @@ legion_task_get_num_requirements(legion_task_t task_)
 }
 
 legion_region_requirement_t
-legion_task_get_region_requirement(legion_task_t task_, unsigned idx)
+legion_task_get_region(legion_task_t task_, unsigned idx)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
-  return CObjectWrapper::wrap(task->regions[idx]);
+  return CObjectWrapper::wrap(&task->regions[idx]);
 }
 
 unsigned
-legion_task_get_num_futures(legion_task_t task_)
+legion_task_get_futures_size(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 

@@ -60,6 +60,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_accessor_array_t);
   NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
+  NEW_OPAQUE_TYPE(legion_region_requirement_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -152,25 +153,6 @@ extern "C" {
     legion_index_partition_t index_partition;
     legion_field_space_t field_space;
   } legion_logical_partition_t;
-
-  /**
-   * @see LegionRuntime::HighLevel::LogicalRequirement
-   */
-  typedef struct legion_region_requirement_t {
-      legion_logical_region_t region;
-      legion_logical_partition_t partition;
-      legion_field_id_t *privilege_fields;
-      unsigned num_privilege_fields;
-      legion_field_id_t *instance_fields;
-      unsigned num_instance_fields;
-      legion_privilege_mode_t privilege;
-      legion_coherence_property_t prop;
-      legion_logical_region_t parent;
-      legion_reduction_op_id_t redop;
-      legion_mapping_tag_id_t tag;
-      legion_handle_type_t handle_type;
-      legion_projection_id_t projection;
-  } legion_region_requirement_t;
 
   /**
    * @see LegionRuntime::HighLevel::TaskArgument
@@ -625,12 +607,128 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @param handle Caller must have ownership of parameter `handle`.
+   * @see LegionRuntime::HighLevel::RegionRequirement::region
+   */
+  legion_logical_region_t
+  legion_region_requirement_get_region(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::parent
+   */
+  legion_logical_region_t
+  legion_region_requirement_get_parent(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::partition
+   */
+  legion_logical_partition_t
+  legion_region_requirement_get_partition(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
+   */
+  unsigned
+  legion_region_requirement_get_privilege_fields_size(
+      legion_region_requirement_t handle);
+
+  /**
+   * @param fields Caller should give a buffer of the size fields_size
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::~RegionRequirement()
+   * @param fields_size the size of the buffer fields
+   *
+   * @return returns privilege fields in the region requirement.
+   *         The return might be truncated if the buffer size is
+   *         smaller than the number of privilege fields.
+   *
+   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
    */
   void
-  legion_region_requirement_destroy(legion_region_requirement_t handle);
+  legion_region_requirement_get_privilege_fields(
+      legion_region_requirement_t handle,
+      legion_field_id_t* fields,
+      unsigned fields_size);
+
+  /**
+   * @return returns the i-th privilege field in the region requirement.
+   *         note that this function takes O(n) time due to the underlying
+   *         data structure does not provide an indexing operation.
+   *
+   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
+   */
+  legion_field_id_t
+  legion_region_requirement_get_privilege_field(
+      legion_region_requirement_t handle,
+      unsigned idx);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   */
+  unsigned
+  legion_region_requirement_get_instance_fields_size(
+      legion_region_requirement_t handle);
+
+  /**
+   * @param fields Caller should give a buffer of the size fields_size
+   *
+   * @param fields_size the size of the buffer fields
+   *
+   * @return returns instance fields in the region requirement.
+   *         The return might be truncated if the buffer size is
+   *         smaller than the number of instance fields.
+   *
+   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   */
+  void
+  legion_region_requirement_get_instance_fields(
+      legion_region_requirement_t handle,
+      legion_field_id_t* fields,
+      unsigned fields_size);
+
+  /**
+   * @return returns the i-th instance field in the region requirement.
+   *
+   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   */
+  legion_field_id_t
+  legion_region_requirement_get_instance_field(
+      legion_region_requirement_t handle,
+      unsigned idx);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::privilege
+   */
+  legion_privilege_mode_t
+  legion_region_requirement_get_privilege(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::prop
+   */
+  legion_coherence_property_t
+  legion_region_requirement_get_prop(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::redop
+   */
+  legion_reduction_op_id_t
+  legion_region_requirement_get_redop(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::tag
+   */
+  legion_mapping_tag_id_t
+  legion_region_requirement_get_tag(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::handle_type
+   */
+  legion_handle_type_t
+  legion_region_requirement_get_handle_type(legion_region_requirement_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::projection
+   */
+  legion_projection_id_t
+  legion_region_requirement_get_projection(legion_region_requirement_t handle);
 
   // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
@@ -1302,19 +1400,21 @@ extern "C" {
    * @see LegionRuntime::HighLevel::Task::regions
    */
   unsigned
-  legion_task_get_num_requirements(legion_task_t task);
+  legion_task_get_regions_size(legion_task_t task);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Task::regions
    */
   legion_region_requirement_t
-  legion_task_get_region_requirement(legion_task_t task, unsigned idx);
+  legion_task_get_region(legion_task_t task, unsigned idx);
 
   /**
    * @see LegionRuntime::HighLevel::Task::futures
    */
   unsigned
-  legion_task_get_num_futures(legion_task_t task);
+  legion_task_get_futures_size(legion_task_t task);
 
   /**
    * @see LegionRuntime::HighLevel::Task::futures

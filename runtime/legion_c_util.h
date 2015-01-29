@@ -126,6 +126,7 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
+      NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -305,34 +306,6 @@ namespace LegionRuntime {
                            r_.index_partition,
                            unwrap(r_.field_space));
         return r;
-      }
-
-      static legion_region_requirement_t
-      wrap(const RegionRequirement& req)
-      {
-        legion_region_requirement_t req_;
-        req_.region = CObjectWrapper::wrap(req.region);
-        req_.partition = CObjectWrapper::wrap(req.partition);
-        req_.num_privilege_fields = req.privilege_fields.size();
-        req_.privilege_fields =
-          (legion_field_id_t*)malloc(sizeof(legion_field_id_t) *
-              req_.num_privilege_fields);
-        std::copy(req.privilege_fields.begin(), req.privilege_fields.end(),
-            req_.privilege_fields);
-        req_.num_instance_fields = req.instance_fields.size();
-        req_.instance_fields =
-          (legion_field_id_t*)malloc(sizeof(legion_field_id_t) *
-              req_.num_instance_fields);
-        std::copy(req.instance_fields.begin(), req.instance_fields.end(),
-            req_.instance_fields);
-        req_.privilege = req.privilege;
-        req_.prop = req.prop;
-        req_.parent = CObjectWrapper::wrap(req.parent);
-        req_.redop = req.redop;
-        req_.tag = req.tag;
-        req_.handle_type = req.handle_type;
-        req_.projection = req.projection;
-        return req_;
       }
 
       static legion_field_allocator_t

@@ -1,0 +1,13 @@
+tstop   0.6
+meshtype rect
+meshparams 360
+uinitradial -1.0
+bcx     0.0
+bcy     0.0
+ssmin   0.1
+alfa    0.1
+q1      0.1
+q2      1.0
+dtinit  5.e-6
+dtreport 100
+chunksize 512

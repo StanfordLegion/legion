@@ -1,0 +1,12 @@
+cstop   10
+tstop   0.6
+meshtype pie
+meshparams 2 20
+uinitradial -1.0
+bcx     0.0
+bcy     0.0
+ssmin   0.1
+q1      0.1
+q2      1.0
+dtinit  0.001
+chunksize 16

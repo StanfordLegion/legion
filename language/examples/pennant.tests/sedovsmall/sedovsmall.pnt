@@ -1,0 +1,14 @@
+cstop   10
+tstop   1.0
+meshtype rect
+meshparams 9 9 1.125 1.125
+subregion 0.0 0.125  0.0 0.125
+rinitsub 1.0
+einitsub 40.222
+bcx     0.0 1.125
+bcy     0.0 1.125
+ssmin   0.1
+q1      0.1
+q2      1.0
+dtinit  0.0025
+chunksize 16
