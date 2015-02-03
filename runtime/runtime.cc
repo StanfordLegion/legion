@@ -4313,7 +4313,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       // Initialize a logger if we have one
       {
-        std::set<Processor> all_locals(local_procsbegin(), local_procs.end());
+        std::set<Processor> all_locals(local_procs.begin(), local_procs.end());
         all_locals.insert(local_utils.begin(), local_utils.end());
         LegionLogging::initialize_legion_logging(unique, all_locals);
       }
