@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ gasnet_seginfo_t *segment_info = 0;
 static bool is_registered(void *ptr)
 {
   off_t offset = ((char *)ptr) - ((char *)(segment_info[gasnet_mynode()].addr));
-  if((offset >= 0) && (offset < segment_info[gasnet_mynode()].size))
+  if((offset >= 0) && ((size_t)offset < segment_info[gasnet_mynode()].size))
     return true;
   return false;
 }
@@ -1217,6 +1217,12 @@ void OutgoingMessage::set_payload(PayloadSource *_payload_src,
   if(_payload_mode == PAYLOAD_NONE)
     return;
 
+  // empty payload?
+  if(_payload_size == 0) {
+    payload_mode = PAYLOAD_EMPTY;
+    return;
+  }
+
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
   log_sdp.info("setting payload (%zd, %d)", _payload_size, _payload_mode);
   assert(_payload_size > 0);
@@ -1236,8 +1242,9 @@ void OutgoingMessage::set_payload(PayloadSource *_payload_src,
 //  need us to go out the door to remove the blockage)
 void OutgoingMessage::reserve_srcdata(void)
 {
-  // no payload case is easy
-  if(payload_mode == PAYLOAD_NONE) return;
+  // no or empty payload cases are easy
+  if((payload_mode == PAYLOAD_NONE) ||
+     (payload_mode == PAYLOAD_EMPTY)) return;
 
   // if the payload is stable and in registered memory AND contiguous, we can
   //  just use it
@@ -1331,7 +1338,7 @@ public:
     outstanding_messages = (int*)malloc(num_endpoints*sizeof(int));
     for (int i = 0; i < num_endpoints; i++)
     {
-      if (i == gasnet_mynode())
+      if (((unsigned)i) == gasnet_mynode())
         endpoints[i] = 0;
       else
         endpoints[i] = new ActiveMessageEndpoint(i);
@@ -1551,10 +1558,10 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
   char *my_segment = (char *)(segment_info[gasnet_mynode()].addr);
-  char *gasnet_mem_base = my_segment;  my_segment += (gasnet_mem_size_in_mb << 20);
-  char *reg_mem_base = my_segment;  my_segment += (registered_mem_size_in_mb << 20);
+  /*char *gasnet_mem_base = my_segment;*/  my_segment += (gasnet_mem_size_in_mb << 20);
+  /*char *reg_mem_base = my_segment;*/  my_segment += (registered_mem_size_in_mb << 20);
   char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
-  char *lmb_base = my_segment;  my_segment += total_lmb_size;
+  /*char *lmb_base = my_segment;*/  my_segment += total_lmb_size;
   assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 
 
 #ifndef NO_SRCDATAPOOL
@@ -1611,9 +1618,8 @@ void start_polling_threads(int count)
   }
 }
 
-static void* sender_thread_loop(void *index)
+static void* sender_thread_loop(void * /*unused*/)
 {
-  long idx = (long)index;
   while (!thread_shutdown_flag) {
     endpoint_manager->push_messages(10000,true);
   }
@@ -1625,7 +1631,7 @@ void start_sending_threads(void)
   num_sending_threads = gasnet_nodes();
   sending_threads = new pthread_t[num_sending_threads];
 
-  for (int i = 0; i < gasnet_nodes(); i++)
+  for (unsigned i = 0; i < gasnet_nodes(); i++)
   {
     if (i == gasnet_mynode()) continue;
     pthread_attr_t attr;
@@ -1792,10 +1798,11 @@ void SpanPayload::copy_data(void *dest)
   char *dst_c = (char *)dest;
   off_t bytes_left = size;
   for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
-    assert(it->second <= bytes_left);
+    assert(it->second <= (size_t)bytes_left);
     memcpy(dst_c, it->first, it->second);
     dst_c += it->second;
     bytes_left -= it->second;
+    assert(bytes_left >= 0);
   }
   assert(bytes_left == 0);
 }
@@ -1803,6 +1810,11 @@ void SpanPayload::copy_data(void *dest)
 extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
                                 const void *args, size_t arglen)
 {
+  // special case: if the buffer size is zero, it's an empty message and no adjustment
+  //   is needed
+  if(buffer_size == 0)
+    return true;
+
   assert(source != gasnet_mynode());
   assert(arglen >= 2*sizeof(int));
   const int *arg_ptr = (const int*)args;

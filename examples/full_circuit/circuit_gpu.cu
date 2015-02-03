@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,7 @@
 
 #include "circuit.h"
 
-#include "cuda.h"
 #include "cuda_runtime.h"
-
-#define CUDA_SAFE_CALL(expr)	\
-  {				\
-    cudaError_t err = (expr);	\
-    if (err != cudaSuccess)	\
-    {				\
-      printf("Cuda error: %s\n", cudaGetErrorString(err));\
-      assert(false);		\
-    }				\
-  }
 
 using namespace LegionRuntime::Accessor;
 
@@ -254,50 +243,28 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
-  // Create our own stream so we don't interfere with the runtime
-  cudaStream_t exec_stream;
-  CUDA_SAFE_CALL( cudaStreamCreateWithFlags(&exec_stream, cudaStreamNonBlocking) );
-
   // Create compound types so CUDA copies them by value
   SegmentAccessors<RegionAccessor<AccessorType::SOA<sizeof(float)>,float>,WIRE_SEGMENTS>
     current_segments(soa_current);
   SegmentAccessors<RegionAccessor<AccessorType::SOA<sizeof(float)>,float>,(WIRE_SEGMENTS-1)>
     voltage_segments(soa_voltage);
 
-#ifdef TIME_CUDA_KERNELS
-  cudaEvent_t ev_start, ev_end;
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
-#endif
-  calc_new_currents_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_wire,
-                                                                           piece.num_wires,
-									   piece.dt,
-									   piece.steps,
-                                                                           soa_in_ptr,
-                                                                           soa_out_ptr,
-                                                                           soa_in_loc,
-                                                                           soa_out_loc,
-                                                                           soa_inductance,
-                                                                           soa_resistance,
-                                                                           soa_wire_cap,
-                                                                           soa_pvt_voltage,
-                                                                           soa_shr_voltage,
-                                                                           soa_ghost_voltage,
-                                                                           current_segments,
-                                                                           voltage_segments);
-#ifdef TIME_CUDA_KERNELS
-  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
-#endif
-  CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
-#ifdef TIME_CUDA_KERNELS
-  float ms;
-  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
-  printf("CNC TIME = %f\n", ms);
-#endif
-  CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
+  calc_new_currents_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+                                                             piece.num_wires,
+                                                             piece.dt,
+                                                             piece.steps,
+                                                             soa_in_ptr,
+                                                             soa_out_ptr,
+                                                             soa_in_loc,
+                                                             soa_out_loc,
+                                                             soa_inductance,
+                                                             soa_resistance,
+                                                             soa_wire_cap,
+                                                             soa_pvt_voltage,
+                                                             soa_shr_voltage,
+                                                             soa_ghost_voltage,
+                                                             current_segments,
+                                                             voltage_segments);
 
   free(soa_current);
   free(soa_voltage);
@@ -417,44 +384,21 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
   RegionAccessor<AccessorType::ReductionFold<GPUAccumulateCharge>,float> fold_ghost_charge = 
     fa_ghost_charge.convert<AccessorType::ReductionFold<GPUAccumulateCharge> >();
 
-  // Create our own stream so we don't interfere with the runtime
-  cudaStream_t exec_stream;
-  CUDA_SAFE_CALL( cudaStreamCreateWithFlags(&exec_stream, cudaStreamNonBlocking) );
-
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
 
-#ifdef TIME_CUDA_KERNELS
-  cudaEvent_t ev_start, ev_end;
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
-#endif
-  distribute_charge_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_wire,
-                                                                           piece.num_wires,
-									   piece.dt,
-                                                                           soa_in_ptr,
-                                                                           soa_out_ptr,
-                                                                           soa_in_loc,
-                                                                           soa_out_loc,
-                                                                           soa_in_current,
-                                                                           soa_out_current,
-                                                                           soa_pvt_charge,
-                                                                           fold_shr_charge,
-                                                                           fold_ghost_charge);
-
-#ifdef TIME_CUDA_KERNELS
-  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
-#endif
-  CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
-#ifdef TIME_CUDA_KERNELS
-  float ms;
-  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
-  printf("DC TIME = %f\n", ms);
-#endif
-  CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
+  distribute_charge_kernel<<<num_blocks,threads_per_block>>>(piece.first_wire,
+                                                             piece.num_wires,
+                                                             piece.dt,
+                                                             soa_in_ptr,
+                                                             soa_out_ptr,
+                                                             soa_in_loc,
+                                                             soa_out_loc,
+                                                             soa_in_current,
+                                                             soa_out_current,
+                                                             soa_pvt_charge,
+                                                             fold_shr_charge,
+                                                             fold_ghost_charge);
 #endif
 }
 
@@ -557,42 +501,20 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
   RegionAccessor<AccessorType::SOA<sizeof(PointerLocation)>,PointerLocation> soa_ptr_loc = 
     fa_location.convert<AccessorType::SOA<sizeof(PointerLocation)> >();
 
-  // Create our own stream so we don't interfere with the runtime
-  cudaStream_t exec_stream;
-  CUDA_SAFE_CALL( cudaStreamCreateWithFlags(&exec_stream, cudaStreamNonBlocking) );
-
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_nodes + (threads_per_block-1)) / threads_per_block;
 
-#ifdef TIME_CUDA_KERNELS
-  cudaEvent_t ev_start, ev_end;
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_start, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventCreate(&ev_end, cudaEventDefault));
-  CUDA_SAFE_CALL(cudaEventRecord(ev_start, exec_stream));
-#endif
-  update_voltages_kernel<<<num_blocks,threads_per_block,0,exec_stream>>>(piece.first_node,
-                                                                         piece.num_nodes,
-                                                                         soa_pvt_voltage,
-                                                                         soa_shr_voltage,
-                                                                         soa_pvt_charge,
-                                                                         soa_shr_charge,
-                                                                         soa_pvt_cap,
-                                                                         soa_shr_cap,
-                                                                         soa_pvt_leakage,
-                                                                         soa_shr_leakage,
-                                                                         soa_ptr_loc);
-#ifdef TIME_CUDA_KERNELS
-  CUDA_SAFE_CALL(cudaEventRecord(ev_end, exec_stream));
-#endif
-  CUDA_SAFE_CALL( cudaStreamSynchronize(exec_stream) );
-#ifdef TIME_CUDA_KERNELS
-  float ms;
-  CUDA_SAFE_CALL(cudaEventElapsedTime(&ms, ev_start, ev_end));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_start));
-  CUDA_SAFE_CALL(cudaEventDestroy(ev_end));
-  printf("UV TIME = %f\n", ms);
-#endif
-  CUDA_SAFE_CALL( cudaStreamDestroy(exec_stream) );
+  update_voltages_kernel<<<num_blocks,threads_per_block>>>(piece.first_node,
+                                                           piece.num_nodes,
+                                                           soa_pvt_voltage,
+                                                           soa_shr_voltage,
+                                                           soa_pvt_charge,
+                                                           soa_shr_charge,
+                                                           soa_pvt_cap,
+                                                           soa_shr_cap,
+                                                           soa_pvt_leakage,
+                                                           soa_shr_leakage,
+                                                           soa_ptr_loc);
 #endif
 }
 

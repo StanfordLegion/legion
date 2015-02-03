@@ -12,6 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1",
+--    "-absolute", "1e-8", "-relative", "1e-8", "-relative_absolute", "1e-17"],
+--   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1",
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-17"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1",
+--    "-absolute", "1e-8", "-relative", "1e-8", "-relative_absolute", "1e-17"]
+-- ]
+
 -- Inspired by https://github.com/losalamos/PENNANT
 
 import "legion"
@@ -20,14 +30,15 @@ import "legion"
 local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../runtime"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = root_dir .. "pennant.so"
-  if os.execute("c++ -std=c++11 -Wall -shared -fPIC " .. pennant_cc .. " -o " .. pennant_so) ~= 0 then
+  if os.execute("c++ -std=c++11 -Wall -shared -fPIC -I " .. runtime_dir .. " " .. pennant_cc .. " -o " .. pennant_so) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
   terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", "-I", root_dir)
+  cpennant = terralib.includec("pennant.h", "-I", root_dir, "-I", runtime_dir)
 end
 
 -- Include other headers
@@ -902,6 +913,11 @@ task calc_force_qcs(rz : region(zone), rpp : region(point), rpg : region(point),
           rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4, exp, elen, carea, ccos, cevol, cdiv, cdu, cqe1, cqe2})
   , writes(rz.{zuc, zdu, z0tmp},
            rs.{sfq, carea, cdiv, cevol, ccos, cdu, cqe1, cqe2})
+
+  -- FIXME: Hack: Unmap regions to avoid continually remapping. This
+  -- is something the compiler ought to be doing for us.
+  c.legion_runtime_unmap_all_regions(__runtime(), __context())
+
   qcs_zone_center_velocity(rz, rpp, rpg, rs, sstart, send, use_foreign)
   qcs_corner_divergence(rz, rpp, rpg, rs, sstart, send, use_foreign)
   qcs_qcn_force(rz, rpp, rpg, rs, gamma, q1, q2, sstart, send, use_foreign)
@@ -1175,6 +1191,12 @@ task initialize(rz_all : region(zone), rp_all : region(point),
   , reads(rz_all, rp_all, rs_all, rm_all)
   , writes(rz_all, rp_all, rs_all, rm_all)
 
+  -- FIXME: Hack: Unmap regions to avoid continually remapping. This
+  -- is something the compiler ought to be doing for us.
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rz_all))[0])
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rp_all))[0])
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rs_all))[0])
+
   var einit = conf.einit
   var einitsub = conf.einitsub
   var rinit = conf.rinit
@@ -1227,6 +1249,13 @@ task simulate(rz_all : region(zone), rp_all : region(point),
               conf : config)
   , reads(rz_all, rp_all, rs_all, rm_all)
   , writes(rz_all, rp_all, rs_all, rm_all)
+
+  -- FIXME: Hack: Unmap regions to avoid continually remapping. This
+  -- is something the compiler ought to be doing for us.
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rz_all))[0])
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rp_all))[0])
+  c.legion_runtime_unmap_region(__runtime(), __context(), (__physical(rs_all))[0])
+
   var alfa = conf.alfa
   var cfl = conf.cfl
   var cflv = conf.cflv
@@ -1246,8 +1275,8 @@ task simulate(rz_all : region(zone), rp_all : region(point),
   var use_foreign = conf.use_foreign
 
   var interval = 10
-  -- var start_time = get_abs_time()
-  -- var last_time = start_time
+  var start_time = c.legion_get_current_time_in_micros()/1.e6
+  var last_time = start_time
 
   var time = 0.0
   var cycle = 0
@@ -1257,9 +1286,10 @@ task simulate(rz_all : region(zone), rp_all : region(point),
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
     if cycle > 0 and cycle % interval == 0 then
-    --   var current_time = get_abs_time()
-    --   print_simulation_loop(cycle, time, dt, start_time, last_time, current_time, interval)
-    --   last_time = current_time
+      var current_time = c.legion_get_current_time_in_micros()/1.e6
+      c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+      last_time = current_time
     end
 
     for m in rm_all do
@@ -1563,12 +1593,7 @@ terra read_config()
   var input_filename = get_positional_arg()
   if input_filename == nil then
     c.printf("Usage: ./pennant <filename>\n")
-    -- FIXME: Fix the test harness so that this can get command-line
-    -- parameters.
-
-    -- c.abort()
-    input_filename = "pennant.tests/sedovsmall/sedovsmall.pnt"
-    c.printf("Continuing with filename = \"%s\"\n", input_filename)
+    c.abort()
   end
 
   c.printf("Reading \"%s\"...\n", input_filename)
@@ -1960,12 +1985,7 @@ terra validate_output(runtime : c.legion_runtime_t,
   legionlib.assert(solution_zp ~= nil)
 
   var input_filename = get_positional_arg()
-  if input_filename == nil then
-    -- FIXME: Fix the test harness so that this can get command-line
-    -- parameters.
-    input_filename = "pennant.tests/sedovsmall/sedovsmall.pnt"
-    c.printf("Continuing with filename = \"%s\"\n", input_filename)
-  end
+  legionlib.assert(input_filename ~= nil)
 
   var solution_filename : int8[solution_filename_maxlen]
   do
@@ -1983,8 +2003,9 @@ terra validate_output(runtime : c.legion_runtime_t,
   c.printf("Reading \"%s\"...\n", solution_filename)
   var solution_file = c.fopen(solution_filename, "r")
   if solution_file == nil then
-    c.printf("Error: Failed to open \"%s\"\n", solution_filename)
-    c.abort()
+    c.printf("Warning: Failed to open \"%s\"\n", solution_filename)
+    c.printf("Warning: Skipping validation step\n")
+    return
   end
 
   c.fscanf(solution_file, " # zr")
@@ -2032,13 +2053,27 @@ terra validate_output(runtime : c.legion_runtime_t,
     solution_zp[i] = zp
   end
 
+  var absolute_eps = 1.0e-8
+  var absolute_eps_text = get_optional_arg("-absolute")
+  if absolute_eps_text ~= nil then
+    absolute_eps = c.atof(absolute_eps_text)
+  end
+
+  var relative_eps = 1.0e-8
+  var relative_eps_text = get_optional_arg("-relative")
+  if relative_eps_text ~= nil then
+    relative_eps = c.atof(relative_eps_text)
+  end
+
   -- FIXME: This is kind of silly, but some of the really small values
   -- (around 1e-30) have fairly large relative error (1e-3), tripping
   -- up the validator. For now, stop complaining about those cases if
-  -- the absolute error is small (smaller than 1e-20).
-  var absolute_eps = 1.0e-5
-  var relative_eps = 1.0e-7
-  var relative_absolute_eps = 1.0e-16
+  -- the absolute error is small.
+  var relative_absolute_eps = 1.0e-30
+  var relative_absolute_eps_text = get_optional_arg("-relative_absolute")
+  if relative_absolute_eps_text ~= nil then
+    relative_absolute_eps = c.atof(relative_absolute_eps_text)
+  end
 
   do
     var rz_zr = c.legion_physical_region_get_field_accessor_array(
@@ -2053,6 +2088,9 @@ terra validate_output(runtime : c.legion_runtime_t,
       then
         c.printf("Error: zr value out of bounds at %d, expected %.12e and got %.12e\n",
                  i, sol, ck)
+        c.printf("absolute %.12e relative %.12e\n",
+                 cmath.fabs(ck - sol),
+                 cmath.fabs(ck - sol) / sol)
         c.abort()
       end
     end
@@ -2094,6 +2132,9 @@ terra validate_output(runtime : c.legion_runtime_t,
       then
         c.printf("Error: zp value out of bounds at %d, expected %.8e and got %.8e\n",
                  i, sol, ck)
+        c.printf("absolute %.12e relative %.12e\n",
+                 cmath.fabs(ck - sol),
+                 cmath.fabs(ck - sol) / sol)
         c.abort()
       end
     end
@@ -2202,4 +2243,5 @@ task toplevel()
 end
 function _t3() end -- seems like I need this to break up the statements
 (terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
+cpennant.register_mappers()
 legionlib.start(toplevel)

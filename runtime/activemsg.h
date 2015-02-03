@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -80,6 +80,7 @@ enum { PAYLOAD_NONE, // no payload in packet
        PAYLOAD_SRCPTR, // payload has been copied to the src data pool
        PAYLOAD_PENDING, // payload needs to be copied, but hasn't yet
        PAYLOAD_KEEPREG, // use payload pointer, AND it's registered!
+       PAYLOAD_EMPTY, // message can have payload, but this one is 0 bytes
 };
 
 /* Necessary base structure for all medium and long active messages */
@@ -89,6 +90,7 @@ struct BaseMedium {
   void set_magic(void) {
     message_id = MESSAGE_ID_MAGIC;
     message_chunks = MESSAGE_CHUNKS_MAGIC;
+    srcptr = 0;
   }
   gasnet_handlerarg_t message_id;
   gasnet_handlerarg_t message_chunks;
@@ -283,9 +285,9 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
     record_message(src, true); \
     /*nbytes = adjust_long_msgsize(src, buf, nbytes);*/	\
     bool handle_now = adjust_long_msgsize(src, buf, nbytes, &u, sizeof(u)); \
-    if (handle_now) { \
-      (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
-      if(nbytes > 0/*gasnet_AMMaxMedium()*/) handle_long_msgptr(src, buf); \
+    if (handle_now) (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
+    if (handle_now && (nbytes > 0)) {					\
+      handle_long_msgptr(src, buf); \
       /* We need to send an reply no matter what since asynchronous active*/ \
       /* messages require a reply. */ \
       /*printf("sending release of srcptr %p (%d -> %d)\n", u.typed.srcptr, gasnet_mynode(), src);*/ \

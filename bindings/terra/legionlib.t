@@ -559,9 +559,7 @@ end
 
 -- Lua wrapper for LegionRuntime::HighLevel::IndexAllocator
 function IndexAllocator:from_cobj(cobj)
-  local allocator =
-    { index_space = IndexSpace:from_cobj(cobj.index_space),
-      allocator = cobj.allocator }
+  local allocator = { cobj = cobj }
   allocator.is_index_allocator = true
   setmetatable(allocator, self)
   return allocator
@@ -570,20 +568,12 @@ end
 function IndexAllocator:alloc(num_elements)
   return
     Ptr:from_cobj(
-      legion_c.legion_index_allocator_alloc(self, num_elements))
-end
-
-function IndexAllocator:delete()
-  assert(self.is_index_allocator)
-  legion_c.legion_index_allocator_destroy(self)
+      legion_c.legion_index_allocator_alloc(self.cobj, num_elements))
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::FieldAllocator
 function FieldAllocator:from_cobj(cobj)
-  local allocator =
-    { field_space = FieldSpace:from_cobj(cobj.field_space),
-      parent = cobj.parent,
-      runtime = cobj.runtime }
+  local allocator = { cobj = cobj }
   allocator.is_field_allocator = true
   setmetatable(allocator, self)
   return allocator
@@ -591,12 +581,7 @@ end
 
 function FieldAllocator:allocate_field(size, fid)
   fid = fid or -1
-  return legion_c.legion_field_allocator_allocate_field(self, size, fid)
-end
-
-function FieldAllocator:delete()
-  assert(self.is_field_allocator)
-  legion_c.legion_field_allocator_destroy(self)
+  return legion_c.legion_field_allocator_allocate_field(self.cobj, size, fid)
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::LogicalRegion
@@ -739,8 +724,10 @@ function ArgumentMap:new()
   local arg_map = {}
   arg_map.is_argument_map = true
   setmetatable(arg_map, self)
-  local cobj = legion_c.legion_argument_map_create()
-  arg_map.impl = cobj.impl
+  local cobj =
+    ffi.gc(legion_c.legion_argument_map_create(),
+           legion_c.legion_argument_map_destroy)
+  arg_map.cobj = cobj
   return arg_map
 end
 
@@ -749,17 +736,12 @@ function ArgumentMap:set_point(dp, arg, replace)
   assert(dp.is_domain_point,
     "Error: ArgumentMap:set_point takes only a DomainPoint")
   dp = dp:to_cobj()
-  legion_c.legion_argument_map_set_point(self, dp, arg, replace)
-end
-
-function ArgumentMap:delete()
-  assert(self.is_argument_map)
-  legion_c.legion_argument_map_destroy(self)
+  legion_c.legion_argument_map_set_point(self.cobj, dp, arg, replace)
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::Future
 function Future:from_cobj(cobj)
-  local future = { impl = cobj.impl }
+  local future = { cobj = ffi.gc(cobj, legion_c.legion_future_destroy) }
   future.is_future = true
   setmetatable(future, Future)
   return future
@@ -774,22 +756,17 @@ function Future:get_result(value_type)
     legion_c.legion_task_result_destroy(result)
     return return_value
   end
-  return call_capi(self)
+  return call_capi(self.cobj)
 end
 
 function Future:get_void_result()
   assert(self.is_future)
-  legion_c.legion_future_get_void_result(self)
-end
-
-function Future:delete()
-  assert(self.is_future)
-  legion_c.legion_future_destroy(self)
+  legion_c.legion_future_get_void_result(self.cobj)
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::FutureMap
 function FutureMap:from_cobj(cobj)
-  local fm = { impl = cobj.impl }
+  local fm = { cobj = ffi.gc(cobj, legion_c.legion_future_map_destroy) }
   fm.is_future_map = true
   setmetatable(fm, FutureMap)
   return fm
@@ -797,25 +774,19 @@ end
 
 function FutureMap:get_future(dp)
   assert(self.is_future_map)
-  return Future:from_cobj(legion_c.legion_future_map_get_future(self, dp))
+  return Future:from_cobj(legion_c.legion_future_map_get_future(self.cobj, dp))
 end
 
 function FutureMap:get_result(value_type, dp)
   assert(self.is_future_map)
-  local future = Future:from_cobj(self:get_future(dp))
+  local future = self:get_future(dp)
   local result = future:get_result(value_type)
-  future:delete()
   return result
 end
 
 function FutureMap:wait_all_results()
   assert(self.is_future_map)
-  legion_c.legion_future_map_wait_all_results(self)
-end
-
-function FutureMap:delete()
-  assert(self.is_future_map)
-  legion_c.legion_future_map_destroy(self)
+  legion_c.legion_future_map_wait_all_results(self.cobj)
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::Task
@@ -899,12 +870,6 @@ function Task:get_local_args(arg_type)
   return call_capi(self)
 end
 
-function Task:delete()
-  for i = 0, self.futures.size - 1 do
-    self.futures[i]:delete()
-  end
-end
-
 -- Lua wrapper for LegionRuntime::HighLevel::TaskArgument
 function TaskArgument:new(arg, arg_type)
   local terra alloc(arg : arg_type)
@@ -913,17 +878,10 @@ function TaskArgument:new(arg, arg_type)
     @args = [arg]
     return args
   end
-  local ptr = alloc(arg)
+  local ptr = ffi.gc(alloc(arg), std.free)
   local tbl = { args = ptr, arglen = sizeof(arg_type) }
   setmetatable(tbl, self)
   return tbl
-end
-
-function TaskArgument:delete()
-  local terra dealloc()
-    std.free(([self.args]))
-  end
-  dealloc()
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::TaskLauncher
@@ -1124,7 +1082,9 @@ function legion:create_index_allocator(ctx, handle)
     "Error: create_index_allocator takes an index space as the second argument")
   return
     IndexAllocator:from_cobj(
-      legion_c.legion_index_allocator_create(self, ctx, handle))
+      ffi.gc(
+        legion_c.legion_index_allocator_create(self, ctx, handle),
+        legion_c.legion_index_allocator_destroy))
 end
 
 function legion:create_field_allocator(ctx, handle)
@@ -1134,7 +1094,9 @@ function legion:create_field_allocator(ctx, handle)
     "Error: create_field_allocator takes an field space as the second argument")
   return
     FieldAllocator:from_cobj(
-      legion_c.legion_field_allocator_create(self, ctx, handle))
+      ffi.gc(
+        legion_c.legion_field_allocator_create(self, ctx, handle),
+        legion_c.legion_field_allocator_destroy))
 end
 
 function legion:execute_task(ctx, launcher)
@@ -1172,7 +1134,7 @@ function legion:execute_task(ctx, launcher)
   end
   for i = 0, launcher.futures.size - 1 do
     local f = launcher.futures[i]
-    legion_c.legion_task_launcher_add_future(launcher_cobj, f)
+    legion_c.legion_task_launcher_add_future(launcher_cobj, f.cobj)
   end
   local cobj = legion_c.legion_task_launcher_execute(self, ctx, launcher_cobj)
   legion_c.legion_task_launcher_destroy(launcher_cobj)
@@ -1187,7 +1149,7 @@ function legion:execute_index_space(ctx, launcher)
 
   local launcher_cobj =
     legion_c.legion_index_launcher_create(
-      launcher.task_id, launcher.domain.cobj, launcher.global_arg, launcher.map,
+      launcher.task_id, launcher.domain.cobj, launcher.global_arg, launcher.map.cobj,
       launcher.pred, launcher.must, launcher.id, launcher.tag)
   for i = 0, launcher.region_requirements.size - 1 do
     local req = launcher.region_requirements[i]
@@ -1350,7 +1312,6 @@ function lua_task_wrapper_in_lua(script_name, return_type_name,
     return task_result
   end
 
-  task:delete()
   return alloc_task_result(result_from_task)
 end
 
@@ -1366,7 +1327,6 @@ function lua_void_task_wrapper_in_lua(script_name, task_name,
   runtime.is_runtime = true
   setmetatable(runtime, legion)
   _G[task_name](task, regions_lua, ctx, runtime)
-  task:delete()
 end
 
 -- Lua wrapper for LegionRuntime::Array::GenericPointInRectIterator
@@ -1399,8 +1359,10 @@ function RegionAccessor:new(pr, fid)
   local accessor = {}
   accessor.is_region_accessor = true
   local cobj =
-    legion_c.legion_physical_region_get_field_accessor_generic(pr, fid)
-  accessor.impl = cobj.impl
+    ffi.gc(
+      legion_c.legion_physical_region_get_field_accessor_generic(pr, fid),
+      legion_c.legion_accessor_generic_destroy)
+  accessor.cobj = cobj
   setmetatable(accessor, self)
   return accessor
 end
@@ -1424,7 +1386,7 @@ function RegionAccessor:typeify(elem_type)
       "Error: the self object is not a RegionAccessor object. " ..
       "Did you forget to write ':read' to call this read method?")
     if p.is_domain_point then
-      return read_dp(self, p:to_cobj())
+      return read_dp(self.cobj, p:to_cobj())
     end
   end
   self.write = function(self, p, v)
@@ -1432,14 +1394,10 @@ function RegionAccessor:typeify(elem_type)
       "Error: the self object is not a RegionAccessor object. " ..
       "Did you forget to write ':write' to call this write method?")
     if p.is_domain_point then
-      write_dp(self, p:to_cobj(), v)
+      write_dp(self.cobj, p:to_cobj(), v)
     end
   end
   return self
-end
-
-function RegionAccessor:delete()
-  legion_c.legion_accessor_generic_destroy(self)
 end
 
 function TaskConfigOptions:new(leaf, inner, idempotent)

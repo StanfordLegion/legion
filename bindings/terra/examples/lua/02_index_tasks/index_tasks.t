@@ -61,7 +61,6 @@ function top_level_task(task, reigons, ctx, runtime)
     local input = i + 10
     local arg = TaskArgument:new(input, int)
     arg_map:set_point(DomainPoint:from_point(Point:new{i}), arg)
-    arg:delete()
   end
 
   -- Legion supports launching an array of tasks with a
@@ -85,7 +84,6 @@ function top_level_task(task, reigons, ctx, runtime)
   -- in the index space to finish, or it can pull out
   -- individual futures for specific points on which to wait.
   local fm = runtime:execute_index_space(ctx, index_launcher)
-  arg_map:delete()
   -- Here we wait for all the futures to be ready
   fm:wait_all_results()
   -- Now we can check that the future results that came back
@@ -105,8 +103,6 @@ function top_level_task(task, reigons, ctx, runtime)
   if all_passed then
     print("All checks passed")
   end
-
-  fm:delete()
 end
 
 function index_space_task(task, regions, ctx, runtime)

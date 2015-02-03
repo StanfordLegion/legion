@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1287,7 +1287,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
-      bool result;
+      bool result = false; // this is actually set on all paths, but the compiler can't see it
       {
         AutoLock o_lock(op_lock);
         if (speculation_state == RESOLVE_TRUE_STATE)
@@ -1348,7 +1348,7 @@ namespace LegionRuntime {
       // If the predicate hasn't resolved yet, then we can ask the
       // mapper if it would like us to speculate on the value.
       // Then take the lock and set up our state.
-      bool value, speculated;
+      bool value, speculated = false;
       bool valid = predicate->register_waiter(this, get_generation(), value);
       // Now that we've attempted to register ourselves with the
       // predicate we can remove the predicate reference
@@ -1576,8 +1576,8 @@ namespace LegionRuntime {
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       parent_task = ctx;
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
       if (launcher.requirement.privilege_fields.empty())
       {
         log_task(LEVEL_WARNING,"WARNING: REGION REQUIREMENT OF INLINE MAPPING "
@@ -1592,7 +1592,6 @@ namespace LegionRuntime {
         parent_ctx->check_simultaneous_restricted(requirement);
       map_id = launcher.map_id;
       tag = launcher.tag;
-      parent_task = ctx;
       termination_event = UserEvent::create_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
@@ -2213,7 +2212,6 @@ namespace LegionRuntime {
                             const CopyLauncher &launcher, bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_ctx = ctx;
       parent_task = ctx;
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
                              launcher.src_requirements.size() + 
@@ -2647,7 +2645,6 @@ namespace LegionRuntime {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        unsigned index = src_requirements.size() + idx;
         dst_contexts[idx] = parent_ctx->find_enclosing_physical_context(
                                               dst_requirements[idx].parent);
         if (!dst_requirements[idx].premapped)
@@ -4128,7 +4125,6 @@ namespace LegionRuntime {
                                bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_ctx = ctx;
       parent_task = ctx;
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT,
                              1/*num region requirements*/,
@@ -4654,7 +4650,6 @@ namespace LegionRuntime {
                                bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_ctx = ctx;
       parent_task = ctx;
       initialize_speculation(ctx, true/*track*/, Event::NO_EVENT, 
                              1/*num region requirements*/,
@@ -5548,7 +5543,7 @@ namespace LegionRuntime {
     void AndPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve, resolve_value;
+      bool need_resolve = false, resolve_value = false;
       if (pred_gen == get_generation())
       {
         AutoLock o_lock(op_lock);
@@ -5760,7 +5755,7 @@ namespace LegionRuntime {
     void OrPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve, resolve_value;
+      bool need_resolve = false, resolve_value = false;
       if (pred_gen == get_generation())
       {
         AutoLock o_lock(op_lock);
@@ -6370,10 +6365,11 @@ namespace LegionRuntime {
     TaskOp* MustEpochOp::find_task_by_index(int index)
     //--------------------------------------------------------------------------
     {
-      if (index < indiv_tasks.size())
+      assert(index >= 0);
+      if ((size_t)index < indiv_tasks.size())
         return indiv_tasks[index];
       index -= indiv_tasks.size();
-      if (index < index_tasks.size())
+      if ((size_t)index < index_tasks.size())
         return index_tasks[index];
       assert(false);
       return NULL;

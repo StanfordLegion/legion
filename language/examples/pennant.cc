@@ -13,13 +13,6 @@
  * limitations under the License.
  */
 
-/*
- * Some portions of the following code are derived from the
- * open-source release of PENNANT:
- *
- * https://github.com/losalamos/PENNANT
- */
-
 #include "pennant.h"
 
 #include <algorithm>
@@ -28,6 +21,10 @@
 #include <cstring>
 #include <map>
 #include <vector>
+
+#include "default_mapper.h"
+
+using namespace LegionRuntime::HighLevel;
 
 struct config {
   int64_t np;
@@ -47,6 +44,17 @@ enum {
   MESH_RECT = 1,
   MESH_HEX = 2,
 };
+
+///
+/// Mesh Generator
+///
+
+/*
+ * Some portions of the following code are derived from the
+ * open-source release of PENNANT:
+ *
+ * https://github.com/losalamos/PENNANT
+ */
 
 static void generate_mesh_rect(config &conf,
                                std::vector<double> &pointpos_x,
@@ -512,4 +520,188 @@ void generate_mesh_raw(
   *zonesize_size = zonesize_vec.size();
   *zonepoints_size = zonepoints_vec.size();
   *zonecolors_size = zonecolors_vec.size();
+}
+
+///
+/// Mapper
+///
+
+LegionRuntime::Logger::Category log_mapper("mapper");
+
+class PennantMapper : public DefaultMapper
+{
+public:
+  PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor local);
+  virtual void select_task_options(Task *task);
+  virtual void select_task_variant(Task *task);
+  virtual bool map_task(Task *task);
+  virtual bool map_inline(Inline *inline_operation);
+  virtual void notify_mapping_failed(const Mappable *mappable);
+private:
+  Color get_task_color_by_region(Task *task, LogicalRegion region);
+private:
+  std::map<Processor::Kind, std::vector<Processor> > all_processors;
+  Memory local_sysmem;
+  Memory local_regmem;
+};
+
+PennantMapper::PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor local)
+  : DefaultMapper(machine, rt, local)
+{
+  const std::set<Processor> &procs = machine->get_all_processors();
+  for (std::set<Processor>::const_iterator it = procs.begin();
+       it != procs.end(); it++) {
+    Processor::Kind kind = machine->get_processor_kind(*it);
+    all_processors[kind].push_back(*it);
+  }
+
+  local_sysmem =
+    machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);
+  local_regmem =
+    machine_interface.find_memory_kind(local_proc, Memory::REGDMA_MEM);
+  if(!local_regmem.exists()) {
+    local_regmem = local_sysmem;
+  }
+}
+
+void PennantMapper::select_task_options(Task *task)
+{
+  if (task->regions.size() >= 1) {
+    LogicalRegion region = task->regions[0].region;
+    Color color = get_task_color_by_region(task, region);
+
+    // Task options:
+    task->inline_task = false;
+    task->spawn_task = false;
+    task->map_locally = false;
+    task->profile_task = false;
+
+    // Processor (round robin by piece of graph):
+    std::vector<Processor> &procs = all_processors[Processor::LOC_PROC];
+    task->target_proc = procs[color % procs.size()];
+  } else {
+    DefaultMapper::select_task_options(task);
+    return;
+  }
+}
+
+void PennantMapper::select_task_variant(Task *task)
+{
+  // Use the SOA variant for all tasks.
+  // task->selected_variant = VARIANT_SOA;
+  DefaultMapper::select_task_variant(task);
+
+  std::vector<RegionRequirement> &regions = task->regions;
+  for (std::vector<RegionRequirement>::iterator it = regions.begin();
+        it != regions.end(); it++) {
+    RegionRequirement &req = *it;
+
+    // Select SOA layout for all regions.
+    req.blocking_factor = req.max_blocking_factor;
+  }
+}
+
+bool PennantMapper::map_task(Task *task)
+{
+  assert(task->target_proc == local_proc);
+
+  std::vector<RegionRequirement> &regions = task->regions;
+  for (std::vector<RegionRequirement>::iterator it = regions.begin();
+        it != regions.end(); it++) {
+    RegionRequirement &req = *it;
+
+    // Region options:
+    req.virtual_map = false;
+    req.enable_WAR_optimization = false;
+    req.reduction_list = false;
+
+    // Place all regions in local system memory.
+    req.target_ranking.push_back(local_sysmem);
+  }
+
+  return false;
+}
+
+bool PennantMapper::map_inline(Inline *inline_operation)
+{
+  RegionRequirement &req = inline_operation->requirement;
+
+  // Region options:
+  req.virtual_map = false;
+  req.enable_WAR_optimization = false;
+  req.reduction_list = false;
+  req.blocking_factor = req.max_blocking_factor;
+
+  // Place all regions in global memory.
+  req.target_ranking.push_back(local_sysmem);
+
+  log_mapper.debug(
+    "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
+    req.region.get_index_space().id,
+    req.region.get_field_space().get_id(),
+    req.region.get_tree_id(),
+    req.target_ranking[0].id,
+    req.target_ranking.size());
+
+  return false;
+}
+
+void PennantMapper::notify_mapping_failed(const Mappable *mappable)
+{
+  switch (mappable->get_mappable_kind()) {
+  case Mappable::TASK_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on task");
+      break;
+    }
+  case Mappable::COPY_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on copy");
+      break;
+    }
+  case Mappable::INLINE_MAPPABLE:
+    {
+      Inline *_inline = mappable->as_mappable_inline();
+      RegionRequirement &req = _inline->requirement;
+      LogicalRegion region = req.region;
+      log_mapper.warning(
+        "mapping %s on inline region (%d,%d,%d) memory %d",
+        (req.mapping_failed ? "failed" : "succeeded"),
+        region.get_index_space().id,
+        region.get_field_space().get_id(),
+        region.get_tree_id(),
+        req.selected_memory.id);
+      break;
+    }
+  case Mappable::ACQUIRE_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on acquire");
+      break;
+    }
+  case Mappable::RELEASE_MAPPABLE:
+    {
+      log_mapper.warning("mapping failed on release");
+      break;
+    }
+  }
+  assert(0 && "mapping failed");
+}
+
+Color PennantMapper::get_task_color_by_region(Task *task, LogicalRegion region)
+{
+  return get_logical_region_color(region);
+}
+
+void create_mappers(Machine *machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+  {
+    runtime->replace_default_mapper(new PennantMapper(machine, runtime, *it), *it);
+  }
+}
+
+void register_mappers()
+{
+  HighLevelRuntime::set_registration_callback(create_mappers);
 }

@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,6 +90,10 @@
 // How many tasks to group together for runtime operations
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
+#endif
+// Default number of leaf directory entries for precise information
+#ifndef DEFAULT_MAX_DIRECTORY_SIZE
+#define DEFAULT_MAX_DIRECTORY_SIZE      64
 #endif
 // Scheduling granularity for how many operations to
 // handle at a time at each stage of the pipeline

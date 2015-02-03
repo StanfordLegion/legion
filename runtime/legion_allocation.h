@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -113,6 +113,7 @@ namespace LegionRuntime {
       TASK_LOCAL_FIELD_ALLOC,
       TASK_INLINE_ALLOC,
       SEMANTIC_INFO_ALLOC,
+      DIRECTORY_ALLOC,
       LAST_ALLOC, // must be last
     };
 

@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -189,7 +189,7 @@ namespace LegionRuntime {
 
       void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
   
-      int operator[](unsigned idx) const { return x[idx]; }
+      int operator[](unsigned idx) const { return x[0]; }
       operator int(void) const { return x[0]; }
   
       static Point<DIM> ZEROES(void)
@@ -313,9 +313,9 @@ namespace LegionRuntime {
         return true;
       }
 
-      int volume(void) const
+      size_t volume(void) const
       {
-	int v = 1;
+	size_t v = 1;
 	for(unsigned i = 0; i < DIM; i++) {
 	  if(lo.x[i] > hi.x[i]) return 0;
 	  v *= (hi.x[i] - lo.x[i] + 1);

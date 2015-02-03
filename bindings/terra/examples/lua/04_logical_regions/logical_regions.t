@@ -70,13 +70,14 @@ function top_level_task(task, reigons, ctx, runtime)
   -- store actual data (covered in a later example).  Here we create
   -- an allocator for our unstructured index space and allocate all of
   -- its points.
-  local allocator = runtime:create_index_allocator(ctx, unstructured_is)
-  local begin = allocator:alloc(1024)
-  assert(not begin:is_null())
-  printf("Allocated elements in unstructured space at ptr_t %d", begin.value)
-  -- When done using the allocator, users should call the 'delete' method
-  -- to reclaim resources the allocator was using.
-  allocator:delete()
+  do
+    local allocator = runtime:create_index_allocator(ctx, unstructured_is)
+    local begin = allocator:alloc(1024)
+    assert(not begin:is_null())
+    printf("Allocated elements in unstructured space at ptr_t %d", begin.value)
+    -- When done using the allocator, users should call the 'delete' method
+    -- to reclaim resources the allocator was using.
+  end
 
   -- For structured index spaces we can always recover the original
   -- domain for an index space from the runtime.
@@ -95,23 +96,22 @@ function top_level_task(task, reigons, ctx, runtime)
   -- allocated in a field space at a time (see 'MAX_FIELDS' at the
   -- top of legion_types.h).  If a program exceeds this maximum then
   -- the Legion runtime will report an error and exit.
-
-  allocator = runtime:create_field_allocator(ctx, fs)
-
-  -- When fields are allocated they must specify the size of the data
-  -- to be stored in the field in bytes.  Users may also optionally
-  -- specify the ID for the field being allocated.  If this is done,
-  -- the user is responsible for ensuring that each field ID is used
-  -- only once for a each field space.  Legion support parallel allocation
-  -- of fields in the same field space, but it will result in undefined
-  -- behavior if two fields are allocated in the same field space at
-  -- the same time with the same user provided ID.
-  local fida = allocator:allocate_field(sizeof(double), FID_FIELD_A)
-  assert(fida == FID_FIELD_A)
-  local fidb = allocator:allocate_field(sizeof(int), FID_FIELD_B)
-  assert(fidb == FID_FIELD_B)
-  printf("Allocated two fields with Field IDs %d and %d", fida, fidb)
-  allocator:delete()
+  do
+    local allocator = runtime:create_field_allocator(ctx, fs)
+    -- When fields are allocated they must specify the size of the data
+    -- to be stored in the field in bytes.  Users may also optionally
+    -- specify the ID for the field being allocated.  If this is done,
+    -- the user is responsible for ensuring that each field ID is used
+    -- only once for a each field space.  Legion support parallel allocation
+    -- of fields in the same field space, but it will result in undefined
+    -- behavior if two fields are allocated in the same field space at
+    -- the same time with the same user provided ID.
+    local fida = allocator:allocate_field(sizeof(double), FID_FIELD_A)
+    assert(fida == FID_FIELD_A)
+    local fidb = allocator:allocate_field(sizeof(int), FID_FIELD_B)
+    assert(fidb == FID_FIELD_B)
+    printf("Allocated two fields with Field IDs %d and %d", fida, fidb)
+  end
 
   -- Logical regions are created by passing an index space and a field
   -- space to the 'create_logical_region' runtime method.  Note that

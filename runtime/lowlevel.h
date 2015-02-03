@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,194 @@ namespace LegionRuntime {
 
     typedef ::legion_lowlevel_id_t IDType;
     typedef ::legion_lowlevel_address_space_t AddressSpace;
+    typedef legion_lowlevel_reduction_op_id_t ReductionOpID;
+
+    typedef int ReductionOpID;
+    class ReductionOpUntyped {
+    public:
+      size_t sizeof_lhs;
+      size_t sizeof_rhs;
+      size_t sizeof_list_entry;
+      bool has_identity;
+      bool is_foldable;
+
+      template <class REDOP>
+	static ReductionOpUntyped *create_reduction_op(void);
+
+      virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
+			 bool exclusive = false) const = 0;
+      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
+				 off_t lhs_stride, off_t rhs_stride, size_t count,
+				 bool exclusive = false) const = 0;
+      virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
+			bool exclusive = false) const = 0;
+      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
+				off_t lhs_stride, off_t rhs_stride, size_t count,
+				bool exclusive = false) const = 0;
+      virtual void init(void *rhs_ptr, size_t count) const = 0;
+
+      virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
+				    off_t ptr_offset, bool exclusive = false) const = 0;
+      virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
+                                    off_t ptr_offset, bool exclusive = false) const = 0;
+      virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const = 0;
+
+    protected:
+      ReductionOpUntyped(size_t _sizeof_lhs, size_t _sizeof_rhs,
+			 size_t _sizeof_list_entry,
+			 bool _has_identity, bool _is_foldable)
+	: sizeof_lhs(_sizeof_lhs), sizeof_rhs(_sizeof_rhs),
+	  sizeof_list_entry(_sizeof_list_entry),
+  	  has_identity(_has_identity), is_foldable(_is_foldable) {}
+    };
+    typedef std::map<ReductionOpID, const ReductionOpUntyped *> ReductionOpTable;
+
+    template <class LHS, class RHS>
+    struct ReductionListEntry {
+      ptr_t ptr;
+      RHS rhs;
+    };
+
+    template <class REDOP>
+    class ReductionOp : public ReductionOpUntyped {
+    public:
+      // TODO: don't assume identity and fold are available - use scary
+      //  template-fu to figure it out
+      ReductionOp(void)
+	: ReductionOpUntyped(sizeof(typename REDOP::LHS), sizeof(typename REDOP::RHS),
+			     sizeof(ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS>),
+			     true, true) {}
+
+      virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
+			 bool exclusive = false) const
+      {
+	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
+	const typename REDOP::RHS *rhs = (const typename REDOP::RHS *)rhs_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template apply<true>(lhs[i], rhs[i]);
+	} else {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template apply<false>(lhs[i], rhs[i]);
+	}
+      }
+
+      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
+				 off_t lhs_stride, off_t rhs_stride, size_t count,
+				 bool exclusive = false) const
+      {
+	char *lhs = (char *)lhs_ptr;
+	const char *rhs = (const char *)rhs_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template apply<true>(*(typename REDOP::LHS *)lhs,
+					*(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	} else {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template apply<false>(*(typename REDOP::LHS *)lhs,
+					 *(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	}
+      }
+
+      virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
+			bool exclusive = false) const
+      {
+	typename REDOP::RHS *rhs1 = (typename REDOP::RHS *)rhs1_ptr;
+	const typename REDOP::RHS *rhs2 = (const typename REDOP::RHS *)rhs2_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template fold<true>(rhs1[i], rhs2[i]);
+	} else {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template fold<false>(rhs1[i], rhs2[i]);
+	}
+      }
+
+      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
+				off_t lhs_stride, off_t rhs_stride, size_t count,
+				bool exclusive = false) const
+      {
+	char *lhs = (char *)lhs_ptr;
+	const char *rhs = (const char *)rhs_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template fold<true>(*(typename REDOP::RHS *)lhs,
+				       *(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	} else {
+	  for(size_t i = 0; i < count; i++) {
+	    REDOP::template fold<false>(*(typename REDOP::RHS *)lhs,
+					*(const typename REDOP::RHS *)rhs);
+	    lhs += lhs_stride;
+	    rhs += rhs_stride;
+	  }
+	}
+      }
+
+      virtual void init(void *ptr, size_t count) const
+      {
+        typename REDOP::RHS *rhs_ptr = (typename REDOP::RHS *)ptr;
+        for (size_t i = 0; i < count; i++)
+          memcpy(rhs_ptr++, &(REDOP::identity), sizeof_rhs);
+      }
+
+      virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
+				    off_t ptr_offset, bool exclusive = false) const
+      {
+	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
+	const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
+	if(exclusive) {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template apply<true>(lhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
+	} else {
+	  for(size_t i = 0; i < count; i++)
+	    REDOP::template apply<false>(lhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
+	}
+      }
+
+      virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
+                                    off_t ptr_offset, bool exclusive = false) const
+      {
+        typename REDOP::RHS *rhs = (typename REDOP::RHS*)rhs_ptr;
+        const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
+        if (exclusive)
+        {
+          for (size_t i = 0; i < count; i++)
+            REDOP::template fold<true>(rhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
+        }
+        else
+        {
+          for (size_t i = 0; i < count; i++)
+            REDOP::template fold<false>(rhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
+        }
+      }
+
+      virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const
+      {
+	const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
+	for(size_t i = 0; i < count; i++) {
+	  ptrs[i] = entry[i].ptr.value;
+	  //printf("%d=%d\n", i, ptrs[i]);
+	}
+      }
+    };
+
+    template <class REDOP>
+    ReductionOpUntyped *ReductionOpUntyped::create_reduction_op(void)
+    {
+      ReductionOp<REDOP> *redop = new ReductionOp<REDOP>();
+      return redop;
+    }
+
+    typedef unsigned int AddressSpace;
 
     class Event {
     public:
@@ -114,14 +302,18 @@ namespace LegionRuntime {
 
       timestamp_t timestamp;
 
-      static Barrier create_barrier(unsigned expected_arrivals);
+      static Barrier create_barrier(unsigned expected_arrivals, ReductionOpID redop_id = 0,
+				    const void *initial_value = 0, size_t initial_value_size = 0);
       void destroy_barrier(void);
 
       Barrier advance_barrier(void) const;
       Barrier alter_arrival_count(int delta) const;
-      Event get_previous_phase(void) const;
+      Barrier get_previous_phase(void) const;
 
-      void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT) const;
+      void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT,
+		  const void *reduce_value = 0, size_t reduce_value_size = 0) const;
+
+      bool get_result(void *value, size_t value_size) const;
     };
 
     class Reservation {
@@ -346,191 +538,6 @@ namespace LegionRuntime {
       static void fold(RHS& rhs1, RHS rhs2);
     };
 #endif
-
-    typedef legion_lowlevel_reduction_op_id_t ReductionOpID;
-    class ReductionOpUntyped {
-    public:
-      size_t sizeof_lhs;
-      size_t sizeof_rhs;
-      size_t sizeof_list_entry;
-      bool has_identity;
-      bool is_foldable;
-
-      template <class REDOP>
-	static ReductionOpUntyped *create_reduction_op(void);
-
-      virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
-			 bool exclusive = false) const = 0;
-      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
-				 off_t lhs_stride, off_t rhs_stride, size_t count,
-				 bool exclusive = false) const = 0;
-      virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
-			bool exclusive = false) const = 0;
-      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
-				off_t lhs_stride, off_t rhs_stride, size_t count,
-				bool exclusive = false) const = 0;
-      virtual void init(void *rhs_ptr, size_t count) const = 0;
-
-      virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
-				    off_t ptr_offset, bool exclusive = false) const = 0;
-      virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
-                                    off_t ptr_offset, bool exclusive = false) const = 0;
-      virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const = 0;
-
-    protected:
-      ReductionOpUntyped(size_t _sizeof_lhs, size_t _sizeof_rhs,
-			 size_t _sizeof_list_entry,
-			 bool _has_identity, bool _is_foldable)
-	: sizeof_lhs(_sizeof_lhs), sizeof_rhs(_sizeof_rhs),
-	  sizeof_list_entry(_sizeof_list_entry),
-  	  has_identity(_has_identity), is_foldable(_is_foldable) {}
-    };
-    typedef std::map<ReductionOpID, const ReductionOpUntyped *> ReductionOpTable;
-
-    template <class LHS, class RHS>
-    struct ReductionListEntry {
-      ptr_t ptr;
-      RHS rhs;
-    };
-
-    template <class REDOP>
-    class ReductionOp : public ReductionOpUntyped {
-    public:
-      // TODO: don't assume identity and fold are available - use scary
-      //  template-fu to figure it out
-      ReductionOp(void)
-	: ReductionOpUntyped(sizeof(typename REDOP::LHS), sizeof(typename REDOP::RHS),
-			     sizeof(ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS>),
-			     true, true) {}
-
-      virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
-			 bool exclusive = false) const
-      {
-	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
-	const typename REDOP::RHS *rhs = (const typename REDOP::RHS *)rhs_ptr;
-	if(exclusive) {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template apply<true>(lhs[i], rhs[i]);
-	} else {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template apply<false>(lhs[i], rhs[i]);
-	}
-      }
-
-      virtual void apply_strided(void *lhs_ptr, const void *rhs_ptr,
-				 off_t lhs_stride, off_t rhs_stride, size_t count,
-				 bool exclusive = false) const
-      {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
-	if(exclusive) {
-	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<true>(*(typename REDOP::LHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
-	  }
-	} else {
-	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<false>(*(typename REDOP::LHS *)lhs,
-					 *(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
-	  }
-	}
-      }
-
-      virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
-			bool exclusive = false) const
-      {
-	typename REDOP::RHS *rhs1 = (typename REDOP::RHS *)rhs1_ptr;
-	const typename REDOP::RHS *rhs2 = (const typename REDOP::RHS *)rhs2_ptr;
-	if(exclusive) {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template fold<true>(rhs1[i], rhs2[i]);
-	} else {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template fold<false>(rhs1[i], rhs2[i]);
-	}
-      }
-
-      virtual void fold_strided(void *lhs_ptr, const void *rhs_ptr,
-				off_t lhs_stride, off_t rhs_stride, size_t count,
-				bool exclusive = false) const
-      {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
-	if(exclusive) {
-	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<true>(*(typename REDOP::RHS *)lhs,
-				       *(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
-	  }
-	} else {
-	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<false>(*(typename REDOP::RHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
-	    lhs += lhs_stride;
-	    rhs += rhs_stride;
-	  }
-	}
-      }
-
-      virtual void init(void *ptr, size_t count) const
-      {
-        typename REDOP::RHS *rhs_ptr = (typename REDOP::RHS *)ptr;
-        for (size_t i = 0; i < count; i++)
-          memcpy(rhs_ptr++, &(REDOP::identity), sizeof_rhs);
-      }
-
-      virtual void apply_list_entry(void *lhs_ptr, const void *entry_ptr, size_t count,
-				    off_t ptr_offset, bool exclusive = false) const
-      {
-	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
-	const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
-	if(exclusive) {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template apply<true>(lhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
-	} else {
-	  for(size_t i = 0; i < count; i++)
-	    REDOP::template apply<false>(lhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
-	}
-      }
-
-      virtual void fold_list_entry(void *rhs_ptr, const void *entry_ptr, size_t count,
-                                    off_t ptr_offset, bool exclusive = false) const
-      {
-        typename REDOP::RHS *rhs = (typename REDOP::RHS*)rhs_ptr;
-        const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
-        if (exclusive)
-        {
-          for (size_t i = 0; i < count; i++)
-            REDOP::template fold<true>(rhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
-        }
-        else
-        {
-          for (size_t i = 0; i < count; i++)
-            REDOP::template fold<false>(rhs[entry[i].ptr.value - ptr_offset], entry[i].rhs);
-        }
-      }
-
-      virtual void get_list_pointers(unsigned *ptrs, const void *entry_ptr, size_t count) const
-      {
-	const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *entry = (const ReductionListEntry<typename REDOP::LHS,typename REDOP::RHS> *)entry_ptr;
-	for(size_t i = 0; i < count; i++) {
-	  ptrs[i] = entry[i].ptr.value;
-	  //printf("%d=%d\n", i, ptrs[i]);
-	}
-      }
-    };
-
-    template <class REDOP>
-    ReductionOpUntyped *ReductionOpUntyped::create_reduction_op(void)
-    {
-      ReductionOp<REDOP> *redop = new ReductionOp<REDOP>();
-      return redop;
-    }
 
     class RegionInstance {
     public:
@@ -919,17 +926,23 @@ namespace LegionRuntime {
 
       LegionRuntime::LowLevel::IndexSpace get_index_space(void) const
       {
-	assert(is_id);
-	IndexSpace is = { static_cast<IDType>(is_id) };
-	return is;
+        if (is_id)
+        {
+          IndexSpace is;
+          is.id = static_cast<IDType>(is_id);
+          return is;
+        }
+        return IndexSpace::NO_SPACE;
       }
 
       LegionRuntime::LowLevel::IndexSpace get_index_space(bool create_if_needed = false)
       {
 	IndexSpace is;
 	if(!is_id) {
-	  assert(create_if_needed);
-	  is_id = IndexSpace::create_index_space(1).id;
+          if (create_if_needed)
+            is_id = IndexSpace::create_index_space(1).id;
+          else
+            return IndexSpace::NO_SPACE;
 	}
 	is.id = is_id;
 	return is;
@@ -977,7 +990,7 @@ namespace LegionRuntime {
 
       int get_dim(void) const { return dim; }
 
-      int get_volume(void) const
+      size_t get_volume(void) const
       {
         switch (dim)
         {

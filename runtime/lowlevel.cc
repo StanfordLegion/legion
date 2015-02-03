@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,16 @@ using namespace LegionRuntime::Accessor;
 #ifdef __SSE2__
 #include <emmintrin.h>
 #endif
+
+// like strdup, but works on arbitrary byte arrays
+static void *bytedup(const void *data, size_t datalen)
+{
+  if(datalen == 0) return 0;
+  void *dst = malloc(datalen);
+  assert(dst != 0);
+  memcpy(dst, data, datalen);
+  return dst;
+}
 
 // Implementation of Detailed Timer
 namespace LegionRuntime {
@@ -100,6 +110,12 @@ namespace LegionRuntime {
       REMOTE_REDLIST_MSGID,
       MACHINE_SHUTDOWN_MSGID,
       BARRIER_ADJUST_MSGID,
+      BARRIER_SUBSCRIBE_MSGID,
+      BARRIER_TRIGGER_MSGID,
+      METADATA_REQUEST_MSGID,
+      METADATA_RESPONSE_MSGID, // should really be a reply
+      METADATA_INVALIDATE_MSGID,
+      METADATA_INVALIDATE_RPLID,
     };
 
 #ifdef EVENT_GRAPH_TRACE
@@ -332,7 +348,7 @@ namespace LegionRuntime {
       RollUpRequestArgs args;
       args.sender = gasnet_mynode();
       args.rollup_ptr = this;
-      for(int i = 0; i < gasnet_nodes(); i++)
+      for(unsigned i = 0; i < gasnet_nodes(); i++)
         if(i != gasnet_mynode())
           RollUpRequestMessage::request(i, args);
 
@@ -580,7 +596,7 @@ namespace LegionRuntime {
       lock.set_local_data(&locked_data);
       valid_mask = 0;
       valid_mask_complete = false;
-      valid_mask_event = Event::NO_EVENT;
+      valid_mask_event = 0;
       gasnet_hsl_init(&valid_mask_mutex);
     }
 
@@ -599,7 +615,7 @@ namespace LegionRuntime {
 		    new ElementMask(*_initial_valid_mask) :
 		    new ElementMask(_num_elmts));
       valid_mask_complete = true;
-      valid_mask_event = Event::NO_EVENT;
+      valid_mask_event = 0;
       gasnet_hsl_init(&valid_mask_mutex);
       if(_frozen) {
 	avail_mask = 0;
@@ -680,20 +696,22 @@ namespace LegionRuntime {
       size_t num_elmts = StaticAccess<IndexSpace::Impl>(this)->num_elmts;
       int valid_mask_owner = -1;
       
+      Event e;
       {
 	AutoHSLLock a(valid_mask_mutex);
 	
 	if(valid_mask != 0) {
 	  // if the mask exists, we've already requested it, so just provide
 	  //  the event that we have
-	  return valid_mask_event;
+	  return (valid_mask_event ? valid_mask_event->current_event() : Event::NO_EVENT);
 	}
 	
 	valid_mask = new ElementMask(num_elmts);
 	valid_mask_owner = ID(me).node(); // a good guess?
 	valid_mask_count = (valid_mask->raw_size() + 2047) >> 11;
 	valid_mask_complete = false;
-	valid_mask_event = Event::Impl::create_event();
+	valid_mask_event = GenEventImpl::create_genevent();
+	e = valid_mask_event->current_event();
       }
       
       ValidMaskRequestArgs args;
@@ -701,7 +719,7 @@ namespace LegionRuntime {
       args.sender = gasnet_mynode();
       ValidMaskRequestMessage::request(valid_mask_owner, args);
 
-      return valid_mask_event;
+      return e;
     }
 
     void handle_valid_mask_request(ValidMaskRequestArgs args)
@@ -765,8 +783,7 @@ namespace LegionRuntime {
       if(trigger) {
 	//printf("triggering " IDFMT "/%d\n",
 	//       r_impl->valid_mask_event.id, r_impl->valid_mask_event.gen);
-	r_impl->valid_mask_event.impl()->trigger(r_impl->valid_mask_event.gen,
-						 gasnet_mynode());
+	r_impl->valid_mask_event->trigger_current();
       }
     }
     
@@ -786,76 +803,426 @@ namespace LegionRuntime {
       IndexSpace::Impl *is_impl;
     };
 
+    ///////////////////////////////////////////////////
+    // Metadata
+
+    Logger::Category log_metadata("metadata");
+
+    MetadataBase::MetadataBase(void)
+      : state(STATE_INVALID), valid_event(0)
+    {}
+
+    MetadataBase::~MetadataBase(void)
+    {}
+
+    void MetadataBase::mark_valid(void)
+    {
+      // don't actually need lock for this
+      assert(!remote_copies); // should not have any valid remote copies if we weren't valid
+      state = STATE_VALID;
+    }
+
+    void MetadataBase::handle_request(int requestor)
+    {
+      // just add the requestor to the list of remote nodes with copies
+      AutoHSLLock a(mutex);
+
+      assert(is_valid());
+      assert(!remote_copies.is_set(requestor));
+      remote_copies.set_bit(requestor);
+    }
+
+    void MetadataBase::handle_response(void)
+    {
+      // update the state, and
+      // if there was an event, we'll trigger it
+      GenEventImpl *to_trigger = 0;
+      {
+	AutoHSLLock a(mutex);
+
+	switch(state) {
+	case STATE_REQUESTED:
+	  {
+	    to_trigger = valid_event;
+	    valid_event = 0;
+	    state = STATE_VALID;
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
+      }
+
+      if(to_trigger)
+	to_trigger->trigger_current();
+    }
+
+    struct MetadataRequestMessage {
+      struct RequestArgs {
+	int node;
+	IDType id;
+      };
+
+      static void handle_request(RequestArgs args)
+      {
+	// switch on different types of objects that can have metadata
+	switch(ID(args.id).type()) {
+	case ID::ID_INSTANCE:
+	  {
+	    RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(args.id);
+	    impl->metadata.handle_request(args.node);
+	    size_t datalen;
+	    void *data = impl->metadata.serialize(datalen);
+	    log_metadata.info("metadata for " IDFMT " requested by %d - %zd bytes",
+			      args.id, args.node, datalen);
+	    send_response(args.node, args.id, data, datalen, PAYLOAD_FREE);
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
+      }
+
+      typedef ActiveMessageShortNoReply<METADATA_REQUEST_MSGID,
+					RequestArgs,
+					handle_request> RequestMessage;
+
+      static void send_request(gasnet_node_t target, IDType id)
+      {
+	RequestArgs args;
+
+	args.node = gasnet_mynode();
+	args.id = id;
+	RequestMessage::request(target, args);
+      }
+
+      struct ResponseArgs : public BaseMedium {
+	IDType id;
+      };
+	
+      static void handle_response(ResponseArgs args, const void *data, size_t datalen)
+      {
+	log_metadata.info("metadata for " IDFMT " received - %zd bytes",
+			  args.id, datalen);
+
+	// switch on different types of objects that can have metadata
+	switch(ID(args.id).type()) {
+	case ID::ID_INSTANCE:
+	  {
+	    RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(args.id);
+	    impl->metadata.deserialize(data, datalen);
+	    impl->metadata.handle_response();
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
+      }
+
+      typedef ActiveMessageMediumNoReply<METADATA_RESPONSE_MSGID,
+					 ResponseArgs,
+					 handle_response> ResponseMessage;
+
+      static void send_response(gasnet_node_t target, IDType id, 
+				const void *data, size_t datalen, int payload_mode)
+      {
+	ResponseArgs args;
+
+	args.id = id;
+
+	ResponseMessage::request(target, args, data, datalen, payload_mode);
+      }
+    };
+
+    Event MetadataBase::request_data(int owner, IDType id)
+    {
+      // early out - valid data need not be re-requested
+      if(state == STATE_VALID) 
+	return Event::NO_EVENT;
+
+      // sanity-check - should never be requesting data from ourselves
+      assert(((unsigned)owner) != gasnet_mynode());
+
+      Event e = Event::NO_EVENT;
+      bool issue_request = false;
+      {
+	AutoHSLLock a(mutex);
+
+	switch(state) {
+	case STATE_VALID:
+	  {
+	    // possible if the data came in between our early out check
+	    // above and our taking of the lock - nothing more to do
+	    break;
+	  }
+
+	case STATE_INVALID: 
+	  {
+	    // if the current state is invalid, we'll need to issue a request
+	    state = STATE_REQUESTED;
+	    valid_event = GenEventImpl::create_genevent();
+	    e = valid_event->current_event();
+	    issue_request = true;
+	    break;
+	  }
+
+	case STATE_REQUESTED:
+	  {
+	    // request has already been issued, but return the event again
+	    assert(valid_event);
+	    e = valid_event->current_event();
+	    break;
+	  }
+
+	case STATE_INVALIDATE:
+	  assert(0 && "requesting metadata we've been told is invalid!");
+
+	case STATE_CLEANUP:
+	  assert(0 && "requesting metadata in CLEANUP state!");
+	}
+      }
+
+      if(issue_request)
+	MetadataRequestMessage::send_request(owner, id);
+
+      return e;
+    }
+
+    void MetadataBase::await_data(bool block /*= true*/)
+    {
+      // early out - valid data means no waiting
+      if(state == STATE_VALID) return;
+
+      // take lock to get event - must have already been requested (we don't have enough
+      //  information to do that now)
+      Event e = Event::NO_EVENT;
+      {
+	AutoHSLLock a(mutex);
+
+	assert(state != STATE_INVALID);
+	if(valid_event)
+	  e = valid_event->current_event();
+      }
+
+      if(!e.has_triggered())
+	e.impl()->external_wait(e.gen); // FIXME
+    }
+
+    class MetadataInvalidateMessage {
+    public:
+      struct RequestArgs {
+	int owner;
+	IDType id;
+      };
+
+      static void handle_request(RequestArgs args)
+      {
+	log_metadata.info("received invalidate request for " IDFMT, args.id);
+
+	//
+	// switch on different types of objects that can have metadata
+	switch(ID(args.id).type()) {
+	case ID::ID_INSTANCE:
+	  {
+	    RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(args.id);
+	    impl->metadata.handle_invalidate();
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
+
+	// ack the request
+	respond(args.owner, args.id);
+      }
+
+      struct ResponseArgs {
+	gasnet_node_t node;
+	IDType id;
+      };
+
+      static void handle_response(ResponseArgs args)
+      {
+	log_metadata.info("received invalidate ack for " IDFMT, args.id);
+
+	// switch on different types of objects that can have metadata
+	switch(ID(args.id).type()) {
+	case ID::ID_INSTANCE:
+	  {
+	    RegionInstance::Impl *impl = Runtime::get_runtime()->get_instance_impl(args.id);
+	    if(impl->metadata.handle_inval_ack(args.node)) {
+	      log_metadata.info("last inval ack received for " IDFMT, args.id);
+	    }
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
+      }
+
+      typedef ActiveMessageShortNoReply<METADATA_INVALIDATE_MSGID,
+					RequestArgs,
+					handle_request> RequestMessage;
+      typedef ActiveMessageShortNoReply<METADATA_INVALIDATE_RPLID,
+					ResponseArgs,
+					handle_response> ResponseMessage;
+      
+      static void request(gasnet_node_t target, IDType id)
+      {
+	RequestArgs args;
+
+	args.owner = gasnet_mynode();
+	args.id = id;
+	RequestMessage::request(target, args);
+      }
+
+      static void respond(gasnet_node_t target, IDType id)
+      {
+	ResponseArgs args;
+
+	args.node = gasnet_mynode();
+	args.id = id;
+	ResponseMessage::request(target, args);
+      }
+    };
+
+    bool MetadataBase::initiate_cleanup(IDType id)
+    {
+      NodeMask invals_to_send;
+      {
+	AutoHSLLock a(mutex);
+
+	assert(state == STATE_VALID);
+
+	if(!remote_copies) {
+	  state = STATE_INVALID;
+	} else {
+	  state = STATE_CLEANUP;
+	  invals_to_send = remote_copies;
+	}
+      }
+
+      // send invalidations outside the locked section
+      if(!invals_to_send)
+	return true;
+
+      for(int node = 0; node < MAX_NUM_NODES; node++)
+	if(invals_to_send.is_set(node)) {
+	  MetadataInvalidateMessage::request(node, id);
+	  invals_to_send.unset_bit(node);
+	  if(!invals_to_send) break;
+	}
+
+      // can't free object until we receive all the acks
+      return false;
+    }
+
+    void MetadataBase::handle_invalidate(void)
+    {
+      AutoHSLLock a(mutex);
+
+      switch(state) {
+      case STATE_VALID: 
+	{
+	  // was valid, now invalid (up to app to make sure no races exist)
+	  state = STATE_INVALID;
+	  break;
+	}
+
+      case STATE_REQUESTED:
+	{
+	  // hopefully rare case where invalidation passes response to initial request
+	  state = STATE_INVALIDATE;
+	  break;
+	}
+
+      default:
+	assert(0);
+      }
+    }
+
+    bool MetadataBase::handle_inval_ack(int sender)
+    {
+      bool last_copy;
+      {
+	AutoHSLLock a(mutex);
+
+	assert(remote_copies.is_set(sender));
+	remote_copies.unset_bit(sender);
+	last_copy = !remote_copies;
+      }
+
+      return last_copy;
+    }
+
+
+    ///////////////////////////////////////////////////
+    // RegionInstance
+
     RegionInstance::Impl::Impl(RegionInstance _me, IndexSpace _is, Memory _memory, off_t _offset, size_t _size, ReductionOpID _redopid,
 			       const DomainLinearization& _linear, size_t _block_size, size_t _elmt_size, const std::vector<size_t>& _field_sizes,
 			       off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/, RegionInstance _parent_inst /*= NO_INST*/)
       : me(_me), memory(_memory)
     {
-      linearization = _linear;
-      linearization.serialize(locked_data.linearization_bits);
+      metadata.linearization = _linear;
 
-      locked_data.block_size = _block_size;
-      locked_data.elmt_size = _elmt_size;
+      metadata.block_size = _block_size;
+      metadata.elmt_size = _elmt_size;
 
-      assert(_field_sizes.size() <= MAX_FIELDS_PER_INST);
-      for(unsigned i = 0; i < _field_sizes.size(); i++)
-	locked_data.field_sizes[i] = _field_sizes[i];
-      if(_field_sizes.size() < MAX_FIELDS_PER_INST)
-	locked_data.field_sizes[_field_sizes.size()] = 0;
+      metadata.field_sizes = _field_sizes;
 
-      locked_data.is = _is;
-      locked_data.alloc_offset = _offset;
-      //locked_data.access_offset = _offset + _adjust;
-      locked_data.size = _size;
+      metadata.is = _is;
+      metadata.alloc_offset = _offset;
+      //metadata.access_offset = _offset + _adjust;
+      metadata.size = _size;
       
       //StaticAccess<IndexSpace::Impl> rdata(_is.impl());
       //locked_data.first_elmt = rdata->first_elmt;
       //locked_data.last_elmt = rdata->last_elmt;
 
-      locked_data.redopid = _redopid;
-      locked_data.count_offset = _count_offset;
-      locked_data.red_list_size = _red_list_size;
-      locked_data.parent_inst = _parent_inst;
+      metadata.redopid = _redopid;
+      metadata.count_offset = _count_offset;
+      metadata.red_list_size = _red_list_size;
+      metadata.parent_inst = _parent_inst;
 
-      locked_data.valid = true;
+      metadata.mark_valid();
 
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
-      lock.set_local_data(&locked_data);
     }
 
     // when we auto-create a remote instance, we don't know region/offset
     RegionInstance::Impl::Impl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory)
     {
-      locked_data.valid = false;
-      locked_data.is = IndexSpace::NO_SPACE;
-      locked_data.alloc_offset = -1;
-      //locked_data.access_offset = -1;
-      locked_data.size = 0;
-      //locked_data.first_elmt = 0;
-      //locked_data.last_elmt = 0;
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
       lock.in_use = true;
-      lock.set_local_data(&locked_data);
     }
 
     RegionInstance::Impl::~Impl(void) {}
 
     // helper function to figure out which field we're in
-    static void find_field_start(const int *field_sizes, off_t byte_offset, size_t size, off_t& field_start, int& field_size)
+    static void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
+				 size_t size, off_t& field_start, int& field_size)
     {
       off_t start = 0;
-      for(unsigned i = 0; i < RegionInstance::Impl::MAX_FIELDS_PER_INST; i++) {
-	assert(field_sizes[i] > 0);
-	if(byte_offset < field_sizes[i]) {
-	  assert((int)(byte_offset + size) <= field_sizes[i]);
+      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
+	  it != field_sizes.end();
+	  it++) {
+	assert((*it) > 0);
+	if(byte_offset < (off_t)(*it)) {
+	  assert((off_t)(byte_offset + size) <= (off_t)(*it));
 	  field_start = start;
-	  field_size = field_sizes[i];
+	  field_size = (*it);
 	  return;
 	}
-	start += field_sizes[i];
-	byte_offset -= field_sizes[i];
+	start += (*it);
+	byte_offset -= (*it);
       }
       assert(0);
     }
@@ -864,20 +1231,22 @@ namespace LegionRuntime {
 						      off_t field_offset)
     {
       Memory::Impl *mem = memory.impl();
-      StaticAccess<RegionInstance::Impl> idata(this);
 
-      off_t offset = idata->alloc_offset;
-      off_t elmt_stride;
+      // must have valid data by now - block if we have to
+      metadata.await_data();
+
+      off_t offset = metadata.alloc_offset;
+      size_t elmt_stride;
       
-      if (idata->block_size == 1) {
+      if (metadata.block_size == 1) {
         offset += field_offset;
-        elmt_stride = idata->elmt_size;
+        elmt_stride = metadata.elmt_size;
       } else {
         off_t field_start;
         int field_size;
-        find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+        find_field_start(metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-        offset += (field_start * idata->block_size) + (field_offset - field_start);
+        offset += (field_start * metadata.block_size) + (field_offset - field_start);
 	elmt_stride = field_size;
       }
 
@@ -887,7 +1256,7 @@ namespace LegionRuntime {
       // if the caller wants a particular stride and we differ (and have more
       //  than one element), fail
       if(stride != 0) {
-        if((stride != elmt_stride) && (idata->size > idata->elmt_size))
+        if((stride != elmt_stride) && (metadata.size > metadata.elmt_size))
           return false;
       } else {
         stride = elmt_stride;
@@ -895,7 +1264,7 @@ namespace LegionRuntime {
 
       // if there's a per-element offset, apply it after we've agreed with the caller on 
       //  what we're pretending the stride is
-      const DomainLinearization& dl = linearization;
+      const DomainLinearization& dl = metadata.linearization;
       if(dl.get_dim() > 0) {
 	// make sure this instance uses a 1-D linearization
 	assert(dl.get_dim() == 1);
@@ -914,6 +1283,61 @@ namespace LegionRuntime {
       return true;
     }
 
+    void *RegionInstance::Impl::Metadata::serialize(size_t& out_size) const
+    {
+      // figure out how much space we need
+      out_size = (sizeof(IndexSpace) +
+		  sizeof(off_t) +
+		  sizeof(size_t) +
+		  sizeof(ReductionOpID) +
+		  sizeof(off_t) +
+		  sizeof(off_t) +
+		  sizeof(size_t) +
+		  sizeof(size_t) +
+		  sizeof(size_t) + (field_sizes.size() * sizeof(size_t)) +
+		  sizeof(RegionInstance) +
+		  (MAX_LINEARIZATION_LEN * sizeof(int)));
+      void *data = malloc(out_size);
+      char *pos = (char *)data;
+#define S(val) do { memcpy(pos, &(val), sizeof(val)); pos += sizeof(val); } while(0)
+      S(is);
+      S(alloc_offset);
+      S(size);
+      S(redopid);
+      S(count_offset);
+      S(red_list_size);
+      S(block_size);
+      S(elmt_size);
+      size_t l = field_sizes.size();
+      S(l);
+      for(size_t i = 0; i < l; i++) S(field_sizes[i]);
+      S(parent_inst);
+      linearization.serialize((int *)pos);
+#undef S
+      return data;
+    }
+
+    void RegionInstance::Impl::Metadata::deserialize(const void *in_data, size_t in_size)
+    {
+      const char *pos = (const char *)in_data;
+#define S(val) do { memcpy(&(val), pos, sizeof(val)); pos += sizeof(val); } while(0)
+      S(is);
+      S(alloc_offset);
+      S(size);
+      S(redopid);
+      S(count_offset);
+      S(red_list_size);
+      S(block_size);
+      S(elmt_size);
+      size_t l;
+      S(l);
+      field_sizes.resize(l);
+      for(size_t i = 0; i < l; i++) S(field_sizes[i]);
+      S(parent_inst);
+      linearization.deserialize((const int *)pos);
+#undef S
+    }
+
     AddressSpace RegionInstance::address_space(void) const
     {
       return ID(id).node();
@@ -930,25 +1354,21 @@ namespace LegionRuntime {
     ///*static*/ Event::Impl *Event::Impl::first_free = 0;
     ///*static*/ gasnet_hsl_t Event::Impl::freelist_mutex = GASNET_HSL_INITIALIZER;
 
-    Event::Impl::Impl(void)
+    GenEventImpl::GenEventImpl(void)
+      : me((IDType)-1), owner(-1)
     {
-      Event bad = { -1, -1 };
-      init(bad, -1); 
+      generation = 0;
+      gen_subscribed = 0;
+      next_free = 0;
     }
 
-    void Event::Impl::init(Event _me, unsigned _init_owner)
+    void GenEventImpl::init(ID _me, unsigned _init_owner)
     {
       me = _me;
       owner = _init_owner;
       generation = 0;
       gen_subscribed = 0;
-      free_generation = 0;
       next_free = 0;
-      mutex = new gasnet_hsl_t;
-      //printf("[%d] MUTEX INIT %p\n", gasnet_mynode(), mutex);
-      gasnet_hsl_init(mutex);
-      remote_waiters.clear();
-      base_arrival_count = current_arrival_count = 0;
     }
 
     struct EventSubscribeArgs {
@@ -976,12 +1396,13 @@ namespace LegionRuntime {
 
     static Logger::Category log_event("event");
 
+    // only called for generational events
     void handle_event_subscribe(EventSubscribeArgs args)
     {
       log_event(LEVEL_DEBUG, "event subscription: node=%d event=" IDFMT "/%d",
 		args.node, args.event.id, args.event.gen);
 
-      Event::Impl *impl = args.event.impl();
+      GenEventImpl *impl = Runtime::get_runtime()->get_genevent_impl(args.event);
 
 #ifdef EVENT_TRACING
       {
@@ -1008,7 +1429,7 @@ namespace LegionRuntime {
 
       {
 	AutoHSLLock a(impl->mutex);
-        // first trigger any generations which are below are current generation
+        // first trigger any generations which are below our current generation
         if(impl->generation > (args.previous_subscribe_gen)) {
           log_event(LEVEL_DEBUG, "event subscription already done: node=%d event=" IDFMT "/%d (<= %d)",
 		    args.node, args.event.id, args.event.gen, impl->generation);
@@ -1018,67 +1439,101 @@ namespace LegionRuntime {
 	  trigger_args.event.gen = impl->generation;
 	  EventTriggerMessage::request(args.node, trigger_args);
         }
-        NodeMask waiter_mask;
-        waiter_mask.set_bit(args.node);
-        // now register any remote waiters
-        for (Event::gen_t wait_gen = impl->generation+1;
-              wait_gen <= args.event.gen; wait_gen++) {
-          // nope - needed generation hasn't happened yet, so add this node to
-	  //  the mask
+
+	// if the subscriber is asking about a generation that JUST triggered, the above trigger message
+	//  is all we needed to do
+	if(args.event.gen > impl->generation) {
+	  // barrier logic is now separated, so we should never hear about an event generate beyond the one
+	  //  that will trigger next
+	  assert(args.event.gen <= (impl->generation + 1));
+
+	  impl->remote_waiters.set_bit(args.node);
 	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=" IDFMT "/%d (> %d)",
-		    args.node, args.event.id, wait_gen, impl->generation);
-	  //impl->remote_waiters |= (1ULL << args.node);
-          std::map<Event::gen_t,NodeMask>::iterator finder =
-            impl->remote_waiters.find(wait_gen);
-          if (finder == impl->remote_waiters.end()) {
-            impl->remote_waiters[wait_gen] = waiter_mask;
-          }
-          else
-            finder->second.set_bit(args.node);
-        }
+		    args.node, args.event.id, args.event.gen, impl->generation);
+	}
       }
     }
 
     void show_event_waiters(FILE *f = stdout)
     {
       fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
-      for(int i = 0; i < gasnet_nodes(); i++) {
+      for(unsigned i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &Runtime::runtime->nodes[i];
         // Iterate over all the events and get their implementations
         for (unsigned long j = 0; j < n->events.max_entries(); j++) {
           if (!n->events.has_entry(j))
             continue;
-	  Event::Impl *e = n->events.lookup_entry(j, i/*node*/);
+	  GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	  if(e->local_waiters.empty() && !e->remote_waiters)
 	    continue;
 
           fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-		  e->me.id, e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(), e->remote_waiters.size());
-	  for(std::map<Event::gen_t, std::vector<Event::Impl::EventWaiter *> >::iterator it = e->local_waiters.begin();
+		  e->me.id(), e->generation, e->gen_subscribed, 
+		  e->local_waiters.size(), (size_t)(e->remote_waiters.pop_count()));
+	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
 	      it != e->local_waiters.end();
 	      it++) {
-	    for(std::vector<Event::Impl::EventWaiter *>::iterator it2 = it->second.begin();
-		it2 != it->second.end();
-		it2++) {
-	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
-	      (*it2)->print_info(f);
-	    }
+	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
+	      (*it)->print_info(f);
 	  }
-	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
-	      it != e->remote_waiters.end();
-	      it++) {
-	    fprintf(f, "  [%d] R:", it->first);
-	    for(int k = 0; k < MAX_NUM_NODES; k++)
-	      if(it->second.is_set(k))
-		fprintf(f, " %d", k);
-	    fprintf(f, "\n");
-	  }
+	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+	  //     it != e->remote_waiters.end();
+	  //     it++) {
+	  //   fprintf(f, "  [%d] R:", it->first);
+	  //   for(int k = 0; k < MAX_NUM_NODES; k++)
+	  //     if(it->second.is_set(k))
+	  // 	fprintf(f, " %d", k);
+	  //   fprintf(f, "\n");
+	  // }
 	}
       }
+
+      // TODO - pending barriers
+#if 0
+      // // convert from events to barriers
+      // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      // for(int i = 0; i < gasnet_nodes(); i++) {
+      // 	Node *n = &Runtime::runtime->nodes[i];
+      //   // Iterate over all the events and get their implementations
+      //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+      //     if (!n->events.has_entry(j))
+      //       continue;
+      // 	  Event::Impl *e = n->events.lookup_entry(j, i/*node*/);
+      // 	  AutoHSLLock a2(e->mutex);
+
+      // 	  // print anything with either local or remote waiters
+      // 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+      // 	    continue;
+
+      //     fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
+      // 		  e->me.id, e->generation, e->gen_subscribed, 
+      // 		  e->local_waiters.size(), e->remote_waiters.size());
+      // 	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = e->local_waiters.begin();
+      // 	      it != e->local_waiters.end();
+      // 	      it++) {
+      // 	    for(std::vector<EventWaiter *>::iterator it2 = it->second.begin();
+      // 		it2 != it->second.end();
+      // 		it2++) {
+      // 	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
+      // 	      (*it2)->print_info(f);
+      // 	    }
+      // 	  }
+      // 	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+      // 	      it != e->remote_waiters.end();
+      // 	      it++) {
+      // 	    fprintf(f, "  [%d] R:", it->first);
+      // 	    for(int k = 0; k < MAX_NUM_NODES; k++)
+      // 	      if(it->second.is_set(k))
+      // 		fprintf(f, " %d", k);
+      // 	    fprintf(f, "\n");
+      // 	  }
+      // 	}
+      // }
+#endif
+
       fprintf(f,"DONE\n");
       fflush(f);
     }
@@ -1088,13 +1543,14 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_event(LEVEL_DEBUG, "Remote trigger of event " IDFMT "/%d from node %d!",
 		args.event.id, args.event.gen, args.node);
-      args.event.impl()->trigger(args.event.gen, args.node);
+      GenEventImpl *impl = Runtime::get_runtime()->get_genevent_impl(args.event);
+      impl->trigger(args.event.gen, args.node);
     }
 
     /*static*/ const Event Event::NO_EVENT = { 0, 0 };
-    // Take this you POS C++ type system
+    // Take this you POS c++ type system
     /* static */ const UserEvent UserEvent::NO_USER_EVENT = 
-          *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
+      *(static_cast<UserEvent*>(const_cast<Event*>(&Event::NO_EVENT)));
     Event::Impl *Event::impl(void) const
     {
       return Runtime::runtime->get_event_impl(*this);
@@ -1110,42 +1566,24 @@ namespace LegionRuntime {
 
 
     // Perform our merging events in a lock free way
-#define LOCK_FREE_MERGED_EVENTS
-    class EventMerger : public Event::Impl::EventWaiter {
+    class EventMerger : public EventWaiter {
     public:
-      EventMerger(Event _finish_event)
+      EventMerger(GenEventImpl *_finish_event)
 	: count_needed(1), finish_event(_finish_event)
       {
-#ifndef LOCK_FREE_MERGED_EVENTS
-	gasnet_hsl_init(&mutex);
-#endif
       }
 
       virtual ~EventMerger(void)
       {
-#ifndef LOCK_FREE_MERGED_EVENTS
-        gasnet_hsl_destroy(&mutex);
-#endif
       }
 
       void add_event(Event wait_for)
       {
 	if(wait_for.has_triggered()) return; // early out
-	{
-#ifdef LOCK_FREE_MERGED_EVENTS
-          __sync_fetch_and_add(&count_needed, 1);
-#else
-	  // step 1: increment our count first - we can't hold the lock while
-	  //   we add a listener to the 'wait_for' event (since it might trigger
-	  //   instantly and call our count-decrementing function), and we
-	  //   need to make sure all increments happen before corresponding
-	  //   decrements
-	  AutoHSLLock a(mutex);
-	  count_needed++;
-#endif
-	}
+        // Increment the count and then add ourselves
+        __sync_fetch_and_add(&count_needed, 1);
 	// step 2: enqueue ourselves on the input event
-	wait_for.impl()->add_waiter(wait_for, this);
+	wait_for.impl()->add_waiter(wait_for.gen, this);
       }
 
       // arms the merged event once you're done adding input events - just
@@ -1160,35 +1598,22 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void)
       {
-	bool last_trigger = false;
-#ifdef LOCK_FREE_MERGED_EVENTS
-	unsigned count_left = __sync_fetch_and_add(&count_needed, -1);
-	log_event(LEVEL_INFO, "recevied trigger merged event " IDFMT "/%d (%d)",
-		  finish_event.id, finish_event.gen, count_left);
-	last_trigger = (count_left == 1);
-#else
-	{
-	  AutoHSLLock a(mutex);
-	  log_event(LEVEL_INFO, "recevied trigger merged event " IDFMT "/%d (%d)",
-		    finish_event.id, finish_event.gen, count_needed);
-	  count_needed--;
-	  if(count_needed == 0) last_trigger = true;
-	}
-#endif
-	// actually do triggering outside of lock (maybe not necessary, but
-	//  feels safer :)
-	//	if(last_trigger)
-	//	  finish_event.impl()->trigger(finish_event.gen, gasnet_mynode());
+	// save ID and generation because we can't reference finish_event after the
+	// decrement (unless last_trigger ends up being true)
+	IDType id = finish_event->me.id();
+	Event::gen_t gen = finish_event->generation;
+
+	int count_left = __sync_fetch_and_add(&count_needed, -1);
+
+        // Put the logging first to avoid segfaults
+        log_event(LEVEL_INFO, "received trigger merged event " IDFMT "/%d (%d)",
+		  id, gen, count_left);
+
+	// count is the value before the decrement, so it was 1, it's now 0
+	bool last_trigger = (count_left == 1);
+
 	if(last_trigger) {
-	  Event::Impl *i;
-	  {
-	    //TimeStamp ts("foo5", true);
-	    i = finish_event.impl();
-	  }
-	  {
-	    //TimeStamp ts("foo6", true);
-	    i->trigger(finish_event.gen, gasnet_mynode());
-	  }
+	  finish_event->trigger_current();
 	}
 
         // caller can delete us if this was the last trigger
@@ -1197,19 +1622,16 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event.id, finish_event.gen);
+	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event->me.id(), finish_event->generation);
       }
 
     protected:
-      unsigned count_needed;
-      Event finish_event;
-#ifndef LOCK_FREE_MERGED_EVENTS
-      gasnet_hsl_t mutex;
-#endif
+      int count_needed;
+      GenEventImpl *finish_event;
     };
 
     // creates an event that won't trigger until all input events have
-    /*static*/ Event Event::Impl::merge_events(const std::set<Event>& wait_for)
+    /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for)
     {
       if (wait_for.empty())
         return Event::NO_EVENT;
@@ -1238,18 +1660,22 @@ namespace LegionRuntime {
         return *(wait_for.begin());
 #endif
       // counts of 2+ require building a new event and a merger to trigger it
-      Event finish_event = Event::Impl::create_event();
+      GenEventImpl *finish_event = GenEventImpl::create_genevent();
       EventMerger *m = new EventMerger(finish_event);
+
+      // get the Event for this GenEventImpl before any triggers can occur
+      Event e = finish_event->current_event();
+
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
-                          finish_event.id, finish_event.gen, wait_for.size());
+			   e.id, e.gen, wait_for.size());
 #endif
 
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
 	log_event(LEVEL_INFO, "merged event " IDFMT "/%d waiting for " IDFMT "/%d",
-		  finish_event.id, finish_event.gen, (*it).id, (*it).gen);
+		  finish_event->me.id(), finish_event->generation, (*it).id, (*it).gen);
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
@@ -1262,12 +1688,12 @@ namespace LegionRuntime {
       if(m->arm())
         delete m;
 
-      return finish_event;
+      return e;
     }
 
-    /*static*/ Event Event::Impl::merge_events(Event ev1, Event ev2,
-					       Event ev3 /*= NO_EVENT*/, Event ev4 /*= NO_EVENT*/,
-					       Event ev5 /*= NO_EVENT*/, Event ev6 /*= NO_EVENT*/)
+    /*static*/ Event GenEventImpl::merge_events(Event ev1, Event ev2,
+						Event ev3 /*= NO_EVENT*/, Event ev4 /*= NO_EVENT*/,
+						Event ev5 /*= NO_EVENT*/, Event ev6 /*= NO_EVENT*/)
     {
       // scan through events to see how many exist/haven't fired - we're
       //  interested in counts of 0, 1, or 2+ - also remember the first
@@ -1308,8 +1734,11 @@ namespace LegionRuntime {
 #endif
 
       // counts of 2+ require building a new event and a merger to trigger it
-      Event finish_event = Event::Impl::create_event();
+      GenEventImpl *finish_event = GenEventImpl::create_genevent();
       EventMerger *m = new EventMerger(finish_event);
+
+      // get the Event for this GenEventImpl before any triggers can occur
+      Event e = finish_event->current_event();
 
       m->add_event(ev1);
       m->add_event(ev2);
@@ -1345,14 +1774,14 @@ namespace LegionRuntime {
       if(m->arm())
         delete m;
 
-      return finish_event;
+      return e;
     }
 
     // creates an event that won't trigger until all input events have
     /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      return Event::Impl::merge_events(wait_for);
+      return GenEventImpl::merge_events(wait_for);
     }
 
     /*static*/ Event Event::merge_events(Event ev1, Event ev2,
@@ -1360,13 +1789,13 @@ namespace LegionRuntime {
 					 Event ev5 /*= NO_EVENT*/, Event ev6 /*= NO_EVENT*/)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      return Event::Impl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
+      return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
     }
 
     /*static*/ UserEvent UserEvent::create_user_event(void)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      Event e = Event::Impl::create_event();
+      Event e = GenEventImpl::create_genevent()->current_event();
       assert(e.id != 0);
       UserEvent u;
       u.id = e.id;
@@ -1377,6 +1806,8 @@ namespace LegionRuntime {
     void UserEvent::trigger(Event wait_on) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+      GenEventImpl *e = Runtime::get_runtime()->get_genevent_impl(*this);
 #ifdef EVENT_GRAPH_TRACE
       Event enclosing = find_enclosing_termination_event();
       log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
@@ -1384,131 +1815,62 @@ namespace LegionRuntime {
                             id, gen, wait_on.id, wait_on.gen,
                             enclosing.id, enclosing.gen);
 #endif
-      impl()->trigger(gen, gasnet_mynode(), wait_on);
-      //Runtime::get_runtime()->get_event_impl(*this)->trigger();
+      e->trigger(gen, gasnet_mynode(), wait_on);
     }
 
-    /*static*/ Event Event::Impl::create_event(void)
+    /*static*/ GenEventImpl *GenEventImpl::create_genevent(void)
     {
-      Event::Impl *impl = Runtime::runtime->local_event_free_list->alloc_entry();
+      GenEventImpl *impl = Runtime::runtime->local_event_free_list->alloc_entry();
       assert(impl);
       assert(ID(impl->me).type() == ID::ID_EVENT);
-      if(impl) {
-	assert(impl->generation == impl->free_generation);
-	impl->free_generation++; // normal events are one-shot
-	Event ev = impl->me;
-	ev.gen = impl->generation + 1;
-	//printf("REUSE EVENT %x/%d\n", ev.id, ev.gen);
-	log_event.info("event created: event=" IDFMT "/%d", ev.id, ev.gen);
-#ifdef EVENT_TRACING
-        {
-          EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-          item.event_id = ev.id;
-          item.event_gen = ev.gen;
-          item.action = EventTraceItem::ACT_CREATE;
-        }
-#endif
-	return ev;
-      }
-      assert(false);
-      return Event::NO_EVENT;
-#if 0
-      
-      //DetailedTimer::ScopedPush sp(17);
-      // see if the freelist has an event we can reuse
-      Event::Impl *impl = 0;
-      {
-	AutoHSLLock al(&freelist_mutex);
-	if(first_free) {
-	  impl = first_free;
-	  first_free = impl->next_free;
-	}
-      }
-      if(impl) {
-	assert(impl->generation == impl->free_generation);
-	impl->free_generation++; // normal events are one-shot
-	Event ev = impl->me;
-	ev.gen = impl->generation + 1;
-	//printf("REUSE EVENT " IDFMT "/%d\n", ev.id, ev.gen);
-	log_event(LEVEL_SPEW, "event reused: event=" IDFMT "/%d", ev.id, ev.gen);
-#ifdef EVENT_TRACING
-        {
-          EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-          item.event_id = ev.id;
-          item.event_gen = ev.gen;
-          item.action = EventTraceItem::ACT_CREATE;
-        }
-#endif
-	return ev;
-      }
 
-      // TODO: figure out if it's safe to iterate over a vector that is
-      //  being resized?
-      AutoHSLLock a(Runtime::runtime->nodes[gasnet_mynode()].mutex);
-
-      std::vector<Event::Impl>& events = Runtime::runtime->nodes[gasnet_mynode()].events;
-
-#ifdef SCAN_FOR_FREE_EVENTS
-      // try to find an event we can reuse
-      for(std::vector<Event::Impl>::iterator it = events.begin();
-	  it != events.end();
-	  it++) {
-	// check the owner and in_use without taking the lock - conservative check
-	if((*it).in_use || ((*it).owner != gasnet_mynode())) continue;
-
-	// now take the lock and make sure it really isn't in use
-	AutoHSLLock a((*it).mutex);
-	if(!(*it).in_use && ((*it).owner == gasnet_mynode())) {
-	  // now we really have the event
-	  (*it).in_use = true;
-	  Event ev = (*it).me;
-	  ev.gen = (*it).generation + 1;
-	  //printf("REUSE EVENT " IDFMT "/%d\n", ev.id, ev.gen);
-	  log_event(LEVEL_SPEW, "event reused: event=" IDFMT "/%d", ev.id, ev.gen);
-#ifdef EVENT_TRACING
-          {
-	    EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-            item.event_id = ev.id;
-            item.event_gen = ev.gen;
-            item.action = EventTraceItem::ACT_CREATE;
-          }
-#endif
-	  return ev;
-	}
-      }
-#endif
-
-      // couldn't reuse an event - make a new one
-      // TODO: take a lock here!?
-      unsigned index = events.size();
-      assert((index+1) < MAX_LOCAL_EVENTS);
-      events.resize(index + 1);
-      Event ev = ID(ID::ID_EVENT, gasnet_mynode(), index).convert<Event>();
-      events[index].init(ev, gasnet_mynode());
-      events[index].free_generation++; // this event will be available after this generation
-      Runtime::runtime->nodes[gasnet_mynode()].num_events = index + 1;
-      ev.gen = 1; // waiting for first generation of this new event
-      //printf("NEW EVENT " IDFMT "/%d\n", ev.id, ev.gen);
-      log_event(LEVEL_SPEW, "event created: event=" IDFMT "/%d", ev.id, ev.gen);
+      log_event.info("event created: event=" IDFMT "/%d", impl->me.id(), impl->generation+1);
 #ifdef EVENT_TRACING
       {
-        EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = ev.id;
-        item.event_gen = ev.gen;
-        item.action = EventTraceItem::ACT_CREATE;
+	EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
+	item.event_id = impl->me.id();
+	item.event_gen = impl->me.gen;
+	item.action = EventTraceItem::ACT_CREATE;
       }
 #endif
-      return ev;
-#endif
+      return impl;
+    }
+    
+    void GenEventImpl::check_for_catchup(Event::gen_t implied_trigger_gen)
+    {
+      // early out before we take a lock
+      if(implied_trigger_gen <= generation) return;
+
+      // now take a lock and see if we really need to catch up
+      std::vector<EventWaiter *> stale_waiters;
+      {
+	AutoHSLLock a(mutex);
+
+	if(implied_trigger_gen > generation) {
+	  assert(owner != gasnet_mynode());  // cannot be a local event
+
+	  log_event.info("event catchup: " IDFMT "/%d -> %d",
+			 me.id(), generation, implied_trigger_gen);
+	  generation = implied_trigger_gen;
+	  stale_waiters.swap(local_waiters);  // we'll actually notify them below
+	}
+      }
+
+      if(!stale_waiters.empty()) {
+	for(std::vector<EventWaiter *>::iterator it = stale_waiters.begin();
+	    it != stale_waiters.end();
+	    it++)
+	  (*it)->event_triggered();
+      }
     }
 
-    void Event::Impl::add_waiter(Event event, EventWaiter *waiter, bool pre_subscribed /*= false*/)
+    bool GenEventImpl::add_waiter(Event::gen_t needed_gen, EventWaiter *waiter)
     {
 #ifdef EVENT_TRACING
       {
         EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
-        item.event_id = event.id;
-        item.event_gen = event.gen;
+        item.event_id = me->id;
+        item.event_gen = needed_gen;
         item.action = EventTraceItem::ACT_WAIT;
       }
 #endif
@@ -1516,33 +1878,35 @@ namespace LegionRuntime {
 
       int subscribe_owner = -1;
       EventSubscribeArgs args;
-
       {
 	AutoHSLLock a(mutex);
 
-	if(event.gen > generation) {
+	if(needed_gen > generation) {
 	  log_event(LEVEL_DEBUG, "event not ready: event=" IDFMT "/%d owner=%d gen=%d subscr=%d",
-		    event.id, event.gen, owner, generation, gen_subscribed);
-	  // we haven't triggered the needed generation yet - add to list of
-	  //  waiters, and subscribe if we're not the owner
-	  local_waiters[event.gen].push_back(waiter);
-	  //printf("LOCAL WAITERS CHECK: %zd\n", local_waiters.size());
+		    me.id(), needed_gen, owner, generation, gen_subscribed);
 
-	  if((owner != gasnet_mynode()) && (event.gen > gen_subscribed)) {
-	    args.node = gasnet_mynode();
-	    args.event = event;
-            args.previous_subscribe_gen = 
-              (gen_subscribed > generation ? gen_subscribed : generation);
+	  // catchup code for remote events has been moved to get_genevent_impl, so
+	  //  we should never be asking for a stale version here
+	  assert(needed_gen == (generation + 1));
+
+	  // do we need to subscribe?
+	  if((owner != gasnet_mynode()) && (gen_subscribed < needed_gen)) {
+	    gen_subscribed = needed_gen;
 	    subscribe_owner = owner;
-	    gen_subscribed = event.gen;
+	    args.node = gasnet_mynode();
+	    args.event = me.convert<Event>();
+	    args.event.gen = needed_gen;
 	  }
+
+	  // now we add to the local waiter list
+	  local_waiters.push_back(waiter);
 	} else {
 	  // event we are interested in has already triggered!
 	  trigger_now = true; // actually do trigger outside of mutex
 	}
       }
 
-      if((subscribe_owner != -1) && !pre_subscribed)
+      if((subscribe_owner != -1))
 	EventSubscribeMessage::request(owner, args);
 
       if(trigger_now) {
@@ -1550,9 +1914,11 @@ namespace LegionRuntime {
         if(nuke)
           delete waiter;
       }
+
+      return true;  // waiter is always either enqueued or triggered right now
     }
 
-    bool Event::Impl::has_triggered(Event::gen_t needed_gen) volatile
+    bool GenEventImpl::has_triggered(Event::gen_t needed_gen)
     {
 #ifdef EVENT_TRACING
       {
@@ -1565,41 +1931,39 @@ namespace LegionRuntime {
       return (needed_gen <= generation);
     }
 
-    class PthreadCondWaiter : public Event::Impl::EventWaiter {
+    class PthreadCondWaiter : public EventWaiter {
     public:
-      PthreadCondWaiter(Event::Impl *i)
-        : impl(i)
+      PthreadCondWaiter(GASNetCondVar &_cv)
+        : cv(_cv)
       {
-        gasnett_cond_init(&cond);
       }
       virtual ~PthreadCondWaiter(void) 
       {
-        gasnett_cond_destroy(&cond);
       }
 
       virtual bool event_triggered(void)
       {
         // Need to hold the lock to avoid the race
-        AutoHSLLock(impl->mutex);
-        gasnett_cond_signal(&cond);
+        AutoHSLLock(cv.mutex);
+	cv.signal();
         // we're allocated on caller's stack, so deleting would be bad
         return false;
       }
       virtual void print_info(FILE *f) { fprintf(f,"external waiter\n"); }
 
     public:
-      gasnett_cond_t cond;
-      Event::Impl *impl;
+      GASNetCondVar &cv;
     };
 
-    void Event::Impl::external_wait(Event::gen_t gen_needed)
+    void GenEventImpl::external_wait(Event::gen_t gen_needed)
     {
-      PthreadCondWaiter w(this);
+      GASNetCondVar cv(mutex);
+      PthreadCondWaiter w(cv);
       {
 	AutoHSLLock a(mutex);
 
 	if(gen_needed > generation) {
-	  local_waiters[gen_needed].push_back(&w);
+	  local_waiters.push_back(&w);
     
 	  if((owner != gasnet_mynode()) && (gen_needed > gen_subscribed)) {
 	    printf("AAAH!  Can't subscribe to another node's event in external_wait()!\n");
@@ -1607,14 +1971,14 @@ namespace LegionRuntime {
 	  }
 
 	  // now just sleep on the condition variable - hope we wake up
-          gasnett_cond_wait(&w.cond, &mutex->lock);
+	  cv.wait();
 	}
       }
     }
 
-    class DeferredEventTrigger : public Event::Impl::EventWaiter {
+    class DeferredEventTrigger : public EventWaiter {
     public:
-      DeferredEventTrigger(Event _after_event)
+      DeferredEventTrigger(GenEventImpl *_after_event)
 	: after_event(_after_event)
       {}
 
@@ -1622,37 +1986,40 @@ namespace LegionRuntime {
 
       virtual bool event_triggered(void)
       {
-	log_event.info("deferred trigger occuring: " IDFMT "/%d", after_event.id, after_event.gen);
-	after_event.impl()->trigger(after_event.gen, gasnet_mynode(), Event::NO_EVENT);
+	log_event.info("deferred trigger occuring: " IDFMT "/%d", after_event->me.id(), after_event->generation+1);
+	after_event->trigger_current();
         return true;
       }
 
       virtual void print_info(FILE *f)
       {
 	fprintf(f,"deferred trigger: after=" IDFMT "/%d\n",
-	       after_event.id, after_event.gen);
+		after_event->me.id(), after_event->generation+1);
       }
 
     protected:
-      Event after_event;
+      GenEventImpl *after_event;
     };
 
-    void Event::Impl::trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on)
+    void GenEventImpl::trigger_current(void)
+    {
+      // wrapper triggers the next generation on the current node
+      trigger(generation + 1, gasnet_mynode());
+    }
+
+    void GenEventImpl::trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on)
     {
       if(!wait_on.has_triggered()) {
 	// deferred trigger
 	// TODO: forward the deferred trigger to the owning node if it's remote
-	Event after_event;
-	after_event.id = me.id;
-	after_event.gen = gen_triggered;
-	log_event.info("deferring event trigger: in=" IDFMT "/%d out=" IDFMT "/%d\n",
-		       wait_on.id, wait_on.gen, me.id, gen_triggered);
-	wait_on.impl()->add_waiter(wait_on, new DeferredEventTrigger(after_event));
+	log_event.info("deferring event trigger: in=" IDFMT "/%d out=" IDFMT "/%d",
+		       wait_on.id, wait_on.gen, me.id(), gen_triggered);
+	wait_on.impl()->add_waiter(wait_on.gen, new DeferredEventTrigger(this));
 	return;
       }
 
       log_event(LEVEL_SPEW, "event triggered: event=" IDFMT "/%d by node %d", 
-		me.id, gen_triggered, trigger_node);
+		me.id(), gen_triggered, trigger_node);
 #ifdef EVENT_TRACING
       {
         EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1661,34 +2028,27 @@ namespace LegionRuntime {
         item.action = EventTraceItem::ACT_TRIGGER;
       }
 #endif
-      //printf("[%d] TRIGGER " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
-      std::deque<EventWaiter *> to_wake;
-      bool release_event = false;
-      {
-	//TimeStamp ts("foo", true);
-	//printf("[%d] TRIGGER MUTEX IN " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
-	AutoHSLLock a(mutex);
-	//printf("[%d] TRIGGER MUTEX HOLD " IDFMT "/%d\n", gasnet_mynode(), me.id, gen_triggered);
 
-	//printf("[%d] TRIGGER GEN: " IDFMT "/%d->%d\n", gasnet_mynode(), me.id, generation, gen_triggered);
-	// SJT: there is at least one unavoidable case where we'll receive
+      std::vector<EventWaiter *> to_wake;
+      {
+	AutoHSLLock a(mutex);
+
+        // SJT: there is at least one unavoidable case where we'll receive
 	//  duplicate trigger notifications, so if we see a triggering of
 	//  an older generation, just ignore it
 	if(gen_triggered <= generation) return;
-	//assert(gen_triggered > generation);
-	generation = gen_triggered;
-	// if the generation is caught up to the "free generation", we can release the event
-	if(generation == free_generation)
-	  release_event = true;
 
+	// in preparation for switching everybody over to trigger_current(), complain
+	//  LOUDLY if this wouldn't actually be a triggering of the current generation
+	if(gen_triggered != (generation + 1))
+	  log_event.error("HELP!  non-current event generation being triggered: " IDFMT "/%d vs %d",
+			  me.id(), gen_triggered, generation + 1);
+
+        generation = gen_triggered;
+
+	// grab whole list of local waiters - we'll trigger them once we let go of the lock
 	//printf("[%d] LOCAL WAITERS: %zd\n", gasnet_mynode(), local_waiters.size());
-	std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = local_waiters.begin();
-	while((it != local_waiters.end()) && (it->first <= gen_triggered)) {
-	  //printf("[%d] LOCAL WAIT: %d (%zd)\n", gasnet_mynode(), it->first, it->second.size());
-	  to_wake.insert(to_wake.end(), it->second.begin(), it->second.end());
-	  local_waiters.erase(it);
-	  it = local_waiters.begin();
-	}
+	to_wake.swap(local_waiters);
 
 	// notify remote waiters and/or event's actual owner
 	if(owner == gasnet_mynode()) {
@@ -1696,15 +2056,11 @@ namespace LegionRuntime {
 	  //  (except the one that triggered)
 	  EventTriggerArgs args;
 	  args.node = trigger_node;
-	  args.event = me;
+	  args.event = me.convert<Event>();
 	  args.event.gen = gen_triggered;
-          NodeMask send_mask;
-          std::map<Event::gen_t,NodeMask>::iterator nit = remote_waiters.begin();
-          while((nit != remote_waiters.end()) && (nit->first <= gen_triggered)) {
-            send_mask |= nit->second;
-            remote_waiters.erase(nit);
-            nit = remote_waiters.begin();
-          }
+          NodeMask send_mask = remote_waiters;
+	  // no clear method?
+	  remote_waiters = NodeMask();
 	  //for(int node = 0; remote_waiters != 0; node++, remote_waiters >>= 1)
 	  //  if((remote_waiters & 1) && (node != trigger_node))
 	  //    EventTriggerMessage::request(node, args);
@@ -1712,38 +2068,30 @@ namespace LegionRuntime {
             if (send_mask.is_set(node) && (node != trigger_node))
               EventTriggerMessage::request(node, args);
 	} else {
-	  if(trigger_node == gasnet_mynode()) {
+	  if(((unsigned)trigger_node) == gasnet_mynode()) {
 	    // if we're not the owner, we just send to the owner and let him
 	    //  do the broadcast (assuming the trigger was local)
 	    //assert(remote_waiters == 0);
 
 	    EventTriggerArgs args;
 	    args.node = trigger_node;
-	    args.event = me;
+	    args.event = me.convert<Event>();
 	    args.event.gen = gen_triggered;
 	    EventTriggerMessage::request(owner, args);
 	  }
 	}
       }
 
-      if(release_event) {
-	//TimeStamp ts("foo2", true);
-	// if this is one of our events, put ourselves on the free
-	//  list (we don't need our lock for this)
-	if(owner == gasnet_mynode()) {
-	  //AutoHSLLock al(&freelist_mutex);
-	  base_arrival_count = current_arrival_count = 0;
-	  Runtime::runtime->local_event_free_list->free_entry(this);
-	  //next_free = first_free;
-	  //first_free = this;
-	}
+      // if this is one of our events, put ourselves on the free
+      //  list (we don't need our lock for this)
+      if(owner == gasnet_mynode()) {
+	Runtime::runtime->local_event_free_list->free_entry(this);
       }
 
+      // now that we've let go of the lock, notify all the waiters who wanted
+      //  this event generation (or an older one)
       {
-	//TimeStamp ts("foo3", true);
-	// now that we've let go of the lock, notify all the waiters who wanted
-	//  this event generation (or an older one)
-	for(std::deque<EventWaiter *>::iterator it = to_wake.begin();
+	for(std::vector<EventWaiter *>::iterator it = to_wake.begin();
 	    it != to_wake.end();
 	    it++) {
 	  bool nuke = (*it)->event_triggered();
@@ -1753,13 +2101,90 @@ namespace LegionRuntime {
           }
         }
       }
+    }
 
-      {
-	//TimeStamp ts("foo4", true);
-	{
-	  //TimeStamp ts("foo4b", true);
-	}
+    static Logger::Category log_barrier("barrier");
+
+    /*static*/ BarrierImpl *BarrierImpl::create_barrier(unsigned expected_arrivals,
+							ReductionOpID redopid,
+							const void *initial_value /*= 0*/,
+							size_t initial_value_size /*= 0*/)
+    {
+      BarrierImpl *impl = Runtime::runtime->local_barrier_free_list->alloc_entry();
+      assert(impl);
+      assert(impl->me.type() == ID::ID_BARRIER);
+
+      // set the arrival count
+      impl->base_arrival_count = expected_arrivals;
+
+      if(redopid == 0) {
+	assert(initial_value_size == 0);
+	impl->redop_id = 0;
+	impl->redop = 0;
+	impl->initial_value = 0;
+	impl->value_capacity = 0;
+	impl->final_values = 0;
+      } else {
+	impl->redop_id = redopid;  // keep the ID too so we can share it
+	impl->redop = reduce_op_table[redopid];
+
+	assert(initial_value != 0);
+	assert(initial_value_size == impl->redop->sizeof_lhs);
+
+	impl->initial_value = (char *)malloc(initial_value_size);
+	memcpy(impl->initial_value, initial_value, initial_value_size);
+
+	impl->value_capacity = 0;
+	impl->final_values = 0;
       }
+
+      // and let the barrier rearm as many times as necessary without being released
+      impl->free_generation = (unsigned)-1;
+
+      log_barrier.info("barrier created: " IDFMT "/%d base_count=%d redop=%d",
+		       impl->me.id(), impl->generation, impl->base_arrival_count, redopid);
+#ifdef EVENT_TRACING
+      {
+	EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
+	item.event_id = impl->me.id();
+	item.event_gen = impl->me.gen;
+	item.action = EventTraceItem::ACT_CREATE;
+      }
+#endif
+      return impl;
+    }
+
+    BarrierImpl::BarrierImpl(void)
+      : me((IDType)-1), owner(-1)
+    {
+      generation = 0;
+      gen_subscribed = 0;
+      first_generation = free_generation = 0;
+      next_free = 0;
+      remote_subscribe_gens.clear();
+      remote_trigger_gens.clear();
+      base_arrival_count = 0;
+      redop = 0;
+      initial_value = 0;
+      value_capacity = 0;
+      final_values = 0;
+    }
+
+    void BarrierImpl::init(ID _me, unsigned _init_owner)
+    {
+      me = _me;
+      owner = _init_owner;
+      generation = 0;
+      gen_subscribed = 0;
+      first_generation = free_generation = 0;
+      next_free = 0;
+      remote_subscribe_gens.clear();
+      remote_trigger_gens.clear();
+      base_arrival_count = 0;
+      redop = 0;
+      initial_value = 0;
+      value_capacity = 0;
+      final_values = 0;
     }
 
     static Barrier::timestamp_t barrier_adjustment_timestamp;
@@ -1767,73 +2192,145 @@ namespace LegionRuntime {
     static const int BARRIER_TIMESTAMP_NODEID_SHIFT = 48;
 
     struct BarrierAdjustMessage {
-      struct RequestArgs {
-	Event event;
-	Barrier::timestamp_t timestamp;
+      struct RequestArgs : public BaseMedium {
+	Barrier barrier;
 	int delta;
         Event wait_on;
       };
 
-      static void handle_request(RequestArgs args)
+      static void handle_request(RequestArgs args, const void *data, size_t datalen)
       {
-	args.event.impl()->adjust_arrival(args.event.gen, args.delta, args.timestamp, args.wait_on);
+	log_barrier.info("received barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
+			 args.delta, args.wait_on.id, args.wait_on.gen, args.barrier.id, args.barrier.gen, args.barrier.timestamp);
+	BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(args.barrier);
+	impl->adjust_arrival(args.barrier.gen, args.delta, args.barrier.timestamp, args.wait_on,
+			     datalen ? data : 0, datalen);
       }
 
-      typedef ActiveMessageShortNoReply<BARRIER_ADJUST_MSGID,
-					RequestArgs,
-					handle_request> Message;
+      typedef ActiveMessageMediumNoReply<BARRIER_ADJUST_MSGID,
+					 RequestArgs,
+					 handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Event event, int delta, Barrier::timestamp_t timestamp, Event wait_on)
+      static void send_request(gasnet_node_t target, Barrier barrier, int delta, Event wait_on,
+			       const void *data, size_t datalen)
       {
 	RequestArgs args;
 	
-	args.event = event;
-	args.timestamp = timestamp;
+	args.barrier = barrier;
 	args.delta = delta;
         args.wait_on = wait_on;
+
+	Message::request(target, args, data, datalen, PAYLOAD_COPY);
+      }
+    };
+
+    struct BarrierSubscribeMessage {
+      struct RequestArgs {
+	gasnet_node_t node;
+	IDType barrier_id;
+	Event::gen_t subscribe_gen;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<BARRIER_SUBSCRIBE_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(gasnet_node_t target, IDType barrier_id, Event::gen_t subscribe_gen)
+      {
+	RequestArgs args;
+
+	args.node = gasnet_mynode();
+	args.barrier_id = barrier_id;
+	args.subscribe_gen = subscribe_gen;
 
 	Message::request(target, args);
       }
     };
 
-    static Logger::Category log_barrier("barrier");
+    struct BarrierTriggerMessage {
+      struct RequestArgs : public BaseMedium {
+	gasnet_node_t node;
+	IDType barrier_id;
+	Event::gen_t trigger_gen;
+	Event::gen_t previous_gen;
+	Event::gen_t first_generation;
+	ReductionOpID redop_id;
+      };
 
-    class DeferredBarrierArrival : public Event::Impl::EventWaiter {
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<BARRIER_TRIGGER_MSGID,
+					 RequestArgs,
+					 handle_request> Message;
+
+      static void send_request(gasnet_node_t target, IDType barrier_id,
+			       Event::gen_t trigger_gen, Event::gen_t previous_gen,
+			       Event::gen_t first_generation, ReductionOpID redop_id,
+			       const void *data, size_t datalen)
+      {
+	RequestArgs args;
+
+	args.node = gasnet_mynode();
+	args.barrier_id = barrier_id;
+	args.trigger_gen = trigger_gen;
+	args.previous_gen = previous_gen;
+	args.first_generation = first_generation;
+	args.redop_id = redop_id;
+
+	Message::request(target, args, data, datalen, PAYLOAD_COPY);
+      }
+    };
+
+    class DeferredBarrierArrival : public EventWaiter {
     public:
-      DeferredBarrierArrival(Barrier _barrier, int _delta)
-	: barrier(_barrier), delta(_delta)
+      DeferredBarrierArrival(Barrier _barrier, int _delta, const void *_data, size_t _datalen)
+	: barrier(_barrier), delta(_delta), data(bytedup(_data, _datalen)), datalen(_datalen)
       {}
 
-      virtual ~DeferredBarrierArrival(void) { }
+      virtual ~DeferredBarrierArrival(void)
+      {
+	if(data)
+	  free(data);
+      }
 
       virtual bool event_triggered(void)
       {
-	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d\n",
+	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d",
 			 barrier.id, barrier.gen, barrier.timestamp, delta);
-	barrier.impl()->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT);
+	BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(barrier);
+	impl->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT, data, datalen);
         return true;
       }
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"deferred arrival: barrier=" IDFMT "/%d (%llx), delta=%d\n",
-	       barrier.id, barrier.gen, barrier.timestamp, delta);
+	fprintf(f,"deferred arrival: barrier=" IDFMT "/%d (%llx), delta=%d datalen=%zd\n",
+		barrier.id, barrier.gen, barrier.timestamp, delta, datalen);
       }
 
     protected:
       Barrier barrier;
       int delta;
+      void *data;
+      size_t datalen;
     };
 
-    class Event::Impl::PendingUpdates {
+    class BarrierImpl::Generation {
      public:
       struct PerNodeUpdates {
         Barrier::timestamp_t last_ts;
         std::map<Barrier::timestamp_t, int> pending;
       };
 
-      PendingUpdates(void) : unguarded_delta(0) {}
-      ~PendingUpdates(void)
+      int unguarded_delta;
+      std::vector<EventWaiter *> local_waiters;
+      std::map<int, PerNodeUpdates *> pernode;
+      
+
+      Generation(void) : unguarded_delta(0) {}
+      ~Generation(void)
       {
         for(std::map<int, PerNodeUpdates *>::iterator it = pernode.begin();
             it != pernode.end();
@@ -1841,9 +2338,14 @@ namespace LegionRuntime {
           delete (it->second);
       }
 
-      int handle_adjustment(Barrier::timestamp_t ts, int delta)
+      void handle_adjustment(Barrier::timestamp_t ts, int delta)
       {
-        int delta_out = 0;
+	if(ts == 0) {
+	  // simple case - apply delta directly
+	  unguarded_delta += delta;
+	  return;
+	}
+
         int node = ts >> BARRIER_TIMESTAMP_NODEID_SHIFT;
         PerNodeUpdates *pn;
         std::map<int, PerNodeUpdates *>::iterator it = pernode.find(node);
@@ -1855,12 +2357,12 @@ namespace LegionRuntime {
         }
         if(delta > 0) {
           // TODO: really need two timestamps to properly order increments
-          delta_out += delta;
+          unguarded_delta += delta;
           pn->last_ts = ts;
           std::map<Barrier::timestamp_t, int>::iterator it2 = pn->pending.begin();
           while((it2 != pn->pending.end()) && (it2->first <= pn->last_ts)) {
             log_barrier.info("applying pending delta: %llx/%d", it2->first, it2->second);
-            delta_out += it2->second;
+            unguarded_delta += it2->second;
             pn->pending.erase(it2);
             it2 = pn->pending.begin();
           }
@@ -1869,67 +2371,71 @@ namespace LegionRuntime {
           if(ts <= pn->last_ts) {
             log_barrier.info("adjustment can be applied immediately: %llx/%d (%llx)",
                              ts, delta, pn->last_ts);
-            delta_out += delta;
+            unguarded_delta += delta;
           } else {
             log_barrier.info("adjustment must be deferred: %llx/%d (%llx)",
                              ts, delta, pn->last_ts);
             pn->pending[ts] += delta;
           }
         }
-        return delta_out;
       }
+    };
 
-      int unguarded_delta;
-
-      std::map<int, PerNodeUpdates *> pernode;
+    struct RemoteNotification {
+      unsigned node;
+      Event::gen_t trigger_gen, previous_gen;
     };
 
     // used to adjust a barrier's arrival count either up or down
     // if delta > 0, timestamp is current time (on requesting node)
     // if delta < 0, timestamp says which positive adjustment this arrival must wait for
-    void Event::Impl::adjust_arrival(Event::gen_t barrier_gen, int delta, 
-				     Barrier::timestamp_t timestamp, Event wait_on)
+    void BarrierImpl::adjust_arrival(Event::gen_t barrier_gen, int delta, 
+				     Barrier::timestamp_t timestamp, Event wait_on,
+				     const void *reduce_value, size_t reduce_value_size)
     {
       if(!wait_on.has_triggered()) {
 	// deferred arrival
+	Barrier b = me.convert<Barrier>();
+	b.gen = barrier_gen;
+	b.timestamp = timestamp;
 #ifndef DEFER_ARRIVALS_LOCALLY
         if(owner != gasnet_mynode()) {
 	  // let deferral happen on owner node (saves latency if wait_on event
           //   gets triggered there)
-          Event e;
-          e.id = me.id;
-          e.gen = barrier_gen;
           //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
           //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
-	  BarrierAdjustMessage::send_request(owner, e, delta, timestamp, wait_on);
+	  log_barrier.info("forwarding deferred barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
+			   delta, wait_on.id, wait_on.gen, b.id, b.gen, b.timestamp);
+	  BarrierAdjustMessage::send_request(owner, b, delta, wait_on, reduce_value, reduce_value_size);
 	  return;
         }
 #endif
-	Barrier b;
-	b.id = me.id;
-	b.gen = barrier_gen;
-	b.timestamp = timestamp;
-	log_barrier.info("deferring barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)\n",
-			 delta, wait_on.id, wait_on.gen, me.id, barrier_gen, timestamp);
-	wait_on.impl()->add_waiter(wait_on, new DeferredBarrierArrival(b, delta));
+	log_barrier.info("deferring barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
+			 delta, wait_on.id, wait_on.gen, me.id(), barrier_gen, timestamp);
+	wait_on.impl()->add_waiter(wait_on.gen, new DeferredBarrierArrival(b, delta, 
+									   reduce_value, reduce_value_size));
 	return;
       }
 
       log_barrier.info("barrier adjustment: event=" IDFMT "/%d delta=%d ts=%llx", 
-		       me.id, barrier_gen, delta, timestamp);
+		       me.id(), barrier_gen, delta, timestamp);
 
       if(owner != gasnet_mynode()) {
 	// all adjustments handled by owner node
-        Event e;
-        e.id = me.id;
-        e.gen = barrier_gen;
-	BarrierAdjustMessage::send_request(owner, e, delta, timestamp, Event::NO_EVENT);
+	Barrier b = me.convert<Barrier>();
+	b.gen = barrier_gen;
+	b.timestamp = timestamp;
+	BarrierAdjustMessage::send_request(owner, b, delta, Event::NO_EVENT, reduce_value, reduce_value_size);
 	return;
       }
 
       // can't actually trigger while holding the lock, so remember which generation(s),
       //  if any, to trigger and do it at the end
-      gen_t trigger_gen = 0;
+      Event::gen_t trigger_gen = 0;
+      std::vector<EventWaiter *> local_notifications;
+      std::vector<RemoteNotification> remote_notifications;
+      Event::gen_t oldest_previous = 0;
+      void *final_values_copy = 0;
       {
 	AutoHSLLock a(mutex);
 
@@ -1937,89 +2443,389 @@ namespace LegionRuntime {
 	assert(generation < free_generation);
 	assert(base_arrival_count > 0);
 
-	// just handle updates to current generation first
-	if(barrier_gen == (generation + 1)) {
-          int act_delta = 0;
-          if(timestamp == 0) {
-            act_delta = delta;
-          } else {
-            // some ordering is required - check pending updates
-            PendingUpdates *p;
-            std::map<Event::gen_t, PendingUpdates *>::iterator it = pending_updates.find(barrier_gen);
-            if(it != pending_updates.end()) {
-              p = it->second;
-            } else {
-	      p = new PendingUpdates;
-              pending_updates[barrier_gen] = p;
-            }
-            act_delta = p->handle_adjustment(timestamp, delta);
-            log_barrier.info("barrier timestamp adjustment: " IDFMT "/%d, %llx/%d -> %d",
-                             me.id, barrier_gen, timestamp, delta, act_delta);
-          }
-
-	  if(act_delta > 0) {
-	    current_arrival_count += act_delta;
+	// update whatever generation we're told to
+	{
+	  assert(barrier_gen > generation);
+	  Generation *g;
+	  std::map<Event::gen_t, Generation *>::iterator it = generations.find(barrier_gen);
+	  if(it != generations.end()) {
+	    g = it->second;
 	  } else {
-	    assert(-act_delta <= current_arrival_count);
-	    current_arrival_count += act_delta; // delta is negative
-	    if(current_arrival_count == 0) {
-	      // mark that we want to trigger this barrier generation
-	      trigger_gen = barrier_gen;
+	    g = new Generation;
+	    generations[barrier_gen] = g;
+	    log_barrier.info("added tracker for barrier " IDFMT ", generation %d",
+			     me.id(), barrier_gen);
+	  }
 
-	      // and reset the arrival count for the next generation
-	      current_arrival_count = base_arrival_count;
+	  g->handle_adjustment(timestamp, delta);
+	}
+
+	// if the update was to the next generation, it may cause one or more generations
+	//  to trigger
+	if(barrier_gen == (generation + 1)) {
+	  std::map<Event::gen_t, Generation *>::iterator it = generations.begin();
+	  while((it != generations.end()) &&
+		(it->first == (generation + 1)) &&
+		((base_arrival_count + it->second->unguarded_delta) == 0)) {
+	    // keep the list of local waiters to wake up once we release the lock
+	    local_notifications.insert(local_notifications.end(), 
+				       it->second->local_waiters.begin(), it->second->local_waiters.end());
+	    trigger_gen = generation = it->first;
+	    delete it->second;
+	    generations.erase(it);
+	    it = generations.begin();
+	  }
+
+	  // if any triggers occurred, figure out which remote nodes need notifications
+	  //  (i.e. any who have subscribed)
+	  if(generation >= barrier_gen) {
+	    std::map<unsigned, Event::gen_t>::iterator it = remote_subscribe_gens.begin();
+	    while(it != remote_subscribe_gens.end()) {
+	      RemoteNotification rn;
+	      rn.node = it->first;
+	      if(it->second <= generation) {
+		// we have fulfilled the entire subscription
+		rn.trigger_gen = it->second;
+		std::map<unsigned, Event::gen_t>::iterator to_nuke = it++;
+		remote_subscribe_gens.erase(to_nuke);
+	      } else {
+		// subscription remains valid
+		rn.trigger_gen = generation;
+		it++;
+	      }
+	      // also figure out what the previous generation this node knew about was
+	      {
+		std::map<unsigned, Event::gen_t>::iterator it2 = remote_trigger_gens.find(rn.node);
+		if(it2 != remote_trigger_gens.end()) {
+		  rn.previous_gen = it2->second;
+		  it2->second = rn.trigger_gen;
+		} else {
+		  rn.previous_gen = first_generation;
+		  remote_trigger_gens[rn.node] = rn.trigger_gen;
+		}
+	      }
+	      if(remote_notifications.empty() || (rn.previous_gen < oldest_previous))
+		oldest_previous = rn.previous_gen;
+	      remote_notifications.push_back(rn);
 	    }
 	  }
-	} else {
-	  // defer updates for future generations until then becomes now
-	  assert(0);
+	}
+
+	// do we have reduction data to apply?  we can do this even if the actual adjustment is
+	//  being held - no need to have lots of reduce values lying around
+	if(reduce_value_size > 0) {
+	  assert(redop != 0);
+	  assert(redop->sizeof_rhs == reduce_value_size);
+
+	  // do we have space for this reduction result yet?
+	  int rel_gen = barrier_gen - first_generation;
+	  assert(rel_gen > 0);
+
+	  if((size_t)rel_gen > value_capacity) {
+	    size_t new_capacity = rel_gen;
+	    final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
+	    while(value_capacity < new_capacity) {
+	      memcpy(final_values + (value_capacity * redop->sizeof_lhs), initial_value, redop->sizeof_lhs);
+	      value_capacity += 1;
+	    }
+	  }
+
+	  redop->apply(final_values + ((rel_gen - 1) * redop->sizeof_lhs), reduce_value, 1, true);
+	}
+
+	// do this AFTER we actually update the reduction value above :)
+	// if any remote notifications are going to occur and we have reduction values, make a copy so
+	//  we have something stable after we let go of the lock
+	if(trigger_gen && redop) {
+	  int rel_gen = oldest_previous + 1 - first_generation;
+	  assert(rel_gen > 0);
+	  int count = trigger_gen - oldest_previous;
+	  final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
+				      count * redop->sizeof_lhs);
 	}
       }
 
       if(trigger_gen != 0) {
 	log_barrier.info("barrier trigger: event=" IDFMT "/%d", 
-			 me.id, trigger_gen);
-	trigger(trigger_gen, gasnet_mynode());
+			 me.id(), trigger_gen);
+
+	// notify local waiters first
+	for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
+	    it != local_notifications.end();
+	    it++) {
+	  bool nuke = (*it)->event_triggered();
+	  if(nuke)
+	    delete (*it);
+	}
+
+	// now do remote notifications
+	for(std::vector<RemoteNotification>::const_iterator it = remote_notifications.begin();
+	    it != remote_notifications.end();
+	    it++) {
+	  log_barrier.info("sending remote trigger notification: " IDFMT "/%d -> %d, dest=%d",
+			   me.id(), (*it).previous_gen, (*it).trigger_gen, (*it).node);
+	  void *data = 0;
+	  size_t datalen = 0;
+	  if(final_values_copy) {
+	    data = (char *)final_values_copy + (((*it).previous_gen - oldest_previous) * redop->sizeof_lhs);
+	    datalen = ((*it).trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
+	  }
+	  BarrierTriggerMessage::send_request((*it).node, me.id(), (*it).trigger_gen, (*it).previous_gen,
+					      first_generation, redop_id, data, datalen);
+	}
+      }
+
+      // free our copy of the final values, if we had one
+      if(final_values_copy)
+	free(final_values_copy);
+    }
+
+    bool BarrierImpl::has_triggered(Event::gen_t needed_gen)
+    {
+      // no need to take lock to check current generation
+      if(needed_gen <= generation) return true;
+
+      // if we're not the owner, subscribe if we haven't already
+      if(owner != gasnet_mynode()) {
+	Event::gen_t previous_subscription;
+	// take lock to avoid duplicate subscriptions
+	{
+	  AutoHSLLock a(mutex);
+	  previous_subscription = gen_subscribed;
+	  if(gen_subscribed < needed_gen)
+	    gen_subscribed = needed_gen;
+	}
+
+	if(previous_subscription < needed_gen) {
+	  log_barrier.info("subscribing to barrier " IDFMT "/%d", me.id(), needed_gen);
+	  BarrierSubscribeMessage::send_request(owner, me.id(), needed_gen);
+	}
+      }
+
+      // whether or not we subscribed, the answer for now is "no"
+      return false;
+    }
+
+    void BarrierImpl::external_wait(Event::gen_t needed_gen)
+    {
+      assert(0);
+    }
+
+    bool BarrierImpl::add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/)
+    {
+      bool trigger_now = false;
+      {
+	AutoHSLLock a(mutex);
+
+	if(needed_gen > generation) {
+	  Generation *g;
+	  std::map<Event::gen_t, Generation *>::iterator it = generations.find(needed_gen);
+	  if(it != generations.end()) {
+	    g = it->second;
+	  } else {
+	    g = new Generation;
+	    generations[needed_gen] = g;
+	    log_barrier.info("added tracker for barrier " IDFMT ", generation %d",
+			     me.id(), needed_gen);
+	  }
+	  g->local_waiters.push_back(waiter);
+
+	  // a call to has_triggered should have already handled the necessary subscription
+	  assert((owner == gasnet_mynode()) || (gen_subscribed >= needed_gen));
+	} else {
+	  // needed generation has already occurred - trigger this waiter once we let go of lock
+	  trigger_now = true;
+	}
+      }
+
+      if(trigger_now) {
+	bool nuke = waiter->event_triggered();
+	if(nuke)
+	  delete waiter;
+      }
+
+      return true;
+    }
+
+    /*static*/ void BarrierSubscribeMessage::handle_request(BarrierSubscribeMessage::RequestArgs args)
+    {
+      Barrier b;
+      b.id = args.barrier_id;
+      b.gen = args.subscribe_gen;
+      BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(b);
+
+      // take the lock and add the subscribing node - notice if they need to be notified for
+      //  any generations that have already triggered
+      Event::gen_t trigger_gen = 0;
+      Event::gen_t previous_gen = 0;
+      void *final_values_copy = 0;
+      size_t final_values_size = 0;
+      {
+	AutoHSLLock a(impl->mutex);
+
+	// make sure the subscription is for this "lifetime" of the barrier
+	assert(args.subscribe_gen > impl->first_generation);
+
+	bool already_subscribed = false;
+	{
+	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_subscribe_gens.find(args.node);
+	  if(it != impl->remote_subscribe_gens.end()) {
+	    if(it->second >= args.subscribe_gen)
+	      already_subscribed = true;
+	    else
+	      it->second = args.subscribe_gen;
+	  } else {
+	    // new subscription - don't reset remote_trigger_gens because the node may have
+	    //  been subscribed in the past
+	    impl->remote_subscribe_gens[args.node] = args.subscribe_gen;
+	  }
+	}
+
+	// as long as we're not already subscribed to this generation, check to see if
+	//  any trigger notifications are needed
+	if(!already_subscribed && (impl->generation > impl->first_generation)) {
+	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_trigger_gens.find(args.node);
+	  if((it == impl->remote_trigger_gens.end()) or (it->second < impl->generation)) {
+	    previous_gen = ((it == impl->remote_trigger_gens.end()) ?
+			      impl->first_generation :
+			      it->second);
+	    trigger_gen = impl->generation;
+	    impl->remote_trigger_gens[args.node] = impl->generation;
+
+	    if(impl->redop) {
+	      int rel_gen = previous_gen + 1 - impl->first_generation;
+	      assert(rel_gen > 0);
+	      final_values_size = (trigger_gen - previous_gen) * impl->redop->sizeof_lhs;
+	      final_values_copy = bytedup(impl->final_values + ((rel_gen - 1) * impl->redop->sizeof_lhs),
+					  final_values_size);
+	    }
+	  }
+	}
+      }
+
+      // send trigger message outside of lock, if needed
+      if(trigger_gen > 0) {
+	log_barrier.info("sending immediate barrier trigger: " IDFMT "/%d -> %d",
+			 args.barrier_id, previous_gen, trigger_gen);
+	BarrierTriggerMessage::send_request(args.node, args.barrier_id, trigger_gen, previous_gen,
+					    impl->first_generation, impl->redop_id,
+					    final_values_copy, final_values_size);
+      }
+
+      if(final_values_copy)
+	free(final_values_copy);
+    }
+
+    /*static*/ void BarrierTriggerMessage::handle_request(BarrierTriggerMessage::RequestArgs args,
+							  const void *data, size_t datalen)
+    {
+      log_barrier.info("received remote barrier trigger: " IDFMT "/%d -> %d",
+		       args.barrier_id, args.previous_gen, args.trigger_gen);
+
+      Barrier b;
+      b.id = args.barrier_id;
+      b.gen = args.trigger_gen;
+      BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(b);
+
+      // we'll probably end up with a list of local waiters to notify
+      std::vector<EventWaiter *> local_notifications;
+      {
+	AutoHSLLock a(impl->mutex);
+
+	// it's theoretically possible for multiple trigger messages to arrive out
+	//  of order, so check if this message triggers the oldest possible range
+	if(args.previous_gen == impl->generation) {
+	  // see if we can pick up any of the held triggers too
+	  while(!impl->held_triggers.empty()) {
+	    std::map<Event::gen_t, Event::gen_t>::iterator it = impl->held_triggers.begin();
+	    // if it's not contiguous, we're done
+	    if(it->first != args.trigger_gen) break;
+	    // it is contiguous, so absorb it into this message and remove the held trigger
+	    log_barrier.info("collapsing future trigger: " IDFMT "/%d -> %d -> %d",
+			     args.barrier_id, args.previous_gen, args.trigger_gen, it->second);
+	    args.trigger_gen = it->second;
+	    impl->held_triggers.erase(it);
+	  }
+
+	  impl->generation = args.trigger_gen;
+
+	  // now iterate through any generations up to and including the latest triggered
+	  //  generation, and accumulate local waiters to notify
+	  while(!impl->generations.empty()) {
+	    std::map<Event::gen_t, BarrierImpl::Generation *>::iterator it = impl->generations.begin();
+	    if(it->first > args.trigger_gen) break;
+
+	    local_notifications.insert(local_notifications.end(),
+				       it->second->local_waiters.begin(),
+				       it->second->local_waiters.end());
+	    delete it->second;
+	    impl->generations.erase(it);
+	  }
+	} else {
+	  // hold this trigger until we get messages for the earlier generation(s)
+	  log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
+			   args.barrier_id, impl->generation, 
+			   args.previous_gen, args.trigger_gen);
+	  impl->held_triggers[args.previous_gen] = args.trigger_gen;
+	}
+
+	// is there any data we need to store?
+	if(datalen) {
+	  assert(args.redop_id != 0);
+
+	  // TODO: deal with invalidation of previous instance of a barrier
+	  impl->redop_id = args.redop_id;
+	  impl->redop = reduce_op_table[args.redop_id];
+	  impl->first_generation = args.first_generation;
+
+	  int rel_gen = args.trigger_gen - impl->first_generation;
+	  assert(rel_gen > 0);
+	  if(impl->value_capacity < (size_t)rel_gen) {
+	    size_t new_capacity = rel_gen;
+	    impl->final_values = (char *)realloc(impl->final_values, new_capacity * impl->redop->sizeof_lhs);
+	    // no need to initialize new entries - we'll overwrite them now or when data does show up
+	    impl->value_capacity = new_capacity;
+	  }
+	  assert(datalen == (impl->redop->sizeof_lhs * (args.trigger_gen - args.previous_gen)));
+	  memcpy(impl->final_values + ((rel_gen - 1) * impl->redop->sizeof_lhs), data, datalen);
+	}
+      }
+
+      // with lock released, perform any local notifications
+      for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
+	  it != local_notifications.end();
+	  it++) {
+	bool nuke = (*it)->event_triggered();
+	if(nuke)
+	  delete (*it);
       }
     }
 
     ///////////////////////////////////////////////////
     // Barrier 
 
-    /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals)
+    /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
+					       ReductionOpID redop_id /*= 0*/,
+					       const void *initial_value /*= 0*/,
+					       size_t initial_value_size /*= 0*/)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
-      // start by getting a free event
-      Event e = Event::Impl::create_event();
+      BarrierImpl *impl = BarrierImpl::create_barrier(expected_arrivals, redop_id, initial_value, initial_value_size);
+      Barrier b = impl->me.convert<Barrier>();
+      b.gen = impl->generation + 1;
+      b.timestamp = 0;
+
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Barrier Creation: " IDFMT " %d", e.id, expected_arrivals);
 #endif
 
-      // now turn it into a barrier
-      Event::Impl *impl = e.impl();
-
-      // set the arrival count
-      impl->base_arrival_count = expected_arrivals;
-      impl->current_arrival_count = expected_arrivals;
-
-      // and let the barrier rearm as many times as necessary without being released
-      impl->free_generation = (unsigned)-1;
-
-      log_barrier.info("barrier created: " IDFMT "/%d base_count=%d", e.id, e.gen, impl->base_arrival_count);
-
-      Barrier result;
-      result.id = e.id;
-      result.gen = e.gen;
-      result.timestamp = 0;
-
-      return result;
+      return b;
     }
 
     void Barrier::destroy_barrier(void)
     {
-      // TODO: Implement this
-      assert(false);
+      log_barrier.info("barrier destruction request: " IDFMT "/%d", id, gen);
     }
 
     Barrier Barrier::advance_barrier(void) const
@@ -2040,7 +2846,8 @@ namespace LegionRuntime {
       log_event_graph.info("Barrier Alter: (" IDFMT ",%d) (" IDFMT
                            ",%d) %d", id, gen, enclosing.id, enclosing.gen, delta);
 #endif
-      impl()->adjust_arrival(gen, delta, timestamp);
+      BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(*this);
+      impl->adjust_arrival(gen, delta, timestamp, Event::NO_EVENT, 0, 0);
 
       Barrier with_ts;
       with_ts.id = id;
@@ -2050,14 +2857,15 @@ namespace LegionRuntime {
       return with_ts;
     }
 
-    Event Barrier::get_previous_phase(void) const
+    Barrier Barrier::get_previous_phase(void) const
     {
-      Event result = *this;
+      Barrier result = *this;
       result.gen--;
       return result;
     }
 
-    void Barrier::arrive(unsigned count /*= 1*/, Event wait_on /*= Event::NO_EVENT*/) const
+    void Barrier::arrive(unsigned count /*= 1*/, Event wait_on /*= Event::NO_EVENT*/,
+			 const void *reduce_value /*= 0*/, size_t reduce_value_size /*= 0*/) const
     {
 #ifdef EVENT_GRAPH_TRACE
       Event enclosing = find_enclosing_termination_event();
@@ -2067,7 +2875,35 @@ namespace LegionRuntime {
                            enclosing.id, enclosing.gen, count);
 #endif
       // arrival uses the timestamp stored in this barrier object
-      impl()->adjust_arrival(gen, -count, timestamp, wait_on);
+      BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(*this);
+      impl->adjust_arrival(gen, -count, timestamp, wait_on,
+			   reduce_value, reduce_value_size);
+    }
+
+    bool Barrier::get_result(void *value, size_t value_size) const
+    {
+      BarrierImpl *impl = Runtime::get_runtime()->get_barrier_impl(*this);
+      return impl->get_result(gen, value, value_size);
+    }
+     
+    bool BarrierImpl::get_result(Event::gen_t result_gen, void *value, size_t value_size)
+    {
+      // take the lock so we can safely see how many results (if any) are on hand
+      AutoHSLLock al(mutex);
+
+      // generation hasn't triggered yet?
+      if(result_gen > generation) return false;
+
+      // if it has triggered, we should have the data
+      int rel_gen = result_gen - first_generation;
+      assert(rel_gen > 0);
+      assert((size_t)rel_gen <= value_capacity);
+
+      assert(redop != 0);
+      assert(value_size == redop->sizeof_lhs);
+      assert(value != 0);
+      memcpy(value, final_values + ((rel_gen - 1) * redop->sizeof_lhs), redop->sizeof_lhs);
+      return true;
     }
 
     ///////////////////////////////////////////////////
@@ -2222,7 +3058,7 @@ namespace LegionRuntime {
           "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
 	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
-      std::deque<Event> to_wake;
+      std::deque<GenEventImpl *> to_wake;
 
       Reservation::Impl *impl = args.lock.impl();
       {
@@ -2247,21 +3083,25 @@ namespace LegionRuntime {
 	assert(any_local);
       }
 
-      for(std::deque<Event>::iterator it = to_wake.begin();
+      for(std::deque<GenEventImpl *>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
 	log_reservation(LEVEL_DEBUG, "release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
-		 args.lock.id, (*it).id, (*it).gen);
-	(*it).impl()->trigger((*it).gen, gasnet_mynode());
+			args.lock.id, (*it)->me.id(), (*it)->generation+1);
+	(*it)->trigger_current();
       }
     }
 
     Event Reservation::Impl::acquire(unsigned new_mode, bool exclusive,
-			   Event after_lock /*= Event::NO_EVENT*/)
+				     GenEventImpl *after_lock /* = 0*/)
     {
+      Event after_lock_event = after_lock ? after_lock->current_event() : Event::NO_EVENT;
+
       log_reservation(LEVEL_DEBUG, 
-          "local reservation request: reservation=" IDFMT " mode=%d excl=%d event=" IDFMT "/%d count=%d impl=%p",
-	       me.id, new_mode, exclusive, after_lock.id, after_lock.gen, count, this);
+		      "local reservation request: reservation=" IDFMT " mode=%d excl=%d event=" IDFMT "/%d count=%d impl=%p",
+		      me.id, new_mode, exclusive, 
+		      after_lock_event.id,
+		      after_lock_event.gen, count, this);
 
       // collapse exclusivity into mode
       if(exclusive) new_mode = MODE_EXCL;
@@ -2342,8 +3182,10 @@ namespace LegionRuntime {
 	// if we didn't get the lock, put our event on the queue of local
 	//  waiters - create an event if we weren't given one to use
 	if(!got_lock) {
-	  if(!after_lock.exists())
-	    after_lock = Event::Impl::create_event();
+	  if(!after_lock) {
+	    after_lock = GenEventImpl::create_genevent();
+	    after_lock_event = after_lock->current_event();
+	  }
 	  local_waiters[new_mode].push_back(after_lock);
 	}
       }
@@ -2362,16 +3204,16 @@ namespace LegionRuntime {
       }
 
       // if we got the lock, trigger an event if we were given one
-      if(got_lock && after_lock.exists()) 
-	after_lock.impl()->trigger(after_lock.gen, gasnet_mynode());
+      if(got_lock && after_lock) 
+	after_lock->trigger(after_lock_event.gen, gasnet_mynode());
 
-      return after_lock;
+      return after_lock_event;
     }
 
     // factored-out code to select one or more local waiters on a lock
     //  fills events to trigger into 'to_wake' and returns true if any were
     //  found - NOTE: ASSUMES LOCK IS ALREADY HELD!
-    bool Reservation::Impl::select_local_waiters(std::deque<Event>& to_wake)
+    bool Reservation::Impl::select_local_waiters(std::deque<GenEventImpl *>& to_wake)
     {
       if(local_waiters.size() == 0)
 	return false;
@@ -2384,7 +3226,7 @@ namespace LegionRuntime {
 	
       // further favor exclusive waiters
       if(local_waiters.find(MODE_EXCL) != local_waiters.end()) {
-	std::deque<Event>& excl_waiters = local_waiters[MODE_EXCL];
+	std::deque<GenEventImpl *>& excl_waiters = local_waiters[MODE_EXCL];
 	to_wake.push_back(excl_waiters.front());
 	excl_waiters.pop_front();
 	  
@@ -2397,7 +3239,7 @@ namespace LegionRuntime {
 	log_reservation.spew("count <-1 [%p]=%d", &count, count);
       } else {
 	// pull a whole list of waiters that want to share with the same mode
-	std::map<unsigned, std::deque<Event> >::iterator it = local_waiters.begin();
+	std::map<unsigned, std::deque<GenEventImpl *> >::iterator it = local_waiters.begin();
 	
 	mode = it->first;
 	count = ZERO_COUNT + it->second.size();
@@ -2424,7 +3266,7 @@ namespace LegionRuntime {
     {
       // make a list of events that we be woken - can't do it while holding the
       //  lock's mutex (because the event we trigger might try to take the lock)
-      std::deque<Event> to_wake;
+      std::deque<GenEventImpl *> to_wake;
 
       int release_target = -1;
       LockReleaseArgs r_args;
@@ -2519,12 +3361,12 @@ namespace LegionRuntime {
 #endif
       }
 
-      for(std::deque<Event>::iterator it = to_wake.begin();
+      for(std::deque<GenEventImpl *>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
 	log_reservation(LEVEL_DEBUG, "release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
-		 me.id, (*it).id, (*it).gen);
-	(*it).impl()->trigger((*it).gen, gasnet_mynode());
+			me.id, (*it)->me.id(), (*it)->generation + 1);
+	(*it)->trigger_current();
       }
     }
 
@@ -2548,10 +3390,10 @@ namespace LegionRuntime {
       return held;
     }
 
-    class DeferredLockRequest : public Event::Impl::EventWaiter {
+    class DeferredLockRequest : public EventWaiter {
     public:
       DeferredLockRequest(Reservation _lock, unsigned _mode, bool _exclusive,
-			  Event _after_lock)
+			  GenEventImpl *_after_lock)
 	: lock(_lock), mode(_mode), exclusive(_exclusive), after_lock(_after_lock) {}
 
       virtual ~DeferredLockRequest(void) { }
@@ -2565,14 +3407,14 @@ namespace LegionRuntime {
       virtual void print_info(FILE *f)
       {
 	fprintf(f,"deferred lock: lock=" IDFMT " after=" IDFMT "/%d\n",
-	       lock.id, after_lock.id, after_lock.gen);
+		lock.id, after_lock->me.id(), after_lock->generation + 1);
       }
 
     protected:
       Reservation lock;
       unsigned mode;
       bool exclusive;
-      Event after_lock;
+      GenEventImpl *after_lock;
     };
 
     Event Reservation::acquire(unsigned mode /* = 0 */, bool exclusive /* = true */,
@@ -2587,14 +3429,16 @@ namespace LegionRuntime {
 	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
-	Event after_lock = Event::Impl::create_event();
-	wait_on.impl()->add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
+	Event::Impl *wait_impl = Runtime::get_runtime()->get_event_impl(wait_on);
+	GenEventImpl *after_lock = GenEventImpl::create_genevent();
+	Event e = after_lock->current_event();
+	wait_impl->add_waiter(wait_on.gen, new DeferredLockRequest(*this, mode, exclusive, after_lock));
 	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
-	return after_lock;
+	return e;
       }
     }
 
-    class DeferredUnlockRequest : public Event::Impl::EventWaiter {
+    class DeferredUnlockRequest : public EventWaiter {
     public:
       DeferredUnlockRequest(Reservation _lock)
 	: lock(_lock) {}
@@ -2625,7 +3469,8 @@ namespace LegionRuntime {
       if(wait_on.has_triggered()) {
 	impl()->release();
       } else {
-	wait_on.impl()->add_waiter(wait_on, new DeferredUnlockRequest(*this));
+	Event::Impl *wait_impl = Runtime::get_runtime()->get_event_impl(wait_on);
+	wait_impl->add_waiter(wait_on.gen, new DeferredUnlockRequest(*this));
       }
     }
 
@@ -2724,7 +3569,7 @@ namespace LegionRuntime {
       Runtime::runtime->local_reservation_free_list->free_entry(this);
     }
 
-    class DeferredLockDestruction : public Event::Impl::EventWaiter {
+    class DeferredLockDestruction : public EventWaiter {
     public:
       DeferredLockDestruction(Reservation _lock) : lock(_lock) {}
 
@@ -2762,11 +3607,13 @@ namespace LegionRuntime {
       }
 
       // to destroy a local lock, we first must lock it (exclusively)
-      Event e = acquire(0, true);
-      if(e.has_triggered()) {
-	impl()->release_reservation();
+      Reservation::Impl *lock_impl = impl();
+      Event e = lock_impl->acquire(0, true);
+      if(!e.has_triggered()) {
+	Runtime::get_runtime()->get_genevent_impl(e)->add_waiter(e.gen, new DeferredLockDestruction(*this));
       } else {
-	e.impl()->add_waiter(e, new DeferredLockDestruction(*this));
+	// got grant immediately - can release reservation now
+	lock_impl->release_reservation();
       }
     }
 
@@ -2865,7 +3712,7 @@ namespace LegionRuntime {
 
       // frees of zero bytes should have the special offset
       if(size == 0) {
-	assert(offset == this->size + ZERO_SIZE_INSTANCE_OFFSET);
+	assert((size_t)offset == this->size + ZERO_SIZE_INSTANCE_OFFSET);
 	return;
       }
 
@@ -3187,8 +4034,8 @@ namespace LegionRuntime {
           }
 	    
 	  if(args.event.exists())
-	    args.event.impl()->trigger(args.event.gen,
-				       gasnet_mynode());
+	    Runtime::get_runtime()->get_genevent_impl(args.event)->trigger(args.event.gen,
+									   gasnet_mynode());
 	  break;
 	}
 
@@ -3200,8 +4047,8 @@ namespace LegionRuntime {
 	  impl->put_bytes(args.offset, data, datalen);
 
 	  if(args.event.exists())
-	    args.event.impl()->trigger(args.event.gen,
-				       gasnet_mynode());
+	    Runtime::get_runtime()->get_genevent_impl(args.event)->trigger(args.event.gen,
+									   gasnet_mynode());
 	  break;
 	}
 
@@ -3244,7 +4091,7 @@ namespace LegionRuntime {
 	    partial_remote_writes.erase(it);
 	    gasnet_hsl_unlock(&partial_remote_writes_lock);
 	    if(e.exists())
-	      e.impl()->trigger(e.gen, gasnet_mynode());
+	      Runtime::get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
@@ -3270,8 +4117,6 @@ namespace LegionRuntime {
     void handle_remote_reduce(RemoteReduceArgs args,
 			     const void *data, size_t datalen)
     {
-      Memory::Impl *impl = args.mem.impl();
-
       ReductionOpID redop_id;
       bool red_fold;
       if(args.redop_id > 0) {
@@ -3339,7 +4184,7 @@ namespace LegionRuntime {
 	    partial_remote_writes.erase(it);
 	    gasnet_hsl_unlock(&partial_remote_writes_lock);
 	    if(e.exists())
-	      e.impl()->trigger(e.gen, gasnet_mynode());
+	      Runtime::get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
@@ -3403,7 +4248,7 @@ namespace LegionRuntime {
 	    partial_remote_writes.erase(it);
 	    gasnet_hsl_unlock(&partial_remote_writes_lock);
 	    if(e.exists())
-	      e.impl()->trigger(e.gen, gasnet_mynode());
+	      Runtime::get_runtime()->get_genevent_impl(e)->trigger(e.gen, gasnet_mynode());
 	    return;
 	  }
 	}
@@ -3687,8 +4532,6 @@ namespace LegionRuntime {
 		     mem.id, offset, dst_stride, rhs_size, count,
 		     redop_id, (red_fold ? "fold" : "apply"),
 		     event.id, event.gen);
-
-      Memory::Impl *m_impl = mem.impl();
 
       // reductions always have to bounce off an intermediate buffer, so are subject to
       //  LMB limits
@@ -4065,9 +4908,9 @@ namespace LegionRuntime {
       // SJT: think about this more to see if there are any race conditions
       //  with an allocator temporarily having the wrong ID
       RegionInstance i = ID(ID::ID_INSTANCE, 
-				   ID(me).node(),
-				   ID(me).index_h(),
-				   0).convert<RegionInstance>();
+			    ID(me).node(),
+			    ID(me).index_h(),
+			    0).convert<RegionInstance>();
 
 
       //RegionMetaDataImpl *r_impl = Runtime::runtime->get_metadata_impl(r);
@@ -4140,7 +4983,7 @@ namespace LegionRuntime {
       assert(msglen == (sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields));
 
       std::vector<size_t> field_sizes(payload->num_fields);
-      for(int i = 0; i < payload->num_fields; i++)
+      for(size_t i = 0; i < payload->num_fields; i++)
 	field_sizes[i] = payload->field_size(i);
 
       resp.i = args.m.impl()->create_instance(args.r, 
@@ -4154,10 +4997,11 @@ namespace LegionRuntime {
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
-      StaticAccess<RegionInstance::Impl> i_data(resp.i.impl());
-      resp.inst_offset = i_data->alloc_offset;
-      resp.count_offset = i_data->count_offset;
-      //resp.inst_offset = StaticAccess<RegionInstance::Impl>(resp.i.impl())->alloc_offset;
+      RegionInstance::Impl *i_impl = resp.i.impl();
+
+      resp.inst_offset = i_impl->metadata.alloc_offset;
+      resp.count_offset = i_impl->metadata.count_offset;
+
       return resp;
     }
 
@@ -4251,11 +5095,20 @@ namespace LegionRuntime {
       // all we do for now is free the actual data storage
       unsigned index = ID(i).index_l();
       assert(index < instances.size());
-      RegionInstance::Impl *iimpl = instances[index];
-      free_bytes(iimpl->locked_data.alloc_offset, iimpl->locked_data.size);
 
-      if(iimpl->locked_data.count_offset >= 0)
-	free_bytes(iimpl->locked_data.count_offset, sizeof(size_t));
+      RegionInstance::Impl *iimpl = instances[index];
+
+      free_bytes(iimpl->metadata.alloc_offset, iimpl->metadata.size);
+
+      if(iimpl->metadata.count_offset >= 0)
+	free_bytes(iimpl->metadata.count_offset, sizeof(size_t));
+
+      // begin recovery of metadata
+      if(iimpl->metadata.initiate_cleanup(i.id)) {
+	// no remote copies exist, so we can reclaim instance immediately
+	log_metadata.info("no remote copies of metadata for " IDFMT, i.id);
+	// TODO
+      }
       
       return; // TODO: free up actual instance record?
       ID id(i);
@@ -4321,7 +5174,7 @@ namespace LegionRuntime {
       free(args);
     }
 
-    class DeferredTaskSpawn : public Event::Impl::EventWaiter {
+    class DeferredTaskSpawn : public EventWaiter {
     public:
       DeferredTaskSpawn(Processor::Impl *_proc, Task *_task) 
         : proc(_proc), task(_task) {}
@@ -4359,7 +5212,7 @@ namespace LegionRuntime {
     // global because I'm being lazy...
     Processor::TaskIDTable task_id_table;
 
-    /*static*/ const Processor Processor::NO_PROC = { 0 };
+    /*static*/ const Processor Processor::NO_PROC = { 0 }; 
 
     Processor::Impl *Processor::impl(void) const
     {
@@ -4400,7 +5253,7 @@ namespace LegionRuntime {
 
     void ProcessorGroup::init(Processor _me, int _owner)
     {
-      assert(ID(_me).node() == _owner);
+      assert(ID(_me).node() == (unsigned)_owner);
 
       me = _me;
       lock.init(ID(me).convert<Reservation>(), ID(me).node());
@@ -4466,7 +5319,7 @@ namespace LegionRuntime {
       if (start_event.has_triggered())
         enqueue_task(task);
       else
-        start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
+        start_event.impl()->add_waiter(start_event.gen, new DeferredTaskSpawn(this, task));
     }
 
     class LocalProcessor : public Processor::Impl {
@@ -4525,7 +5378,7 @@ namespace LegionRuntime {
       //  wake up to run
       class Thread : public PreemptableThread {
       public:
-	class EventStackEntry : public Event::Impl::EventWaiter {
+	class EventStackEntry : public EventWaiter {
 	public:
 	  EventStackEntry(Thread *_thread, Event _event, EventStackEntry *_next)
 	    : thread(_thread), event(_event), next(_next), triggered(false) {}
@@ -4539,7 +5392,7 @@ namespace LegionRuntime {
 	    if(event.has_triggered())
 	      triggered = true;
 	    else
-	      event.impl()->add_waiter(event, this);
+	      event.impl()->add_waiter(event.gen, this);
 	  }
 
 	  virtual bool event_triggered(void)
@@ -4908,8 +5761,8 @@ namespace LegionRuntime {
 
 	      log_task(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", proc->me.id);
 	    }
-	    if(proc->shutdown_event.exists())
-	      proc->shutdown_event.impl()->trigger(proc->shutdown_event.gen, gasnet_mynode());
+	    if(proc->shutdown_event)
+	      proc->shutdown_event->trigger_current();
             proc->finished();
 	  }
 
@@ -4920,14 +5773,52 @@ namespace LegionRuntime {
         {
           return proc->me;
         }
-      }; 
+      };
+
+      class DeferredTaskSpawn : public EventWaiter {
+      public:
+	DeferredTaskSpawn(Task *_task) : task(_task) {}
+
+	virtual ~DeferredTaskSpawn(void)
+	{
+	  // we do _NOT_ own the task - do not free it
+	}
+
+	virtual bool event_triggered(void)
+	{
+	  log_task(LEVEL_DEBUG, "deferred task now ready: func=%d finish=" IDFMT "/%d",
+		   task->func_id, 
+		   task->finish_event.id, task->finish_event.gen);
+
+	  // add task to processor's ready queue
+#ifdef SHARED_TASK_QUEUE
+          if(task->func_id && task->proc->shared_queue) {
+            // always insert into shared queue for now
+            task->proc->shared_queue->add(task);
+            return true;
+          }
+#endif
+	  ((LocalProcessor *)(task->proc.impl()))->enqueue_task(task);
+
+          return true;
+	}
+
+	virtual void print_info(FILE *f)
+	{
+	  fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
+		 task->func_id, task->proc.id, task->finish_event.id, task->finish_event.gen);
+	}
+
+      protected:
+	Task *task;
+      };
 
       LocalProcessor(Processor _me, int _core_id, 
 		     int _total_threads = 1, int _max_active_threads = 1)
 	: Processor::Impl(_me, Processor::LOC_PROC), core_id(_core_id),
 	  total_threads(_total_threads),
 	  active_thread_count(0), max_active_threads(_max_active_threads),
-	  init_done(false), shutdown_requested(false), shutdown_event(Event::NO_EVENT), in_idle_task(false),
+	  init_done(false), shutdown_requested(false), shutdown_event(0), in_idle_task(false),
 	  idle_task_enabled(false)
       {
         gasnet_hsl_init(&mutex);
@@ -4964,7 +5855,7 @@ namespace LegionRuntime {
 	if(task->func_id == 0) {
 	  log_task(LEVEL_INFO, "shutdown request received!");
 	  shutdown_requested = true;
-	  shutdown_event = task->finish_event;
+	  shutdown_event = Runtime::get_runtime()->get_genevent_impl(task->finish_event);
           // Wake up any available threads that may be sleeping
           while (!avail_threads.empty()) {
             Thread *thread = avail_threads.front();
@@ -5071,7 +5962,7 @@ namespace LegionRuntime {
 	} else {
 	  log_task(LEVEL_DEBUG, "deferring spawn: func=%d event=" IDFMT "/%d",
 		   func_id, start_event.id, start_event.gen);
-	  start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
+	  start_event.impl()->add_waiter(start_event.gen, new DeferredTaskSpawn(/*this,*/ task));
 	}
       }
 
@@ -5142,7 +6033,7 @@ namespace LegionRuntime {
       std::set<Thread *> all_threads;
       gasnet_hsl_t mutex;
       bool init_done, shutdown_requested;
-      Event shutdown_event;
+      GenEventImpl *shutdown_event;
       bool in_idle_task;
       Task *idle_task;
       bool idle_task_enabled;
@@ -5191,7 +6082,7 @@ namespace LegionRuntime {
                "utility task end: %d (%p) (%s)", task->func_id, fptr, argstr);
 #endif
       if(task->finish_event.exists())
-        task->finish_event.impl()->trigger(task->finish_event.gen, gasnet_mynode());
+	Runtime::get_runtime()->get_genevent_impl(task->finish_event)->trigger(task->finish_event.gen, gasnet_mynode());
     }
 
     /*static*/ bool PreemptableThread::preemptable_sleep(Event wait_for,
@@ -5453,7 +6344,7 @@ namespace LegionRuntime {
       if (start_event.has_triggered())
         enqueue_task(task);
       else
-        start_event.impl()->add_waiter(start_event, new DeferredTaskSpawn(this, task));
+        start_event.impl()->add_waiter(start_event.gen, new DeferredTaskSpawn(this, task));
     }
 
     void UtilityProcessor::tasks_available(int priority)
@@ -5699,20 +6590,23 @@ namespace LegionRuntime {
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       Processor::Impl *p = impl();
-      Event finish_event = Event::Impl::create_event();
+
+      GenEventImpl *finish_event = GenEventImpl::create_genevent();
+      Event e = finish_event->current_event();
 #ifdef EVENT_GRAPH_TRACE
       Event enclosing = find_enclosing_termination_event();
       log_event_graph.info("Task Request: %d " IDFMT 
                             " (" IDFMT ",%d) (" IDFMT ",%d)"
                             " (" IDFMT ",%d) %d %p %ld",
-                            func_id, id, finish_event.id, finish_event.gen,
+                            func_id, id, e.id, e.gen,
                             wait_on.id, wait_on.gen,
                             enclosing.id, enclosing.gen,
                             priority, args, arglen);
 #endif
+
       p->spawn_task(func_id, args, arglen, //instances_needed, 
-		    wait_on, finish_event, priority);
-      return finish_event;
+		    wait_on, e, priority);
+      return e;
     }
 
     Processor Processor::get_utility_processor(void) const
@@ -5744,41 +6638,46 @@ namespace LegionRuntime {
     ///////////////////////////////////////////////////
     // Runtime
 
-    Event::Impl *Runtime::get_event_impl(ID id)
+    Event::Impl *Runtime::get_event_impl(Event e)
     {
+      ID id(e);
       switch(id.type()) {
       case ID::ID_EVENT:
-	{
-	  Node *n = &runtime->nodes[id.node()];
-	  Event::Impl *impl = n->events.lookup_entry(id.index(), id.node());
-	  assert(impl->me == id.convert<Event>());
-	  return impl;
-#if 0
-	  unsigned index = id.index();
-	  if(index >= n->num_events) {
-	    AutoHSLLock a(n->mutex); // take lock before we actually resize
-
-	    // grow our array to mirror additions by other nodes
-	    //  this should never happen for our own node
-	    assert(id.node() != gasnet_mynode());
-
-	    unsigned oldsize = n->events.size();
-	    if(index >= oldsize) { // only it's still too small
-              assert((index+1) < MAX_LOCAL_EVENTS);
-	      n->events.resize(index + 1);
-	      for(unsigned i = oldsize; i <= index; i++)
-		n->events[i].init(ID(ID::ID_EVENT, id.node(), i).convert<Event>(),
-				  id.node());
-	      n->num_events = index + 1;
-	    }
-	  }
-	  return &(n->events[index]);
-#endif
-	}
-
+	return get_genevent_impl(e);
+      case ID::ID_BARRIER:
+	return get_barrier_impl(e);
       default:
 	assert(0);
       }
+    }
+
+    GenEventImpl *Runtime::get_genevent_impl(Event e)
+    {
+      ID id(e);
+      assert(id.type() == ID::ID_EVENT);
+
+      Node *n = &runtime->nodes[id.node()];
+      GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
+      assert(impl->me == id);
+
+      // check to see if this is for a generation more than one ahead of what we
+      //  know of - this should only happen for remote events, but if it does it means
+      //  there are some generations we don't know about yet, so we can catch up (and
+      //  notify any local waiters right away)
+      impl->check_for_catchup(e.gen - 1);
+
+      return impl;
+    }
+
+    BarrierImpl *Runtime::get_barrier_impl(Event e)
+    {
+      ID id(e);
+      assert(id.type() == ID::ID_BARRIER);
+
+      Node *n = &runtime->nodes[id.node()];
+      BarrierImpl *impl = n->barriers.lookup_entry(id.index(), id.node());
+      assert(impl->me == id);
+      return impl;
     }
 
     Reservation::Impl *Runtime::get_lock_impl(ID id)
@@ -5947,7 +6846,7 @@ namespace LegionRuntime {
 
     static Logger::Category log_meta("meta");
 
-    /*static*/ const IndexSpace IndexSpace::NO_SPACE = IndexSpace();
+    /*static*/ const IndexSpace IndexSpace::NO_SPACE = { 0 };
     /*static*/ const Domain Domain::NO_DOMAIN = Domain();
 
     IndexSpace::Impl *IndexSpace::impl(void) const
@@ -6208,16 +7107,15 @@ namespace LegionRuntime {
       }
     }
 
-    class DeferredInstDestroy : public Event::Impl::EventWaiter {
+    class DeferredInstDestroy : public EventWaiter {
     public:
       DeferredInstDestroy(RegionInstance::Impl *i) : impl(i) { }
       virtual ~DeferredInstDestroy(void) { }
     public:
       virtual bool event_triggered(void)
       {
-        StaticAccess<RegionInstance::Impl> i_data(impl);
         log_meta(LEVEL_INFO, "instance destroyed: space=" IDFMT " id=" IDFMT "",
-                 i_data->is.id, impl->me.id);
+                 impl->metadata.is.id, impl->me.id);
         impl->memory.impl()->destroy_instance(impl->me, true); 
         return true;
       }
@@ -6236,12 +7134,12 @@ namespace LegionRuntime {
       RegionInstance::Impl *i_impl = impl();
       if (!wait_on.has_triggered())
       {
-        wait_on.impl()->add_waiter(wait_on, new DeferredInstDestroy(i_impl));
+        wait_on.impl()->add_waiter(wait_on.gen, new DeferredInstDestroy(i_impl));
         return;
       }
-      StaticAccess<RegionInstance::Impl> i_data(i_impl);
+
       log_meta(LEVEL_INFO, "instance destroyed: space=" IDFMT " id=" IDFMT "",
-	       i_data->is.id, this->id);
+	       i_impl->metadata.is.id, this->id);
       i_impl->memory.impl()->destroy_instance(*this, true);
     }
 
@@ -6889,7 +7787,7 @@ namespace LegionRuntime {
       // for now, do updates of valid masks immediately
       IndexSpace::Impl *impl = is_impl;
       while(1) {
-	SharedAccess<IndexSpace::Impl> is_data(is_impl);
+	SharedAccess<IndexSpace::Impl> is_data(impl);
 	assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
 	is_impl->valid_mask->enable(ptr, count);
 	IndexSpace is = is_data->parent;
@@ -6903,7 +7801,7 @@ namespace LegionRuntime {
       // for now, do updates of valid masks immediately
       IndexSpace::Impl *impl = is_impl;
       while(1) {
-	SharedAccess<IndexSpace::Impl> is_data(is_impl);
+	SharedAccess<IndexSpace::Impl> is_data(impl);
 	assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
 	is_impl->valid_mask->disable(ptr, count);
 	IndexSpace is = is_data->parent;
@@ -6935,61 +7833,70 @@ namespace LegionRuntime {
 
     void RegionInstance::Impl::get_bytes(int index, off_t byte_offset, void *dst, size_t size)
     {
-      StaticAccess<RegionInstance::Impl> data(this);
+      // must have valid data by now - block if we have to
+      metadata.await_data();
+ 
       off_t o;
-      if(data->block_size == 1) {
+      if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * data->elmt_size) + byte_offset;
+	o = (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(data->field_sizes, byte_offset, size, field_start, field_size);
+	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
 
-	int block_num = index / data->block_size;
-	int block_ofs = index % data->block_size;
+	int block_num = index / metadata.block_size;
+	int block_ofs = index % metadata.block_size;
 
-	o = (((data->elmt_size * block_num + field_start) * data->block_size) + 
+	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
 	     (field_size * block_ofs) +
 	     (byte_offset - field_start));
       }
       Memory::Impl *m = Runtime::runtime->get_memory_impl(memory);
-      m->get_bytes(data->alloc_offset + o, dst, size);
+      m->get_bytes(metadata.alloc_offset + o, dst, size);
     }
 
     void RegionInstance::Impl::put_bytes(int index, off_t byte_offset, const void *src, size_t size)
     {
-      StaticAccess<RegionInstance::Impl> data(this);
+      // must have valid data by now - block if we have to
+      metadata.await_data();
+
       off_t o;
-      if(data->block_size == 1) {
+      if(metadata.block_size == 1) {
 	// no blocking - don't need to know about field boundaries
-	o = (index * data->elmt_size) + byte_offset;
+	o = (index * metadata.elmt_size) + byte_offset;
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(data->field_sizes, byte_offset, size, field_start, field_size);
+	find_field_start(metadata.field_sizes, byte_offset, size, field_start, field_size);
 
-	int block_num = index / data->block_size;
-	int block_ofs = index % data->block_size;
+	int block_num = index / metadata.block_size;
+	int block_ofs = index % metadata.block_size;
 
-	o = (((data->elmt_size * block_num + field_start) * data->block_size) + 
+	o = (((metadata.elmt_size * block_num + field_start) * metadata.block_size) + 
 	     (field_size * block_ofs) +
 	     (byte_offset - field_start));
       }
       Memory::Impl *m = Runtime::runtime->get_memory_impl(memory);
-      m->put_bytes(data->alloc_offset + o, src, size);
+      m->put_bytes(metadata.alloc_offset + o, src, size);
     }
 
-    /*static*/ const RegionInstance RegionInstance::NO_INST = RegionInstance();
+    /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
 
     // a generic accessor just holds a pointer to the impl and passes all 
     //  requests through
     RegionAccessor<AccessorType::Generic> RegionInstance::get_accessor(void) const
     {
+      // request metadata (if needed), but don't block on it yet
+      Event e = impl()->metadata.request_data(ID(id).node(), id);
+      if(!e.has_triggered())
+	log_metadata.info("requested metadata in accessor creation: " IDFMT, id);
+	
       return RegionAccessor<AccessorType::Generic>(AccessorType::Generic::Untyped((void *)impl()));
     }
 
 #if 0
-    class DeferredCopy : public Event::Impl::EventWaiter {
+    class DeferredCopy : public EventWaiter {
     public:
       DeferredCopy(RegionInstance _src, RegionInstance _target,
 		   IndexSpace _region,
@@ -7069,6 +7976,7 @@ namespace LegionRuntime {
 				    data, datalen, PAYLOAD_COPY);
     }
 
+#ifdef OLD_RANGE_EXECUTORS
     namespace RangeExecutors {
       class Memcpy {
       public:
@@ -7255,7 +8163,7 @@ namespace LegionRuntime {
 
 	  // if we don't have an event for our completion, we need one now
 	  if(!event.exists())
-	    event = Event::Impl::create_event();
+	    event = GenEventImpl::create_event();
 
 	  RemoteWriteArgs args;
 	  args.mem = tgt_mem;
@@ -7281,6 +8189,7 @@ namespace LegionRuntime {
       };
 
     }; // namespace RangeExecutors
+#endif
 
 #if 0
     /*static*/ Event RegionInstance::Impl::copy(RegionInstance src, 
@@ -7379,7 +8288,7 @@ namespace LegionRuntime {
 
 	log_copy.info("passsing the buck to node %d for " IDFMT "->" IDFMT " copy",
 		      delegate, src_mem->me.id, dst_mem->me.id);
-	Event after_copy = Event::Impl::create_event();
+	Event after_copy = GenEventImpl::create_event();
 	RemoteCopyArgs args;
 	args.source = *this;
 	args.target = target;
@@ -7402,7 +8311,7 @@ namespace LegionRuntime {
 
 	log_copy.info("passsing the buck to node %d for " IDFMT "->" IDFMT " copy",
 		      delegate, src_mem->me.id, dst_mem->me.id);
-	Event after_copy = Event::Impl::create_event();
+	Event after_copy = GenEventImpl::create_event();
 	RemoteCopyArgs args;
 	args.source = *this;
 	args.target = target;
@@ -7417,7 +8326,7 @@ namespace LegionRuntime {
       }
 
       if(!wait_on.has_triggered()) {
-	Event after_copy = Event::Impl::create_event();
+	Event after_copy = GenEventImpl::create_event();
 	log_copy.debug("copy deferred: " IDFMT " (%d) -> " IDFMT " (%d), wait=" IDFMT "/%d after=" IDFMT "/%d", id, src_mem->kind, target.id, dst_mem->kind, wait_on.id, wait_on.gen, after_copy.id, after_copy.gen);
 	wait_on.impl()->add_waiter(wait_on,
 				   new DeferredCopy(*this, target,
@@ -7858,7 +8767,7 @@ namespace LegionRuntime {
 				      handle_machine_shutdown_request> MachineShutdownRequestMessage;
 
     static gasnet_hsl_t announcement_mutex = GASNET_HSL_INITIALIZER;
-    static int announcements_received = 0;
+    static unsigned announcements_received = 0;
 
     enum {
       NODE_ANNOUNCE_DONE = 0,
@@ -8092,7 +9001,7 @@ namespace LegionRuntime {
 #endif
 
       // count how many actual cores we have
-      size_t core_count = 0;
+      int core_count = 0;
       for(SystemProcMap::const_iterator it1 = proc_map.begin(); it1 != proc_map.end(); it1++)
 	core_count += it1->second.size();
       
@@ -8256,7 +9165,8 @@ namespace LegionRuntime {
       int offset = 0;
       for (int i = 0; i < bt_size; i++)
         offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
-      fprintf(stderr,"BACKTRACE\n----------\n%s\n----------\n", buffer);
+      fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
+              gasnet_mynode(), pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
     }
@@ -8307,6 +9217,7 @@ namespace LegionRuntime {
       unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
+      unsigned num_gpu_streams = 12;
       bool     active_msg_sender_threads = false;
       bool     gpu_dma_thread = true;
 #ifdef EVENT_TRACING
@@ -8346,6 +9257,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
+        INT_ARG("-ll:streams", num_gpu_streams);
         BOOL_ARG("-ll:gpudma", gpu_dma_thread);
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
 	INT_ARG("-ll:bind", bind_localproc_threads);
@@ -8458,6 +9370,12 @@ namespace LegionRuntime {
       hcount += RemoteRedListMessage::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
       hcount += MachineShutdownRequestMessage::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
       hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
+      hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
+      hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
+      hcount += MetadataRequestMessage::RequestMessage::add_handler_entries(&handlers[hcount], "Metadata Request AM");
+      hcount += MetadataRequestMessage::ResponseMessage::add_handler_entries(&handlers[hcount], "Metadata Response AM");
+      hcount += MetadataInvalidateMessage::RequestMessage::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
+      hcount += MetadataInvalidateMessage::ResponseMessage::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 
@@ -8476,6 +9394,7 @@ namespace LegionRuntime {
       {
 	Node& n = r->nodes[gasnet_mynode()];
 	r->local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
+	r->local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, gasnet_mynode());
 	r->local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
 	r->local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
 	r->local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
@@ -8779,7 +9698,7 @@ namespace LegionRuntime {
 					      zc_mem_size_in_mb << 20,
 					      fb_mem_size_in_mb << 20,
                                               stack_size_in_mb << 20,
-                                              gpu_dma_thread);
+                                              gpu_dma_thread, num_gpu_streams);
 #ifdef UTIL_PROCS_FOR_GPU
 	  if(num_util_procs > 0)
           {
@@ -8918,20 +9837,20 @@ namespace LegionRuntime {
       }
 
       // now announce ourselves to everyone else
-      for(int i = 0; i < gasnet_nodes(); i++)
+      for(unsigned i = 0; i < gasnet_nodes(); i++)
 	if(i != gasnet_mynode())
 	  NodeAnnounceMessage::request(i, announce_data, 
 				       adata, apos*sizeof(adata[0]),
 				       PAYLOAD_COPY);
 
       // wait until we hear from everyone else?
-      while(announcements_received < (gasnet_nodes() - 1))
+      while(announcements_received < (unsigned)(gasnet_nodes() - 1))
 	do_some_polling();
 
       log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
 
       // build old proc/mem lists from affinity data
-      for(int i = 0; i < gasnet_nodes(); i++)
+      for(unsigned i = 0; i < gasnet_nodes(); i++)
 	for(std::vector<Processor::Impl *>::const_iterator it = Runtime::runtime->nodes[i].processors.begin();
 	    it != Runtime::runtime->nodes[i].processors.end();
 	    it++)
@@ -9179,6 +10098,7 @@ namespace LegionRuntime {
         log_machine.info("total proc groups: %d", rt->local_proc_group_free_list->next_alloc);
 #endif
       }
+      log_machine.info("running proc count is now zero - terminating\n");
 #ifdef EVENT_GRAPH_TRACE
       {
         FILE *log_file = Logger::get_log_file();
@@ -9188,7 +10108,6 @@ namespace LegionRuntime {
 #if defined(ORDERED_LOGGING) || defined(NODE_LOGGING)
       Logger::finalize();
 #endif
-      log_machine.info("running proc count is now zero - terminating\n");
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       stop_dma_worker_threads();
@@ -9214,7 +10133,7 @@ namespace LegionRuntime {
 	MachineShutdownRequestArgs args;
 	args.initiating_node = gasnet_mynode();
 
-	for(int i = 0; i < gasnet_nodes(); i++)
+	for(unsigned i = 0; i < gasnet_nodes(); i++)
 	  if(i != gasnet_mynode())
 	    MachineShutdownRequestMessage::request(i, args);
       }
@@ -9226,7 +10145,7 @@ namespace LegionRuntime {
 	  it != local_procs.end();
 	  it++)
       {
-        Event e = Event::Impl::create_event();
+        Event e = GenEventImpl::create_genevent()->current_event();
 	(*it)->spawn_task(0 /* shutdown task id */, 0, 0,
 			  Event::NO_EVENT, e, 0/*priority*/);
       }
@@ -9409,15 +10328,19 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
 #ifdef PRIVILEGE_CHECKS 
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
       check_bounds(region, ptr);
 #endif
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      assert(impl->linearization.valid());
-      Arrays::Mapping<1, 1> *mapping = impl->linearization.get_mapping<1>();
+
+      Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
     }
@@ -9425,15 +10348,19 @@ namespace LegionRuntime {
     //bool debug_mappings = false;
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
 #ifdef PRIVILEGE_CHECKS 
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
 #endif
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      assert(impl->linearization.valid());
-      int index = impl->linearization.get_image(dp);
+
+      int index = impl->metadata.linearization.get_image(dp);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
       // if (debug_mappings) {
       // 	printf("READ: " IDFMT " (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
@@ -9445,30 +10372,38 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
 #ifdef PRIVILEGE_CHECKS
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
       check_bounds(region, ptr);
 #endif
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      assert(impl->linearization.valid());
-      Arrays::Mapping<1, 1> *mapping = impl->linearization.get_mapping<1>();
+
+      Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
       impl->put_bytes(index, field_offset + offset, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
 #ifdef PRIVILEGE_CHECKS
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
 #endif
-      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
-      assert(impl->linearization.valid());
-      int index = impl->linearization.get_image(dp);
+
+      int index = impl->metadata.linearization.get_image(dp);
       // if (debug_mappings) {
       // 	printf("WRITE: " IDFMT " (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
       // 	for(size_t i = 0; (i < bytes) && (i < 32); i++)
@@ -9551,27 +10486,29 @@ namespace LegionRuntime {
     bool AccessorType::Generic::Untyped::get_redfold_parameters(void *&base) const
     {
       RegionInstance::Impl *impl = (RegionInstance::Impl *)internal;
-      Memory::Impl *mem = impl->memory.impl();
-      StaticAccess<RegionInstance::Impl> idata(impl);
-      if (idata->redopid == 0) return false;
-      if (idata->red_list_size > 0) return false;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      if (impl->metadata.redopid == 0) return false;
+      if (impl->metadata.red_list_size > 0) return false;
 
       // ReductionFold accessors currently assume packed instances
-      size_t stride = idata->elmt_size;
+      size_t stride = impl->metadata.elmt_size;
       return impl->get_strided_parameters(base, stride, field_offset);
 #if 0
-      off_t offset = idata->alloc_offset + field_offset;
+      off_t offset = impl->metadata.alloc_offset + field_offset;
       off_t elmt_stride;
 
-      if (idata->block_size == 1) {
+      if (impl->metadata.block_size == 1) {
         offset += field_offset;
-        elmt_stride = idata->elmt_size;
+        elmt_stride = impl->metadata.elmt_size;
       } else {
         off_t field_start;
         int field_size;
-        find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+        find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-        offset += (field_start * idata->block_size) + (field_offset - field_start);
+        offset += (field_start * impl->metadata.block_size) + (field_offset - field_start);
 	elmt_stride = field_size;
       }
       base = mem->get_direct_ptr(offset, 0);
@@ -9599,30 +10536,29 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       Memory::Impl *mem = impl->memory.impl();
 
-      StaticAccess<RegionInstance::Impl> idata(impl);
-      if(!impl->linearization.valid()) {
-	impl->linearization.deserialize(idata->linearization_bits);
-      }
-      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
 
-      off_t offset = idata->alloc_offset;
+      off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
 
-      if(idata->block_size == 1) {
-	offset += index * idata->elmt_size + field_offset;
-	elmt_stride = idata->elmt_size;
+      if(impl->metadata.block_size == 1) {
+	offset += index * impl->metadata.elmt_size + field_offset;
+	elmt_stride = impl->metadata.elmt_size;
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+	find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-	int block_num = index / idata->block_size;
-	int block_ofs = index % idata->block_size;
+	int block_num = index / impl->metadata.block_size;
+	int block_ofs = index % impl->metadata.block_size;
 
-	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
 		   (field_offset - field_start));
 	elmt_stride = field_size;
@@ -9647,22 +10583,21 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       Memory::Impl *mem = impl->memory.impl();
 
-      StaticAccess<RegionInstance::Impl> idata(impl);
-      if(!impl->linearization.valid()) {
-	impl->linearization.deserialize(idata->linearization_bits);
-      }
-      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
 
-      off_t offset = idata->alloc_offset;
+      off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
       off_t fld_stride;
 
-      if(idata->block_size == 1) {
-	offset += index * idata->elmt_size + field_offset;
-	elmt_stride = idata->elmt_size;
+      if(impl->metadata.block_size == 1) {
+	offset += index * impl->metadata.elmt_size + field_offset;
+	elmt_stride = impl->metadata.elmt_size;
 
 	if(field_offsets.size() == 1) {
 	  fld_stride = 0;
@@ -9677,12 +10612,12 @@ namespace LegionRuntime {
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+	find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-	int block_num = index / idata->block_size;
-	int block_ofs = index % idata->block_size;
+	int block_num = index / impl->metadata.block_size;
+	int block_ofs = index % impl->metadata.block_size;
 
-	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
 		   (field_offset - field_start));
 	elmt_stride = field_size;
@@ -9692,18 +10627,18 @@ namespace LegionRuntime {
 	} else {
 	  off_t field_start2;
 	  int field_size2;
-	  find_field_start(idata->field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
+	  find_field_start(impl->metadata.field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
 
 	  // field sizes much match or element stride isn't consistent
 	  if(field_size2 != field_size)
 	    return 0;
 	  
-	  fld_stride = (((field_start2 - field_start) * idata->block_size) + 
+	  fld_stride = (((field_start2 - field_start) * impl->metadata.block_size) + 
 			(field_offsets[1] - field_start2) - (field_offsets[0] - field_start));
 
 	  for(size_t i = 2; i < field_offsets.size(); i++) {
-	    find_field_start(idata->field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
-	    off_t fld_stride2 = (((field_start2 - field_start) * idata->block_size) + 
+	    find_field_start(impl->metadata.field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
+	    off_t fld_stride2 = (((field_start2 - field_start) * impl->metadata.block_size) + 
 			(field_offsets[i] - field_start2) - (field_offsets[0] - field_start));
 	    if(fld_stride2 != fld_stride * i) {
 	      // fields aren't evenly spaced - abort
@@ -9730,29 +10665,28 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       Memory::Impl *mem = impl->memory.impl();
 
-      StaticAccess<RegionInstance::Impl> idata(impl);
-      if(!impl->linearization.valid()) {
-	impl->linearization.deserialize(idata->linearization_bits);
-      }
-      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       int index = mapping->image_dense_subrect(r, subrect);
 
-      off_t offset = idata->alloc_offset;
+      off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
 
-      if(idata->block_size == 1) {
-	offset += index * idata->elmt_size + field_offset;
-	elmt_stride = idata->elmt_size;
+      if(impl->metadata.block_size == 1) {
+	offset += index * impl->metadata.elmt_size + field_offset;
+	elmt_stride = impl->metadata.elmt_size;
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(idata->field_sizes, field_offset, 1, field_start, field_size);
+	find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-	int block_num = index / idata->block_size;
-	int block_ofs = index % idata->block_size;
+	int block_num = index / impl->metadata.block_size;
+	int block_ofs = index % impl->metadata.block_size;
 
-	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
 		   (field_offset - field_start));
 	elmt_stride = field_size;
@@ -9776,21 +10710,20 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       Memory::Impl *mem = impl->memory.impl();
 
-      StaticAccess<RegionInstance::Impl> idata(impl);
-      if(!impl->linearization.valid()) {
-	impl->linearization.deserialize(idata->linearization_bits);
-      }
-      Arrays::Mapping<DIM, 1> *mapping = impl->linearization.get_mapping<DIM>();
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       int index = mapping->image_dense_subrect(r, subrect);
 
-      off_t offset = idata->alloc_offset;
+      off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
       off_t fld_stride;
 
-      if(idata->block_size == 1) {
-	offset += index * idata->elmt_size + field_offset + field_offsets[0];
-	elmt_stride = idata->elmt_size;
+      if(impl->metadata.block_size == 1) {
+	offset += index * impl->metadata.elmt_size + field_offset + field_offsets[0];
+	elmt_stride = impl->metadata.elmt_size;
 
 	if(field_offsets.size() == 1) {
 	  fld_stride = 0;
@@ -9805,12 +10738,12 @@ namespace LegionRuntime {
       } else {
 	off_t field_start;
 	int field_size;
-	find_field_start(idata->field_sizes, field_offset + field_offsets[0], 1, field_start, field_size);
+	find_field_start(impl->metadata.field_sizes, field_offset + field_offsets[0], 1, field_start, field_size);
 
-	int block_num = index / idata->block_size;
-	int block_ofs = index % idata->block_size;
+	int block_num = index / impl->metadata.block_size;
+	int block_ofs = index % impl->metadata.block_size;
 
-	offset += (((idata->elmt_size * block_num + field_start) * idata->block_size) + 
+	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
 		   (field_offset + field_offsets[0] - field_start));
 	elmt_stride = field_size;
@@ -9820,18 +10753,18 @@ namespace LegionRuntime {
 	} else {
 	  off_t field_start2;
 	  int field_size2;
-	  find_field_start(idata->field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
+	  find_field_start(impl->metadata.field_sizes, field_offset + field_offsets[1], 1, field_start2, field_size2);
 
 	  // field sizes much match or element stride isn't consistent
 	  if(field_size2 != field_size)
 	    return 0;
 	  
-	  fld_stride = (((field_start2 - field_start) * idata->block_size) + 
+	  fld_stride = (((field_start2 - field_start) * impl->metadata.block_size) + 
 			(field_offsets[1] - field_start2) - (field_offsets[0] - field_start));
 
 	  for(size_t i = 2; i < field_offsets.size(); i++) {
-	    find_field_start(idata->field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
-	    off_t fld_stride2 = (((field_start2 - field_start) * idata->block_size) + 
+	    find_field_start(impl->metadata.field_sizes, field_offset + field_offsets[i], 1, field_start2, field_size2);
+	    off_t fld_stride2 = (((field_start2 - field_start) * impl->metadata.block_size) + 
 			(field_offsets[i] - field_start2) - (field_offsets[0] - field_start));
 	    if(fld_stride2 != fld_stride * i) {
 	      // fields aren't evenly spaced - abort

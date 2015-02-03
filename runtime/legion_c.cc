@@ -1139,8 +1139,8 @@ legion_runtime_unmap_region(legion_runtime_t runtime_,
 }
 
 void
-legion_runtime_map_all_region(legion_runtime_t runtime_,
-                              legion_context_t ctx_)
+legion_runtime_map_all_regions(legion_runtime_t runtime_,
+                               legion_context_t ctx_)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
@@ -1542,7 +1542,7 @@ task_wrapper_void(const Task *task,
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
   std::vector<legion_physical_region_t> regions_;
-  for (int i = 0; i < regions.size(); i++) {
+  for (size_t i = 0; i < regions.size(); i++) {
     regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
   }
   legion_physical_region_t *regions_ptr = NULL;
@@ -1584,7 +1584,7 @@ task_wrapper(const Task *task,
 {
   const legion_task_t task_ = CObjectWrapper::wrap_const(task);
   std::vector<legion_physical_region_t> regions_;
-  for (int i = 0; i < regions.size(); i++) {
+  for (size_t i = 0; i < regions.size(); i++) {
     regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
   }
   legion_physical_region_t *regions_ptr = NULL;

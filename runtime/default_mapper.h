@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -89,6 +89,9 @@ namespace LegionRuntime {
       virtual void handle_message(Processor source,
                                   const void *message,
                                   size_t length);
+      virtual void handle_mapper_task_result(MapperEvent event,
+                                             const void *result,
+                                             size_t result_size);
     public:
       // Helper methods for building other kinds of mappers, made static 
       // so they can be used in non-derived classes

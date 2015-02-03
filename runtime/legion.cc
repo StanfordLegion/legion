@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ namespace LegionRuntime {
     Logger::Category log_leak("leaks");
     Logger::Category log_variant("variants");
     Logger::Category log_allocation("allocation");
+    Logger::Category log_directory("directory");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
@@ -638,8 +639,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier::PhaseBarrier(Barrier b, unsigned parts)
-      : phase_barrier(b), participants(parts)
+    PhaseBarrier::PhaseBarrier(Barrier b)
+      : phase_barrier(b)
     //--------------------------------------------------------------------------
     {
     }
@@ -659,15 +660,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhaseBarrier::arrive(unsigned count /*=0*/)
+    void PhaseBarrier::arrive(unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      // This is a no-op since we would just end up
-      // altering the arrival count and then decrementing
-      // it by the same amount.
+      phase_barrier.arrive(count);
     }
 
     //--------------------------------------------------------------------------
@@ -685,6 +684,39 @@ namespace LegionRuntime {
         phase_barrier.wait();
         rt->post_wait(proc);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhaseBarrier::alter_arrival_count(int delta)
+    //--------------------------------------------------------------------------
+    {
+      phase_barrier.alter_arrival_count(delta);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Dynamic Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DynamicCollective::DynamicCollective(void)
+      : PhaseBarrier(), redop(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective::DynamicCollective(Barrier b, ReductionOpID r)
+      : PhaseBarrier(b), redop(r)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollective::arrive(const void *value, size_t size, 
+                                   unsigned count /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      phase_barrier.arrive(count, Event::NO_EVENT, value, size); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -1953,6 +1985,12 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    ProjectionFunctor::~ProjectionFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
     /////////////////////////////////////////////////////////////
@@ -2689,10 +2727,10 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhaseBarrier HighLevelRuntime::create_phase_barrier(Context ctx, 
-                                                        unsigned participants)
+                                                        unsigned arrivals)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_phase_barrier(ctx, participants);
+      return runtime->create_phase_barrier(ctx, arrivals);
     }
 
     //--------------------------------------------------------------------------
@@ -2708,6 +2746,51 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->advance_phase_barrier(ctx, pb);
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective HighLevelRuntime::create_dynamic_collective(Context ctx,
+                                                        unsigned arrivals,
+                                                        ReductionOpID redop,
+                                                        const void *init_value,
+                                                        size_t init_size)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_dynamic_collective(ctx, arrivals, redop,
+                                                init_value, init_size);
+    }
+    
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::destroy_dynamic_collective(Context ctx, 
+                                                      DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      runtime->destroy_dynamic_collective(ctx, dc);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::defer_dynamic_collective_arrival(Context ctx,
+                                                      DynamicCollective dc,
+                                                      Future f, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      runtime->defer_dynamic_collective_arrival(ctx, dc, f, count);
+    }
+
+    //--------------------------------------------------------------------------
+    Future HighLevelRuntime::get_dynamic_collective_result(Context ctx,
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_dynamic_collective_result(ctx, dc);
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollective HighLevelRuntime::advance_dynamic_collective(Context ctx,
+                                                           DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->advance_dynamic_collective(ctx, dc);
     }
 
     //--------------------------------------------------------------------------
@@ -3315,6 +3398,36 @@ namespace LegionRuntime {
     {
       runtime->runtime->handle_mapper_send_message(this, target, 
                                                    message, length);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::broadcast_message(const void *message, size_t length, 
+                                   int radix /*=4*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->handle_mapper_broadcast(this, message, length, radix);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperEvent Mapper::launch_mapper_task(Processor::TaskFuncID tid,
+                                           const TaskArgument &arg)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->launch_mapper_task(this, tid, arg);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::defer_mapper_call(MapperEvent event)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->defer_mapper_call(this, event);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperEvent Mapper::merge_mapper_events(const std::set<MapperEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      return Event::merge_events(events);
     }
 
     //--------------------------------------------------------------------------

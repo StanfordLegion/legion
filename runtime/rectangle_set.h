@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2121,7 +2121,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Segment<T> *result = NULL;
-      T diff;
+      T diff = 0;
       for (typename std::set<Segment<T>*>::const_iterator it = bounds.begin();
             it != bounds.end(); it++)
       {
@@ -2146,7 +2146,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Segment<T> *result = NULL;
-      T diff;
+      T diff = 0;
       for (typename std::set<Segment<T>*>::const_iterator it = bounds.begin();
             it != bounds.end(); it++)
       {

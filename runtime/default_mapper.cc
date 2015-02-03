@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -798,6 +798,18 @@ namespace LegionRuntime {
       log_mapper(LEVEL_SPEW,"Handle message in default mapper for processor " 
                             IDFMT "", local_proc.id);
       // We don't send any messages so we should never receive one
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::handle_mapper_task_result(MapperEvent event,
+                                                  const void *result,
+                                                  size_t result_size)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper(LEVEL_SPEW,"Handle mapper task result in default mapper "
+                            "for processor " IDFMT "", local_proc.id);
+      // We don't launch any sub tasks so we should never receive a result
       assert(false);
     }
 

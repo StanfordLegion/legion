@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,7 @@ namespace LegionRuntime {
     extern Logger::Category log_garbage;
     extern Logger::Category log_leak;
     extern Logger::Category log_variant;
+    extern Logger::Category log_directory;
 
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
@@ -586,7 +587,7 @@ namespace LegionRuntime {
       // We do need the autolock here since we're going to be making
       // region tree nodes
       AutoLock f_lock(forest_lock,1,false/*exclusive*/);
-      RegionNode *result = create_node(handle, NULL/*parent*/);
+      create_node(handle, NULL/*parent*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1029,7 +1030,8 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       MappableInfo info(ctx.get_id(), mappable, local_proc, req, user_mask); 
-      PremapTraverser traverser(path, &info);
+      StateDirectory *directory = parent_ctx->get_directory();
+      PremapTraverser traverser(path, &info, directory);
       // Mark that we are beginning the premapping
       UserEvent premap_event = 
         parent_ctx->begin_premapping(req.parent.tree_id, user_mask);
@@ -1605,7 +1607,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::send_physical_state(RegionTreeContext ctx,
                                                const RegionRequirement &req,
-                                               UniqueID unique_id,
+                                               StateDirectory *directory,
                                                AddressSpaceID target,
                                  std::map<LogicalView*,FieldMask> &needed_views,
                                  std::set<PhysicalManager*> &needed_managers)
@@ -1645,10 +1647,12 @@ namespace LegionRuntime {
       bool invalidate = (req.handle_type == SINGULAR) && IS_WRITE(req);
       // Construct a traverser to send the state
       FieldMask send_mask = field_node->get_field_mask(req.privilege_fields);
-      StateSender sender(ctx.get_id(), unique_id, target, 
+      StateSender sender(ctx.get_id(), directory->get_owner_uid(), target, 
           needed_views, needed_managers, send_mask, invalidate);
       // Now we're ready to send the state
       top_node->visit_node(&sender);
+      // Update the directory state
+      directory->update_remote_state(target, top_node, send_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -1864,6 +1868,131 @@ namespace LegionRuntime {
         PhysicalManager *manager = find_manager(did);
         manager->add_held_remote_reference();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_remote_shape(const IndexSpaceRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      // If we have the node we want then we are definitely good
+      return has_node(req.handle);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_remote_shape(const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      // Easy, check to see if we have a tree with right ID
+      return has_tree(req.parent.get_tree_id());
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_remote_state(const RegionRequirement &req,
+                                              RegionTreeContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      // This one is a little bit harder, see if all the states for the 
+      // various sub-nodes are valid.  If not then we are not valid.
+      RegionTreeNode *top_node;
+      FieldSpaceNode *field_node;
+      if (req.handle_type == PART_PROJECTION)
+      {
+        // Handling partition projection
+        PartitionNode *part_node = get_node(req.partition);
+        top_node = part_node;
+        field_node = part_node->column_source;
+      }
+      else
+      {
+        // We're dealing with region nodes
+        RegionNode *reg_node = get_node(req.region);
+        top_node = reg_node; 
+        field_node = reg_node->column_source;
+      }
+      FieldMask check_mask = field_node->get_field_mask(req.privilege_fields);
+      RemoteChecker checker(ctx.get_id(), check_mask);
+      top_node->visit_node(&checker);
+      return checker.is_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::validate_remote_state(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // Packed by StateDirectory::update_remote_state
+      DerezCheck z(derez);
+      UniqueID remote_owner_uid;
+      derez.deserialize(remote_owner_uid);
+      RemoteTask *remote_task = 
+        runtime->find_or_init_remote_context(remote_owner_uid);
+      bool is_region;
+      derez.deserialize(is_region);
+      FieldSpaceNode *field_node;
+      RegionTreeNode *top_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionNode *reg_node = get_node(handle);
+        top_node = reg_node;
+        field_node = reg_node->column_source;
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        PartitionNode *part_node = get_node(handle);
+        top_node = part_node;
+        field_node = part_node->column_source;
+      }
+      FieldMask validate_mask;
+      derez.deserialize(validate_mask);
+      // Do the transformation of the field mask to the local node
+      field_node->transform_field_mask(validate_mask, source);
+      // Now we can traverse the tree
+      RemoteValidator validator(remote_task->get_context_id(), validate_mask);
+      top_node->visit_node(&validator);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_remote_state(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID remote_owner_uid;
+      derez.deserialize(remote_owner_uid);
+      RemoteTask *remote_task = 
+        runtime->find_or_init_remote_context(remote_owner_uid);
+      bool is_region;
+      derez.deserialize(is_region);
+      FieldSpaceNode *field_node;
+      RegionTreeNode *top_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionNode *reg_node = get_node(handle);
+        top_node = reg_node;
+        field_node = reg_node->column_source;
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        PartitionNode *part_node = get_node(handle);
+        top_node = part_node;
+        field_node = part_node->column_source;
+      }
+      FieldMask invalidate_mask;
+      derez.deserialize(invalidate_mask);
+      // Do the transformation of the field mask to the local node
+      field_node->transform_field_mask(invalidate_mask, source);
+      // Now we can traverse the tree
+      RemoteInvalidator invalidator(remote_task->get_context_id(), 
+                                    invalidate_mask);
+      top_node->visit_node(&invalidator);
     }
 
     //--------------------------------------------------------------------------
@@ -3663,6 +3792,623 @@ namespace LegionRuntime {
 #endif
 
     /////////////////////////////////////////////////////////////
+    // State Directory 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    StateDirectory::StateDirectory(UniqueID remote_owner, RegionTreeForest *f,
+                                   SingleTask *ctx)
+      : remote_owner_uid(remote_owner), forest(f), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+      state_lock = Reservation::create_reservation();
+    }
+
+    //--------------------------------------------------------------------------
+    StateDirectory::StateDirectory(const StateDirectory &rhs)
+      : remote_owner_uid(0), forest(NULL), context(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    StateDirectory::~StateDirectory(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to hold the lock since we are done
+      // Send messages to deactivate any remote contexts
+      if (!!remote_contexts)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_owner_uid);
+        }
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
+        {
+          if (remote_contexts[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (remote_contexts.is_set(target))
+                context->runtime->send_free_remote_context(target, rez);
+            }
+          }
+        }
+      }
+      state_lock.destroy_reservation();
+      state_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    StateDirectory& StateDirectory::operator=(const StateDirectory &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::update_remote_state(AddressSpaceID target,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (target == forest->runtime->address_space)
+        return;
+      // Send the message first
+      Serializer rez;
+      {
+        // Unpacked by RegionTreeForest::validate_remote_state
+        RezCheck z(rez);
+        rez.serialize(remote_owner_uid);
+        bool is_region = node->is_region();
+        rez.serialize(is_region);
+        if (is_region)
+        {
+          RegionNode *region = node->as_region_node();
+          rez.serialize(region->handle);
+#ifdef DEBUG_HIGH_LEVEL
+          char *mask_str = mask.to_string();
+          log_directory(LEVEL_INFO,"Remote owner %lld VALIDATING region "
+                                   "(" IDFMT ",%x,%d) on node %d for "
+                                   "fields %s", remote_owner_uid,
+                                   region->handle.get_index_space().id,
+                                   region->handle.get_field_space().get_id(),
+                                   region->handle.get_tree_id(),
+                                   target, mask_str);
+          free(mask_str);
+#endif
+        }
+        else
+        {
+          PartitionNode *partition = node->as_partition_node();
+          rez.serialize(partition->handle);
+#ifdef DEBUG_HIGH_LEVEL
+          char *mask_str = mask.to_string();
+          log_directory(LEVEL_INFO,"Remote owner %lld VALIDATING partition "
+                                   "(%d,%x,%d) on node %d for fields %s",
+                                   remote_owner_uid,
+                                   partition->handle.get_index_partition(),
+                                   partition->handle.get_field_space().get_id(),
+                                   partition->handle.get_tree_id(),
+                                   target, mask_str);
+          free(mask_str);
+#endif
+        }
+        rez.serialize(mask);
+      }
+      forest->runtime->send_validate_remote_state(target, rez);
+      RegionTreeID tid = node->get_tree_id();
+      AutoLock s_lock(state_lock);
+      // Update our remote contexts and remote fields
+      remote_contexts.set_bit(target);
+      remote_fields |= mask;
+      RemoteForestState &state = remote_forest_states[tid];
+      update_remote_state(state, target, node, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::update_remote_state(RemoteForestState &state,
+                                             AddressSpaceID target,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      state.valid_fields |= mask;
+      RemoteTreeState &tree_state = state.remote_tree_states[node];
+      update_remote_state(tree_state, target, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::update_remote_state(RemoteTreeState &state,
+                                             AddressSpaceID target,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    { 
+      state.valid_fields |= mask;
+      // Iterate over all the states and compute the 
+      // new set of valid fields for the remote target
+      bool found = false;
+      FieldMask new_mask = mask;
+      for (std::list<RemoteNodeState>::iterator it = 
+            state.node_states.begin(); it !=
+            state.node_states.end(); /*nothing*/)
+      {
+        if (it->remote_nodes.is_set(target))
+        {
+          // Check to see if the field sets are the same
+          // If we are then we are done
+          if (it->valid_fields == mask)
+          {
+            found = true;
+            break;
+          }
+          // Otherwise remove our bit and update the mask
+          new_mask |= it->valid_fields;
+          it->remote_nodes.unset_bit(target);
+          if (!it->remote_nodes)
+            it = state.node_states.erase(it);
+          else
+            it++;
+        }
+        else
+          it++;
+      }
+      // If we haven't inserted our new information yet,
+      // do that now, iterate through and see if we find
+      // any masks that match ours
+      if (!found)
+        insert_node_state(target, new_mask, state.node_states);
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::issue_invalidations(RegionTreeNode *node,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(state_lock);
+      // If we don't have any remote copies of anything we are done
+      if (!remote_contexts)
+        return;
+      // If we don't have any intersecting fields we are done
+      if (remote_fields * mask)
+        return; 
+      RegionTreeID tid = node->get_tree_id();
+      std::map<RegionTreeID,RemoteForestState>::iterator finder = 
+        remote_forest_states.find(tid);
+      if (finder != remote_forest_states.end())
+      {
+        bool remove = issue_invalidations(finder->second, node, mask);
+        if (remove)
+          remote_forest_states.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::issue_invalidations(AddressSpaceID source, bool remote,
+                                             const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type != PART_PROJECTION); 
+#endif
+      RegionTreeNode *node = forest->get_node(req.region);
+      AutoLock s_lock(state_lock);
+      // If we don't have any remote copies then there is nothing to do
+      if (!remote && !remote_contexts)
+        return;
+      RegionTreeID tid = node->get_tree_id();
+      std::map<RegionTreeID,RemoteForestState>::iterator finder = 
+        remote_forest_states.find(tid);
+      if (finder != remote_forest_states.end())
+      {
+        // Construct the field mask
+        FieldMask mask = 
+                  node->column_source->get_field_mask(req.privilege_fields);
+        if (remote_fields * mask)
+          return;
+        bool remove;
+        if (!remote)
+          remove = issue_invalidations(finder->second, node, mask); 
+        else
+          remove = issue_invalidations(finder->second, node, mask, source);
+        if (remove)
+          remote_forest_states.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::issue_invalidations(AddressSpaceID source, bool remote,
+                                             const RegionRequirement &req,
+                                      const std::vector<LogicalRegion> &handles)
+    //--------------------------------------------------------------------------
+    {
+      // Do the invalidation for the upper bound, then update
+      // the remote state for each of the handles
+      RegionTreeNode *node;
+      if (req.handle_type != PART_PROJECTION)
+        node = forest->get_node(req.region);
+      else
+        node = forest->get_node(req.partition);
+      FieldMask mask = 
+                node->column_source->get_field_mask(req.privilege_fields);
+      do
+      {
+        AutoLock s_lock(state_lock);
+        // If we don't have any remote copies then there is nothing to do
+        if (!remote && !remote_contexts)
+          break;
+        if (remote_fields * mask)
+          break;
+        RegionTreeID tid = node->get_tree_id();
+        std::map<RegionTreeID,RemoteForestState>::iterator finder = 
+          remote_forest_states.find(tid);
+        if (finder != remote_forest_states.end())
+        {
+          bool remove = issue_invalidations(finder->second, node, mask);
+          if (remove)
+            remote_forest_states.erase(finder);
+        }
+      } while (0);
+      // If we aren't sending remotely, then we are done
+      if (source == forest->runtime->address_space)
+        return;
+      // Now update the remote state for each of the handles
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            handles.begin(); it != handles.end(); it++)
+      {
+        RegionTreeNode *child = forest->get_node(*it);
+        update_remote_state(source, child, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool StateDirectory::issue_invalidations(RemoteForestState &state,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // Quick out in case we don't have any overlapping fields
+      if (state.valid_fields * mask)
+        return false;
+      std::map<RegionTreeNode*,RemoteTreeState> &remote_tree_states = 
+        state.remote_tree_states;
+      std::vector<RegionTreeNode*> to_delete;
+      for (std::map<RegionTreeNode*,RemoteTreeState>::iterator it = 
+            remote_tree_states.begin(); it != remote_tree_states.end(); it++)
+      {
+        if ((node == it->first) || 
+              node->intersects_with(it->first, false/*compute*/))
+        {
+          // Check to see if we intersect with the tree in any way
+          bool remove = issue_invalidations(it->second, node, mask);
+          if (remove)
+            to_delete.push_back(it->first);
+        }
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          remote_tree_states.erase(*it);
+      }
+      return remote_tree_states.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool StateDirectory::issue_invalidations(RemoteForestState &state,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (state.valid_fields * mask)
+        return false;
+      std::map<RegionTreeNode*,RemoteTreeState> &remote_tree_states = 
+        state.remote_tree_states;
+      std::vector<RegionTreeNode*> to_delete;
+      for (std::map<RegionTreeNode*,RemoteTreeState>::iterator it = 
+            remote_tree_states.begin(); it != remote_tree_states.end(); it++)
+      {
+        // Check to see if we intersect with the tree in any way
+        if ((node == it->first) || 
+              node->intersects_with(it->first, false/*compute*/))
+        {
+          bool remove = issue_invalidations(it->second, node, mask, source);
+          if (remove)
+            to_delete.push_back(it->first);
+        }
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          remote_tree_states.erase(*it);
+      }
+      return remote_tree_states.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool StateDirectory::issue_invalidations(RemoteTreeState &state,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (state.valid_fields * mask)
+        return false;
+      LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list 
+        &remote_node_states = state.node_states;
+      for (std::list<RemoteNodeState>::iterator it = 
+            remote_node_states.begin(); it != 
+            remote_node_states.end(); /*nothing*/)
+      {
+        // See if there are any overlap fields
+        FieldMask overlap = it->valid_fields & mask;
+        if (!overlap)
+        {
+          it++;
+          continue;
+        }
+        // Send invalidations to all the nodes
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_owner_uid);
+          bool is_region = node->is_region();
+          rez.serialize<bool>(is_region);
+          if (is_region)
+          {
+            RegionNode *reg_node = node->as_region_node();
+            rez.serialize(reg_node->handle);
+#ifdef DEBUG_HIGH_LEVEL
+            char *mask_str = overlap.to_string();
+            log_directory(LEVEL_INFO,"Remote owner %lld INVALIDATING region "
+                                   "(" IDFMT ",%x,%d) for fields %s", 
+                                   remote_owner_uid,
+                                   reg_node->handle.get_index_space().id,
+                                   reg_node->handle.get_field_space().get_id(),
+                                   reg_node->handle.get_tree_id(),
+                                   mask_str);
+            free(mask_str);
+#endif
+          }
+          else
+          {
+            PartitionNode *part_node = node->as_partition_node();
+            rez.serialize(part_node->handle);
+#ifdef DEBUG_HIGH_LEVEL
+            char *mask_str = overlap.to_string();
+            log_directory(LEVEL_INFO,"Remote owner %lld INVALIDATING partition "
+                                   "(%d,%x,%d) for fields %s",
+                                   remote_owner_uid,
+                                   part_node->handle.get_index_partition(),
+                                   part_node->handle.get_field_space().get_id(),
+                                   part_node->handle.get_tree_id(),
+                                   mask_str);
+            free(mask_str);
+#endif
+          }
+          rez.serialize(overlap);
+        }
+        // Send the invalidations to anyone that needs them
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
+        {
+          if (it->remote_nodes[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (it->remote_nodes.is_set(target))
+              {
+                // Because of potential aliasing, always make sure
+                // we send the remote tree shape first
+                node->get_row_source()->send_node(target, 
+                                                  true/*up*/, false/*down*/);
+                node->column_source->send_node(target);
+                node->send_node(target);
+                forest->runtime->send_invalidate_remote_state(target, rez);
+              }
+            }
+          }
+        }
+        it->valid_fields -= overlap;
+        if (!it->valid_fields)
+          it = remote_node_states.erase(it);
+        else
+          it++;
+      }
+      return remote_node_states.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool StateDirectory::issue_invalidations(RemoteTreeState &state,
+                                             RegionTreeNode *node,
+                                             const FieldMask &mask,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      if (state.valid_fields * mask)
+        return false;
+      LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list 
+        &remote_node_states = state.node_states;
+      FieldMask source_mask;
+      for (std::list<RemoteNodeState>::iterator it = 
+            remote_node_states.begin(); it != 
+            remote_node_states.end(); /*nothing*/)
+      {
+        // See if the fields overlap
+        if (it->valid_fields * mask)
+        {
+          it++;
+          continue;
+        }
+        // Send invalidations to all the nodes
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_owner_uid);
+          bool is_region = node->is_region();
+          rez.serialize<bool>(is_region);
+          if (is_region)
+          {
+            RegionNode *reg_node = node->as_region_node();
+            rez.serialize(reg_node->handle);
+          }
+          else
+          {
+            PartitionNode *part_node = node->as_partition_node();
+            rez.serialize(part_node->handle);
+          }
+          rez.serialize(mask);
+        }
+        // Send the invalidations to anyone that needs them
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
+        {
+          if (it->remote_nodes[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (target == source)
+              {
+                // Need an |= here to keep track of potentially
+                // many fields for which we have remote data
+                source_mask |= it->valid_fields;
+                continue;
+              }
+              if (it->remote_nodes.is_set(target))
+              {
+                // Because of potential aliasing, always make sure
+                // we send the remote tree shape first
+                node->get_row_source()->send_node(target, 
+                                                  true/*up*/, false/*down*/);
+                node->column_source->send_node(target);
+                node->send_node(target);
+                forest->runtime->send_invalidate_remote_state(target, rez);
+              }
+            }
+          }
+        }
+        it->valid_fields -= mask;
+        if (!it->valid_fields)
+          it = remote_node_states.erase(it);
+        else
+        {
+          // Also unset the source bit if necessary
+          if (it->remote_nodes.is_set(source))
+          {
+            it->remote_nodes.unset_bit(source);
+            if (!it->remote_nodes)
+              it = remote_node_states.erase(it);
+            else
+              it++;
+          }
+          else
+            it++;
+        }
+      }
+      if (!!source_mask)
+        insert_node_state(source, source_mask, remote_node_states);
+      return remote_node_states.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    void StateDirectory::insert_node_state(AddressSpaceID node,
+                                           const FieldMask &node_mask,
+            LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list &node_states)
+    //--------------------------------------------------------------------------
+    {
+      // Here is where we maintain the important invariant of keeping at 
+      // most one valid field per entry in the list of node states. There
+      // is a trade-off between precision and data structure size.  We can
+      // have lots of entries for different fields with more precise node
+      // information, or we can have fewer entries with less precise node
+      // information. The first case results in larger data structure size,
+      // while the second one results in unnecessary messages. We implement
+      // both approaches and switch based on the maximum size of the directory
+      // allowed by the user, the default maximum size is 64.
+      if (node_states.size() >= context->max_directory_size)
+      {
+        // Resort to less precise approach
+        FieldMask remaining = node_mask;
+        for (std::list<RemoteNodeState>::iterator it = node_states.begin();
+              it != node_states.end(); it++)
+        {
+          if (remaining * it->valid_fields)
+            continue;
+          it->remote_nodes.set_bit(node);
+          remaining -= it->valid_fields;
+          if (!remaining)
+            break;
+        }
+        if (!!remaining)
+          node_states.push_back(RemoteNodeState(remaining, node));
+      }
+      else
+      {
+        // Maintain precise information for fields
+        FieldMask remaining = node_mask;
+        std::deque<RemoteNodeState> to_add;
+        for (std::list<RemoteNodeState>::iterator it = node_states.begin();
+              it != node_states.end(); it++)
+        {
+          // First test for disjointness
+          if (it->valid_fields * remaining)
+            continue;
+          // Then test for equality
+          if (it->valid_fields == remaining)
+          {
+            it->remote_nodes.set_bit(node);
+            remaining.clear();
+            break;
+          }
+          // Now see who dominate who
+          FieldMask overlap_left = it->valid_fields - remaining;
+          if (!overlap_left)
+          {
+            // Remaining dominates
+            it->remote_nodes.set_bit(node);   
+            remaining -= it->valid_fields;
+            continue;
+          }
+          FieldMask overlap_right = remaining - it->valid_fields;
+          if (!overlap_right)
+          {
+            // Valid fields dominates
+            RemoteNodeState new_state(remaining, node);
+            new_state.remote_nodes |= it->remote_nodes;
+            to_add.push_back(new_state);
+            it->valid_fields = overlap_left;
+            remaining.clear();
+            break;
+          }
+          // Last case, no domination, break into three cases
+          RemoteNodeState new_state(it->valid_fields & remaining, node);
+          new_state.remote_nodes |= it->remote_nodes;
+          to_add.push_back(new_state);
+          it->valid_fields = overlap_left;
+          remaining = overlap_right;
+        }
+        // Add any of the new states that we computed
+        for (std::deque<RemoteNodeState>::const_iterator it = 
+              to_add.begin(); it != to_add.end(); it++)
+        {
+          node_states.push_back(*it);
+        }
+        if (!!remaining)
+          node_states.push_back(RemoteNodeState(remaining, node));
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Tree Node 
     /////////////////////////////////////////////////////////////
 
@@ -3695,6 +4441,19 @@ namespace LegionRuntime {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+      for (std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
+            intersections.begin(); it != intersections.end(); it++)
+      {
+        IntersectInfo &info = it->second; 
+        for (std::set<Domain>::iterator dit = info.intersections.begin();
+              dit != info.intersections.end(); dit++)
+        {
+          IndexSpace space = dit->get_index_space();
+          if (space.exists())
+            space.destroy();
+        }
+      }
+      intersections.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3787,7 +4546,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     /*static*/ bool IndexTreeNode::compute_intersections(
         const std::set<Domain> &left, const std::set<Domain> &right, 
-        std::set<Domain> &result_domains)
+        std::set<Domain> &result_domains, bool compute)
     //--------------------------------------------------------------------------
     {
       for (std::set<Domain>::const_iterator lit = left.begin();
@@ -3797,8 +4556,13 @@ namespace LegionRuntime {
               rit != right.end(); rit++)
         {
           Domain result;
-          if (compute_intersection(*lit, *rit, result))
-            result_domains.insert(result);
+          if (compute_intersection(*lit, *rit, result, compute))
+          {
+            if (compute)
+              result_domains.insert(result);
+            else
+              return true;
+          }
         }
       }
       return !result_domains.empty();
@@ -3807,15 +4571,20 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     /*static*/ bool IndexTreeNode::compute_intersections(
         const std::set<Domain> &left, const Domain &right, 
-        std::set<Domain> &result_domains)
+        std::set<Domain> &result_domains, bool compute)
     //--------------------------------------------------------------------------
     {
       for (std::set<Domain>::const_iterator it = left.begin();
             it != left.end(); it++)
       {
         Domain result;
-        if (compute_intersection(*it, right, result))
-          result_domains.insert(result);
+        if (compute_intersection(*it, right, result, compute))
+        {
+          if (compute)
+            result_domains.insert(result);
+          else
+            return true;
+        }
       }
       return !result_domains.empty();
     }
@@ -3823,7 +4592,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     /*static*/ bool IndexTreeNode::compute_intersection(const Domain &left,
                                                         const Domain &right,
-                                                        Domain &result)
+                                                        Domain &result,
+                                                        bool compute)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3842,7 +4612,8 @@ namespace LegionRuntime {
             if (!!intersection)
             {
               non_empty = true;
-              result = Domain(IndexSpace::create_index_space(intersection));
+              if (compute)
+                result = Domain(IndexSpace::create_index_space(intersection));
             }
             break;
           }
@@ -3854,10 +4625,8 @@ namespace LegionRuntime {
             if (temp.volume() > 0)
             {
               non_empty = true;
-              result = Domain::from_rect<1>(temp);
-#ifdef SHARED_LOWLEVEL
-              result.get_index_space(true/*create if needed*/);
-#endif
+              if (compute)
+                result = Domain::from_rect<1>(temp);
             }
             break;
           }
@@ -3869,10 +4638,8 @@ namespace LegionRuntime {
             if (temp.volume() > 0)
             {
               non_empty = true;
-              result = Domain::from_rect<2>(temp);
-#ifdef SHARED_LOWLEVEL
-              result.get_index_space(true/*create if needed*/);
-#endif
+              if (compute)
+                result = Domain::from_rect<2>(temp);
             }
             break;
           }
@@ -3884,10 +4651,8 @@ namespace LegionRuntime {
             if (temp.volume() > 0)
             {
               non_empty = true;
-              result = Domain::from_rect<3>(temp);
-#ifdef SHARED_LOWLEVEL
-              result.get_index_space(true/*create if needed*/);
-#endif
+              if (compute)
+                result = Domain::from_rect<3>(temp);
             }
             break;
           }
@@ -4157,12 +4922,19 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
       {
-        if (!targets.is_set(idx))
-          continue;
-        AddressSpaceID target = idx;
-        context->runtime->send_index_space_semantic_info(target, rez);
+        if (targets[idx])
+        {
+          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+          {
+            AddressSpaceID target = offset+i;
+            if (!targets.is_set(target))
+              continue;
+            context->runtime->send_index_space_semantic_info(target, rez);
+          }
+        }
       }
     }
 
@@ -4351,114 +5123,108 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::intersects_with(IndexSpaceNode *other)
+    bool IndexSpaceNode::intersects_with(IndexSpaceNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        // Only return the value if we either didn't want to compute
+        // or we already have valid intersections
+        if ((finder != intersections.end()) && 
+            (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
       std::set<Domain> intersect;
-      bool result, own_results;
+      bool result;
       if (component_domains.empty())
       { 
-#ifndef SHARED_LOWLEVEL
-        own_results = (domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
         if (other->has_component_domains())
           result = compute_intersections(other->get_component_domains(),
-                                         domain, intersect);
+                                         domain, intersect, compute);
         else
         {
           Domain inter;
-          result = compute_intersection(domain, other->domain, inter);
+          result = compute_intersection(domain, other->domain, inter, compute);
           if (result)
             intersect.insert(inter);
         }
       }
       else
       {
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
         if (other->has_component_domains())
           result = compute_intersections(component_domains,
-                        other->get_component_domains(), intersect);
+                        other->get_component_domains(), intersect, compute);
         else
           result = compute_intersections(component_domains,
-                                         other->domain, intersect); 
+                                         other->domain, intersect, compute); 
       }
       AutoLock n_lock(node_lock);
       if (result)
       {
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
         // Check to make sure we didn't lose the race
-        if (intersections.find(other) == intersections.end())
+        if ((finder == intersections.end()) || 
+            (compute && !finder->second.intersections_valid))
         {
-          intersections[other] = IntersectInfo(true/*has intersects*/,
-                                               own_results, intersect);
+          if (compute)
+            intersections[other] = IntersectInfo(intersect);
+          else
+            intersections[other] = IntersectInfo(true/*result*/);
         }
       }
       else
-        intersections[other] = IntersectInfo(false/*has intersects*/, 
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::intersects_with(IndexPartNode *other)
+    bool IndexSpaceNode::intersects_with(IndexPartNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        // Only return the value if we know we are valid and we didn't
+        // want to compute anything or we already did compute it
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
       // Build up the set of domains for the partition
       std::set<Domain> other_domains, intersect;
       other->get_subspace_domains(other_domains);
-      bool result, own_results;
+      bool result;
       if (component_domains.empty())
       {
-        result = compute_intersections(other_domains, domain, intersect);
-        // If the dim is zero then we own the index space results
-#ifndef SHARED_LOWLEVEL
-        own_results = (domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
+        result = compute_intersections(other_domains, domain, 
+                                       intersect, compute);
       }
       else
       {
         result = compute_intersections(component_domains, other_domains,
-                                       intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
+                                       intersect, compute);
       }
       AutoLock n_lock(node_lock);
       if (result)
       {
         // Check to make sure we didn't lose the race
-        if (intersections.find(other) == intersections.end())
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersections_valid))
         {
-          intersections[other] = IntersectInfo(true/*has intersects*/,
-                                               own_results, intersect);
+          if (compute)
+            intersections[other] = IntersectInfo(intersect);
+          else
+            intersections[other] = IntersectInfo(true/*result*/);
         }
       }
       else
-        intersections[other] = IntersectInfo(false/*has intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return result;
     }
 
@@ -4471,56 +5237,47 @@ namespace LegionRuntime {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        if ((finder != intersections.end()) &&
+            finder->second.intersections_valid)
           return finder->second.intersections;
       }
       std::set<Domain> intersect;
-      bool result, own_results;
+      bool result;
       if (component_domains.empty())
       { 
-#ifndef SHARED_LOWLEVEL
-        own_results = (domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
         if (other->has_component_domains())
           result = compute_intersections(other->get_component_domains(),
-                                         domain, intersect);
+                                         domain, intersect, true/*compute*/);
         else
         {
           Domain inter;
-          result = compute_intersection(domain, other->domain, inter);
+          result = compute_intersection(domain, other->domain, 
+                                        inter, true/*compute*/);
           if (result)
             intersect.insert(inter);
         }
       }
       else
       {
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
         if (other->has_component_domains())
           result = compute_intersections(component_domains,
-                        other->get_component_domains(), intersect);
+                  other->get_component_domains(), intersect, true/*compute*/);
         else
           result = compute_intersections(component_domains,
-                                         other->domain, intersect); 
+                                   other->domain, intersect, true/*compute*/); 
       }
       AutoLock n_lock(node_lock);
       if (result)
       {
         // Check again to make sure we didn't lose the race
-        if (intersections.find(other) == intersections.end())
-        {
-          intersections[other] = IntersectInfo(true/*has intersects*/,
-                                               own_results, intersect);
-        }
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            !finder->second.intersections_valid)
+          intersections[other] = IntersectInfo(intersect);
       }
       else
-        intersections[other] = IntersectInfo(false/*has intersects*/, 
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return intersections[other].intersections;
     }
 
@@ -4533,46 +5290,36 @@ namespace LegionRuntime {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        if ((finder != intersections.end()) &&
+            finder->second.intersections_valid)
           return finder->second.intersections;
       }
       // Build up the set of domains for the partition
       std::set<Domain> other_domains, intersect;
       other->get_subspace_domains(other_domains);
-      bool result, own_results;
+      bool result;
       if (component_domains.empty())
       {
-        result = compute_intersections(other_domains, domain, intersect);
-        // If the dim is zero then we own the index space results
-#ifndef SHARED_LOWLEVEL
-        own_results = (domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
+        result = compute_intersections(other_domains, domain, 
+                                       intersect, true/*compute*/);
       }
       else
       {
         result = compute_intersections(component_domains, other_domains,
-                                       intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
+                                       intersect, true/*compute*/);
       }
       AutoLock n_lock(node_lock);
       if (result)
       {
         // Check again to make sure we didn't lose the race
-        if (intersections.find(other) == intersections.end())
-        {
-          intersections[other] = IntersectInfo(true/*has intersects*/,
-                                               own_results, intersect);
-        }
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            !finder->second.intersections_valid)
+          intersections[other] = IntersectInfo(intersect);
       }
       else
-        intersections[other] = IntersectInfo(false/*has intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return intersections[other].intersections;
     }
 
@@ -4860,12 +5607,19 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
       {
-        if (!targets.is_set(idx))
-          continue;
-        AddressSpaceID target = idx;
-        context->runtime->send_index_partition_semantic_info(target, rez);
+        if (targets[idx])
+        {
+          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+          {
+            AddressSpaceID target = offset+i;
+            if (!targets.is_set(target))
+              continue;
+            context->runtime->send_index_partition_semantic_info(target, rez);
+          }
+        }
       }
     }
 
@@ -5009,6 +5763,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::get_colors(std::set<Color> &colors)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      for (std::map<Color,IndexSpaceNode*>::const_iterator it = 
+            valid_map.begin(); it != valid_map.end(); it++)
+      {
+        colors.insert(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::add_instance(PartitionNode *inst)
     //--------------------------------------------------------------------------
     {
@@ -5075,76 +5841,86 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::intersects_with(IndexSpaceNode *other)
+    bool IndexPartNode::intersects_with(IndexSpaceNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
       std::set<Domain> local_domains, intersect;
-      bool result, own_results;
+      bool result;
       get_subspace_domains(local_domains);
       if (other->has_component_domains())
       {
         result = compute_intersections(local_domains, 
-                                     other->get_component_domains(), intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
+                     other->get_component_domains(), intersect, compute);
       }
       else
       {
-        result = compute_intersections(local_domains, other->domain, intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = (other->domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
+        result = compute_intersections(local_domains, other->domain, 
+                                       intersect, compute);
       }
       AutoLock n_lock(node_lock);
       if (result)
-        intersections[other] = IntersectInfo(true/*has intersects*/,
-                                             own_results, intersect);
+      {
+        // Check to make sure we didn't lose the race
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersections_valid))
+        {
+          if (compute)
+            intersections[other] = IntersectInfo(intersect);
+          else
+            intersections[other] = IntersectInfo(true/*result*/);
+        }
+      }
       else
-        intersections[other] = IntersectInfo(false/*own intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::intersects_with(IndexPartNode *other)
+    bool IndexPartNode::intersects_with(IndexPartNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        // Only return the value if we know we are valid and we didn't
+        // want to compute anything or we already did compute it
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
       std::set<Domain> local_domains, other_domains, intersect;
       get_subspace_domains(local_domains);
       other->get_subspace_domains(other_domains);
       bool result = compute_intersections(local_domains, other_domains, 
-                                          intersect);
-#ifndef SHARED_LOWLEVEL
-      bool own_results = (local_domains.begin()->get_dim() == 0);
-#else
-      bool own_results = true;
-#endif
+                                          intersect, compute);
       AutoLock n_lock(node_lock);
       if (result)
-        intersections[other] = IntersectInfo(true/*has intersects*/,
-                                             own_results, intersect);
+      {
+        // Check to make sure we didn't lose the race
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersections_valid))
+        {
+          if (compute)
+            intersections[other] = IntersectInfo(intersect);
+          else
+            intersections[other] = IntersectInfo(false/*result*/);
+        }
+      }
       else
-        intersections[other] = IntersectInfo(false/*own intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return result;
     }
 
@@ -5157,38 +5933,34 @@ namespace LegionRuntime {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        if ((finder != intersections.end()) &&
+            finder->second.intersections_valid)
           return finder->second.intersections;
       }
       std::set<Domain> local_domains, intersect;
-      bool result, own_results;
+      bool result;
       get_subspace_domains(local_domains);
       if (other->has_component_domains())
       {
         result = compute_intersections(local_domains, 
-                                     other->get_component_domains(), intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = false;
-#else
-        own_results = true;
-#endif
+                   other->get_component_domains(), intersect, true/*compute*/);
       }
       else
       {
-        result = compute_intersections(local_domains, other->domain, intersect);
-#ifndef SHARED_LOWLEVEL
-        own_results = (other->domain.get_dim() == 0);
-#else
-        own_results = true;
-#endif
+        result = compute_intersections(local_domains, other->domain, 
+                                       intersect, true/*compute*/);
       }
       AutoLock n_lock(node_lock);
       if (result)
-        intersections[other] = IntersectInfo(true/*has intersects*/,
-                                             own_results, intersect);
+      {
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            !finder->second.intersections_valid)
+          intersections[other] = IntersectInfo(intersect);
+      }
       else
-        intersections[other] = IntersectInfo(false/*own intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*false*/);
       return intersections[other].intersections;
     }
 
@@ -5201,26 +5973,26 @@ namespace LegionRuntime {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
           intersections.find(other);
-        if (finder != intersections.end())
+        if ((finder != intersections.end()) &&
+            finder->second.intersections_valid)
           return finder->second.intersections;
       }
       std::set<Domain> local_domains, other_domains, intersect;
       get_subspace_domains(local_domains);
       other->get_subspace_domains(other_domains);
       bool result = compute_intersections(local_domains, other_domains, 
-                                          intersect);
-#ifndef SHARED_LOWLEVEL
-      bool own_results = (local_domains.begin()->get_dim() == 0);
-#else
-      bool own_results = true;
-#endif
+                                          intersect, true/*compute*/);
       AutoLock n_lock(node_lock);
       if (result)
-        intersections[other] = IntersectInfo(true/*has intersects*/,
-                                             own_results, intersect);
+      {
+        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
+          intersections.find(other);
+        if ((finder == intersections.end()) ||
+            !finder->second.intersections_valid)
+          intersections[other] = IntersectInfo(intersect);
+      }
       else
-        intersections[other] = IntersectInfo(false/*own intersects*/,
-                                             false/*own*/);
+        intersections[other] = IntersectInfo(false/*result*/);
       return intersections[other].intersections;
     }
 
@@ -5403,7 +6175,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
-      this->allocated_indexes = FieldMask();
+      this->allocated_indexes.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5524,12 +6296,19 @@ namespace LegionRuntime {
           rez.serialize(size);
           rez.serialize(buffer, size);
         }
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
         {
-          if (!diff.is_set(idx))
-            continue;
-          AddressSpaceID target = idx;
-          context->runtime->send_field_space_semantic_info(target, rez);
+          if (diff[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (!diff.is_set(target))
+                continue;
+              context->runtime->send_field_space_semantic_info(target, rez);
+            }
+          }
         }
       }
     }
@@ -5608,12 +6387,19 @@ namespace LegionRuntime {
           rez.serialize(size);
           rez.serialize(buffer, size);
         }
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
         {
-          if (!diff.is_set(idx))
-            continue;
-          AddressSpaceID target = idx;
-          context->runtime->send_field_semantic_info(target, rez);
+          if (diff[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (!diff.is_set(target))
+                continue;
+              context->runtime->send_field_semantic_info(target, rez);
+            }
+          }
         }
       }
     }
@@ -5724,12 +6510,20 @@ namespace LegionRuntime {
       // as long as it is not local.  Local fields get sent by the task contexts
       if (!local && !!creation_set)
       {
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
         {
-          if (!creation_set.is_set(idx))
-            continue;
-          context->runtime->send_field_allocation(handle, fid, size,
-                                                  index, idx);
+          if (creation_set[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (!creation_set.is_set(target))
+                continue;
+              context->runtime->send_field_allocation(handle, fid, size,
+                                                      index, target);
+            }
+          }
         }
       }
     }
@@ -5762,12 +6556,20 @@ namespace LegionRuntime {
         // us the allocation in the first place
         if (!!creation_set)
         {
-          for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+          for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
           {
-            if (!creation_set.is_set(idx))
-              continue;
-            context->runtime->send_field_allocation(handle, fid, size,
-                                                    our_index, idx);
+            if (creation_set[idx])
+            {
+              unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+              for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+              {
+                AddressSpaceID target = offset+i;
+                if (!creation_set.is_set(target))
+                  continue;
+                context->runtime->send_field_allocation(handle, fid, size,
+                                                        our_index, target);
+              }
+            }
           }
         }
       }
@@ -5807,13 +6609,21 @@ namespace LegionRuntime {
       // Tell all our subscribers that we've destroyed the field
       if (!!creation_set)
       {
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
         {
-          if (idx == source)
-            continue;
-          if (!creation_set.is_set(idx))
-            continue;
-          context->runtime->send_field_destruction(handle, fid, idx);
+          if (creation_set[idx])
+          {
+            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+            {
+              AddressSpaceID target = offset+i;
+              if (target == source)
+                continue;
+              if (!creation_set.is_set(target))
+                continue;
+              context->runtime->send_field_destruction(handle, fid, target);
+            }
+          }
         }
       }
       // Free the index
@@ -7368,15 +8178,16 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PremapTraverser::PremapTraverser(RegionTreePath &p, MappableInfo *i)
-      : PathTraverser(p), info(i)
+    PremapTraverser::PremapTraverser(RegionTreePath &p, MappableInfo *i,
+                                     StateDirectory *dir)
+      : PathTraverser(p), info(i), directory(dir), last_node(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PremapTraverser::PremapTraverser(const PremapTraverser &rhs)
-      : PathTraverser(rhs.path), info(NULL)
+      : PathTraverser(rhs.path), info(NULL), directory(NULL), last_node(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7419,6 +8230,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(node->context, PERFORM_PREMAP_CLOSE_CALL);
 #endif
+      // Keep track of the most recent node visited
+      last_node = node;
+      // Keep track of which fields have invalidated state due to
+      // either close operations or flushed reductions. We'll need to
+      // invalidate any remote region trees for these fields.
+      FieldMask invalidate_mask;
       // Check to see if we have any close operations to perform
       std::deque<CloseInfo> close_ops;
       path.get_close_operations(depth, close_ops);
@@ -7433,6 +8250,8 @@ namespace LegionRuntime {
         for (std::deque<CloseInfo>::iterator it = close_ops.begin();
               it != close_ops.end(); it++)
         {
+          // Update the invalidate mask
+          invalidate_mask |= it->close_mask;
           // Mark whether the closer is allowed to leave the child open
           closer.permit_leave_open = it->get_leave_open();
           // Handle a special case where we've arrive at our destination
@@ -7597,9 +8416,15 @@ namespace LegionRuntime {
           closer.update_node_views(node, state);
         node->release_physical_state(state);
       }
-      // Flush any reduction operations
-      node->flush_reductions(info->traversal_mask, 
-                             info->req.redop, info);
+      // Flush any reduction operations and track which fields
+      // if any were flushed and therefore need to be invalidated
+      invalidate_mask |= node->flush_reductions(info->traversal_mask, 
+                                                info->req.redop, info);
+      // If we had any invalidated fields, tell the directory
+      // so it can issue the appropriate invalidation messages
+      // to any remote nodes
+      if (!!invalidate_mask)
+        directory->issue_invalidations(node, invalidate_mask);
       PhysicalState *state = 
         node->acquire_physical_state(info->ctx, true/*exclusive*/);
       // Update our physical state to indicate which child
@@ -7657,7 +8482,7 @@ namespace LegionRuntime {
           info->req.max_blocking_factor = node_domain.get_volume();
       }
       // Release the state
-      node->release_physical_state(state);
+      node->release_physical_state(state); 
       return true;
     }
 
@@ -8120,11 +8945,12 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    StateSender::StateSender(ContextID c, UniqueID id, AddressSpaceID t,
+    StateSender::StateSender(ContextID c, UniqueID owner_uid, 
+                             AddressSpaceID t,
                              std::map<LogicalView*,FieldMask> &views,
                              std::set<PhysicalManager*> &managers,
                              const FieldMask &mask, bool inv)
-      : ctx(c), uid(id), target(t), needed_views(views),
+      : ctx(c), remote_owner_uid(owner_uid), target(t), needed_views(views),
         needed_managers(managers), send_mask(mask), invalidate(inv)
     //--------------------------------------------------------------------------
     {
@@ -8132,7 +8958,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     StateSender::StateSender(const StateSender &rhs)
-      : ctx(0), uid(0), target(0), 
+      : ctx(0), remote_owner_uid(0), target(0), 
         needed_views(rhs.needed_views), needed_managers(rhs.needed_managers),
         send_mask(FieldMask()), invalidate(false)
     //--------------------------------------------------------------------------
@@ -8167,16 +8993,16 @@ namespace LegionRuntime {
     bool StateSender::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      return node->send_state(ctx, uid, target, send_mask, invalidate,
-                              needed_views, needed_managers);
+      return node->send_state(ctx, remote_owner_uid, target, send_mask, 
+                              invalidate, needed_views, needed_managers);
     }
 
     //--------------------------------------------------------------------------
     bool StateSender::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      return node->send_state(ctx, uid, target, send_mask, invalidate,
-                              needed_views, needed_managers); 
+      return node->send_state(ctx, remote_owner_uid, target, send_mask, 
+                              invalidate, needed_views, needed_managers); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -8302,6 +9128,219 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // RemoteChecker
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteChecker::RemoteChecker(ContextID c, const FieldMask &mask)
+      : ctx(c), check_mask(mask), valid(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteChecker::RemoteChecker(const RemoteChecker &rhs)
+      : ctx(0), check_mask(FieldMask())
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteChecker::~RemoteChecker(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteChecker& RemoteChecker::operator=(const RemoteChecker &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteChecker::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteChecker::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      return check_validity(node);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteChecker::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      return check_validity(node);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteChecker::check_validity(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(valid); // if we are here we should be valid to begin with
+#endif
+      PhysicalState *state = 
+        node->acquire_physical_state(ctx, false/*exclusive*/);  
+      // See if all the remote fields are still valid
+      valid = !(check_mask - state->remote_mask);   
+      node->release_physical_state(state);
+      // Only continue the traversal if we are still valid
+      return valid;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RemoteValidator 
+    /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    RemoteValidator::RemoteValidator(ContextID c, const FieldMask &mask)
+      : ctx(c), validate_mask(mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    RemoteValidator::RemoteValidator(const RemoteValidator &rhs)
+      : ctx(0), validate_mask(FieldMask())
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteValidator::~RemoteValidator(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteValidator& RemoteValidator::operator=(const RemoteValidator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteValidator::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteValidator::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      validate_node(node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteValidator::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      validate_node(node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteValidator::validate_node(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure we instantiate all the children
+      node->instantiate_children();
+      PhysicalState *state = 
+        node->acquire_physical_state(ctx, true/*exclusive*/);
+      state->remote_mask |= validate_mask;
+      node->release_physical_state(state);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RemoteInvalidator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteInvalidator::RemoteInvalidator(ContextID c, const FieldMask &mask)
+      : ctx(c), invalidate_mask(mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    RemoteInvalidator::RemoteInvalidator(const RemoteInvalidator &rhs)
+      : ctx(0), invalidate_mask(FieldMask())
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteInvalidator::~RemoteInvalidator(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteInvalidator& RemoteInvalidator::operator=(
+                                                   const RemoteInvalidator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteInvalidator::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteInvalidator::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      invalidate_node(node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteInvalidator::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      invalidate_node(node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteInvalidator::invalidate_node(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalState *state = 
+        node->acquire_physical_state(ctx, true/*exclusive*/);
+      node->invalidate_physical_state(state, invalidate_mask, false/*force*/);
+      // clear out the remote fields which are no longer valid
+      state->remote_mask -= invalidate_mask;
+      node->release_physical_state(state);
+    }
+
+    /////////////////////////////////////////////////////////////
     // States 
     /////////////////////////////////////////////////////////////
 
@@ -8372,7 +9411,7 @@ namespace LegionRuntime {
       prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
 #endif
       close_operations.clear();
-      user_level_coherence = FieldMask();
+      user_level_coherence.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -9463,10 +10502,10 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhysicalUnpacker::PhysicalUnpacker(FieldSpaceNode *node,
-                                       AddressSpaceID src,
-                                       std::map<Event,FieldMask> &events)
+                                       AddressSpaceID src)//,
+                                       /*std::map<Event,FieldMask> &events)*/
       : field_node(node), source(src), 
-        deferred_events(events), reinsert_count(0)
+        /*deferred_events(events),*/ reinsert_count(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -12706,9 +13745,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
-                                          ReductionOpID redop,
-                                          MappableInfo *info)
+    FieldMask RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
+                                               ReductionOpID redop,
+                                               MappableInfo *info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -12790,6 +13829,7 @@ namespace LegionRuntime {
         // Release any valid view references we are holding
         remove_valid_references(valid_views);
       }
+      return flush_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -12806,6 +13846,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!state->dirty_mask);
       assert(!state->reduction_mask);
+      assert(!state->remote_mask);
       assert(!state->children.valid_fields);
       assert(state->children.open_children.empty());
       assert(state->valid_views.empty());
@@ -12813,8 +13854,9 @@ namespace LegionRuntime {
       // Should be one since we're using it
       assert(state->acquired_count == 1);
 #endif
-      state->dirty_mask = FieldMask();
-      state->reduction_mask = FieldMask();
+      state->dirty_mask.clear();
+      state->reduction_mask.clear();
+      state->remote_mask.clear();
       state->children = ChildState();
       state->valid_views.clear();
       state->reduction_views.clear();
@@ -12833,8 +13875,9 @@ namespace LegionRuntime {
 #endif
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 
-      state->dirty_mask = FieldMask();
-      state->reduction_mask = FieldMask();
+      state->dirty_mask.clear();
+      state->reduction_mask.clear();
+      state->remote_mask.clear();
       state->children = ChildState();
       state->pending_updates.clear();
 
@@ -12874,9 +13917,20 @@ namespace LegionRuntime {
       assert(ctx < physical_state_size);
 #endif
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      invalidate_physical_state(state, invalid_mask, force);
+      release_physical_state(state);
+    }
 
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_physical_state(PhysicalState *state,
+                                                  const FieldMask &invalid_mask,
+                                                  bool force)
+    //--------------------------------------------------------------------------
+    {
       invalidate_instance_views(state, invalid_mask, true/*clean*/, force);
       invalidate_reduction_views(state, invalid_mask);
+      // Don't invalidate the remote_mask here since that is only
+      // set by messages coming from other nodes
       state->children.valid_fields -= invalid_mask;
       std::vector<Color> to_delete;
       for (std::map<Color,FieldMask>::iterator it = 
@@ -12889,7 +13943,6 @@ namespace LegionRuntime {
       }
       for (unsigned idx = 0; idx < to_delete.size(); idx++)
         state->children.open_children.erase(to_delete[idx]);
-      release_physical_state(state);
     }
 
     //--------------------------------------------------------------------------
@@ -13512,6 +14565,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexTreeNode* RegionNode::get_row_source(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeID RegionNode::get_tree_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return handle.get_tree_id();
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeNode* RegionNode::get_parent(void) const
     //--------------------------------------------------------------------------
     {
@@ -13537,6 +14604,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::instantiate_children(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Color> all_colors;
+      row_source->get_colors(all_colors);
+      // This may look like it does nothing, but it checks to see
+      // if we have instantiated all the child nodes
+      for (std::set<Color>::const_iterator it = all_colors.begin();
+            it != all_colors.end(); it++)
+        get_child(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -13587,11 +14667,14 @@ namespace LegionRuntime {
           AutoLock n_lock(node_lock,1,false/*exclusive*/);
           children = color_map;
         }
+        bool break_early = traverser->break_early();
         for (std::map<Color,PartitionNode*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
           bool result = it->second->visit_node(traverser);
           continue_traversal = continue_traversal && result;
+          if (!result && break_early)
+            break;
         }
       }
       return continue_traversal;
@@ -13627,14 +14710,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::intersects_with(RegionTreeNode *other)
+    bool RegionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other->is_region())
-        return row_source->intersects_with(other->as_region_node()->row_source);
+        return row_source->intersects_with(
+                  other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                      other->as_partition_node()->row_source);
+                  other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -14157,7 +15241,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::send_state(ContextID ctx, UniqueID uid, 
+    bool RegionNode::send_state(ContextID ctx, UniqueID remote_owner_uid, 
                                 AddressSpaceID target,
                                 const FieldMask &send_mask, bool invalidate,
                                 std::map<LogicalView*,FieldMask> &needed_views,
@@ -14168,7 +15252,7 @@ namespace LegionRuntime {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(uid);
+        rez.serialize(remote_owner_uid);
         rez.serialize(handle);
         // Now pack up the rest of the state
         continue_traversal = pack_send_state(ctx, rez, target, send_mask, 
@@ -14189,12 +15273,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      UniqueID uid;
-      derez.deserialize(uid);
+      UniqueID remote_owner_uid;
+      derez.deserialize(remote_owner_uid);
       LogicalRegion handle;
       derez.deserialize(handle);
       RemoteTask *remote_ctx = 
-        context->runtime->find_or_init_remote_context(uid);
+        context->runtime->find_or_init_remote_context(remote_owner_uid);
       RegionTreeContext ctx = remote_ctx->get_context();
       RegionNode *node = context->get_node(handle);
       // Now do the unpack
@@ -14269,12 +15353,19 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
       {
-        if (!targets.is_set(idx))
-          continue;
-        AddressSpaceID target = idx;
-        context->runtime->send_logical_region_semantic_info(target, rez);
+        if (targets[idx])
+        {
+          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+          {
+            AddressSpaceID target = offset+i;
+            if (!targets.is_set(target))
+              continue;
+            context->runtime->send_logical_region_semantic_info(target, rez);
+          }
+        }
       }
     }
 
@@ -14693,6 +15784,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexTreeNode* PartitionNode::get_row_source(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeID PartitionNode::get_tree_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return handle.get_tree_id();
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeNode* PartitionNode::get_parent(void) const
     //--------------------------------------------------------------------------
     {
@@ -14718,6 +15823,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return row_source->disjoint;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::instantiate_children(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Color> all_colors;
+      row_source->get_colors(all_colors);
+      // This may look like it does nothing, but it checks to see
+      // if we have instantiated all the child nodes
+      for (std::set<Color>::const_iterator it = all_colors.begin();
+            it != all_colors.end(); it++)
+        get_child(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -14768,11 +15886,14 @@ namespace LegionRuntime {
           AutoLock n_lock(node_lock,1,false/*exclusive*/);
           children = color_map;
         }
+        bool break_early = traverser->break_early();
         for (std::map<Color,RegionNode*>::const_iterator it = 
               children.begin(); it != children.end(); it++)
         {
           bool result = it->second->visit_node(traverser);
           continue_traversal = continue_traversal && result;
+          if (!result && break_early)
+            continue;
         }
       }
       return continue_traversal;
@@ -14819,14 +15940,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::intersects_with(RegionTreeNode *other)
+    bool PartitionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other->is_region())
-        return row_source->intersects_with(other->as_region_node()->row_source);
+        return row_source->intersects_with(
+                    other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                                        other->as_partition_node()->row_source);
+                    other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -14944,9 +16066,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::send_state(ContextID ctx, UniqueID uid,
-                                   AddressSpaceID target,
-                                   const FieldMask &send_mask, bool invalidate,
+    bool PartitionNode::send_state(ContextID ctx, UniqueID remote_owner_uid,
+                                 AddressSpaceID target,
+                                 const FieldMask &send_mask, bool invalidate,
                                  std::map<LogicalView*,FieldMask> &needed_views,
                                  std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
@@ -14955,7 +16077,7 @@ namespace LegionRuntime {
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(uid);
+        rez.serialize(remote_owner_uid);
         rez.serialize(handle);
         // Now pack up the rest of the state
         continue_traversal = pack_send_state(ctx, rez, target, send_mask,
@@ -14974,12 +16096,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      UniqueID uid;
-      derez.deserialize(uid);
+      UniqueID remote_owner_uid;
+      derez.deserialize(remote_owner_uid);
       LogicalPartition handle;
       derez.deserialize(handle);
       RemoteTask *remote_ctx = 
-        context->runtime->find_or_init_remote_context(uid);
+        context->runtime->find_or_init_remote_context(remote_owner_uid);
       RegionTreeContext ctx = remote_ctx->get_context();
       PartitionNode *node = context->get_node(handle);
       // Now do the unpack
@@ -15056,12 +16178,19 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
       {
-        if (!targets.is_set(idx))
-          continue;
-        AddressSpaceID target = idx;
-        context->runtime->send_logical_partition_semantic_info(target, rez);
+        if (targets[idx])
+        {
+          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
+          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
+          {
+            AddressSpaceID target = offset+i;
+            if (!targets.is_set(target))
+              continue;
+            context->runtime->send_logical_partition_semantic_info(target, rez);
+          }
+        }
       }
     }
 
@@ -15710,7 +16839,7 @@ namespace LegionRuntime {
         return false;
       if (blocking_factor != bf)
         return false;
-      unsigned offset;
+      unsigned offset = 0;
       for (std::vector<size_t>::const_iterator it = field_sizes.begin();
             it != field_sizes.end(); it++)
       {
@@ -19137,7 +20266,6 @@ namespace LegionRuntime {
         view_lock.release();
       // Now launch the waiting deferred events.  We wait until
       // here to do it so we don't need to hold the lock while unpacking
-      Processor gc_proc = Machine::get_executing_processor();
       for (std::map<Event,FieldMask>::const_iterator it = 
             deferred_events.begin(); it != deferred_events.end(); it++)
       {
@@ -19267,7 +20395,6 @@ namespace LegionRuntime {
         }
       }
       // Now we can add the new users to our set
-      Processor curr_proc = Machine::get_executing_processor();
       for (std::vector<PhysicalUser>::const_iterator it =
             curr_updates.begin(); it != curr_updates.end(); it++)
       {
@@ -21150,10 +22277,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool CompositeNode::intersects_with(RegionTreeNode *dst)
+    bool CompositeNode::intersects_with(RegionTreeNode *dst, bool compute)
     //--------------------------------------------------------------------------
     {
-      return logical_node->intersects_with(dst);
+      return logical_node->intersects_with(dst, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -21578,8 +22705,6 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef LEGION_SPY
-      char *string_mask = 
-        manager->region_node->column_source->to_string(reduce_mask);
       {
         std::set<FieldID> field_set;
         manager->region_node->column_source->to_field_set(reduce_mask,
@@ -21651,7 +22776,6 @@ namespace LegionRuntime {
       add_copy_user(manager->redop, reduce_post,
                     red_mask, true/*reading*/, local_proc);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-      Domain domain = logical_node->get_domain();
       IndexSpace reduce_index_space = 
               target->logical_node->get_domain().get_index_space();
       if (!reduce_post.exists())
@@ -21677,8 +22801,6 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef LEGION_SPY
-      char *string_mask = 
-        manager->region_node->column_source->to_string(red_mask);
       {
         std::set<FieldID> field_set;
         manager->region_node->column_source->to_field_set(red_mask, field_set);
@@ -21752,7 +22874,6 @@ namespace LegionRuntime {
       add_copy_user(manager->redop, reduce_post,
                     red_mask, true/*reading*/, local_proc);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-      Domain domain = logical_node->get_domain();
       IndexSpace reduce_index_space = 
               target->logical_node->get_domain().get_index_space();
       if (!reduce_post.exists())
@@ -21778,8 +22899,6 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef LEGION_SPY
-      char *string_mask = 
-        manager->region_node->column_source->to_string(red_mask);
       {
         std::set<FieldID> field_set;
         manager->region_node->column_source->to_field_set(red_mask, field_set);
@@ -22014,7 +23133,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
+      !defined(EVENT_GRAPH_TRACE)
       bool has_local_references = false;
+#endif
       for (std::set<Event>::const_iterator it = term_events.begin();
             it != term_events.end(); it++)
       {
@@ -22022,7 +23144,10 @@ namespace LegionRuntime {
         if (finder != event_references.end())
         {
           event_references.erase(finder);
+#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
+      !defined(EVENT_GRAPH_TRACE)
           has_local_references = true;
+#endif
         }
       }
 #if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
@@ -22292,7 +23417,6 @@ namespace LegionRuntime {
       }
       // Now launch the waiting deferred events.  We wait until
       // here to do it so we don't need to hold the lock while unpacking
-      Processor gc_proc = Machine::get_executing_processor();
       for (std::list<PhysicalUser>::const_iterator it = 
             reduction_users.begin(); it != reduction_users.end(); it++)
       {
@@ -22399,7 +23523,6 @@ namespace LegionRuntime {
                              read_users.begin(), read_users.end());
       }
       // Finally record that we are 
-      Processor curr_proc = Machine::get_executing_processor();
       for (std::vector<PhysicalUser>::const_iterator it = 
             red_users.begin(); it != red_users.end(); it++)
       {

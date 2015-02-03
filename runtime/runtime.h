@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -138,6 +138,14 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FUTURE_ALLOC;
     public:
+      struct ContributeCollectiveArgs {
+      public:
+        HLRTaskID hlr_id;
+        Future::Impl *impl;
+        Barrier barrier;
+        unsigned count;
+      };
+    public:
       Impl(Runtime *rt, bool register_future, DistributedID did, 
            AddressSpaceID owner_space, AddressSpaceID local_space,
            TaskOp *task = NULL);
@@ -180,6 +188,9 @@ namespace LegionRuntime {
                                      AddressSpaceID source);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
+    public:
+      void contribute_to_collective(Barrier barrier, unsigned count);
+      static void handle_contribute_to_collective(const void *args);
     public:
       // These three fields are only valid on the owner node
       TaskOp *const task;
@@ -436,13 +447,16 @@ namespace LegionRuntime {
       struct MapperMessage {
       public:
         MapperMessage(void)
-          : target(Processor::NO_PROC), message(NULL), length(0) { }
+          : target(Processor::NO_PROC), message(NULL), length(0), radix(0) { }
         MapperMessage(Processor t, void *mes, size_t l)
-          : target(t), message(mes), length(l) { }
+          : target(t), message(mes), length(l), radix(-1) { }
+        MapperMessage(void *mes, size_t l, int r)
+          : target(Processor::NO_PROC), message(mes), length(l), radix(r) { }
       public:
         Processor target;
         void *message;
         size_t length;
+        int radix;
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
@@ -492,10 +506,15 @@ namespace LegionRuntime {
                                           MapperID mid, MappingTagID tag);
       void invoke_mapper_handle_message(MapperID map_id, Processor source,
                                         const void *message, size_t length);
+      void invoke_mapper_task_result(MapperID map_id, Event event,
+                                     const void *result, size_t result_size);
     public:
       // Handle mapper messages
       void defer_mapper_message(Processor target, MapperID map_id,
                                 const void *message, size_t length);
+      void defer_mapper_broadcast(MapperID map_id, const void *message,
+                                  size_t length, int radix);
+      void defer_mapper_call(MapperID map_id, Event wait_on);
       void send_mapper_messages(MapperID map_id, 
                                 std::vector<MapperMessage> &messages);
     public:
@@ -576,6 +595,8 @@ namespace LegionRuntime {
       std::vector<std::vector<MapperMessage> > mapper_messages;
       // Keep track of whether we are inside of a mapper call
       std::vector<bool> inside_mapper_call;
+      // Events to wait on before retrying the mapper call
+      std::vector<Event> defer_mapper_event;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
@@ -718,12 +739,16 @@ namespace LegionRuntime {
         SEND_FUTURE_SUBSCRIPTION,
         SEND_MAKE_PERSISTENT,
         SEND_MAPPER_MESSAGE,
+        SEND_MAPPER_BROADCAST,
         SEND_INDEX_SPACE_SEMANTIC_INFO,
         SEND_INDEX_PARTITION_SEMANTIC_INFO,
         SEND_FIELD_SPACE_SEMANTIC_INFO,
         SEND_FIELD_SEMANTIC_INFO,
         SEND_LOGICAL_REGION_SEMANTIC_INFO,
         SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
+        SEND_FREE_REMOTE_CONTEXT,
+        SEND_VALIDATE_REMOTE_STATE,
+        SEND_INVALIDATE_REMOTE_STATE,
       };
       // Implement a three-state state-machine for sending
       // messages.  Either fully self-contained messages
@@ -796,12 +821,16 @@ namespace LegionRuntime {
       void send_future_subscription(Serializer &rez, bool flush);
       void send_make_persistent(Serializer &rez, bool flush);
       void send_mapper_message(Serializer &rez, bool flush);
+      void send_mapper_broadcast(Serializer &rez, bool flush);
       void send_index_space_semantic_info(Serializer &rez, bool flush);
       void send_index_partition_semantic_info(Serializer &rez, bool flush);
       void send_field_space_semantic_info(Serializer &rez, bool flush);
       void send_field_semantic_info(Serializer &rez, bool flush);
       void send_logical_region_semantic_info(Serializer &rez, bool flush);
       void send_logical_partition_semantic_info(Serializer &rez, bool flush);
+      void send_free_remote_context(Serializer &rez, bool flush);
+      void send_validate_remote_state(Serializer &rez, bool flush);
+      void send_invalidate_remote_state(Serializer &rez, bool flush);
     public:
       // Receiving message method
       void process_message(const void *args, size_t arglen);
@@ -812,6 +841,8 @@ namespace LegionRuntime {
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
                            const void *args, size_t arglen);
+    public:
+      Event notify_pending_shutdown(void);
     public:
       const AddressSpaceID local_address_space;
       const AddressSpaceID remote_address_space;
@@ -922,6 +953,19 @@ namespace LegionRuntime {
         int mpi_rank;
         AddressSpace source_space;
       };
+      struct CollectiveFutureArgs {
+        HLRTaskID hlr_id;
+        ReductionOpID redop;
+        Future::Impl *future;
+        Barrier barrier;
+      };
+      struct MapperTaskArgs {
+        HLRTaskID hlr_id;
+        Future::Impl *future;
+        MapperID map_id;
+        Processor proc;
+        Event event;
+      };
     public:
       struct ProcessorGroupInfo {
       public:
@@ -947,6 +991,9 @@ namespace LegionRuntime {
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor proc);
+      Event launch_mapper_task(Mapper *mapper, Processor proc, 
+                               Processor::TaskFuncID tid,
+                               const TaskArgument &arg, MapperID map_id);
       void perform_one_time_logging(void);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
@@ -1146,9 +1193,24 @@ namespace LegionRuntime {
       Grant acquire_grant(Context ctx, 
                           const std::vector<LockRequest> &requests);
       void release_grant(Context ctx, Grant grant);
-      PhaseBarrier create_phase_barrier(Context ctx, unsigned participants);
+    public:
+      PhaseBarrier create_phase_barrier(Context ctx, unsigned arrivals);
       void destroy_phase_barrier(Context ctx, PhaseBarrier pb);
       PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
+    public:
+      DynamicCollective create_dynamic_collective(Context ctx,
+                                                  unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size);
+      void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
+      void defer_dynamic_collective_arrival(Context ctx, 
+                                            DynamicCollective dc,
+                                            Future f, unsigned count);
+      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc);
+      DynamicCollective advance_dynamic_collective(Context ctx,
+                                                   DynamicCollective dc);
+    public:
       void issue_acquire(Context ctx, const AcquireLauncher &launcher);
       void issue_release(Context ctx, const ReleaseLauncher &launcher);
       void issue_mapping_fence(Context ctx);
@@ -1314,6 +1376,7 @@ namespace LegionRuntime {
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_make_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
+      void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_index_space_semantic_info(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_partition_semantic_info(AddressSpaceID target,
@@ -1325,6 +1388,9 @@ namespace LegionRuntime {
                                              Serializer &rez);
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
+      void send_free_remote_context(AddressSpaceID target, Serializer &rez);
+      void send_validate_remote_state(AddressSpaceID target, Serializer &rez);
+      void send_invalidate_remote_state(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1348,10 +1414,12 @@ namespace LegionRuntime {
                                                 AddressSpaceID source);
       void handle_field_allocation(Deserializer &derez, AddressSpaceID source);
       void handle_field_destruction(Deserializer &derez, AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez);
+      void handle_individual_remote_mapped(Deserializer &derez, 
+                                           AddressSpaceID source);
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
-      void handle_slice_remote_mapped(Deserializer &derez);
+      void handle_slice_remote_mapped(Deserializer &derez, 
+                                      AddressSpaceID source);
       void handle_slice_remote_complete(Deserializer &derez);
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_distributed_remove_resource(Deserializer &derez);
@@ -1402,12 +1470,18 @@ namespace LegionRuntime {
       void handle_future_subscription(Deserializer &derez);
       void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
+      void handle_mapper_broadcast(Deserializer &derez);
       void handle_index_space_semantic_info(Deserializer &derez);
       void handle_index_partition_semantic_info(Deserializer &derez);
       void handle_field_space_semantic_info(Deserializer &derez);
       void handle_field_semantic_info(Deserializer &derez);
       void handle_logical_region_semantic_info(Deserializer &derez);
       void handle_logical_partition_semantic_info(Deserializer &derez);
+      void handle_free_remote_context(Deserializer &derez);
+      void handle_validate_remote_state(Deserializer &derez, 
+                                        AddressSpaceID source);
+      void handle_invalidate_remote_state(Deserializer &derez,
+                                          AddressSpaceID source);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1473,10 +1547,22 @@ namespace LegionRuntime {
                                         MapperID map_id, MappingTagID tag);
       void invoke_mapper_handle_message(Processor target, MapperID map_id,
                           Processor source, const void *message, size_t length);
+      void invoke_mapper_broadcast(MapperID map_id, Processor source,
+                                   const void *message, size_t length,
+                                   int radix, int index);
+      void invoke_mapper_task_result(MapperID map_id, Processor source,
+                                     Event event, const void *result,
+                                     size_t result_size);
     public:
       // Handle directions and query requests from the mapper
+      Processor locate_mapper_info(Mapper *mapper, MapperID &map_id);
       void handle_mapper_send_message(Mapper *mapper, Processor target, 
                                       const void *message, size_t length);
+      void handle_mapper_broadcast(Mapper *mapper, const void *message,
+                                   size_t length, int radix);
+      Event launch_mapper_task(Mapper *mapper, Processor::TaskFuncID tid,
+                               const TaskArgument &arg);
+      void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);
@@ -1508,6 +1594,8 @@ namespace LegionRuntime {
       void defer_collect_user(LogicalView *view, Event term_event);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
+      void increment_outstanding_top_level_tasks(void);
+      void decrement_outstanding_top_level_tasks(void);
       void initiate_runtime_shutdown(void);
     public:
       IndividualTask*  get_available_individual_task(void);
@@ -1606,6 +1694,8 @@ namespace LegionRuntime {
       const unsigned runtime_stride; // stride for uniqueness
       RegionTreeForest *const forest;
       Processor utility_group;
+    protected:
+      unsigned outstanding_top_level_tasks;
 #ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;
@@ -1851,12 +1941,14 @@ namespace LegionRuntime {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
+      static unsigned initial_directory_size;
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned max_filter_size;
       static unsigned gc_epoch_size;
       static bool enable_imprecise_filter;
       static bool separate_runtime_instances;
+      static bool record_registration;
       static bool stealing_disabled;
       static bool resilient_mode;
       static unsigned shutdown_counter;

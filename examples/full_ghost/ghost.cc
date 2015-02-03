@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -248,6 +248,10 @@ void top_level_task(const Task *task,
       spmd_launcher.region_requirements[3].flags |= NO_ACCESS_FLAG;
       for (unsigned idx = 0; idx < 4; idx++)
         spmd_launcher.add_field(idx, FID_GHOST);
+
+      spmd_launcher.add_index_requirement(IndexSpaceRequirement(is,
+								NO_MEMORY,
+								is));
 
       DomainPoint point(color);
       must_epoch_launcher.add_single_task(point, spmd_launcher);

@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -255,7 +255,7 @@ namespace LegionRuntime {
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
                                const RegionRequirement &req,
-                               UniqueID unique_id,
+                               StateDirectory *directory,
                                AddressSpaceID target,
                                std::map<LogicalView*,FieldMask> &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
@@ -280,6 +280,15 @@ namespace LegionRuntime {
           const std::set<PhysicalManager*> &needed_managers, 
           AddressSpaceID target);
       void handle_remote_references(Deserializer &derez);
+    public:
+      // Methods for checking the remote state of region trees
+      bool check_remote_shape(const IndexSpaceRequirement &req);
+      bool check_remote_shape(const RegionRequirement &req);
+      bool check_remote_state(const RegionRequirement &req,
+                              RegionTreeContext ctx);
+    public:
+      void validate_remote_state(Deserializer &derez, AddressSpaceID source);
+      void invalidate_remote_state(Deserializer &derez, AddressSpaceID source);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -620,6 +629,123 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class StateDirectory
+     * A state directory object is created for each dynamic
+     * context for tracking which other nodes in the system
+     * have up to date physical region tree state information
+     * for particular fields and region trees. It operates
+     * similar to a directory in a directory based cache-coherence
+     * scheme by tracking all of this information and sending
+     * invalidate messages when necessary.  When it is destructed
+     * it also sends messages to free up the contexts on the 
+     * remote nodes where state was stored.
+     */
+    class StateDirectory {
+    public:
+      struct RemoteNodeState {
+      public:
+        RemoteNodeState(void) { }
+        RemoteNodeState(const FieldMask &m, AddressSpaceID target)
+          : valid_fields(m) { remote_nodes.set_bit(target); }
+      public:
+        NodeMask  remote_nodes;
+        FieldMask valid_fields;
+      };
+      struct RemoteTreeState {
+      public:
+        FieldMask valid_fields;
+        // Each field should be set in exactly one of these entries
+        LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list node_states;
+      };
+      struct RemoteForestState {
+      public:
+        FieldMask valid_fields;
+        std::map<RegionTreeNode*,RemoteTreeState> remote_tree_states;
+      };
+    public:
+      StateDirectory(UniqueID remote_owner_uid, RegionTreeForest *forest,
+                     SingleTask *context);
+      StateDirectory(const StateDirectory &rhs);
+      ~StateDirectory(void);
+    public:
+      StateDirectory& operator=(const StateDirectory &rhs);
+    public:
+      inline UniqueID get_owner_uid(void) const { return remote_owner_uid; }
+    public:
+      // Call this whenever we send some region tree state to a remote node
+      void update_remote_state(AddressSpaceID target, 
+                               RegionTreeNode *node,
+                               const FieldMask &mask);
+    protected:
+      // For operating on RemoteForestStates
+      void update_remote_state(RemoteForestState &state, AddressSpaceID target,
+                               RegionTreeNode *node, const FieldMask &mask);
+      // For operating on RemoteTreeStates
+      void update_remote_state(RemoteTreeState &state, AddressSpaceID target,
+                               const FieldMask &mask);
+    public:
+      // Called whenever we perform a close operation which invalidates all
+      // the state for the given fields for an entire tree rooted at 'node'
+      void issue_invalidations(RegionTreeNode *node, const FieldMask &mask);
+      // Call this whenever we finish mapping a region with write privileges to
+      // invalidate all versions of the tree except the one from the source node
+      void issue_invalidations(AddressSpaceID source, bool remote,
+                               const RegionRequirement &req);
+      // Same thing as the previous one but for projection requirements
+      void issue_invalidations(AddressSpaceID source, bool remote,
+                               const RegionRequirement &req,
+                               const std::vector<LogicalRegion> &handles);
+    protected:
+      // Methods for operating on RemoteForestStates
+      bool issue_invalidations(RemoteForestState &state, 
+                               RegionTreeNode *node, const FieldMask &mask);
+      bool issue_invalidations(RemoteForestState &state, RegionTreeNode *node,
+                               const FieldMask &mask, AddressSpaceID source);
+    protected:
+      // Methods for operation on RemoteTreeStates
+      bool issue_invalidations(RemoteTreeState &state, 
+                               RegionTreeNode *node, const FieldMask &mask);
+      bool issue_invalidations(RemoteTreeState &state, RegionTreeNode *node,
+                               const FieldMask &mask, AddressSpaceID source);
+    protected:
+      void insert_node_state(AddressSpaceID node,
+                             const FieldMask &node_mask,
+       LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list &node_states);
+    private:
+      UniqueID remote_owner_uid;
+      RegionTreeForest *const forest;
+      SingleTask *const context;
+    private:
+      Reservation state_lock;
+      // Set of nodes that have some remote state, these are
+      // monotonically increasing over execution and are only
+      // an approximation for detecting quick outs.
+      NodeMask remote_contexts;
+      FieldMask remote_fields;
+      // There are several trade-offs going on in this data structure.
+      // Ideally we would like to track exactly which fields are valid
+      // on which nodes for every single node in the region tree forest.
+      // That is impractical, so we instead track it for whole sub-trees
+      // in the forest.  This may result in duplicate sending sometimes,
+      // but should otherwise be efficient.
+      //
+      // The other large trade-off that is occurring is that we are 
+      // storing sets of nodes for which all have the same valid fields
+      // for specific sub-trees (RemoteTreeSets).  This may require
+      // additional iterating for both updates and invalidations, but
+      // it is precise. The worst-case scenario is that each node gets
+      // a different field (or set of fields), but that seems to be
+      // an uncommon case for most Legion programs.
+      //
+      // The crucial invariant to maintain is that for each 
+      // RegionTreeNode and remote node ID, a bit is set for the
+      // remote node in at most one RemoteNodeState for the
+      // corresponding RegionTreeNode. This guarantees that our
+      // information about fields on remote nodes is precise.
+      std::map<RegionTreeID,RemoteForestState> remote_forest_states;
+    };
+
+    /**
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
@@ -628,14 +754,17 @@ namespace LegionRuntime {
       struct IntersectInfo {
       public:
         IntersectInfo(void)
-          : has_intersects(false), own_intersections(false) { }
-        IntersectInfo(bool has, bool own)
-          : has_intersects(has), own_intersections(own) { }
-        IntersectInfo(bool has, bool own, const std::set<Domain> &ds)
-          : has_intersects(has), own_intersections(own), intersections(ds) { }
+          : has_intersects(false),
+            intersections_valid(false) { }
+        IntersectInfo(bool has)
+          : has_intersects(has), 
+            intersections_valid(!has) { }
+        IntersectInfo(const std::set<Domain> &ds)
+          : has_intersects(true), intersections_valid(true),
+            intersections(ds) { }
       public:
         bool has_intersects;
-        bool own_intersections;
+        bool intersections_valid;
         std::set<Domain> intersections;
       };
     public:
@@ -656,13 +785,15 @@ namespace LegionRuntime {
     public:
       static bool compute_intersections(const std::set<Domain> &left,
                                         const std::set<Domain> &right,
-                                        std::set<Domain> &result);
+                                        std::set<Domain> &result,
+                                        bool compute);
       static bool compute_intersections(const std::set<Domain> &left,
                                         const Domain &right,
-                                        std::set<Domain> &result);
+                                        std::set<Domain> &result,
+                                        bool compute);
       static bool compute_intersection(const Domain &left,
                                        const Domain &right,
-                                       Domain &result);
+                                       Domain &result, bool compute);
       static bool compute_dominates(const std::set<Domain> &left_set,
                                     const std::set<Domain> &right_set);
     public:
@@ -721,8 +852,8 @@ namespace LegionRuntime {
       bool has_component_domains(void) const;
       void update_component_domains(const std::set<Domain> &domains);
       const std::set<Domain>& get_component_domains(void) const;
-      bool intersects_with(IndexSpaceNode *other);
-      bool intersects_with(IndexPartNode *other);
+      bool intersects_with(IndexSpaceNode *other, bool compute);
+      bool intersects_with(IndexPartNode *other, bool compute);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -789,6 +920,7 @@ namespace LegionRuntime {
       bool are_disjoint(Color c1, Color c2);
       void add_disjoint(Color c1, Color c2);
       bool is_complete(void);
+      void get_colors(std::set<Color> &colors);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -796,8 +928,8 @@ namespace LegionRuntime {
       void destroy_node(AddressSpaceID source);
     public:
       void get_subspace_domains(std::set<Domain> &subspaces);
-      bool intersects_with(IndexSpaceNode *other);
-      bool intersects_with(IndexPartNode *other);
+      bool intersects_with(IndexSpaceNode *other, bool compute);
+      bool intersects_with(IndexPartNode *other, bool compute);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -1317,6 +1449,7 @@ namespace LegionRuntime {
     public:
       FieldMask dirty_mask;
       FieldMask reduction_mask;
+      FieldMask remote_mask; // which fields are valid remote copies
       ChildState children;
       LegionKeyValue<InstanceView*, FieldMask,
                      VALID_VIEW_ALLOC>::map valid_views;
@@ -1544,8 +1677,8 @@ namespace LegionRuntime {
      */
     class PhysicalUnpacker {
     public:
-      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source,
-                       std::map<Event,FieldMask> &deferred_events);
+      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source);//,
+                       /*std::map<Event,FieldMask> &deferred_events);*/
     public:
       void begin_node(FieldTree<PhysicalUser> *node);
       void end_node(FieldTree<PhysicalUser> *node);
@@ -1554,7 +1687,7 @@ namespace LegionRuntime {
     private:
       FieldSpaceNode *const field_node;
       const AddressSpaceID source;
-      std::map<Event,FieldMask> &deferred_events;
+      //std::map<Event,FieldMask> &deferred_events;
     private:
       std::deque<PhysicalUser> reinsert;
       unsigned reinsert_count;
@@ -1797,7 +1930,7 @@ namespace LegionRuntime {
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
-      void flush_reductions(const FieldMask &flush_mask,
+      FieldMask flush_reductions(const FieldMask &flush_mask,
                             ReductionOpID redop, MappableInfo *info);
       // Entry
       void initialize_physical_state(ContextID ctx);
@@ -1807,13 +1940,19 @@ namespace LegionRuntime {
       void invalidate_physical_state(ContextID ctx, 
                                      const FieldMask &invalid_mask,
                                      bool force);
+      void invalidate_physical_state(PhysicalState *state,
+                                     const FieldMask &invalid_mask,
+                                     bool force);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual unsigned get_color(void) const = 0;
+      virtual IndexTreeNode *get_row_source(void) const = 0;
+      virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
       virtual RegionTreeNode* get_tree_child(Color c) = 0;
       virtual bool are_children_disjoint(Color c1, Color c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
+      virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
       virtual RegionNode* as_region_node(void) const = 0;
       virtual PartitionNode* as_partition_node(void) const = 0;
@@ -1823,7 +1962,8 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& get_component_domains(void) const = 0;
       virtual Domain get_domain(void) const = 0;
       virtual bool is_complete(void) = 0;
-      virtual bool intersects_with(RegionTreeNode *other) = 0;
+      virtual bool intersects_with(RegionTreeNode *other, 
+                                   bool compute = true) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
       virtual const std::set<Domain>& 
                             get_intersection_domains(RegionTreeNode *other) = 0;
@@ -1927,10 +2067,13 @@ namespace LegionRuntime {
     public:
       virtual unsigned get_depth(void) const;
       virtual unsigned get_color(void) const;
+      virtual IndexTreeNode *get_row_source(void) const;
+      virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(Color c);
       virtual bool are_children_disjoint(Color c1, Color c2);
       virtual bool are_all_children_disjoint(void);
+      virtual void instantiate_children(void);
       virtual bool is_region(void) const;
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
@@ -1940,7 +2083,7 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -2001,7 +2144,8 @@ namespace LegionRuntime {
       Event close_state(MappableInfo *info, PhysicalUser &user,
                         const InstanceRef &target);
     public:
-      bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
+      bool send_state(ContextID ctx, UniqueID remote_owner_uid,
+                      AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
                       std::map<LogicalView*,FieldMask> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
@@ -2047,10 +2191,13 @@ namespace LegionRuntime {
     public:
       virtual unsigned get_depth(void) const;
       virtual unsigned get_color(void) const;
+      virtual IndexTreeNode *get_row_source(void) const;
+      virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(Color c);
       virtual bool are_children_disjoint(Color c1, Color c2);
       virtual bool are_all_children_disjoint(void);
+      virtual void instantiate_children(void);
       virtual bool is_region(void) const;
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
@@ -2060,7 +2207,7 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& get_component_domains(void) const;
       virtual Domain get_domain(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -2107,7 +2254,8 @@ namespace LegionRuntime {
                                          const FieldMask &mask);
 #endif
     public:
-      bool send_state(ContextID ctx, UniqueID uid, AddressSpaceID target,
+      bool send_state(ContextID ctx, UniqueID remote_owner_uid,
+                      AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
                       std::map<LogicalView*,FieldMask> &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
@@ -2200,6 +2348,7 @@ namespace LegionRuntime {
      */
     class NodeTraverser {
     public:
+      virtual bool break_early(void) const { return false; }
       virtual bool visit_only_valid(void) const = 0;
       virtual bool visit_region(RegionNode *node) = 0;
       virtual bool visit_partition(PartitionNode *node) = 0;
@@ -2384,10 +2533,12 @@ namespace LegionRuntime {
      * \class PremapTraverser
      * A traverser of the physical region tree for
      * performing the premap operation.
+     * Keep track of the last node we visited
      */
     class PremapTraverser : public PathTraverser {
     public:
-      PremapTraverser(RegionTreePath &path, MappableInfo *info);  
+      PremapTraverser(RegionTreePath &path, MappableInfo *info,
+                      StateDirectory *directory);  
       PremapTraverser(const PremapTraverser &rhs); 
       ~PremapTraverser(void);
     public:
@@ -2395,11 +2546,15 @@ namespace LegionRuntime {
     public:
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
+    public:
+      inline RegionTreeNode* get_last_node(void) const { return last_node; }
     protected:
       bool perform_close_operations(RegionTreeNode *node,
                                     LogicalRegion closing_handle);
     protected:
       MappableInfo *const info;
+      StateDirectory *const directory;
+      RegionTreeNode *last_node;
     }; 
 
     /**
@@ -2409,7 +2564,8 @@ namespace LegionRuntime {
      */
     class StateSender : public NodeTraverser {
     public:
-      StateSender(ContextID ctx, UniqueID uid, AddressSpaceID target,
+      StateSender(ContextID ctx, UniqueID remote_owner_uid,
+                  AddressSpaceID target,
                   std::map<LogicalView*,FieldMask> &needed_views,
                   std::set<PhysicalManager*> &needed_managers,
                   const FieldMask &send_mask, bool invalidate);
@@ -2423,7 +2579,7 @@ namespace LegionRuntime {
       virtual bool visit_partition(PartitionNode *node);
     public:
       const ContextID ctx;
-      const UniqueID uid;
+      const UniqueID remote_owner_uid;
       const AddressSpaceID target;
       std::map<LogicalView*,FieldMask> &needed_views;
       std::set<PhysicalManager*> &needed_managers;
@@ -2485,6 +2641,86 @@ namespace LegionRuntime {
       const bool invalidate;
       const FieldMask return_mask;
       std::set<PhysicalManager*> &needed_managers;
+    };
+
+    /**
+     * \class RemoteChecker
+     * This class checks to see if all the states in a given
+     * region tree are up to date for a given set of fields
+     * on a remote node.
+     */
+    class RemoteChecker : public NodeTraverser {
+    public:
+      RemoteChecker(ContextID ctx, const FieldMask &mask);
+      RemoteChecker(const RemoteChecker &rhs);
+      ~RemoteChecker(void);
+    public:
+      RemoteChecker& operator=(const RemoteChecker &rhs);
+    public:
+      virtual bool break_early(void) const { return true; }
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      inline bool is_valid(void) const { return valid; }
+      bool check_validity(RegionTreeNode *node);
+    public:
+      const ContextID ctx;
+      const FieldMask check_mask;
+    private:
+      bool valid;
+    };
+
+    /**
+     * \class RemoteValidator
+     * This class traverses a subtree and marks the configured
+     * number of fields as valid remote copies on the local
+     * node.  It also has the side-effect of eagerly instantiating
+     * the entire sub-tree which is necessary for correctness.
+     */
+    class RemoteValidator : public NodeTraverser {
+    public:
+      RemoteValidator(ContextID ctx, const FieldMask &mask);
+      RemoteValidator(const RemoteValidator &rhs);
+      ~RemoteValidator(void);
+    public:
+      RemoteValidator& operator=(const RemoteValidator &rhs);
+    public:
+      virtual bool break_early(void) const { return true; }
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      void validate_node(RegionTreeNode *node);
+    public:
+      const ContextID ctx;
+      const FieldMask validate_mask;
+    };
+
+    /**
+     * \class RemoteInvalidator
+     * This class does the opposite of the previous class.
+     * It traverses a region tree for a particular context
+     * and set of fields and invalidates the state while
+     * also marking that the fields are no longer valid
+     * remotely.
+     */
+    class RemoteInvalidator : public NodeTraverser {
+    public:
+      RemoteInvalidator(ContextID ctx, const FieldMask &mask);
+      RemoteInvalidator(const RemoteInvalidator &rhs);
+      ~RemoteInvalidator(void);
+    public:
+      RemoteInvalidator& operator=(const RemoteInvalidator &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
+      void invalidate_node(RegionTreeNode *node);
+    public:
+      const ContextID ctx;
+      const FieldMask invalidate_mask;
     };
 
     /**
@@ -3324,7 +3560,7 @@ namespace LegionRuntime {
                                std::set<Event> &preconditions,
                                std::set<Event> &postconditions);
     public:
-      bool intersects_with(RegionTreeNode *dst);
+      bool intersects_with(RegionTreeNode *dst, bool compute = true);
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);

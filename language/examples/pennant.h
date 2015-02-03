@@ -46,6 +46,8 @@ void generate_mesh_raw(
   int64_t *zonepoints, size_t *zonepoints_size,
   int64_t *zonecolors, size_t *zonecolors_size);
 
+void register_mappers();
+
 #ifdef __cplusplus
 }
 #endif

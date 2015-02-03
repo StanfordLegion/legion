@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -590,20 +590,45 @@ namespace LegionRuntime {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(Barrier b, unsigned participants);
+      PhaseBarrier(Barrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
     public:
-      void arrive(unsigned count = 0);
+      void arrive(unsigned count = 1);
       void wait(void);
-    public:
-      // for debug
+      void alter_arrival_count(int delta);
       Barrier get_barrier(void) const { return phase_barrier; }
-      unsigned participant_count(void) const { return participants; }
-    private:
+    protected:
       Barrier phase_barrier;
-      unsigned participants;
+    };
+
+   /**
+     * \class Collective
+     * A DynamicCollective object is a special kind of PhaseBarrier
+     * that is created with an associated reduction operation.
+     * Arrivals on a dynamic collective can contribute a value to
+     * each generation of the collective, either in the form of a
+     * value or in the form of a future. The reduction operation is used
+     * to reduce all the contributed values (which all must be of the same 
+     * type) to a common value. This value is returned in the form of
+     * a future which applications can use as a normal future. Note
+     * that unlike MPI collectives, collectives in Legion can
+     * have different sets of producers and consumers and not
+     * all producers need to contribute a value.
+     */
+    class DynamicCollective : public PhaseBarrier {
+    public:
+      DynamicCollective(void);
+    protected:
+      // Only the runtime is allowed to make non-empty dynamic collectives
+      FRIEND_ALL_RUNTIME_CLASSES
+      DynamicCollective(Barrier b, ReductionOpID redop);
+    public:
+      // All the same operations as a phase barrier
+      void arrive(const void *value, size_t size, unsigned count = 1);
+    protected:
+      ReductionOpID redop;
     };
 
     //==========================================================================
@@ -1536,6 +1561,7 @@ namespace LegionRuntime {
       unsigned                            hysteresis_percentage;
       int                                 max_outstanding_frames;
       unsigned                            min_tasks_to_schedule;
+      unsigned                            max_directory_size;
     public:
       // Profiling information for the task
       unsigned long long                  start_time;
@@ -2325,6 +2351,12 @@ namespace LegionRuntime {
        *                   Any value of 0 or less will disable the check
        *                   causing select_tasks_to_schedule to be polled as
        *                   long as there are tasks to map.
+       * max_directory_size - specifying the maximum number of leaf entries
+       *                   in the region tree state directory for which the
+       *                   runtime should maintain precise information. Beyond
+       *                   this number the runtime may introduce imprecision
+       *                   that results in unnecessary invalidation messages
+       *                   in order to minimize the data structure size.
        */
       virtual void configure_context(Task *task) = 0;
 
@@ -2474,6 +2506,20 @@ namespace LegionRuntime {
       virtual void handle_message(Processor source,
                                   const void *message, size_t length) = 0;
 
+      /**
+       * ----------------------------------------------------------------------
+       *  Handle Mapper Task Result 
+       * ----------------------------------------------------------------------
+       * Handle the result of the mapper task with the corresponding task
+       * token that was launched by a call to 'launch_mapper_task'.
+       * @param event the event identifying the task that was launched
+       * @param result buffer containing the result of the task
+       * @param result_size size of the result buffer in bytes
+       */
+      virtual void handle_mapper_task_result(MapperEvent event,
+                                             const void *result, 
+                                             size_t result_size) = 0;
+
       //------------------------------------------------------------------------
       // All methods below here are methods that are already implemented
       // and serve as an interface for inheriting mapper classes to 
@@ -2496,6 +2542,38 @@ namespace LegionRuntime {
        * @param the size of the message to be sent in bytes
        */
       void send_message(Processor target, const void *message, size_t length); 
+
+      /**
+       * Broadcast a message to all other mappers of the same kind. Mappers
+       * can also control the fan-out radix for the broadcast message.
+       */
+      void broadcast_message(const void *message, size_t length, int radix = 4);
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for launching asynchronous mapper tasks 
+      //------------------------------------------------------------------------
+
+      /**
+       * Launch an asychronous task to compute a value for a mapper to use
+       * in the future. Note that because mapper calls are not allowed to 
+       * block, we don't return a future for these tasks.  Instead we 
+       * return a mapper event that can be used to track when the result 
+       * of the task is passed back to the mapper.
+       */
+      MapperEvent launch_mapper_task(Processor::TaskFuncID tid,
+                                     const TaskArgument &arg);
+
+      /**
+       * We can invoke this call during any mapping call that will defer a
+       * mapping call until a specific mapper event has triggered.
+       */
+      void defer_mapper_call(MapperEvent event);
+
+      /**
+       * Merge a collection of mapper events together to create a new
+       * mapper event that will trigger when all preconditions have triggered.
+       */
+      MapperEvent merge_mapper_events(const std::set<MapperEvent> &events);
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
@@ -2689,6 +2767,7 @@ namespace LegionRuntime {
     class ProjectionFunctor {
     public:
       ProjectionFunctor(HighLevelRuntime *rt);
+      virtual ~ProjectionFunctor(void);
     public:
       /**
        * Compute the projection for a logical region projection
@@ -3550,19 +3629,15 @@ namespace LegionRuntime {
       // Phase Barrier operations
       //------------------------------------------------------------------------
       /**
-       * Create a new phase barrier with a given number of 
-       * participants.  Note that this number of participants
-       * is only the number of participants that are advancing the
-       * phases from one to the next.  An unlimited number of tasks
-       * can be run by each participant within a phase.  Furthermore
-       * all the participants can run an unlimited number of phases
-       * provided that they all run the same number.
+       * Create a new phase barrier with an expected number of 
+       * arrivals.  Note that this number of arrivals 
+       * is the number of arrivals performed on each generation
+       * of the phase barrier and cannot be changed.
        * @param ctx enclosing task context
-       * @param participants number of participant tasks
-       *    that will be performing calls to advance the barrier
+       * @param arrivals number of arrivals on the barrier 
        * @return a new phase barrier handle
        */
-      PhaseBarrier create_phase_barrier(Context ctx, unsigned participants);
+      PhaseBarrier create_phase_barrier(Context ctx, unsigned arrivals);
 
       /**
        * Destroy a phase barrier.  This operation will 
@@ -3588,6 +3663,71 @@ namespace LegionRuntime {
        * @return an updated phase barrier used for the next phase
        */
       PhaseBarrier advance_phase_barrier(Context ctx, PhaseBarrier pb);
+    public:
+      //------------------------------------------------------------------------
+      // Dynamic Collective operations
+      //------------------------------------------------------------------------
+      /**
+       * A dynamic collective is a special type of phase barrier that 
+       * is also associated with a reduction operation that allows arrivals
+       * to contribute a value to a generation of the barrier. The runtime
+       * reduces down all the applied values to a common value for each
+       * generation of the phase barrier. The number of arrivals gives a
+       * default number of expected arrivals for each generation.
+       * @param ctx enclosing task context
+       * @param arrivals default number of expected arrivals 
+       * @param redop the associated reduction operation
+       * @param init_value the inital value for each generation
+       * @param init_size the size in bytes of the initial value
+       * @return a new dynamic collective handle
+       */
+      DynamicCollective create_dynamic_collective(Context ctx, 
+                                                  unsigned arrivals,
+                                                  ReductionOpID redop,
+                                                  const void *init_value,
+                                                  size_t init_size);
+
+      /**
+       * Destroy a dynamic collective operation. It has the
+       * same semantics as the destruction of a phase barrier.
+       * @param ctx enclosing task context
+       * @param dc dynamic collective to destroy
+       */
+      void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
+
+      /**
+       * Perform a deferred arrival on a dynamic collective dependent
+       * upon a future value.  The runtime will automatically pipe the
+       * future value through to the dynamic collective.
+       * @param ctx enclosing task context
+       * @param dc dynamic collective on which to arrive
+       * @param f future to use for performing the arrival
+       * @param count total arrival count
+       */
+      void defer_dynamic_collective_arrival(Context ctx, 
+                                            DynamicCollective dc,
+                                            Future f, unsigned count = 1);
+
+      /**
+       * This will return the value of a dynamic collective in
+       * the form of a future. Applications can then use this 
+       * future just like all other futures.
+       * @param ctx enclosing task context
+       * @param dc dynamic collective on which to get the result
+       * @return future value that contains the result of the collective
+       */
+      Future get_dynamic_collective_result(Context ctx, DynamicCollective dc); 
+
+      /**
+       * Advance an existing dynamic collective to the next
+       * phase.  It has the same semantics as the equivalent
+       * call for phase barriers.
+       * @param ctx enclosing task context
+       * @param dc the dynamic collective to be advanced
+       * @return an updated dynamic collective used for the next phase
+       */
+      DynamicCollective advance_dynamic_collective(Context ctx, 
+                                                   DynamicCollective dc);
     public:
       //------------------------------------------------------------------------
       // User-Managed Software Coherence 
@@ -4065,6 +4205,9 @@ namespace LegionRuntime {
        *              has been compiled with the macro INORDER_EXECUTION.
        *              By default when compiling with INORDER_EXECUTION
        *              all applications will run in program order.
+       * -hl:directory <int> Control the maximum number of leaf entries
+       *              for the runtime should maintain precise information
+       *              for remote region tree contexts. The default is 64.
        * -------------
        *  Messaging
        * -------------
@@ -4117,6 +4260,9 @@ namespace LegionRuntime {
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
+       * -hl:registration Record the mapping from low-level task IDs to
+       *              task variant names for debugging low-level runtime
+       *              error messages.
        * -------------
        *  Profiling
        * -------------

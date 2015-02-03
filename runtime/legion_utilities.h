@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,8 +37,11 @@
 #include <immintrin.h>
 #endif
 #endif
-#ifdef DYNAMIC_FIELD_MASKS
-#include <malloc.h>
+
+#ifdef __MACH__
+#define MASK_FMT "%16.16llx"
+#else
+#define MASK_FMT "%16.16lx"
 #endif
 
 namespace LegionRuntime {
@@ -288,7 +291,7 @@ namespace LegionRuntime {
       inline void begin_context(void);
       inline void end_context(void);
     public:
-      inline off_t get_index(void) const { return index; }
+      inline size_t get_index(void) const { return index; }
       inline const void* get_buffer(void) const { return buffer; }
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
@@ -297,7 +300,7 @@ namespace LegionRuntime {
     private:
       size_t total_bytes;
       char *buffer;
-      off_t index;
+      size_t index;
 #ifdef DEBUG_HIGH_LEVEL
       size_t context_bytes;
 #endif
@@ -325,7 +328,7 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_HIGH_LEVEL
         // should have used the whole buffer
-        assert(index == off_t(total_bytes)); 
+        assert(index == total_bytes); 
 #endif
       }
     public:
@@ -344,7 +347,7 @@ namespace LegionRuntime {
     private:
       const size_t total_bytes;
       const char *buffer;
-      off_t index;
+      size_t index;
 #ifdef DEBUG_HIGH_LEVEL
       size_t context_bytes;
 #endif
@@ -470,6 +473,7 @@ namespace LegionRuntime {
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
     public:
+      inline int pop_count(void) const;
       static inline int pop_count(
             const BitMask<unsigned,MAX,SHIFT,MASK> &mask);
       static inline int pop_count(
@@ -478,6 +482,9 @@ namespace LegionRuntime {
             const BitMask<unsigned long long,MAX,SHIFT,MASK> &mask);
     protected:
       T bit_vector[MAX/(8*sizeof(T))];
+    public:
+      static const unsigned ELEMENT_SIZE = 8*sizeof(T);
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
     };
 
     /////////////////////////////////////////////////////////////
@@ -552,6 +559,9 @@ namespace LegionRuntime {
     protected:
       T bit_vector[MAX/(8*sizeof(T))];
       T sum_mask;
+    public:
+      static const unsigned ELEMENT_SIZE = 8*sizeof(T);
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
     };
 
 #ifdef __SSE2__
@@ -619,6 +629,9 @@ namespace LegionRuntime {
         __m128i sse_vector[MAX/128];
         uint64_t bit_vector[MAX/64];
       } bits;
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
     };
 
     /////////////////////////////////////////////////////////////
@@ -687,6 +700,9 @@ namespace LegionRuntime {
         uint64_t bit_vector[MAX/64];
       } bits;
       uint64_t sum_mask;
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
     };
 #endif // __SSE2__
 
@@ -754,17 +770,14 @@ namespace LegionRuntime {
       static inline int pop_count(const AVXBitMask<MAX> &mask);
     protected:
       union {
-#ifdef DYNAMIC_FIELD_MASKS
-        __m256i *avx_vector;
-        __m256d *avx_double;
-        uint64_t *bit_vector;
-#else
         __m256i avx_vector[MAX/256];
         __m256d avx_double[MAX/256];
         uint64_t bit_vector[MAX/64];
-#endif
       } bits;
-    };
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+    } __attribute__((aligned(16)));
     
     /////////////////////////////////////////////////////////////
     // AVX Two-Level Bit Mask  
@@ -831,18 +844,15 @@ namespace LegionRuntime {
       static inline uint64_t extract_mask(__m256d value);
     protected:
       union {
-#ifdef DYNAMIC_FIELD_MASKS
-        __m256i *avx_vector;
-        __m256d *avx_double;
-        uint64_t *bit_vector;
-#else
         __m256i avx_vector[MAX/256];
         __m256d avx_double[MAX/256];
         uint64_t bit_vector[MAX/64];
-#endif
       } bits;
       uint64_t sum_mask;
-    };
+    public:
+      static const unsigned ELEMENT_SIZE = 64;
+      static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+    } __attribute__((aligned(16)));
 #endif // __AVX__
 
     /////////////////////////////////////////////////////////////
@@ -924,7 +934,7 @@ namespace LegionRuntime {
     inline void Serializer::serialize<bool>(const bool &element)
     //--------------------------------------------------------------------------
     {
-      while ((size_t)(index + 4) > total_bytes)
+      while ((index + 4) > total_bytes)
         resize();
       *((bool*)buffer+index) = element;
       index += 4;
@@ -1093,9 +1103,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(index <= off_t(total_bytes));
+      assert(index <= total_bytes);
 #endif
-      return size_t(total_bytes - index);
+      return total_bytes - index;
     }
 
     //--------------------------------------------------------------------------
@@ -1103,7 +1113,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(index <= off_t(total_bytes));
+      assert(index <= total_bytes);
 #endif
       return (const void*)(buffer+index);
     }
@@ -1872,13 +1882,26 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bit_vector[idx]);
         else
         {
           char temp[8*sizeof(T)+1];
-          sprintf(temp,"%16.16lx",bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bit_vector[idx]);
           strcat(result,temp);
         }
+      }
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::pop_count(void) const
+    //-------------------------------------------------------------------------
+    {
+      int result = 0;
+      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      {
+        result += __builtin_popcount(bit_vector[idx]);
       }
       return result;
     }
@@ -2520,11 +2543,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bit_vector[idx]);
         else
         {
           char temp[8*sizeof(T)+1];
-          sprintf(temp,"%16.16lx",bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bit_vector[idx]);
           strcat(result,temp);
         }
       }
@@ -3142,11 +3165,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
         else
         {
           char temp[65];
-          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
           strcat(result,temp);
         }
       }
@@ -3775,11 +3798,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
         else
         {
           char temp[65];
-          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
           strcat(result,temp);
         }
       }
@@ -3835,12 +3858,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-#ifdef DYNAMIC_FIELD_MASKS
-      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -3853,12 +3870,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-#ifdef DYNAMIC_FIELD_MASKS
-      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = rhs(idx);
@@ -3870,13 +3881,6 @@ namespace LegionRuntime {
     AVXBitMask<MAX>::~AVXBitMask(void)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-      free(bits.bit_vector);
-      bits.bit_vector = NULL;
-#endif
     }
 
     //-------------------------------------------------------------------------
@@ -3964,11 +3968,6 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_vector != NULL);
-#endif
-#endif
       return bits.avx_vector[idx];
     }
 
@@ -3977,11 +3976,6 @@ namespace LegionRuntime {
     inline __m256i& AVXBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_vector != NULL);
-#endif
-#endif
       return bits.avx_vector[idx];
     }
 
@@ -3991,11 +3985,6 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       return bits.bit_vector[idx];
     }
 
@@ -4004,11 +3993,6 @@ namespace LegionRuntime {
     inline uint64_t& AVXBitMask<MAX>::operator[](const unsigned int &idx) 
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       return bits.bit_vector[idx]; 
     }
 
@@ -4017,11 +4001,6 @@ namespace LegionRuntime {
     inline const __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_double != NULL);
-#endif
-#endif
       return bits.avx_double[idx];
     }
 
@@ -4030,11 +4009,6 @@ namespace LegionRuntime {
     inline __m256d& AVXBitMask<MAX>::elem(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_double != NULL);
-#endif
-#endif
       return bits.avx_double[idx];
     }
 
@@ -4474,11 +4448,6 @@ namespace LegionRuntime {
     inline const uint64_t* AVXBitMask<MAX>::base(void) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL); 
-#endif
-#endif
       return bits.bit_vector;
     }
 
@@ -4507,11 +4476,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
         else
         {
           char temp[65];
-          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
           strcat(result,temp);
         }
       }
@@ -4547,12 +4516,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-#ifdef DYNAMIC_FIELD_MASKS
-      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         bits.bit_vector[idx] = init;
@@ -4566,12 +4529,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       LEGION_STATIC_ASSERT((MAX % 256) == 0);
-#ifdef DYNAMIC_FIELD_MASKS
-      bits.bit_vector = (uint64_t*)memalign(32, (MAX/8));
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = rhs(idx);
@@ -4583,13 +4540,6 @@ namespace LegionRuntime {
     AVXTLBitMask<MAX>::~AVXTLBitMask(void)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-      free(bits.bit_vector);
-      bits.bit_vector = NULL;
-#endif
     }
 
     //-------------------------------------------------------------------------
@@ -4686,11 +4636,6 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_vector != NULL);
-#endif
-#endif
       return bits.avx_vector[idx];
     }
 
@@ -4699,11 +4644,6 @@ namespace LegionRuntime {
     inline __m256i& AVXTLBitMask<MAX>::operator()(const unsigned int &idx)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_vector != NULL);
-#endif
-#endif
       return bits.avx_vector[idx];
     }
 
@@ -4713,11 +4653,6 @@ namespace LegionRuntime {
                                                  const unsigned int &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       return bits.bit_vector[idx];
     }
 
@@ -4726,11 +4661,6 @@ namespace LegionRuntime {
     inline uint64_t& AVXTLBitMask<MAX>::operator[](const unsigned int &idx) 
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       return bits.bit_vector[idx]; 
     }
 
@@ -4739,11 +4669,6 @@ namespace LegionRuntime {
     inline const __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_double != NULL);
-#endif
-#endif
       return bits.avx_double[idx];
     }
 
@@ -4752,11 +4677,6 @@ namespace LegionRuntime {
     inline __m256d& AVXTLBitMask<MAX>::elem(const unsigned &idx)
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.avx_double != NULL);
-#endif
-#endif
       return bits.avx_double[idx];
     }
 
@@ -5256,11 +5176,6 @@ namespace LegionRuntime {
     inline const uint64_t* AVXTLBitMask<MAX>::base(void) const
     //-------------------------------------------------------------------------
     {
-#ifdef DYNAMIC_FIELD_MASKS
-#ifdef DEBUG_HIGH_LEVEL
-      assert(bits.bit_vector != NULL);
-#endif
-#endif
       return bits.bit_vector;
     }
 
@@ -5291,11 +5206,11 @@ namespace LegionRuntime {
       for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
       {
         if (idx == (BIT_ELMTS-1))
-          sprintf(result,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
         else
         {
           char temp[65];
-          sprintf(temp,"%16.16lx",bits.bit_vector[idx]);
+          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
           strcat(result,temp);
         }
       }

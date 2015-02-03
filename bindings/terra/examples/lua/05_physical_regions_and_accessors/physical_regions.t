@@ -54,14 +54,12 @@ function top_level_task(task, regions, ctx, runtime)
       runtime:create_field_allocator(ctx, input_fs)
     allocator:allocate_field(sizeof(double),FID_X)
     allocator:allocate_field(sizeof(double),FID_Y)
-    allocator:delete()
   end
   local output_fs = runtime:create_field_space(ctx)
   do
     local allocator =
       runtime:create_field_allocator(ctx, output_fs)
     allocator:allocate_field(sizeof(double),FID_Z)
-    allocator:delete()
   end
   local input_lr = runtime:create_logical_region(ctx, is, input_fs)
   local output_lr = runtime:create_logical_region(ctx, is, output_fs)
@@ -190,7 +188,6 @@ function top_level_task(task, regions, ctx, runtime)
     pir:next()
   end
   print("Done!")
-  acc_z:delete()
 
   -- In some cases it may be necessary to unmap regions and then
   -- remap them.  We'll give a compelling example of this in the
@@ -246,10 +243,6 @@ function top_level_task(task, regions, ctx, runtime)
   else
     print("FAILURE!")
   end
-
-  acc_x:delete()
-  acc_y:delete()
-  acc_z:delete()
 
   runtime:unmap_region(ctx, input_region)
   runtime:unmap_region(ctx, output_region)

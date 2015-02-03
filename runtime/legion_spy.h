@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,8 +35,6 @@ namespace LegionRuntime {
       typedef LegionRuntime::LowLevel::IDType IDType;
 
       extern Logger::Category log_spy;
-
-      static int next_point_id = 0;
 
       // Logger calls for the machine architecture
       static inline void log_utility_processor(IDType unique_id)

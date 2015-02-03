@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,6 +91,11 @@ namespace LegionRuntime {
       TASK_ID_AVAILABLE     = (LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1),
     };
 
+    // redop IDs - none used in HLR right now, but 0 isn't allowed
+    enum {
+      REDOP_ID_AVAILABLE    = 1,
+    };
+
     // Enumeration of high-level runtime tasks
     enum HLRTaskID {
       HLR_SCHEDULER_ID,
@@ -114,6 +119,10 @@ namespace LegionRuntime {
       HLR_DEFERRED_FUTURE_MAP_SET_ID,
       HLR_RESOLVE_FUTURE_PRED_ID,
       HLR_MPI_RANK_ID,
+      HLR_CONTRIBUTE_COLLECTIVE_ID,
+      HLR_COLLECTIVE_FUTURE_ID,
+      HLR_CHECK_STATE_ID,
+      HLR_MAPPER_TASK_ID,
     };
 
     // Forward declarations for user level objects
@@ -216,6 +225,7 @@ namespace LegionRuntime {
 
     // region_tree.h
     class RegionTreeForest;
+    class StateDirectory;
     class IndexTreeNode;
     class IndexSpaceNode;
     class IndexPartNode;
@@ -305,6 +315,7 @@ namespace LegionRuntime {
     typedef LowLevel::Memory Memory;
     typedef LowLevel::Processor Processor;
     typedef LowLevel::Event Event;
+    typedef LowLevel::Event MapperEvent;
     typedef LowLevel::UserEvent UserEvent;
     typedef LowLevel::Reservation Reservation;
     typedef LowLevel::Barrier Barrier;
@@ -357,9 +368,9 @@ namespace LegionRuntime {
       Context,HighLevelRuntime*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
-    // Disable the use of AVX field masks for now since GCC doesn't
-    // know how to properly align them on the stack. If you want
-    // to try it, you can build with -DDYNAMIC_FIELD_MASKS which
+    // Disable the use of AVX field masks for now since many data
+    // structures don't know how to properly align them. If you want
+    // to try it, you can build with -DALIGNED_FIELD_MASKS which
     // will cause all the AVXFieldMasks to allocate their own
     // aligned backing store on the heap.  While correct, this
     // will disable many compiler optimizations due to GCC and
@@ -372,7 +383,7 @@ namespace LegionRuntime {
 #define FIELD_MASK          0x3F
 #define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
-#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
+#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
 #if (MAX_FIELDS > 256)
     typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 128)
@@ -411,7 +422,7 @@ namespace LegionRuntime {
 #define NODE_MASK           0x3F
 #define NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
-#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
+#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
 #if (MAX_NUM_NODES > 256)
     typedef AVXTLBitMask<MAX_NUM_NODES> NodeMask;
 #elif (MAX_NUM_NODES > 128)
@@ -447,7 +458,7 @@ namespace LegionRuntime {
 #define PROC_MASK           0x3F
 #define PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
-#if defined(DYNAMIC_FIELD_MASKS) && defined(__AVX__)
+#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
 #if (MAX_NUM_PROCS > 256)
     typedef AVXTLBitMask<MAX_NUM_PROCS> ProcessorMask;
 #elif (MAX_NUM_PROCS > 128)
@@ -455,7 +466,7 @@ namespace LegionRuntime {
 #elif (MAX_NUM_PROCS > 64)
     typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<PROCTYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__SSE2__)
 #if (MAX_NUM_PROCS > 128)

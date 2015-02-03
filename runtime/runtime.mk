@@ -1,4 +1,4 @@
-# Copyright 2014 Stanford University
+# Copyright 2015 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -130,7 +130,7 @@ NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 else
 NVCC_FLAGS	+= -O2
 endif
-LD_FLAGS	+= -L$(CUDA)/lib64 -lcudart -lcuda -Xlinker -rpath=$(CUDA)/lib64
+LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
 NVCC_FLAGS	+= -arch=compute_20 -code=sm_20
@@ -186,12 +186,15 @@ endif # ifeq SHARED_LOWLEVEL
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
 else
-CC_FLAGS	+= -O2 #-ggdb
+CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
 
 
 # Manage the output setting
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
+
+# demand warning-free compilation
+CC_FLAGS        += -Wall -Werror
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 

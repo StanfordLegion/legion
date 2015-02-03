@@ -1162,8 +1162,8 @@ extern "C" {
    * @see LegionRuntime::HighLevel::HighLevelRuntime::map_all_regions()
    */
   void
-  legion_runtime_map_all_region(legion_runtime_t runtime,
-                                legion_context_t ctx);
+  legion_runtime_map_all_regions(legion_runtime_t runtime,
+                                 legion_context_t ctx);
 
   /**
    * @see LegionRuntime::HighLevel::HighLevelRuntime::unmap_all_regions()

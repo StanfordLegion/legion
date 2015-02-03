@@ -62,7 +62,6 @@ function top_level_task(task, regions, ctx, runtime)
       runtime:create_field_allocator(ctx, fs)
     allocator:allocate_field(sizeof(double),FID_VAL)
     allocator:allocate_field(sizeof(double),FID_DERIV)
-    allocator:delete()
   end
   local stencil_lr = runtime:create_logical_region(ctx, is, fs)
 
@@ -186,7 +185,6 @@ function top_level_task(task, regions, ctx, runtime)
                           legion.EXCLUSIVE, stencil_lr))
   check_launcher:add_field(1, FID_DERIV)
   runtime:execute_task(ctx, check_launcher)
-  arg:delete()
 
   -- Clean up our region, index space, and field space
   runtime:destroy_logical_partition(ctx, disjoint_lp)
@@ -215,8 +213,6 @@ function init_field_task(task, regions, ctx, runtime)
     acc:write(DomainPoint:from_point(pir.p), drand48())
     pir:next()
   end
-
-  acc:delete()
 end
 
 -- Our stencil tasks is interesting because it
@@ -297,9 +293,6 @@ function stencil_task(task, regions, ctx, runtime)
       pir:next()
     end
   end
-
-  read_acc:delete()
-  write_acc:delete()
 end
 
 function check_task(task, regions, ctx, runtime)
@@ -365,9 +358,6 @@ function check_task(task, regions, ctx, runtime)
   else
     print("FAILURE!")
   end
-
-  src_acc:delete()
-  dst_acc:delete()
 end
 
 function legion_main(arg)

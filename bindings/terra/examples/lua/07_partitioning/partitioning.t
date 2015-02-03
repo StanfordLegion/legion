@@ -53,14 +53,12 @@ function top_level_task(task, regions, ctx, runtime)
       runtime:create_field_allocator(ctx, input_fs)
     allocator:allocate_field(sizeof(double),FID_X)
     allocator:allocate_field(sizeof(double),FID_Y)
-    allocator:delete()
   end
   local output_fs = runtime:create_field_space(ctx)
   do
     local allocator =
       runtime:create_field_allocator(ctx, output_fs)
     allocator:allocate_field(sizeof(double),FID_Z)
-    allocator:delete()
   end
   local input_lr = runtime:create_logical_region(ctx, is, input_fs)
   local output_lr = runtime:create_logical_region(ctx, is, output_fs)
@@ -272,7 +270,6 @@ function top_level_task(task, regions, ctx, runtime)
   check_launcher:add_field(1, FID_Z)
 
   runtime:execute_task(ctx, check_launcher)
-  arg:delete()
 
   runtime:destroy_logical_partition(ctx, input_lp)
   runtime:destroy_logical_partition(ctx, output_lp)
@@ -305,8 +302,6 @@ function init_field_task(task, regions, ctx, runtime)
     acc:write(DomainPoint:from_point(pir.p), drand48())
     pir:next()
   end
-
-  acc:delete()
 end
 
 function daxpy_task(task, regions, ctx, runtime)
@@ -333,10 +328,6 @@ function daxpy_task(task, regions, ctx, runtime)
     acc_z:write(DomainPoint:from_point(pir.p), value)
     pir:next()
   end
-
-  acc_x:delete()
-  acc_y:delete()
-  acc_z:delete()
 end
 
 function check_task(task, regions, ctx, runtime)
@@ -369,10 +360,6 @@ function check_task(task, regions, ctx, runtime)
   else
     print("FAILURE!")
   end
-
-  acc_x:delete()
-  acc_y:delete()
-  acc_z:delete()
 end
 
 function legion_main(arg)

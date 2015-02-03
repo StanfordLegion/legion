@@ -1,4 +1,4 @@
-/* Copyright 2014 Stanford University
+/* Copyright 2015 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
 
 #include "lowlevel_impl.h"
 #include "cuda.h"
+// We don't actually use the cuda runtime, but
+// we need all its declarations so we have all the right types
 #include "cuda_runtime.h"
 
 #define CHECK_CUDART(cmd) do { \
@@ -32,7 +34,7 @@
 #define CHECK_CU(cmd) do { \
   CUresult ret = (cmd); \
   if(ret != CUDA_SUCCESS) { \
-    fprintf(stderr, "CU: %s = %d (%s)\n", #cmd, ret, cudaGetErrorString((cudaError_t)ret)); \
+    fprintf(stderr, "CU: %s = %d\n", #cmd, ret); \
     assert(0); \
     exit(1); \
   } \
@@ -48,7 +50,8 @@ namespace LegionRuntime {
       GPUProcessor(Processor _me, int _gpu_index, 
                    int num_local_gpus, Processor _util,
 		   size_t _zcmem_size, size_t _fbmem_size, 
-                   size_t _stack_size, bool gpu_dma_thread);
+                   size_t _stack_size, bool gpu_dma_thread,
+                   int _streams);
 
       ~GPUProcessor(void);
 
@@ -165,6 +168,39 @@ namespace LegionRuntime {
 #ifdef EVENT_GRAPH_TRACE
       std::deque<Event> enclosing_stack;
 #endif
+    public:
+      // Helper methods for intercepting CUDA calls
+      static GPUProcessor* find_local_gpu(void);
+      static void** register_fat_binary(void *fat_bin);
+      static void unregister_fat_binary(void **fat_bin);
+      static void register_var(void **fat_bin, char *host_var,
+                               char *device_addr, const char *device_name,
+                               int ext, int size, int constant, int global);
+      static void register_function(void **fat_bin, const char *host_fun,
+                                    char *device_fun, const char *device_name,
+                                    int thread_limit, uint3 *tid, uint3 *bid,
+                                    dim3 *bDim, dim3 *gDim, int *wSize);
+      static char init_module(void **fat_bin);
+    public:
+      // Helper methods for replacing CUDA calls
+      static cudaError_t stream_create(cudaStream_t *stream);
+      static cudaError_t stream_destroy(cudaStream_t stream);
+      static cudaError_t stream_synchronize(cudaStream_t stream);
+      static cudaError_t configure_call(dim3 grid_dim, dim3 block_dim,
+                                        size_t shared_memory, cudaStream_t stream);
+      static cudaError_t setup_argument(const void *arg, size_t size, size_t offset);
+      static cudaError_t launch(const void *func);
+      static cudaError_t gpu_malloc(void **ptr, size_t size);
+      static cudaError_t gpu_free(void *ptr);
+      static cudaError_t gpu_memcpy(void *dst, const void *src, size_t size, cudaMemcpyKind kind);
+      static cudaError_t gpu_memcpy_async(void *dst, const void *src, size_t size,
+                                      cudaMemcpyKind kind, cudaStream_t stream);
+      static cudaError_t gpu_memcpy_to_symbol(void *dst, const void *src, size_t size,
+                                              size_t offset, cudaMemcpyKind kind, bool sync);
+      static cudaError_t gpu_memcpy_from_symbol(void *dst, const void *src, size_t size,
+                                                size_t offset, cudaMemcpyKind kind, bool sync);
+      static cudaError_t device_synchronize(void);
+      static cudaError_t set_shared_memory_config(cudaSharedMemConfig config);
     };
 
     class GPUFBMemory : public Memory::Impl {
