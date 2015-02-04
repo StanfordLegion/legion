@@ -1,0 +1,147 @@
+-- Copyright 2015 Stanford University
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- Note: The binding library is only being used to load the dynamic
+-- library for Legion, not for any actual functionality. All Legion
+-- calls happen through the C API.
+terralib.require('legionlib')
+c = terralib.includecstring([[
+#include "legion_c.h"
+#include <stdio.h>
+#include <stdlib.h>
+]])
+
+FID_1 = 1
+
+TID_TOP_LEVEL_TASK = 100
+TID_SUB_TASK = 101
+
+terra sub_task(task : c.legion_task_t,
+               regions : &c.legion_physical_region_t,
+               num_regions : uint32,
+               ctx : c.legion_context_t,
+               runtime : c.legion_runtime_t)
+  var r = c.legion_physical_region_get_logical_region(regions[0])
+  var is = r.index_space
+  var d = c.legion_index_space_get_domain(runtime, ctx, is)
+  var rect = c.legion_domain_get_rect_1d(d)
+
+  var a1 = c.legion_physical_region_get_field_accessor_generic(
+    regions[0], FID_1)
+
+  -- This code uses the raw rect ptr API.
+  do
+    var subrect : c.legion_rect_1d_t
+    var offsets : c.legion_byte_offset_t[1]
+
+    var base = [&int8](c.legion_accessor_generic_raw_rect_ptr_1d(
+                         a1, rect, &subrect, &(offsets[0])))
+    if base == nil then
+      c.printf("Error: failed to get raw rect ptr\n")
+      c.abort()
+    end
+
+    c.printf("got raw rect pointer:\n")
+    c.printf("  rect is lo %d, hi %d\n", rect.lo.x[0], rect.hi.x[0])
+    c.printf("  subrect is lo %d, hi %d\n", subrect.lo.x[0], subrect.hi.x[0])
+    c.printf("  offset is %d bytes\n", offsets[0].offset)
+    c.printf("  base %p\n", base)
+
+    for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
+      var local_i0 = global_i0 - subrect.lo.x[0]
+      var ptr = [&int](base + offsets[0].offset*local_i0)
+      c.printf("writing value %2d at global %2d local %2d pointer %p\n",
+               global_i0, global_i0, local_i0, ptr)
+      @ptr = global_i0
+    end
+  end
+
+  -- Sanity check with generic API.
+  for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
+    var p = c.legion_ptr_t { value = global_i0 }
+    var value : int
+    c.legion_accessor_generic_read(a1, p, &value, sizeof(int))
+    c.printf("read value %2d at global %2d\n", value, global_i0)
+    if value ~= global_i0 then
+      c.abort()
+    end
+  end
+
+  c.legion_accessor_generic_destroy(a1)
+end
+
+terra top_level_task(task : c.legion_task_t,
+                     regions : &c.legion_physical_region_t,
+                     num_regions : uint32,
+                     ctx : c.legion_context_t,
+                     runtime : c.legion_runtime_t)
+  c.printf("in top_level_task...\n")
+
+  var d = c.legion_domain_from_rect_1d(
+    c.legion_rect_1d_t {
+      lo = c.legion_point_1d_t { x = arrayof(int, 0) },
+      hi = c.legion_point_1d_t { x = arrayof(int, 15) },
+    })
+  var is = c.legion_index_space_create_domain(runtime, ctx, d)
+  var fs = c.legion_field_space_create(runtime, ctx)
+  var r = c.legion_logical_region_create(runtime, ctx, is, fs)
+
+  do
+    var fsa = c.legion_field_allocator_create(runtime, ctx, fs)
+    c.legion_field_allocator_allocate_field(fsa, sizeof(int), FID_1)
+    c.legion_field_allocator_destroy(fsa)
+  end
+
+  var sub_args = c.legion_task_argument_t { args = nil, arglen = 0 }
+  var launcher = c.legion_task_launcher_create(
+    TID_SUB_TASK, sub_args, c.legion_predicate_true(), 0, 0)
+  var rr1 = c.legion_task_launcher_add_region_requirement_logical_region(
+    launcher, r, c.READ_WRITE, c.EXCLUSIVE, r, 0, false)
+  c.legion_task_launcher_add_field(
+    launcher, rr1, FID_1, true --[[ inst ]])
+
+  var f = c.legion_task_launcher_execute(runtime, ctx, launcher)
+  c.legion_future_destroy(f)
+
+  c.legion_logical_region_destroy(runtime, ctx, r)
+  c.legion_field_space_destroy(runtime, ctx, fs)
+  c.legion_index_space_destroy(runtime, ctx, is)
+end
+
+terra main()
+  c.printf("in main...\n")
+  c.legion_runtime_register_task_void(
+    TID_TOP_LEVEL_TASK,
+    c.LOC_PROC,
+    true,
+    false,
+    1, -- c.AUTO_GENERATE_ID,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    "top_level_task",
+    top_level_task)
+  c.legion_runtime_register_task_void(
+    TID_SUB_TASK,
+    c.LOC_PROC,
+    true,
+    false,
+    1, -- c.AUTO_GENERATE_ID,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    "sub_task",
+    sub_task)
+  c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
+  c.legion_runtime_start(0, [&rawstring](0), false)
+end
+main()
