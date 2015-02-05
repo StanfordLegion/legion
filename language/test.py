@@ -192,6 +192,7 @@ def run_all_tests(thread_count, verbose):
         print
         print 'For detailed information on test failures, run:'
         print '    ./test.py -j1 -v'
+        sys.exit(1)
 
 def test_driver(argv):
     parser = argparse.ArgumentParser(description = 'Legion compiler test suite')
