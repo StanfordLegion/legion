@@ -33,7 +33,8 @@ do
   local runtime_dir = root_dir .. "../../runtime"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = root_dir .. "pennant.so"
-  if os.execute("c++ -std=c++11 -Wall -shared -fPIC -I " .. runtime_dir .. " " .. pennant_cc .. " -o " .. pennant_so) ~= 0 then
+  local cxx = os.getenv('CXX') or 'c++'
+  if os.execute(cxx .. " -std=c++0x -Wall -shared -fPIC -I " .. runtime_dir .. " " .. pennant_cc .. " -o " .. pennant_so) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
