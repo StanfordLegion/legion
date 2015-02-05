@@ -6984,7 +6984,10 @@ namespace LegionRuntime {
       ReductionManager *result = NULL;
       // Find the reduction operation for this instance
       const ReductionOp *op = Runtime::get_reduction_op(redop);
-      std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
+#ifdef DEBUG_HIGH_LEVEL
+      std::map<FieldID,FieldInfo>::const_iterator finder =
+#endif
+        fields.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != fields.end());
 #endif
