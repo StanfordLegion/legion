@@ -90,6 +90,7 @@ SCHEDULE_RANGE = 8
 TRIGGER_RANGE = 9
 GC_RANGE = 10
 MESSAGE_RANGE = 11
+COPY_RANGE = 12
 
 # Helper functions for manipulating event kinds.
 def event_kind_is_begin(kind):
@@ -275,6 +276,10 @@ class UniqueOp(object):
                 time_range = EventRange(self, begin_event, event, MESSAGE_RANGE)
                 self.messages.append(time_range)
                 proc.add_time_range(time_range)
+            elif event.kind_id == 23:
+                time_range = EventRange(self, begin_event, event, COPY_RANGE)
+                self.messages.append(time_range)
+                proc.add_time_range(time_range)
             else:
                 assert False
         else:
@@ -447,10 +452,10 @@ class TimeRange(object):
         return 0
 
     def contains(self, other):
-        if self.start_event > other.end_event:
-            return False
-        if self.end_event < other.start_event:
-            return False
+        #if self.start_event > other.end_event:
+        #    return False
+        #if self.end_event < other.start_event:
+        #    return False
         if self.start_event <= other.start_event and \
             other.end_event <= self.end_event:
             return True
@@ -581,6 +586,9 @@ class EventRange(TimeRange):
         elif self.range_kind == MESSAGE_RANGE:
             color = "#006600" # Evergreen
             title = "Message Handler"
+        elif self.range_kind == COPY_RANGE:
+            color = "#8B0000" # Dark Red
+            title = "Low-Level Copy"
         else:
             assert False
         printer.emit_timing_range(color, level, self.start_event.abs_time, self.end_event.abs_time, title)
@@ -673,6 +681,8 @@ class Processor(object):
         self.utility = utility
         if kind == 1 or kind == 2: # Kind 2 is a utility proc
             self.kind = 'CPU'
+        elif kind == 3:
+            self.kind = 'COPY'
         elif kind == 0:
             self.kind = 'GPU'
         else:
@@ -727,10 +737,13 @@ class Processor(object):
         self.full_range.update_task_stats(stat)
 
     def __repr__(self):
-        return '%s Processor %s%s' % (
-            self.kind,
-            hex(self.proc_id),
-            (' (Utility)' if self.utility else ''))
+        if self.kind != 'COPY':
+            return '%s Processor %s%s' % (
+                self.kind,
+                hex(self.proc_id),
+                (' (Utility)' if self.utility else ''))
+        else:
+            return 'Low-Level Copies'
 
 class Memory(object):
     def __init__(self, mem, kind):

@@ -54,6 +54,8 @@ namespace LegionRuntime {
       PROF_END_GC = 19,
       PROF_BEGIN_MESSAGE = 20,
       PROF_END_MESSAGE = 21,
+      PROF_BEGIN_COPY = 22,
+      PROF_END_COPY = 23,
     };
  
     namespace LegionProf {
@@ -148,9 +150,28 @@ namespace LegionRuntime {
         std::deque<OpInstance> copies;
       };
 
+      struct CopyProfiler {
+      public:
+        CopyProfiler(void) : dumped(0), init_time(0) { }
+      public:
+        inline void add_event(const ProfilingEvent &event)
+        { proc_events.push_back(event); }
+      private:
+        // no copy constructor or assignment
+        CopyProfiler(const CopyProfiler& copy_from)
+        { assert(false); }
+        CopyProfiler& operator=(const CopyProfiler& copy_from)
+        { assert(false); return *this; }
+      public:
+        int dumped;
+        unsigned long long init_time;
+        std::deque<ProfilingEvent> proc_events;
+      };
+
       extern Logger::Category log_prof;
       // Profiler table indexed by processor id
       extern ProcessorProfiler *legion_prof_table;
+      extern CopyProfiler copy_prof;
       // Indicator for when profiling is enabled and disabled
       extern bool profiling_enabled;
 
@@ -181,6 +202,11 @@ namespace LegionRuntime {
       {
         if (profiling_enabled)
           log_prof(LEVEL_INFO,"Prof Memory " IDFMT " %u", mem.id, kind);
+      }
+
+      static inline void initialize_copy_processor()
+      {
+        copy_prof.init_time = TimeStamp::get_current_time_in_micros();
       }
 
       static inline void finalize_processor(Processor proc)
@@ -260,6 +286,43 @@ namespace LegionRuntime {
           }
         }
         prof.mem_events.clear();
+      }
+
+      static inline void finalize_copy_profiler()
+      {
+        legion_lowlevel_id_t last_proc_id = 0;
+        for (unsigned idx = 0; idx < (MAX_NUM_PROCS+1); idx++)
+        {
+          Processor proc = legion_prof_table[idx].proc;
+          if (proc.exists() && last_proc_id < proc.id)
+            last_proc_id = proc.id;
+        }
+        last_proc_id += 1;
+
+        int perform_dump = __sync_fetch_and_add(&copy_prof.dumped, 1);
+        // Someone else has already dumped this processor
+        if (perform_dump > 0) return;
+        if (profiling_enabled)
+          log_prof(LEVEL_INFO,"Prof Processor " IDFMT " 1 3",
+              last_proc_id);
+
+        for (unsigned idx = 0; idx < copy_prof.proc_events.size(); idx++)
+        {
+          ProfilingEvent &event = copy_prof.proc_events[idx];
+          assert(event.time >= copy_prof.init_time);
+          log_prof(LEVEL_INFO, "Prof Event " IDFMT " %u %llu %llu",
+              last_proc_id, event.kind, event.unique_id,
+              event.time - copy_prof.init_time);
+        }
+      }
+
+      static inline void register_copy_event(ProfKind kind)
+      {
+        if (profiling_enabled)
+        {
+          unsigned long long time = TimeStamp::get_current_time_in_micros();
+          copy_prof.add_event(ProfilingEvent(kind, 0, time));
+        }
       }
 
       static inline void register_event(UniqueID uid, ProfKind kind)

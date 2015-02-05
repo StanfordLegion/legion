@@ -129,7 +129,6 @@ namespace LegionRuntime {
       bool initialized;
       bool worker_enabled;
       bool shutdown_requested;
-      bool idle_task_enabled;
       int current_stream;
       pthread_t gpu_thread;
       gasnet_hsl_t mutex;
@@ -160,14 +159,14 @@ namespace LegionRuntime {
                int num_local_gpus,
                size_t _zcmem_size, size_t _fbmem_size,
                size_t _zcmem_res, size_t _fbmem_res,
-               bool enabled, bool gpu_dma, int streams)
+               bool gpu_dma, int streams)
 	: gpu(_gpu), gpu_index(_gpu_index),
           zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
           zcmem_reserve(_zcmem_res), fbmem_reserve(_fbmem_res),
           gpu_dma_thread(gpu_dma),
           initialized(false), worker_enabled(false), 
           shutdown_requested(false),
-	  idle_task_enabled(enabled), current_stream(0)
+	  current_stream(0)
       {
 	gasnet_hsl_init(&mutex);
 	gasnett_cond_init(&parent_condvar);
@@ -281,8 +280,6 @@ namespace LegionRuntime {
 	  {
 	    AutoHSLLock a(mutex);
 	    while(tasks.empty() && copies.empty() && !shutdown_requested) {
-	      // see if there's an idle task we should run
-	      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
               // As long as we have CUDA events on streams
               // we need to keep polling so don't ever go to
               // sleep while we have pending operations either
@@ -306,14 +303,7 @@ namespace LegionRuntime {
                 }
               }
               //
-	      if(idle_task_enabled && (it != task_id_table.end())) {
-		gasnet_hsl_unlock(&mutex);
-		log_gpu.spew("running scheduler thread");
-		(it->second)(0, 0, gpu->me);
-		log_gpu.spew("returned from scheduler thread");
-		gasnet_hsl_lock(&mutex);
-                // Can't go to sleep if we have tasks and/or copies to poll
-	      } else if (!has_pending_operations) {
+	      if (!has_pending_operations) {
 		log_gpu.debug("job queue empty - sleeping\n");
 		gasnett_cond_wait(&worker_condvar, &mutex.lock);
 		if(shutdown_requested) {
@@ -1214,15 +1204,15 @@ namespace LegionRuntime {
 #endif
 
     GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
-             int num_local_gpus, Processor _util,
+             int num_local_gpus,
 	     size_t _zcmem_size, size_t _fbmem_size, 
              size_t _stack_size, bool gpu_dma_thread, int _streams)
-      : Processor::Impl(_me, Processor::TOC_PROC, _util)
+      : Processor::Impl(_me, Processor::TOC_PROC)
     {
       internal = new GPUProcessor::Internal(this, _gpu_index, num_local_gpus,
                                             _zcmem_size, _fbmem_size,
                                             (16 << 20), (32 << 20),
-                                            !_util.exists(), gpu_dma_thread, _streams);
+                                            gpu_dma_thread, _streams);
 
       // enqueue a GPU init job before we do anything else
       Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
@@ -1300,33 +1290,6 @@ namespace LegionRuntime {
 	internal->shutdown_requested = true;
 	gasnett_cond_signal(&internal->worker_condvar);
       }
-    }
-
-    void GPUProcessor::enable_idle_task(void)
-    {
-      log_gpu.info("idle task enabled for processor " IDFMT "", me.id);
-#ifdef UTIL_PROCS_FOR_GPU
-      if (util_proc)
-        util_proc->enable_idle_task(this);
-      else
-#endif
-      {
-        AutoHSLLock a(internal->mutex);
-        internal->idle_task_enabled = true;
-        gasnett_cond_signal(&internal->worker_condvar);
-      }
-    }
-
-    void GPUProcessor::disable_idle_task(void)
-    {
-      //log_gpu.info("idle task NOT disabled for processor " IDFMT "", me.id);
-      log_gpu.info("idle task disabled for processor " IDFMT "", me.id);
-#ifdef UTIL_PROCS_FOR_GPU
-      if (util_proc)
-        util_proc->disable_idle_task(this);
-      else
-#endif
-        internal->idle_task_enabled = false;
     }
 
     void GPUProcessor::copy_to_fb(off_t dst_offset, const void *src, size_t bytes,

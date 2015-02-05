@@ -4142,7 +4142,7 @@ namespace LegionRuntime {
     {
       if (state.valid_fields * mask)
         return false;
-      LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list 
+      LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked
         &remote_node_states = state.node_states;
       for (std::list<RemoteNodeState>::iterator it = 
             remote_node_states.begin(); it != 
@@ -4236,7 +4236,7 @@ namespace LegionRuntime {
     {
       if (state.valid_fields * mask)
         return false;
-      LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list 
+      LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked
         &remote_node_states = state.node_states;
       FieldMask source_mask;
       for (std::list<RemoteNodeState>::iterator it = 
@@ -4323,7 +4323,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void StateDirectory::insert_node_state(AddressSpaceID node,
                                            const FieldMask &node_mask,
-            LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list &node_states)
+            LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked &node_states)
     //--------------------------------------------------------------------------
     {
       // Here is where we maintain the important invariant of keeping at 
@@ -6193,11 +6193,11 @@ namespace LegionRuntime {
     {
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
-      for (std::map<FIELD_TYPE,LegionContainer<LayoutDescription*,
-            LAYOUT_DESCRIPTION_ALLOC>::deque>::iterator it =
+      for (std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+            LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it =
             layouts.begin(); it != layouts.end(); it++)
       {
-        LegionContainer<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::deque 
+        LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
           &descs = it->second;
         for (unsigned idx = 0; idx < descs.size(); idx++)
           delete descs[idx];
@@ -7060,8 +7060,8 @@ namespace LegionRuntime {
     {
       uint64_t hash_key = mask.get_hash_key();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<FIELD_TYPE,LegionContainer<LayoutDescription*,
-        LAYOUT_DESCRIPTION_ALLOC>::deque>::const_iterator finder = 
+      std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+        LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
                                                     layouts.find(hash_key);
       if (finder == layouts.end())
         return NULL;
@@ -7107,12 +7107,12 @@ namespace LegionRuntime {
     {
       uint64_t hash_key = layout->allocated_fields.get_hash_key();
       AutoLock n_lock(node_lock);
-      LegionContainer<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::deque
+      LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
         &descs = layouts[hash_key];
       if (!descs.empty())
       {
-        for (LegionContainer<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::
-              deque::const_iterator it = descs.begin(); it != descs.end(); it++)
+        for (LegionDeque<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
+              ::const_iterator it = descs.begin(); it != descs.end(); it++)
         {
           if (layout->match_layout(*it))
           {
@@ -11606,11 +11606,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, RECORD_CLOSE_CALL);
 #endif
-      for (std::map<Color,LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list>::
+      for (std::map<Color,LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked>::
             const_iterator cit = state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
       {
-        for (LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list::const_iterator 
+        for (LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked::const_iterator 
               it = cit->second.begin(); it != cit->second.end(); it++)
         {
           FieldMask close_mask = it->get_logical_mask() & field_mask;
@@ -11644,7 +11644,7 @@ namespace LegionRuntime {
       for (std::map<Color,FieldMask>::const_iterator pit = to_prune.begin();
             pit != to_prune.end(); pit++)
       {
-        LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list &child_list = 
+        LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked &child_list = 
                                           state.close_operations[pit->first];
         for (std::list<TreeClose>::iterator it = child_list.begin();
               it != child_list.end(); /*nothing*/)
@@ -11789,11 +11789,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FILTER_CLOSE_CALL);
 #endif
-      for (std::map<Color,LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list>::
+      for (std::map<Color,LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked>::
             iterator cit = state.close_operations.begin(); cit !=
             state.close_operations.end(); cit++)
       {
-        for (LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list::iterator it = 
+        for (LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked::iterator it = 
               cit->second.begin(); it != cit->second.end(); /*nothing*/)
         {
           FieldMask &mask = it->get_logical_mask();
@@ -15893,7 +15893,7 @@ namespace LegionRuntime {
           bool result = it->second->visit_node(traverser);
           continue_traversal = continue_traversal && result;
           if (!result && break_early)
-            continue;
+            break;
         }
       }
       return continue_traversal;

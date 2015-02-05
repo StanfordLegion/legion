@@ -48,7 +48,7 @@ namespace LegionRuntime {
     class GPUProcessor : public Processor::Impl {
     public:
       GPUProcessor(Processor _me, int _gpu_index, 
-                   int num_local_gpus, Processor _util,
+                   int num_local_gpus,
 		   size_t _zcmem_size, size_t _fbmem_size, 
                    size_t _stack_size, bool gpu_dma_thread,
                    int _streams);
@@ -69,10 +69,6 @@ namespace LegionRuntime {
 			      //std::set<RegionInstanceUntyped> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
-
-      virtual void enable_idle_task(void);
-
-      virtual void disable_idle_task(void);
 
       void copy_to_fb(off_t dst_offset, const void *src, size_t bytes,
 		      Event start_event, Event finish_event);

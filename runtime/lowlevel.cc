@@ -5219,26 +5219,13 @@ namespace LegionRuntime {
       return Runtime::runtime->get_processor_impl(*this);
     }
 
-    Processor::Impl::Impl(Processor _me, Processor::Kind _kind, Processor _util /*= Processor::NO_PROC*/)
-      : me(_me), kind(_kind), util(_util), util_proc(0), run_counter(0)
+    Processor::Impl::Impl(Processor _me, Processor::Kind _kind)
+      : me(_me), kind(_kind), run_counter(0)
     {
     }
 
     Processor::Impl::~Impl(void)
     {
-    }
-
-    void Processor::Impl::set_utility_processor(UtilityProcessor *_util_proc)
-    {
-      if(is_idle_task_enabled()) {
-	log_util.info("delegating idle task handling for " IDFMT " to " IDFMT "",
-		      me.id, util.id);
-	disable_idle_task();
-	//_util_proc->enable_idle_task(this);
-      }
-
-      util_proc = _util_proc;
-      util = util_proc->me;
     }
 
     ProcessorGroup::ProcessorGroup(void)
@@ -5521,27 +5508,6 @@ namespace LegionRuntime {
 	        }
 	      }
 
-	      // plan C - run the idle task if it's enabled and nobody else
-	      //  is currently running it
-	      if(!block && proc->idle_task_enabled && 
-		 proc->idle_task && !proc->in_idle_task) {
-		log_task.info("thread %p (proc " IDFMT ") running idle task instead of sleeping",
-			      this, proc->me.id);
-
-		proc->in_idle_task = true;
-		
-		al.release();
-		run_task(proc->idle_task);
-		al.reacquire();
-
-		proc->in_idle_task = false;
-
-		log_task.info("thread %p (proc " IDFMT ") done with idle task, back to waiting on " IDFMT "/%d",
-			      this, proc->me.id, wait_for.id, wait_for.gen);
-
-		continue;
-	      }
-	
 	      // plan D - no ready tasks, no resumable tasks, no idle task,
 	      //   so go to sleep, putting ourselves on the preemptable queue
 	      //   if !block
@@ -5630,17 +5596,7 @@ namespace LegionRuntime {
 	      // now we can set 'init_done', and signal anybody who is in the
 	      //  INIT_WAIT state
 	      proc->init_done = true;
-              // Enable the idle task
-              if(proc->util_proc) {
-                log_task.info("idle task DISabled for processor " IDFMT " on util proc " IDFMT "",
-                              proc->me.id, proc->util.id);
 
-                //proc->util_proc->enable_idle_task(proc);
-              } else {
-                assert(proc->kind != Processor::UTIL_PROC);
-                log_task.info("idle task enabled for processor " IDFMT "", proc->me.id);
-                proc->idle_task_enabled = true;
-              }
 	      for(std::set<Thread *>::iterator it = proc->all_threads.begin();
 		  it != proc->all_threads.end();
 		  it++)
@@ -5697,31 +5653,6 @@ namespace LegionRuntime {
               }
 	    }
 
-	    // next idea - try to run the idle task
-	    if((proc->active_thread_count < proc->max_active_threads) &&
-	       proc->idle_task_enabled && 
-	       proc->idle_task && !proc->in_idle_task) {
-	      log_task.info("thread %p (proc " IDFMT ") running idle task",
-			    this, proc->me.id);
-
-	      proc->in_idle_task = true;
-	      proc->active_thread_count++;
-	      state = STATE_RUN;
-		
-	      al.release();
-	      run_task(proc->idle_task);
-	      al.reacquire();
-
-	      proc->in_idle_task = false;
-	      proc->active_thread_count--;
-	      state = STATE_IDLE;
-
-	      log_task.info("thread %p (proc " IDFMT ") done with idle task",
-			    this, proc->me.id);
-
-	      continue;
-	    }
-
 	    // out of ideas, go to sleep
 	    log_task.info("thread %p (proc " IDFMT ") has no work - sleeping",
 			  this, proc->me.id);
@@ -5741,10 +5672,6 @@ namespace LegionRuntime {
 	  bool last = proc->all_threads.size() == 0;
 	    
 	  if(last) {
-	    proc->disable_idle_task();
-	    if(proc->util_proc)
-	      proc->util_proc->wait_for_shutdown();
-
 	    // let go of the lock while we call the shutdown task
 	    Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
 	    if(it != task_id_table.end()) {
@@ -5818,21 +5745,13 @@ namespace LegionRuntime {
 	: Processor::Impl(_me, Processor::LOC_PROC), core_id(_core_id),
 	  total_threads(_total_threads),
 	  active_thread_count(0), max_active_threads(_max_active_threads),
-	  init_done(false), shutdown_requested(false), shutdown_event(0), in_idle_task(false),
-	  idle_task_enabled(false)
+	  init_done(false), shutdown_requested(false), shutdown_event(0)
       {
         gasnet_hsl_init(&mutex);
-
-	// if a processor-idle task is in the table, make a Task object for it
-	Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
-	idle_task = ((it != task_id_table.end()) ?
-  		       new Task(me, Processor::TASK_ID_PROCESSOR_IDLE, 0, 0, Event::NO_EVENT, 0, 0) :
-		       0);
       }
 
       ~LocalProcessor(void)
       {
-	delete idle_task;
       }
 
       void start_worker_threads(size_t stack_size)
@@ -5966,63 +5885,6 @@ namespace LegionRuntime {
 	}
       }
 
-      virtual void enable_idle_task(void)
-      {
-	if(util_proc) {
-	  log_task.info("idle task enabled for processor " IDFMT " on util proc " IDFMT "",
-			me.id, util.id);
-
-	  util_proc->enable_idle_task(this);
-	} else {
-	  assert(kind != Processor::UTIL_PROC);
-	  log_task.info("idle task enabled for processor " IDFMT "", me.id);
-          // need the lock when modifying data structures
-          AutoHSLLock a(mutex);
-	  idle_task_enabled = true;
-          if(active_thread_count < max_active_threads) {
-            if(avail_threads.size() > 0) {
-              // take a thread and start him - up to him to run this task or not
-              Thread *t = avail_threads.front();
-              avail_threads.pop_front();
-              assert(t->state == Thread::STATE_IDLE);
-              log_task.info("waking up thread %p to run idle task", t);
-              t->state = Thread::STATE_RUN;
-              active_thread_count++;
-              gasnett_cond_signal(&t->condvar);
-            } else
-              if(preemptable_threads.size() > 0) {
-                Thread *t = preemptable_threads.front();
-                preemptable_threads.pop_front();
-                assert(t->state == Thread::STATE_PREEMPTABLE);
-                t->state = Thread::STATE_RUN;
-                active_thread_count++;
-                log_task.info("preempting thread %p to run idle task", t);
-                gasnett_cond_signal(&t->condvar);
-              } else {
-                log_task.info("no threads avialable to run idle task");
-              }
-          }
-	}
-      }
-
-      virtual void disable_idle_task(void)
-      {
-	if(util_proc) {
-	  log_task.info("idle task disabled for processor " IDFMT " on util proc " IDFMT "",
-			me.id, util.id);
-
-	  util_proc->disable_idle_task(this);
-	} else {
-	  log_task.info("idle task disabled for processor " IDFMT "", me.id);
-	  idle_task_enabled = false;
-	}
-      }
-
-      virtual bool is_idle_task_enabled(void)
-      {
-	return idle_task_enabled;
-      }
-
     protected:
       int core_id;
       JobQueue<Task> task_queue;
@@ -6034,9 +5896,6 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex;
       bool init_done, shutdown_requested;
       GenEventImpl *shutdown_event;
-      bool in_idle_task;
-      Task *idle_task;
-      bool idle_task_enabled;
     };
 
     void PreemptableThread::start_thread(size_t stack_size, int core_id, const char *debug_name)
@@ -6224,43 +6083,8 @@ namespace LegionRuntime {
             }
 	  }
 
-	  // run some/all of the idle tasks for idle processors
-	  // the set can change, so grab a copy, then let go of the lock
-	  //  while we walk the list - for each item, retake the lock to
-	  //  see if it's still on the list and make sure nobody else is
-	  //  running it
-	  if(proc->idle_procs.size() > 0) {
-	    std::set<Processor::Impl *> copy_of_idle_procs = proc->idle_procs;
-
-	    for(std::set<Processor::Impl *>::iterator it = copy_of_idle_procs.begin();
-		it != copy_of_idle_procs.end();
-		it++) {
-	      Processor::Impl *idle_proc = *it;
-	      // for each item on the list, run the idle task as long as:
-	      //  1) it's still in the idle proc set, and
-	      //  2) somebody else isn't already running its idle task
-	      bool ok_to_run = (proc->idle_task && 
-                                (proc->idle_procs.count(idle_proc) > 0) &&
-				(proc->procs_in_idle_task.count(idle_proc) == 0));
-	      if(ok_to_run) {
-		proc->procs_in_idle_task.insert(idle_proc);
-		gasnet_hsl_unlock(&proc->mutex);
-
-		// run the idle task on behalf of the idle proc
-		log_util.debug("running idle task for " IDFMT "", idle_proc->me.id);
-                if (proc->idle_task)
-                  run_task(proc->idle_task, idle_proc->me);
-		log_util.debug("done with idle task for " IDFMT "", idle_proc->me.id);
-
-		gasnet_hsl_lock(&proc->mutex);
-		proc->procs_in_idle_task.erase(idle_proc);
-	      }
-	    }
-	  }
-	  
 	  // if we really have nothing to do, it's ok to go to sleep
-	  if(proc->task_queue.empty() && (proc->idle_procs.size() == 0) &&
-	     !proc->shutdown_requested) {
+	  if(proc->task_queue.empty() && !proc->shutdown_requested) {
 	    log_util.info("utility thread going to sleep (%p, %p)", this, proc);
 	    gasnett_cond_wait(&proc->condvar, &proc->mutex.lock);
 	    log_util.info("utility thread awake again");
@@ -6292,24 +6116,15 @@ namespace LegionRuntime {
     UtilityProcessor::UtilityProcessor(Processor _me,
                                        int _core_id /*=-1*/,
 				       int _num_worker_threads /*= 1*/)
-      : Processor::Impl(_me, Processor::UTIL_PROC, Processor::NO_PROC),
+      : Processor::Impl(_me, Processor::UTIL_PROC),
 	core_id(_core_id), num_worker_threads(_num_worker_threads), shutdown_requested(false)
     {
       gasnet_hsl_init(&mutex);
       gasnett_cond_init(&condvar);
-
-      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_IDLE);
-      idle_task = ((it != task_id_table.end()) ?
-		     new Task(this->me, 
-			      Processor::TASK_ID_PROCESSOR_IDLE, 
-			      0, 0, Event::NO_EVENT, 0, 0) :
-		     0);
     }
 
     UtilityProcessor::~UtilityProcessor(void)
     {
-      if(idle_task)
-	delete idle_task;
     }
 
     void UtilityProcessor::start_worker_threads(size_t stack_size)
@@ -6358,22 +6173,6 @@ namespace LegionRuntime {
       AutoHSLLock al(mutex);
       task_queue.insert(task, task->priority);
       gasnett_cond_signal(&condvar);
-    }
-
-    void UtilityProcessor::enable_idle_task(Processor::Impl *proc)
-    {
-      AutoHSLLock al(mutex);
-
-      assert(proc != 0);
-      idle_procs.insert(proc);
-      gasnett_cond_signal(&condvar);
-    }
-     
-    void UtilityProcessor::disable_idle_task(Processor::Impl *proc)
-    {
-      AutoHSLLock al(mutex);
-
-      idle_procs.erase(proc);
     }
 
     void UtilityProcessor::wait_for_shutdown(void)
@@ -6490,8 +6289,8 @@ namespace LegionRuntime {
 
     class RemoteProcessor : public Processor::Impl {
     public:
-      RemoteProcessor(Processor _me, Processor::Kind _kind, Processor _util)
-	: Processor::Impl(_me, _kind, _util)
+      RemoteProcessor(Processor _me, Processor::Kind _kind)
+	: Processor::Impl(_me, _kind)
       {
       }
 
@@ -6607,22 +6406,6 @@ namespace LegionRuntime {
       p->spawn_task(func_id, args, arglen, //instances_needed, 
 		    wait_on, e, priority);
       return e;
-    }
-
-    Processor Processor::get_utility_processor(void) const
-    {
-      Processor u = impl()->util;
-      return(u.exists() ? u : *this);
-    }
-
-    void Processor::enable_idle_task(void)
-    {
-      impl()->enable_idle_task();
-    }
-
-    void Processor::disable_idle_task(void)
-    {
-      impl()->disable_idle_task();
     }
 
     AddressSpace Processor::address_space(void) const
@@ -8802,10 +8585,8 @@ namespace LegionRuntime {
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < annc_data.num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
-	    ID util_id((IDType)*cur++);
-	    Processor util = util_id.convert<Processor>();
 	    if(remote) {
-	      RemoteProcessor *proc = new RemoteProcessor(p, kind, util);
+	      RemoteProcessor *proc = new RemoteProcessor(p, kind);
 	      Runtime::runtime->nodes[ID(p).node()].processors[ID(p).index()] = proc;
 	    }
 	  }
@@ -8912,8 +8693,6 @@ namespace LegionRuntime {
       assert(0);
 #endif
     }
-
-    static std::map<Processor, std::set<Processor> *> proc_groups;
 
     ProcessorAssignment::ProcessorAssignment(int _num_local_procs)
       : num_local_procs(_num_local_procs)
@@ -9457,7 +9236,6 @@ namespace LegionRuntime {
 				    2 * num_local_gpus);
 
       // create utility processors (if any)
-      explicit_utility_procs = (num_util_procs > 0);
       if (num_util_procs > 0)
       {
         for(unsigned i = 0; i < num_util_procs; i++) {
@@ -9471,7 +9249,6 @@ namespace LegionRuntime {
           adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = up->me.id;
           adata[apos++] = Processor::UTIL_PROC;
-          adata[apos++] = up->util.id;
         }
       }
 
@@ -9525,38 +9302,12 @@ namespace LegionRuntime {
 						i,
 						cpu_worker_threads, 
 						1); // HLRT not thread-safe yet
-	if(num_util_procs > 0) {
-#ifdef SPECIALIZED_UTIL_PROCS
-          UtilityProcessor *up = local_util_procs[0];
-#else
-	  UtilityProcessor *up = local_util_procs[i % num_util_procs];
-#endif
 
-	  lp->set_utility_processor(up);
-
-	  // add this processor to that util proc's group
-	  std::map<Processor, std::set<Processor> *>::iterator it = proc_groups.find(up->me);
-	  if(it != proc_groups.end()) {
-	    it->second->insert(p);
-	    proc_groups[p] = it->second;
-	  } else {
-	    std::set<Processor> *pgptr = new std::set<Processor>;
-	    pgptr->insert(p);
-	    proc_groups[p] = pgptr;
-	    proc_groups[up->me] = pgptr;
-	  }
-	} else {
-	  // this processor is in its own group
-	  std::set<Processor> *pgptr = new std::set<Processor>;
-	  pgptr->insert(p);
-	  proc_groups[p] = pgptr;
-	}
 	n->processors.push_back(lp);
 	local_cpus.push_back(lp);
 	adata[apos++] = NODE_ANNOUNCE_PROC;
 	adata[apos++] = lp->me.id;
 	adata[apos++] = Processor::LOC_PROC;
-	adata[apos++] = lp->util.id;
 	//local_procs[i]->start();
 	//machine->add_processor(new LocalProcessor(local_procs[i]));
       }
@@ -9688,55 +9439,17 @@ namespace LegionRuntime {
                                                 peer_gpus[i] : 
                                                 dumb_gpus[i-peer_gpus.size()]), 
                                               num_local_gpus,
-#ifdef UTIL_PROCS_FOR_GPU
-					      (num_util_procs ?
-					         local_util_procs[i % num_util_procs]->me :
-					         Processor::NO_PROC),
-#else
-					      Processor::NO_PROC,
-#endif
 					      zc_mem_size_in_mb << 20,
 					      fb_mem_size_in_mb << 20,
                                               stack_size_in_mb << 20,
                                               gpu_dma_thread, num_gpu_streams);
-#ifdef UTIL_PROCS_FOR_GPU
-	  if(num_util_procs > 0)
-          {
-#ifdef SPECIALIZED_UTIL_PROCS
-            UtilityProcessor *up = local_util_procs[0];
-#else
-            UtilityProcessor *up = local_util_procs[i % num_util_procs];
-#endif
-            gp->set_utility_processor(up);
-            std::map<Processor, std::set<Processor>*>::iterator finder = proc_groups.find(up->me);
-            if (finder != proc_groups.end())
-            {
-              finder->second->insert(p);
-              proc_groups[p] = finder->second;
-            }
-            else
-            {
-              std::set<Processor> *pgptr = new std::set<Processor>();
-              pgptr->insert(p);
-              proc_groups[p] = pgptr;
-              proc_groups[up->me] = pgptr;
-            }
-          }
-          else
-#endif
-          {
-            // This is a GPU processor so make it its own utility processor
-            std::set<Processor> *pgptr = new std::set<Processor>();
-            pgptr->insert(p);
-            proc_groups[p] = pgptr;
-          }
+
 	  n->processors.push_back(gp);
 	  local_gpus.push_back(gp);
 
 	  adata[apos++] = NODE_ANNOUNCE_PROC;
 	  adata[apos++] = p.id;
 	  adata[apos++] = Processor::TOC_PROC;
-	  adata[apos++] = gp->util.id;
 
 	  Memory m = ID(ID::ID_MEMORY,
 			gasnet_mynode(),
@@ -9916,13 +9629,6 @@ namespace LegionRuntime {
       }
 #endif
       gasnet_exit(0);
-    }
-
-    // Return the set of processors "local" to a given other one
-    const std::set<Processor>& Machine::get_local_processors(Processor p) const
-    {
-      assert(proc_groups.find(p) != proc_groups.end());
-      return *(proc_groups[p]);
     }
 
     Processor::Kind Machine::get_processor_kind(Processor p) const

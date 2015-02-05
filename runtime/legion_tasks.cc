@@ -2372,7 +2372,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Starting with this context, pack up all the enclosing local fields
-      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque locals = 
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
                                                                   local_fields;
       // Get all the local fields from our enclosing contexts
       find_enclosing_local_fields(locals);
@@ -6514,7 +6514,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndividualTask::find_enclosing_local_fields(
-           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
+           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
       // Ask the same for our parent context
@@ -7171,7 +7171,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PointTask::find_enclosing_local_fields(
-           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
+           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
       // Ask the same for our parent context
@@ -7558,7 +7558,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RemoteTask::find_enclosing_local_fields(
-           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
+           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
       // No need to go up since we are the uppermost task on this runtime
@@ -7698,7 +7698,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InlineTask::find_enclosing_local_fields(
-           LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos)
+           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
       enclosing->find_enclosing_local_fields(infos);

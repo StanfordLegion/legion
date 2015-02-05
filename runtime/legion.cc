@@ -64,6 +64,7 @@ namespace LegionRuntime {
       ProcessorProfiler *legion_prof_table = 
         new ProcessorProfiler[MAX_NUM_PROCS + 1];
       bool profiling_enabled;
+      CopyProfiler copy_prof;
     };
 #endif
 

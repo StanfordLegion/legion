@@ -408,10 +408,10 @@ namespace LegionRuntime {
       std::map<RegionTreeID,RegionNode*>        tree_nodes;
     private:
       // References to objects stored in the region forest
-      LegionKeyValue<DistributedID,PhysicalManager*,
-                     PHYSICAL_MANAGER_ALLOC>::map managers;
-      LegionKeyValue<DistributedID,LogicalView*,
-                     LOGICAL_VIEW_ALLOC>::map views;
+      LegionMap<DistributedID,PhysicalManager*,
+                     PHYSICAL_MANAGER_ALLOC>::tracked managers;
+      LegionMap<DistributedID,LogicalView*,
+                     LOGICAL_VIEW_ALLOC>::tracked views;
 #ifdef DYNAMIC_TESTS
     public:
       class DynamicSpaceTest {
@@ -655,7 +655,7 @@ namespace LegionRuntime {
       public:
         FieldMask valid_fields;
         // Each field should be set in exactly one of these entries
-        LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list node_states;
+        LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked node_states;
       };
       struct RemoteForestState {
       public:
@@ -710,7 +710,7 @@ namespace LegionRuntime {
     protected:
       void insert_node_state(AddressSpaceID node,
                              const FieldMask &node_mask,
-       LegionContainer<RemoteNodeState,DIRECTORY_ALLOC>::list &node_states);
+       LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked &node_states);
     private:
       UniqueID remote_owner_uid;
       RegionTreeForest *const forest;
@@ -1075,8 +1075,8 @@ namespace LegionRuntime {
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
       // differentiate them.
-      std::map<FIELD_TYPE,LegionContainer<LayoutDescription*,
-                          LAYOUT_DESCRIPTION_ALLOC>::deque> layouts;
+      std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
+                          LAYOUT_DESCRIPTION_ALLOC>::tracked> layouts;
     private:
       std::map<SemanticTag,SemanticInfo> semantic_info;
       std::map<std::pair<FieldID,SemanticTag>,SemanticInfo> semantic_field_info;
@@ -1305,17 +1305,17 @@ namespace LegionRuntime {
     public:
       void reset(void);
     public:
-      LegionKeyValue<VersionID,FieldMask,
-                     LOGICAL_FIELD_VERSIONS_ALLOC>::map field_versions;
-      LegionContainer<FieldState,LOGICAL_FIELD_STATE_ALLOC>::list field_states;
+      LegionMap<VersionID,FieldMask,
+                LOGICAL_FIELD_VERSIONS_ALLOC>::tracked field_versions;
+      LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::tracked field_states;
 #ifndef LOGICAL_FIELD_TREE
-      LegionContainer<LogicalUser,CURR_LOGICAL_ALLOC>::list curr_epoch_users;
-      LegionContainer<LogicalUser,PREV_LOGICAL_ALLOC>::list prev_epoch_users;
+      LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::tracked curr_epoch_users;
+      LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::tracked prev_epoch_users;
 #else
       FieldTree<LogicalUser> *curr_epoch_users;
       FieldTree<LogicalUser> *prev_epoch_users;
 #endif
-      std::map<Color,LegionContainer<TreeClose,TREE_CLOSE_ALLOC>::list> 
+      std::map<Color,LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked> 
                                                             close_operations;
       // Fields on which the user has 
       // asked for explicit coherence
@@ -1451,12 +1451,12 @@ namespace LegionRuntime {
       FieldMask reduction_mask;
       FieldMask remote_mask; // which fields are valid remote copies
       ChildState children;
-      LegionKeyValue<InstanceView*, FieldMask,
-                     VALID_VIEW_ALLOC>::map valid_views;
-      LegionKeyValue<ReductionView*, FieldMask,
-                     VALID_REDUCTION_ALLOC>::map reduction_views;
-      LegionKeyValue<MaterializedView*, std::map<Event,FieldMask>,
-                     PENDING_UPDATES_ALLOC>::map pending_updates;
+      LegionMap<InstanceView*, FieldMask,
+                VALID_VIEW_ALLOC>::tracked valid_views;
+      LegionMap<ReductionView*, FieldMask,
+                VALID_REDUCTION_ALLOC>::tracked reduction_views;
+      LegionMap<MaterializedView*, std::map<Event,FieldMask>,
+                PENDING_UPDATES_ALLOC>::tracked pending_updates;
     public:
       // These are used for managing access to the physical state
       unsigned acquired_count;
@@ -3347,18 +3347,18 @@ namespace LegionRuntime {
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
 #ifndef PHYSICAL_FIELD_TREE
-      LegionContainer<PhysicalUser,CURR_PHYSICAL_ALLOC>::list curr_epoch_users;
-      LegionContainer<PhysicalUser,PREV_PHYSICAL_ALLOC>::list prev_epoch_users;
+      LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::tracked curr_epoch_users;
+      LegionList<PhysicalUser,PREV_PHYSICAL_ALLOC>::tracked prev_epoch_users;
 #else
       FieldTree<PhysicalUser> *const curr_epoch_users;
       FieldTree<PhysicalUser> *const prev_epoch_users;
 #endif
       // Keep track of how many outstanding references we have
       // for each of the user events
-      LegionContainer<Event,EVENT_REFERENCE_ALLOC>::set event_references;
+      LegionSet<Event,EVENT_REFERENCE_ALLOC>::tracked event_references;
       // Version information for each of the fields
-      LegionKeyValue<VersionID,FieldMask,
-                     PHYSICAL_VERSION_ALLOC>::map current_versions;
+      LegionMap<VersionID,FieldMask,
+                PHYSICAL_VERSION_ALLOC>::tracked current_versions;
     };
 
     /**

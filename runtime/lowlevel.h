@@ -361,8 +361,6 @@ namespace LegionRuntime {
 
       bool exists(void) const { return id != 0; }
 
-      Processor get_utility_processor(void) const;
-
       typedef ::legion_lowlevel_task_func_id_t TaskFuncID;
       typedef void (*TaskFuncPtr)(const void *args, size_t arglen, Processor proc);
       typedef std::map<TaskFuncID, TaskFuncPtr> TaskIDTable;
@@ -375,9 +373,6 @@ namespace LegionRuntime {
         UTIL_PROC = ::UTIL_PROC, // Utility core
         PROC_GROUP = ::PROC_GROUP, // Processor group
       };
-
-      void enable_idle_task(void);
-      void disable_idle_task(void);
 
       // Return the address space for this processor
       AddressSpace address_space(void) const;
@@ -393,7 +388,6 @@ namespace LegionRuntime {
 	TASK_ID_REQUEST_SHUTDOWN   = 0,
 	TASK_ID_PROCESSOR_INIT     = 1, // only called by utility processors
 	TASK_ID_PROCESSOR_SHUTDOWN = 2, // only called by utility processors
-	TASK_ID_PROCESSOR_IDLE     = 3, // typically used for high-level scheduler, only called by utility processors
 	TASK_ID_FIRST_AVAILABLE    = 4,
       };
 
@@ -1598,11 +1592,6 @@ namespace LegionRuntime {
       const std::set<Processor>& get_shared_processors(Memory m) const
       { return visible_procs_from_memory.find(m)->second; }
 
-      // Return the set of processors "local" to a given other one
-      const std::set<Processor>& get_local_processors(Processor p) const;
-      // Return whether or not the machine is running with explicit utility processors
-      bool has_explicit_utility_processors(void) const { return explicit_utility_procs; }
-
       Processor::Kind get_processor_kind(Processor p) const;
       Memory::Kind get_memory_kind(Memory m) const;
       size_t get_memory_size(const Memory m) const;
@@ -1643,7 +1632,6 @@ namespace LegionRuntime {
       std::map<Processor,std::set<Memory> > visible_memories_from_procs;
       std::map<Memory,std::set<Memory> > visible_memories_from_memory;
       std::map<Memory,std::set<Processor> > visible_procs_from_memory;
-      bool explicit_utility_procs;
       void *background_pthread; // pointer to pthread_t in the background
     public:
       struct NodeAnnounceData;

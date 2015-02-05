@@ -36,6 +36,11 @@ using namespace LegionRuntime::Accessor;
 
 using namespace LegionRuntime::HighLevel::LegionLogging;
 #endif
+#ifdef LEGION_PROF
+#include "legion_profiling.h"
+using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::HighLevel::LegionProf;
+#endif
 
 #include "atomics.h"
 
@@ -2597,7 +2602,7 @@ namespace LegionRuntime {
     }
 
 #ifdef LEGION_LOGGING
-    class CopyCompletionLogger : public Event::Impl::EventWaiter {
+    class CopyCompletionLogger : public EventWaiter {
     public:
       CopyCompletionLogger(Event _event) : event(_event) {}
 
@@ -2619,6 +2624,29 @@ namespace LegionRuntime {
     };
 #endif
 
+#ifdef LEGION_PROF
+    class CopyCompletionProfiler : public EventWaiter {
+      public:
+        CopyCompletionProfiler(Event _event) : event(_event) {}
+
+        virtual ~CopyCompletionProfiler(void) { }
+
+        virtual bool event_triggered(void)
+        {
+          register_copy_event(PROF_END_COPY);
+          return true;
+        }
+
+        virtual void print_info(FILE *f)
+        {
+	        fprintf(f, "copy completion profiler - " IDFMT "/%d\n",
+              event.id, event.gen);
+        }
+      protected:
+        Event event;
+    };
+#endif
+
     void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
@@ -2628,7 +2656,13 @@ namespace LegionRuntime {
 
       // the copy might not actually finish in this thread, so set up an event waiter
       //  to log the completion
-      after_copy.impl()->add_waiter(after_copy, new CopyCompletionLogger(after_copy));
+      after_copy.impl()->add_waiter(after_copy.gen,
+          new CopyCompletionLogger(after_copy));
+#endif
+#ifdef LEGION_PROF
+      register_copy_event(PROF_BEGIN_COPY);
+      after_copy.impl()->add_waiter(after_copy.gen,
+          new CopyCompletionProfiler(after_copy));
 #endif
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
@@ -3319,7 +3353,13 @@ namespace LegionRuntime {
 
       // the copy might not actually finish in this thread, so set up an event waiter
       //  to log the completion
-      after_copy.impl()->add_waiter(after_copy, new CopyCompletionLogger(after_copy));
+      after_copy.impl()->add_waiter(after_copy.gen,
+          new CopyCompletionLogger(after_copy));
+#endif
+#ifdef LEGION_PROF
+      register_copy_event(PROF_BEGIN_COPY);
+      after_copy.impl()->add_waiter(after_copy.gen,
+          new CopyCompletionProfiler(after_copy));
 #endif
 
       DetailedTimer::ScopedPush sp(TIME_COPY);

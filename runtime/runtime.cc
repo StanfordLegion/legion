@@ -4729,6 +4729,7 @@ namespace LegionRuntime {
           Memory::Kind kind = machine->get_memory_kind(*it);
           LegionProf::initialize_memory(*it, kind);
         } 
+        LegionProf::initialize_copy_processor();
       }
 #endif
       // Construct a local utility processor group
@@ -4884,6 +4885,7 @@ namespace LegionRuntime {
           assert(kind == Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
         }
+        LegionProf::finalize_copy_profiler();
       }
 #endif
       delete high_level;

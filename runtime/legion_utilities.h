@@ -33,7 +33,7 @@
 #ifdef __SSE2__
 #include <emmintrin.h>
 #endif
-#ifdef __AVX__
+#if defined(__AVX__) || defined(__AVX2__)
 #include <immintrin.h>
 #endif
 #endif
@@ -632,7 +632,7 @@ namespace LegionRuntime {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    };
+    } __attribute__((aligned(16)));
 
     /////////////////////////////////////////////////////////////
     // SSE Two-Level Bit Mask  
@@ -703,7 +703,7 @@ namespace LegionRuntime {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    };
+    } __attribute__((aligned(16)));
 #endif // __SSE2__
 
 #ifdef __AVX__
@@ -777,7 +777,7 @@ namespace LegionRuntime {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    } __attribute__((aligned(16)));
+    } __attribute__((aligned(32)));
     
     /////////////////////////////////////////////////////////////
     // AVX Two-Level Bit Mask  
@@ -852,7 +852,7 @@ namespace LegionRuntime {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
-    } __attribute__((aligned(16)));
+    } __attribute__((aligned(32)));
 #endif // __AVX__
 
     /////////////////////////////////////////////////////////////
@@ -946,6 +946,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<>
     inline void Serializer::serialize<FieldMask>(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Serializer::serialize<NodeMask>(const NodeMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Serializer::serialize<ProcessorMask>(const ProcessorMask &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
@@ -1051,6 +1067,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<>
     inline void Deserializer::deserialize<FieldMask>(FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Deserializer::deserialize<NodeMask>(NodeMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline void Deserializer::deserialize<ProcessorMask>(ProcessorMask &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
@@ -4939,7 +4971,7 @@ namespace LegionRuntime {
     {
       AVXTLBitMask<MAX> result;
 #ifdef __AVX2__
-      __m128i temp_sum = _mm_set1_epi32(0);
+      __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         result(idx) = _mm256_andnot_si256(rhs(idx), bits.avx_vector[idx]);
@@ -4965,7 +4997,7 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
 #ifdef __AVX2__
-      __m128i temp_sum = _mm_set1_epi32(0);
+      __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = _mm256_andnot_si256(rhs(idx), 

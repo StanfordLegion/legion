@@ -442,7 +442,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void find_enclosing_local_fields(
-      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos) = 0;
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
     public:
       virtual void handle_future(const void *res, 
@@ -461,17 +461,17 @@ namespace LegionRuntime {
       unsigned num_virtual_mappings;
       Processor executing_processor;
       // Hold the result of the mapping 
-      LegionContainer<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::deque 
+      LegionDeque<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::tracked
                                                     physical_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
-      LegionContainer<InstanceRef,TASK_LOCAL_REGION_ALLOC>::deque
+      LegionDeque<InstanceRef,TASK_LOCAL_REGION_ALLOC>::tracked
                                                     local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
-      LegionContainer<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::list
+      LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
                                                    inline_regions;
       // Context for this task
       RegionTreeContext context; 
@@ -479,11 +479,11 @@ namespace LegionRuntime {
       StateDirectory *directory;
     protected:
       // Track whether this task has finished executing
-      LegionContainer<Operation*,EXECUTING_CHILD_ALLOC>::set executing_children;
-      LegionContainer<Operation*,EXECUTED_CHILD_ALLOC>::set executed_children;
-      LegionContainer<Operation*,COMPLETE_CHILD_ALLOC>::set complete_children;
+      LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
+      LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
+      LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children;
       // Traces for this task's execution
-      LegionKeyValue<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::map traces;
+      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
       // Event for waiting when the number of mapping+executing
       // child operations has grown too large.
@@ -505,11 +505,10 @@ namespace LegionRuntime {
       bool simultaneous_checked, has_simultaneous;
     protected:
       // Resources that can build up over a task's lifetime
-      LegionContainer<Reservation,TASK_RESERVATION_ALLOC>::deque context_locks;
-      LegionContainer<Barrier,TASK_BARRIER_ALLOC>::deque context_barriers;
-      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque
-                                                                 local_fields;
-      LegionContainer<InlineTask*,TASK_INLINE_ALLOC>::deque inline_tasks;
+      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
+      LegionDeque<Barrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
+      LegionDeque<InlineTask*,TASK_INLINE_ALLOC>::tracked inline_tasks;
     protected:
       // Support for serializing premapping operations.  Note
       // we make it possible for operations accessing different
@@ -666,7 +665,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
+          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     protected:
       void pack_remote_mapped(Serializer &rez);
@@ -759,7 +758,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
+          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     public:
       virtual void handle_future(const void *res, 
@@ -822,7 +821,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
-      LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos) = 0;
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
     public:
       virtual void handle_future(const void *res, 
@@ -867,7 +866,7 @@ namespace LegionRuntime {
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
-          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
+          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     public:
       void add_top_region(LogicalRegion handle);
     protected:
@@ -909,7 +908,7 @@ namespace LegionRuntime {
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
-          LegionContainer<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::deque &infos);
+          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     public:
       virtual void register_child_operation(Operation *op);
       virtual void register_child_executed(Operation *op);

@@ -656,14 +656,14 @@ namespace LegionRuntime {
       // structures in this memory manager
       Reservation manager_lock;
       // Current set of physical instances and their sizes
-      LegionKeyValue<InstanceManager*,size_t,
-                     MEMORY_INSTANCES_ALLOC>::map physical_instances;
+      LegionMap<InstanceManager*, size_t, 
+                MEMORY_INSTANCES_ALLOC>::tracked physical_instances;
       // Current set of reduction instances and their sizes
-      LegionKeyValue<ReductionManager*,size_t,
-                     MEMORY_REDUCTION_ALLOC>::map reduction_instances;
+      LegionMap<ReductionManager*, size_t,
+                MEMORY_REDUCTION_ALLOC>::tracked reduction_instances;
       // Set of physical instances which are currently eligible for recycling
-      LegionContainer<InstanceManager*,
-                      MEMORY_AVAILABLE_ALLOC>::set available_instances;
+      LegionSet<InstanceManager*,
+                MEMORY_AVAILABLE_ALLOC>::tracked available_instances;
     };
 
     /**
@@ -1754,37 +1754,37 @@ namespace LegionRuntime {
       std::deque<RegionTreeContext> available_contexts;
     protected:
       Reservation group_lock;
-      LegionKeyValue<uint64_t,std::deque<ProcessorGroupInfo>,
-                     PROCESSOR_GROUP_ALLOC>::map processor_groups;
+      LegionMap<uint64_t,std::deque<ProcessorGroupInfo>,
+                PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
     protected:
       Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
-      LegionContainer<DistributedID,RUNTIME_DISTRIBUTED_ALLOC>::deque 
-                                              available_distributed_ids;
+      LegionDeque<DistributedID,
+          RUNTIME_DISTRIBUTED_ALLOC>::tracked available_distributed_ids;
     protected:
       Reservation distributed_collectable_lock;
-      LegionKeyValue<DistributedID,DistributedCollectable*,
-                     RUNTIME_DIST_COLLECT_ALLOC>::map dist_collectables;
+      LegionMap<DistributedID,DistributedCollectable*,
+                RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
       Reservation hierarchical_collectable_lock;
-      LegionKeyValue<DistributedID,HierarchicalCollectable*,
-                     RUNTIME_HIER_COLLECT_ALLOC>::map hier_collectables;
+      LegionMap<DistributedID,HierarchicalCollectable*,
+                RUNTIME_HIER_COLLECT_ALLOC>::tracked hier_collectables;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
-      LegionContainer<GarbageCollectionEpoch*,
-                      RUNTIME_GC_EPOCH_ALLOC>::set pending_gc_epochs;
+      LegionSet<GarbageCollectionEpoch*,
+                RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
       unsigned gc_epoch_counter;
     protected:
       // Keep track of futures
       Reservation future_lock;
-      LegionKeyValue<DistributedID,Future::Impl*,
-                     RUNTIME_FUTURE_ALLOC>::map local_futures;
+      LegionMap<DistributedID,Future::Impl*,
+                RUNTIME_FUTURE_ALLOC>::tracked local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       Reservation remote_lock;
-      LegionKeyValue<UniqueID,RemoteTask*,
-                     RUNTIME_REMOTE_ALLOC>::map remote_contexts;
+      LegionMap<UniqueID,RemoteTask*,
+                RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
 #ifdef TRACE_ALLOCATION
     protected:
       struct AllocationTracker {

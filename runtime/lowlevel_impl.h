@@ -915,7 +915,7 @@ namespace LegionRuntime {
 
     class Processor::Impl {
     public:
-      Impl(Processor _me, Processor::Kind _kind, Processor _util = Processor::NO_PROC);
+      Impl(Processor _me, Processor::Kind _kind);
 
       virtual ~Impl(void);
 
@@ -940,17 +940,9 @@ namespace LegionRuntime {
 	  run_counter->decrement();
       }
 
-      void set_utility_processor(UtilityProcessor *_util_proc);
-
-      virtual void enable_idle_task(void) { assert(0); }
-      virtual void disable_idle_task(void) { assert(0); }
-      virtual bool is_idle_task_enabled(void) { return(false); }
-
     public:
       Processor me;
       Processor::Kind kind;
-      Processor util;
-      UtilityProcessor *util_proc;
       Atomic<int> *run_counter;
     }; 
 
@@ -1115,9 +1107,6 @@ namespace LegionRuntime {
 
       void request_shutdown(void);
 
-      void enable_idle_task(Processor::Impl *proc);
-      void disable_idle_task(Processor::Impl *proc);
-
       void wait_for_shutdown(void);
 
       class UtilityThread;
@@ -1135,14 +1124,9 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex;
       gasnett_cond_t condvar;
 
-      Task *idle_task;
-
       std::set<UtilityThread *> threads;
 
       JobQueue<Task> task_queue;
-
-      std::set<Processor::Impl *> idle_procs;
-      std::set<Processor::Impl *> procs_in_idle_task;
     };
 
     class Memory::Impl {
