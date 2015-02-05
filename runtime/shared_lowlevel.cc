@@ -671,7 +671,7 @@ namespace LegionRuntime {
 
     class ProcessorGroup : public ProcessorImpl {
     public:
-      static const int FIRST_PROC_GROUP_ID = 1000;
+      static const Processor::id_t FIRST_PROC_GROUP_ID = 1000;
 
       ProcessorGroup(Processor p) 
 	: ProcessorImpl(0 /*init*/, Processor::TaskIDTable(), p, 0 /*stacksize*/), next_target(0)
