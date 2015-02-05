@@ -3157,7 +3157,7 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       uint64_t result = 0;
-      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result |= bits.bit_vector[idx];
       }
@@ -3216,12 +3216,12 @@ namespace LegionRuntime {
     {
       int result = 0;
 #ifndef VALGRIND
-      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result += __builtin_popcountl(mask[idx]);
       }
 #else
-      for (int idx = 0; idx < MAX; idx++)
+      for (unsigned idx = 0; idx < MAX; idx++)
       {
         if (mask.is_set(idx))
           result++;
