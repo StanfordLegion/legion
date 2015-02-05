@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-terralib.require("legionlib")
+require("legionlib")
 
 TOP_LEVEL_TASK_ID = 0
 HELLO_WORLD_INDEX_ID = 1

@@ -14,9 +14,9 @@
 
 -- Legion Code Generation
 
-local ast = terralib.require("legion/ast")
-local log = terralib.require("legion/log")
-local std = terralib.require("legion/std")
+local ast = require("legion/ast")
+local log = require("legion/log")
+local std = require("legion/std")
 
 local codegen = {}
 

@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-terralib.require("legionlib")
+require("legionlib")
 local std = terralib.includec("stdlib.h")
 rawset(_G, "drand48", std.drand48)
 

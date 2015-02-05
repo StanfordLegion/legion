@@ -14,7 +14,7 @@
 
 -- Legion Builtins
 
-local std = terralib.require("legion/std")
+local std = require("legion/std")
 
 local builtins = {}
 

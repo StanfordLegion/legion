@@ -28,11 +28,9 @@ runtime_dir = os.path.join(legion_dir, 'runtime')
 bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
 
 terra_path = [
-    '?.lua',
     '?.t',
     os.path.join(root_dir, 'src', '?.t'),
     os.path.join(terra_dir, 'tests', 'lib', '?.t'),
-    os.path.join(bindings_dir, '?.lua'),
     os.path.join(bindings_dir, '?.t'),
 ]
 
@@ -52,7 +50,7 @@ if os_name == 'Darwin':
 
 terra_exe = os.path.join(terra_dir, 'terra')
 terra_env = dict(os.environ.items() + [
-    ('LUA_PATH', ';'.join(terra_path)),
+    ('TERRA_PATH', ';'.join(terra_path)),
     (LD_LIBRARY_PATH, ':'.join(lib_path)),
     ('INCLUDE_PATH', ';'.join(include_path)),
 ])

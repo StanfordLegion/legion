@@ -14,7 +14,7 @@
 
 -- Legion Symbol Table
 
-local log = terralib.require("legion/log")
+local log = require("legion/log")
 
 local symbol_table = {}
 symbol_table.__index = symbol_table

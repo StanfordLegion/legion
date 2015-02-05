@@ -14,9 +14,9 @@
 
 -- Legion Parser
 
-local parsing = terralib.require("parsing")
-local ast = terralib.require("legion/ast")
-local std = terralib.require("legion/std")
+local parsing = require("parsing")
+local ast = require("legion/ast")
+local std = require("legion/std")
 
 local parser = {}
 

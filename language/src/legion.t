@@ -14,13 +14,13 @@
 
 -- Legion Language Entry Point
 
-local ast = terralib.require("legion/ast")
-local builtins = terralib.require("legion/builtins")
-local codegen = terralib.require("legion/codegen")
-local parser = terralib.require("legion/parser")
-local specialize = terralib.require("legion/specialize")
-local std = terralib.require("legion/std")
-local type_check = terralib.require("legion/type_check")
+local ast = require("legion/ast")
+local builtins = require("legion/builtins")
+local codegen = require("legion/codegen")
+local parser = require("legion/parser")
+local specialize = require("legion/specialize")
+local std = require("legion/std")
+local type_check = require("legion/type_check")
 
 -- Add Language Builtins to Global Environment
 

@@ -14,7 +14,7 @@
 
 -- Legion Standard Library
 
-local log = terralib.require("legion/log")
+local log = require("legion/log")
 
 local std = {}
 
@@ -22,7 +22,7 @@ local std = {}
 -- ## Legion Bindings
 -- #################
 
-terralib.require('legionlib')
+require('legionlib')
 local c = terralib.includecstring([[
 #include "legion_c.h"
 #include <stdio.h>

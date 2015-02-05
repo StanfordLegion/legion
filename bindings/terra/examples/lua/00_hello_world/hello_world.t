@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-terralib.require("legionlib")
+require("legionlib")
 
 -- We declare the IDs for user-level tasks in the global scope
 HELLO_WORLD_ID = 1

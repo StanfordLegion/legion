@@ -18,7 +18,7 @@ local std = terralib.includec("stdlib.h")
 legion = {}
 legion.__index = legion
 
-terralib.require 'legionlib-terra'
+require 'legionlib-terra'
 
 local legion_c = terralib.includec("legion_c.h")
 local legion_terra = terralib.includec("legion_terra.h")

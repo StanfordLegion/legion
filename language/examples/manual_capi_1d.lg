@@ -15,7 +15,7 @@
 -- Note: The binding library is only being used to load the dynamic
 -- library for Legion, not for any actual functionality. All Legion
 -- calls happen through the C API.
-terralib.require('legionlib')
+require('legionlib')
 c = terralib.includecstring([[
 #include "legion_c.h"
 #include <stdio.h>
