@@ -17,12 +17,18 @@
 
 import os, subprocess
 
-root_dir = os.path.realpath(os.path.dirname(__file__))
-
-def test(install_args):
+def test(root_dir, install_args, install_env):
     subprocess.check_call(['./install.py'] + install_args, cwd = root_dir)
     subprocess.check_call(['./test.py'], cwd = root_dir)
 
 if __name__ == '__main__':
-    test(['--debug'])
-    test([])
+    root_dir = os.path.realpath(os.path.dirname(__file__))
+    legion_dir = os.path.dirname(root_dir)
+    runtime_dir = os.path.join(legion_dir, 'runtime')
+
+    install_env = dict(os.environ.items() + [
+        ('LG_RT_DIR', runtime_dir),
+    ])
+
+    test(root_dir, ['--debug'], install_env)
+    test(root_dir, [], install_env)
