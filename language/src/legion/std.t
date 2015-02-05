@@ -419,7 +419,8 @@ function std.type_sub(t, mapping)
   elseif std.is_ptr(t) then
     return std.ptr(
       std.type_sub(t.points_to_type, mapping),
-      std.type_sub(t.points_to_region_symbol, mapping))
+      unpack(t.points_to_region_symbols:map(
+               function(region) return std.type_sub(region, mapping) end)))
   elseif std.is_fspace_instance(t) then
     return t.fspace(unpack(t.args:map(
       function(arg) return std.type_sub(arg, mapping) end)))
@@ -445,8 +446,21 @@ function std.type_eq(a, b, mapping)
     end
     return std.type_eq(a.type, b.type, mapping)
   elseif std.is_ptr(a) and std.is_ptr(b) then
-    return std.type_eq(a:points_to_region(), b:points_to_region(), mapping) and
-      std.type_eq(a.points_to_type, b.points_to_type, mapping)
+    if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
+      return false
+    end
+    local a_regions = a:points_to_regions()
+    local b_regions = b:points_to_regions()
+    if #a_regions ~= #b_regions then
+      return false
+    end
+    for i, a_region in ipairs(a_regions) do
+      local b_region = b_regions[i]
+      if not std.type_eq(a_region, b_region, mapping) then
+        return false
+      end
+    end
+    return true
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
     a.fspace == b.fspace
   then
@@ -486,7 +500,9 @@ end
 
 local function add_type(symbols, type)
   if std.is_ptr(type) then
-    add_region_symbol(symbols, type.points_to_region_symbol)
+    for _, region in ipairs(type.points_to_region_symbols) do
+      add_region_symbol(symbols, region)
+    end
   elseif std.is_fspace_instance(type) then
     for _, arg in ipairs(type.args) do
       add_region_symbol(symbols, arg)
@@ -761,13 +777,15 @@ end
 function std.check_read(cx, t)
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_type, field_path = t:refers_to_region(), t.field_path
-    if not std.check_privilege(cx, std.reads, region_type, field_path) then
-      local region = t.refers_to_region_symbol
-      local ref_as_ptr = std.ptr(t.refers_to_type, region)
-      log.error("invalid privilege reads(" ..
-                (std.newtuple(region) .. field_path):hash() ..
-                ") for dereference of " .. tostring(ref_as_ptr))
+    local region_types, field_path = t:refers_to_regions(), t.field_path
+    for i, region_type in ipairs(region_types) do
+      if not std.check_privilege(cx, std.reads, region_type, field_path) then
+        local regions = t.refers_to_region_symbols
+        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        log.error("invalid privilege reads(" ..
+                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  ") for dereference of " .. tostring(ref_as_ptr))
+      end
     end
   end
   return std.as_read(t)
@@ -776,13 +794,15 @@ end
 function std.check_write(cx, t)
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_type, field_path = t:refers_to_region(), t.field_path
-    if not std.check_privilege(cx, std.writes, region_type, field_path) then
-      local region = t.refers_to_region_symbol
-      local ref_as_ptr = std.ptr(t.refers_to_type, region)
-      log.error("invalid privilege writes(" ..
-                (std.newtuple(region) .. field_path):hash() ..
-                ") for dereference of " .. tostring(ref_as_ptr))
+    local region_types, field_path = t:refers_to_regions(), t.field_path
+    for i, region_type in ipairs(region_types) do
+      if not std.check_privilege(cx, std.writes, region_type, field_path) then
+        local regions = t.refers_to_region_symbols
+        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        log.error("invalid privilege writes(" ..
+                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  ") for dereference of " .. tostring(ref_as_ptr))
+      end
     end
   end
   return std.as_read(t)
@@ -791,13 +811,15 @@ end
 function std.check_reduce(cx, op, t)
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_type, field_path = t:refers_to_region(), t.field_path
-    if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
-      local region = t.refers_to_region_symbol
-      local ref_as_ptr = std.ptr(t.refers_to_type, region)
-      log.error("invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
-                (std.newtuple(region) .. field_path):hash() ..
-                ") for dereference of " .. tostring(ref_as_ptr))
+    local region_types, field_path = t:refers_to_regions(), t.field_path
+    for i, region_type in ipairs(region_types) do
+      if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
+        local regions = t.refers_to_region_symbols
+        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        log.error("invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
+                  (std.newtuple(regions[i]) .. field_path):hash() ..
+                  ") for dereference of " .. tostring(ref_as_ptr))
+      end
     end
   end
   return std.as_read(t)
@@ -806,7 +828,7 @@ end
 function std.get_field(t, f)
   assert(terralib.types.istype(t))
   if std.is_ptr(t) then
-    local field_type = std.ref(t.points_to_type, t.points_to_region_symbol, f)
+    local field_type = std.ref(t, f)
     if not std.as_read(field_type) then
       return nil
     end
@@ -817,7 +839,7 @@ function std.get_field(t, f)
       field_path:insert(field)
     end
     field_path:insert(f)
-    local field_type = std.ref(t.refers_to_type, t.refers_to_region_symbol, unpack(field_path))
+    local field_type = std.ref(t, unpack(field_path))
     if not std.as_read(field_type) then
       return nil
     end
@@ -972,24 +994,34 @@ function std.partition(disjointness, region)
     return st.subregions[i]
   end
 
+  function st:subregion_dynamic()
+    return std.region(st:parent_region().element_type)
+  end
+
   return st
 end
 
 -- WARNING: ptr types are NOT unique. If two regions are aliased then
--- it is possible for two different pointer types to be equal.
+-- it is possible for two different pointer types to be equal:
 --
 -- var r = region(t, n)
 -- var s = r
 -- var x = new(ptr(t, r))
 -- var y = new(ptr(t, s))
 --
--- x and y have distinct types but are still type_eq
-std.ptr = terralib.memoize(function(points_to_type, region)
+-- The types of x and y are distinct objects, but are still type_eq.
+std.ptr = terralib.memoize(function(points_to_type, ...)
+  local regions = terralib.newlist({...})
   if not terralib.types.istype(points_to_type) then
     error("ptr expected a type as argument 1, got " .. tostring(points_to_type))
   end
-  if not terralib.issymbol(region) then
-    error("ptr expected a symbol as argument 2, got " .. tostring(region))
+  if #regions <= 0 then
+    error("ptr expected at least one region, got none")
+  end
+  for i, region in ipairs(regions) do
+    if not terralib.issymbol(region) then
+      error("ptr expected a symbol as argument " .. tostring(i+1) .. ", got " .. tostring(region))
+    end
   end
 
   local st = terralib.types.newstruct("ptr")
@@ -999,19 +1031,24 @@ std.ptr = terralib.memoize(function(points_to_type, region)
 
   st.is_pointer = true
   st.points_to_type = points_to_type
-  st.points_to_region_symbol = region
+  st.points_to_region_symbols = regions
 
-  function st:points_to_region()
-    local region = self.points_to_region_symbol.type
-    if not (terralib.types.istype(region) and std.is_region(region)) then
-      log.error("ptr expected a region as argument 2, got " ..
-              tostring(region.type))
+  function st:points_to_regions()
+    local regions = terralib.newlist()
+    for i, region_symbol in ipairs(self.points_to_region_symbols) do
+      local region = region_symbol.type
+      if not (terralib.types.istype(region) and std.is_region(region)) then
+        log.error("ptr expected a region as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region.type))
+      end
+      if not std.type_eq(region.element_type, points_to_type) then
+        log.error("ptr expected region(" .. tostring(points_to_type) ..
+                    ") as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region))
+      end
+      regions:insert(region)
     end
-    if not std.type_eq(region.element_type, points_to_type) then
-      log.error("ptr expected region(" .. tostring(points_to_type) ..
-                  ") as argument 2, got " .. tostring(region))
-    end
-    return region
+    return regions
   end
 
   st.metamethods.__eq = macro(function(a, b)
@@ -1030,9 +1067,9 @@ std.ptr = terralib.memoize(function(points_to_type, region)
   end
 
   function st.metamethods.__typename(st)
-    local region = st.points_to_region_symbol
+    local regions = st.points_to_region_symbols
 
-    return "ptr(" .. tostring(st.points_to_type) .. ", " .. tostring(region) .. ")"
+    return "ptr(" .. tostring(st.points_to_type) .. ", " .. tostring(regions:mkstring(", ")) .. ")"
   end
 
   return st
@@ -1042,38 +1079,33 @@ end)
 -- different from ptr in that it is not intended to be used by code;
 -- it exists mainly to facilitate field-sensitive privilege checks in
 -- the type system.
-std.ref = terralib.memoize(function(refers_to_type, region, ...)
-  if not terralib.types.istype(refers_to_type) then
-    error("ref expected a type as argument 1, got " .. tostring(refers_to_type))
+std.ref = terralib.memoize(function(pointer_type, ...)
+  if not terralib.types.istype(pointer_type) then
+    error("ref expected a type as argument 1, got " .. tostring(pointer_type))
   end
-  if not terralib.issymbol(region) then
-    error("ref expected a symbol as argument 2, got " .. tostring(region))
+  if not (std.is_ptr(pointer_type) or std.is_ref(pointer_type)) then
+    error("ref expected a ptr or ref type as argument 1, got " .. tostring(pointer_type))
+  end
+  if std.is_ref(pointer_type) then
+    pointer_type = pointer_type.pointer_type
   end
 
   local st = terralib.types.newstruct("ref")
 
   st.is_ref = true
-  st.refers_to_type = refers_to_type
-  st.refers_to_region_symbol = region
+  st.pointer_type = pointer_type
+  st.refers_to_type = pointer_type.points_to_type
+  st.refers_to_region_symbols = pointer_type.points_to_region_symbols
   st.field_path = std.newtuple(...)
 
-  function st:refers_to_region()
-    local region = self.refers_to_region_symbol.type
-    if not (terralib.types.istype(region) and std.is_region(region)) then
-      log.error("ref expected a region as argument 2, got " ..
-              tostring(region.type))
-    end
-    if not std.type_eq(region.element_type, refers_to_type) then
-      log.error("ref expected region(" .. tostring(refers_to_type) ..
-                  ") as argument 2, got " .. tostring(region))
-    end
-    return region
+  function st:refers_to_regions()
+    return self.pointer_type:points_to_regions()
   end
 
   function st.metamethods.__typename(st)
-    local region = st.refers_to_region_symbol
+    local regions = st.refers_to_region_symbols
 
-    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(region) .. ")"
+    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(regions:mkstring(", ")) .. ")"
   end
 
   return st

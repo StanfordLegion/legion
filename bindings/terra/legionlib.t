@@ -1372,14 +1372,14 @@ function RegionAccessor:typeify(elem_type)
                       dp : legion_c.legion_domain_point_t)
     var v : elem_type
     var size = sizeof(elem_type)
-    legion_c.legion_accessor_generic_read_dp(accessor, dp, &v, size)
+    legion_c.legion_accessor_generic_read_domain_point(accessor, dp, &v, size)
     return v
   end
   local terra write_dp(accessor : legion_c.legion_accessor_generic_t,
                     dp : legion_c.legion_domain_point_t,
                     v : elem_type)
     var size = sizeof(elem_type)
-    legion_c.legion_accessor_generic_write_dp(accessor, dp, &v, size)
+    legion_c.legion_accessor_generic_write_domain_point(accessor, dp, &v, size)
   end
   self.read = function(self, p)
     assert(self.is_region_accessor,

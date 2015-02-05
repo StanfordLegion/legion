@@ -249,8 +249,12 @@ end
 function specialize.expr_new(cx, node)
   local pointer_type = node.pointer_type_expr(cx.env:env())
   assert(std.is_ptr(pointer_type))
+  local regions = pointer_type.points_to_region_symbols
+  if #regions ~= 1 then
+   log.error("new requires pointer type with exactly one region, got " .. tostring(pointer_type))
+  end
   local region = ast.specialized.ExprID {
-    value = pointer_type.points_to_region_symbol,
+    value = regions[1],
   }
   return ast.specialized.ExprNew {
     pointer_type = pointer_type,

@@ -2199,11 +2199,11 @@ task test()
 
   -- Stuff regions into mesh pieces.
   for m in rm_all do
-    var zones = rz_all_p[0 --[[m.mcolor]]]
-    var private = rp_all_private_p[0 --[[m.mcolor]]]
-    var ghost = rp_all_ghost_p[0 --[[m.mcolor]]]
-    var shared = rp_all_shared_p[0 --[[m.mcolor]]]
-    var sides = rs_all_p[0 --[[m.mcolor]]]
+    var zones = rz_all_p[m.mcolor]
+    var private = rp_all_private_p[m.mcolor]
+    var ghost = rp_all_ghost_p[m.mcolor]
+    var shared = rp_all_shared_p[m.mcolor]
+    var sides = rs_all_p[m.mcolor]
 
     @m = [ mesh(rz_all, rp_all, rs_all) ]({
       rzp = zones,

@@ -260,12 +260,20 @@ function value:unpack(cx, value_type, field_name, field_type)
     region_expr = unpack_region(cx, region_expr, field_type, static_region_type)
     region_expr = expr.just(region_expr.actions, self.expr.value)
     return self:new(region_expr, self.value_type, self.field_path)
-  elseif std.is_ptr(field_type) and
-    not cx:has_region(field_type:points_to_region())
-  then
-    local region_type = field_type:points_to_region()
+  elseif std.is_ptr(field_type) then
+    local region_types = field_type:points_to_regions()
+    -- FIXME: What to do about multi-region pointers?
+    assert(#region_types == 1)
+    local region_type = region_types[1]
+
+    if cx:has_region(region_type) then
+      return self
+    end
+
     local static_ptr_type = std.get_field(value_type, field_name)
-    local static_region_type = static_ptr_type:points_to_region()
+    local static_region_types = static_ptr_type:points_to_regions()
+    assert(#static_region_types == 1)
+    local static_region_type = static_region_types[1]
 
     local region_field_name
     for _, entry in pairs(value_type:getentries()) do
@@ -309,7 +317,9 @@ function ref:__ref(cx)
   local absolute_field_paths = field_paths:map(
     function(field_path) return self.field_path .. field_path end)
 
-  local region_type = self.value_type:points_to_region()
+  local region_types = self.value_type:points_to_regions()
+  assert(#region_types == 1) -- FIXME: for multi-region pointers
+  local region_type = region_types[1]
   local accessors = absolute_field_paths:map(
     function(field_path)
       return cx.regions[region_type]:accessor(field_path)
@@ -1130,7 +1140,9 @@ function codegen.stat_for_list(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local block = codegen.block(cx, node.block)
 
-  local lr = symbol.type.points_to_region_symbol
+  local regions = symbol.type.points_to_region_symbols
+  assert(#regions == 1)
+  local lr = regions[1]
   return quote
     do
       [value.actions]

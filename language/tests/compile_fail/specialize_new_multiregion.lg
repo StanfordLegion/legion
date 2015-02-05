@@ -12,39 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- new requires pointer type with exactly one region, got ptr(int32, $r, $s)
+
 import "legion"
 
-local c = legionlib.c
-
-task f() : int
+task f()
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
-  var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
-  var r0 = p[0]
-
-  var x = new(ptr(int, r0))
-
-  -- Check that pointer shows up in child.
-  @x = 100
-  var s = 0
-  for y in r0 do
-    s += @y
-  end
-
-  -- Check that pointer shows up in parent.
-  @x = 20
-  for y in r do
-    s += @y
-  end
-
-  -- And of course pointer itself should be accessible.
-  @x = 3
-  return s + @x
+  var s = region(int, 5)
+  var x = new(ptr(int, r, s))
 end
-
-task main()
-  legionlib.assert(f() == 123)
-end
-legionlib.start(main)

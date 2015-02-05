@@ -16,35 +16,33 @@ import "legion"
 
 local c = legionlib.c
 
-task f() : int
+task f()
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc, 0)
+  c.legion_coloring_ensure_color(rc, 1)
+  c.legion_coloring_ensure_color(rc, 2)
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
-  var r0 = p[0]
+  c.legion_coloring_destroy(rc)
 
-  var x = new(ptr(int, r0))
+  for i = 0, 3 do
+    var ri = p[i]
+    var x = new(ptr(int, ri))
+    @x = i
+  end
 
-  -- Check that pointer shows up in child.
-  @x = 100
   var s = 0
-  for y in r0 do
-    s += @y
+  for i = 0, 3 do
+    var ri = p[i]
+    for x in ri do
+      s += @x
+    end
   end
 
-  -- Check that pointer shows up in parent.
-  @x = 20
-  for y in r do
-    s += @y
-  end
-
-  -- And of course pointer itself should be accessible.
-  @x = 3
-  return s + @x
+  return s
 end
 
 task main()
-  legionlib.assert(f() == 123)
+  legionlib.assert(f() == 3)
 end
 legionlib.start(main)

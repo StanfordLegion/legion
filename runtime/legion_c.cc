@@ -1261,10 +1261,10 @@ legion_accessor_generic_write(legion_accessor_generic_t handle_,
 }
 
 void
-legion_accessor_generic_read_dp(legion_accessor_generic_t handle_,
-                                legion_domain_point_t dp_,
-                                void *dst,
-                                size_t bytes)
+legion_accessor_generic_read_domain_point(legion_accessor_generic_t handle_,
+                                          legion_domain_point_t dp_,
+                                          void *dst,
+                                          size_t bytes)
 {
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
   DomainPoint dp = CObjectWrapper::unwrap(dp_);
@@ -1273,10 +1273,10 @@ legion_accessor_generic_read_dp(legion_accessor_generic_t handle_,
 }
 
 void
-legion_accessor_generic_write_dp(legion_accessor_generic_t handle_,
-                                 legion_domain_point_t dp_,
-                                 const void *src,
-                                 size_t bytes)
+legion_accessor_generic_write_domain_point(legion_accessor_generic_t handle_,
+                                           legion_domain_point_t dp_,
+                                           const void *src,
+                                           size_t bytes)
 {
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
   DomainPoint dp = CObjectWrapper::unwrap(dp_);

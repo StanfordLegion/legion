@@ -142,6 +142,7 @@ function type_check.expr_index_access(cx, node)
       local parent = value_type:parent_region()
       local subregion = value_type:subregion_constant(index.value)
       std.add_constraint(cx, subregion, parent, "<=", false)
+      -- FIXME: Add disjointness constraints
 
       return ast.typed.ExprIndexAccess {
         value = value,
@@ -149,7 +150,15 @@ function type_check.expr_index_access(cx, node)
         expr_type = subregion,
       }
     else
-      error("unimplemented index access over non-constant indices")
+      local parent = value_type:parent_region()
+      local subregion = value_type:subregion_dynamic()
+      std.add_constraint(cx, subregion, parent, "<=", false)
+
+      return ast.typed.ExprIndexAccess {
+        value = value,
+        index = index,
+        expr_type = subregion,
+      }
     end
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -650,7 +659,7 @@ function type_check.expr_deref(cx, node)
     log.error("dereference of non-pointer type " .. tostring(value_type))
   end
 
-  local expr_type = std.ref(value_type.points_to_type, value_type.points_to_region_symbol)
+  local expr_type = std.ref(value_type)
 
   return ast.typed.ExprDeref {
     value = value,

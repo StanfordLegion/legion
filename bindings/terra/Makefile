@@ -37,12 +37,13 @@ OUTFILE		:= liblegion_terra.so
 GEN_SRC		:= legion_terra.cc	# .cc files
 GEN_GPU_SRC	:=		# .cu files
 
-CC_FLAGS	:= -fPIC #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
-NVCC_FLAGS	:=
-GASNET_FLAGS	:=
+CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
+NVCC_FLAGS ?=
+GASNET_FLAGS ?=
 INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src
 LD_FLAGS +=
 
+CC_FLAGS += -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else

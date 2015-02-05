@@ -48,7 +48,11 @@ terra sub_task(task : c.legion_task_t,
     var base = [&int8](c.legion_accessor_generic_raw_rect_ptr_1d(
                          a1, rect, &subrect, &(offsets[0])))
     if base == nil then
-      c.printf("Error: failed to get raw rect ptr\n")
+      c.printf("Error: failed to get base ptr\n")
+      c.abort()
+    end
+    if rect.lo.x[0] ~= subrect.lo.x[0] or rect.hi.x[0] ~= subrect.hi.x[0] then
+      c.printf("Error: subrect doesn't match rect bounds\n")
       c.abort()
     end
 
@@ -59,7 +63,7 @@ terra sub_task(task : c.legion_task_t,
     c.printf("  base %p\n", base)
 
     for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
-      var local_i0 = global_i0 - subrect.lo.x[0]
+      var local_i0 = global_i0 - rect.lo.x[0]
       var ptr = [&int](base + offsets[0].offset*local_i0)
       c.printf("writing value %2d at global %2d local %2d pointer %p\n",
                global_i0, global_i0, local_i0, ptr)
@@ -69,9 +73,9 @@ terra sub_task(task : c.legion_task_t,
 
   -- Sanity check with generic API.
   for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
-    var p = c.legion_ptr_t { value = global_i0 }
+    var p = c.legion_domain_point_t { dim = 1, point_data = arrayof(int, global_i0, 0, 0) }
     var value : int
-    c.legion_accessor_generic_read(a1, p, &value, sizeof(int))
+    c.legion_accessor_generic_read_domain_point(a1, p, &value, sizeof(int))
     c.printf("read value %2d at global %2d\n", value, global_i0)
     if value ~= global_i0 then
       c.abort()

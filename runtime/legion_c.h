@@ -1256,19 +1256,19 @@ extern "C" {
    * @see LegionRuntime::Accessor::Generic::Untyped::read_untyped()
    */
   void
-  legion_accessor_generic_read_dp(legion_accessor_generic_t handle,
-                                  legion_domain_point_t dp,
-                                  void *dst,
-                                  size_t bytes);
+  legion_accessor_generic_read_domain_point(legion_accessor_generic_t handle,
+                                            legion_domain_point_t dp,
+                                            void *dst,
+                                            size_t bytes);
 
   /**
    * @see LegionRuntime::Accessor::Generic::Untyped::write_untyped()
    */
   void
-  legion_accessor_generic_write_dp(legion_accessor_generic_t handle,
-                                   legion_domain_point_t dp,
-                                   const void *src,
-                                   size_t bytes);
+  legion_accessor_generic_write_domain_point(legion_accessor_generic_t handle,
+                                             legion_domain_point_t dp,
+                                             const void *src,
+                                             size_t bytes);
 
   /**
    * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
