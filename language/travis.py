@@ -18,8 +18,13 @@
 import os, subprocess
 
 def test(root_dir, install_args, install_env):
-    subprocess.check_call(['./install.py'] + install_args, cwd = root_dir)
-    subprocess.check_call(['./test.py'], cwd = root_dir)
+    subprocess.check_call(
+        ['./install.py'] + install_args,
+        env = install_env,
+        cwd = root_dir)
+    subprocess.check_call(
+        ['./test.py'],
+        cwd = root_dir)
 
 if __name__ == '__main__':
     root_dir = os.path.realpath(os.path.dirname(__file__))
