@@ -23,7 +23,7 @@ def test(root_dir, install_args, install_env):
         env = install_env,
         cwd = root_dir)
     subprocess.check_call(
-        ['./test.py'],
+        ['./test.py', '-j1', '-v'],
         cwd = root_dir)
 
 if __name__ == '__main__':
@@ -35,5 +35,21 @@ if __name__ == '__main__':
         ('LG_RT_DIR', runtime_dir),
     ])
 
+    install_env_spy = dict(os.environ.items() + [
+        ('LG_RT_DIR', runtime_dir),
+        ('CC_FLAGS', '-DLEGION_SPY'),
+    ])
+
+    install_env_prof = dict(os.environ.items() + [
+        ('LG_RT_DIR', runtime_dir),
+        ('CC_FLAGS', '-DLEGION_PROF'),
+    ])
+
     test(root_dir, ['--debug'], install_env)
     test(root_dir, [], install_env)
+
+    test(root_dir, ['--debug'], install_env_prof)
+    test(root_dir, [], install_env_prof)
+
+    test(root_dir, ['--debug'], install_env_spy)
+    test(root_dir, [], install_env_spy)
