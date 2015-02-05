@@ -1882,7 +1882,7 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       T result = 0;
-      for (int idx = 0; idx < BIT_ELMTS; idx++)
+      for (unsigned idx = 0; idx < BIT_ELMTS; idx++)
       {
         result |= bit_vector[idx];
       }

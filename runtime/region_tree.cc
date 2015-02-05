@@ -24002,7 +24002,7 @@ namespace LegionRuntime {
       // If we make it here, we can subtract remaining from append count
       // to get the number we actually need to add
       append_count -= remaining;
-      const int new_arrays = (append_count+INC_SIZE-1)/INC_SIZE;
+      const unsigned new_arrays = (append_count+INC_SIZE-1)/INC_SIZE;
 #ifdef DEBUG_HIGH_LEVEL
       // If we fail this assertion, then we've run out of contexts
       assert((buffer_size+new_arrays) <= ((MAX_SIZE+INC_SIZE-1)/INC_SIZE));
