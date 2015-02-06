@@ -20,11 +20,23 @@ import os, platform, subprocess
 def install_dependencies():
     if platform.system() == 'Darwin':
         subprocess.check_call(['brew', 'update'])
-        subprocess.check_call(['brew', 'install', '-v', 'llvm', '--with-clang'])
+        subprocess.check_call(['brew', 'install', 'xz'])
+
+        clang_tarball = 'clang+llvm-3.5.0-macosx-apple-darwin.tar.xz'
+        clang_dir = 'clang+llvm-3.5.0-macosx-apple-darwin'
+
+        subprocess.check_call(
+            ['curl', '-O', 'http://llvm.org/releases/3.5.0/%s' % clang_tarball])
+        shasum = subprocess.Popen(['shasum'], stdin=subprocess.PIPE)
+        shasum.communicate(
+            'ea15cfe99022fb2abce219d7e8a4377b81f7b1fb  %s' % clang_tarball)
+        assert shasum.wait() == 0
+        subprocess.check_call(['tar', 'xfJ', clang_tarball])
+
         os.environ['PATH'] = ':'.join(
-            ['/usr/local/opt/llvm/bin', os.environ['PATH']])
+            [os.path.join(clang_dir, 'bin'), os.environ['PATH']])
         os.environ['DYLD_LIBRARY_PATH'] = ':'.join(
-            ['/usr/local/opt/llvm/lib'] +
+            [os.path.join(clang_dir, 'lib')] +
             ([os.environ['DYLD_LIBRARY_PATH']]
              if 'DYLD_LIBRARY_PATH' in os.environ else []))
 
