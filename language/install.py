@@ -120,8 +120,9 @@ def install_bindings(bindings_dir, terra_dir, debug):
         env = env)
     subprocess.check_call(
         ['make',
-         'DEBUG=%s' % (1 if debug else 0),
-         '-j', str(multiprocessing.cpu_count())],
+         'DEBUG=%s' % (1 if debug else 0)] +
+        (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
+        ['-j', str(multiprocessing.cpu_count())],
         cwd = bindings_dir,
         env = env)
     symlink(os.path.join(bindings_dir, 'liblegion_terra.so'),
