@@ -18,34 +18,31 @@
 import os, platform, subprocess
 
 def install_dependencies():
+    env = dict(os.environ.iteritems())
+
     if platform.system() == 'Darwin':
-        subprocess.check_call(['brew', 'update'])
-        subprocess.check_call(['brew', 'install', 'xz'])
+        clang_tarball = 'clang+llvm-3.4.2-x86_64-apple-darwin10.9.xz'
+        clang_dir = os.path.abspath('clang+llvm-3.4.2-x86_64-apple-darwin10.9')
 
-        clang_tarball = 'clang+llvm-3.5.0-macosx-apple-darwin.tar.xz'
-        clang_dir = os.path.abspath('clang+llvm-3.5.0-macosx-apple-darwin')
-
+        print('http://llvm.org/releases/3.4.2/%s' % clang_tarball)
         subprocess.check_call(
-            ['curl', '-O', 'http://llvm.org/releases/3.5.0/%s' % clang_tarball])
+            ['curl', '-O', 'http://llvm.org/releases/3.4.2/%s' % clang_tarball])
         shasum = subprocess.Popen(['shasum', '-c'], stdin=subprocess.PIPE)
         shasum.communicate(
-            'ea15cfe99022fb2abce219d7e8a4377b81f7b1fb  %s' % clang_tarball)
+            'b182ca49f8e4933041daa8ed466f1e4a589708bf  %s' % clang_tarball)
         assert shasum.wait() == 0
         subprocess.check_call(['tar', 'xfJ', clang_tarball])
 
-        os.environ['PATH'] = ':'.join(
-            [os.path.join(clang_dir, 'bin'), os.environ['PATH']])
-        os.environ['DYLD_LIBRARY_PATH'] = ':'.join(
-            [os.path.join(clang_dir, 'lib')] +
-            ([os.environ['DYLD_LIBRARY_PATH']]
-             if 'DYLD_LIBRARY_PATH' in os.environ else []))
+        env.update({
+            'PATH': ':'.join(
+                [os.path.join(clang_dir, 'bin'), os.environ['PATH']]),
+            'DYLD_LIBRARY_PATH': ':'.join(
+                [os.path.join(clang_dir, 'lib')] +
+                ([os.environ['DYLD_LIBRARY_PATH']]
+                 if 'DYLD_LIBRARY_PATH' in os.environ else [])),
+        })
 
-        print 'clang is:'
-        subprocess.check_call(
-            ['which', 'clang'])
-        print 'clang++ is:'
-        subprocess.check_call(
-            ['which', 'clang++'])
+    return env
 
 def test(root_dir, install_args, install_env):
     subprocess.check_call(
@@ -61,11 +58,10 @@ if __name__ == '__main__':
     legion_dir = os.path.dirname(root_dir)
     runtime_dir = os.path.join(legion_dir, 'runtime')
 
-    install_env = dict(os.environ.items() + [
-        ('LG_RT_DIR', runtime_dir),
-    ])
+    env = install_dependencies()
+    env.update({
+        'LG_RT_DIR': runtime_dir,
+    })
 
-    install_dependencies()
-
-    test(root_dir, ['--debug'], install_env)
-    test(root_dir, [], install_env)
+    test(root_dir, ['--debug'], env)
+    test(root_dir, [], env)
