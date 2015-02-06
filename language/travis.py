@@ -15,7 +15,18 @@
 # limitations under the License.
 #
 
-import os, subprocess
+import os, platform, subprocess
+
+def install_dependencies():
+    if platform.system() == 'Darwin':
+        subprocess.check_call(['brew', 'update'])
+        subprocess.check_call(['brew', 'install', 'llvm', '--with-clang'])
+        os.environ['PATH'] = ':'.join(
+            ['/usr/local/opt/llvm/bin', os.environ['PATH']])
+        os.environ['DYLD_LIBRARY_PATH'] = ':'.join(
+            ['/usr/local/opt/llvm/lib'] +
+            ([os.environ['DYLD_LIBRARY_PATH']]
+             if 'DYLD_LIBRARY_PATH' in os.environ else []))
 
 def test(root_dir, install_args, install_env):
     subprocess.check_call(
@@ -34,6 +45,8 @@ if __name__ == '__main__':
     install_env = dict(os.environ.items() + [
         ('LG_RT_DIR', runtime_dir),
     ])
+
+    install_dependencies()
 
     test(root_dir, ['--debug'], install_env)
     test(root_dir, [], install_env)
