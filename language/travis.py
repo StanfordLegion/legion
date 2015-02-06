@@ -23,7 +23,7 @@ def install_dependencies():
         subprocess.check_call(['brew', 'install', 'xz'])
 
         clang_tarball = 'clang+llvm-3.5.0-macosx-apple-darwin.tar.xz'
-        clang_dir = 'clang+llvm-3.5.0-macosx-apple-darwin'
+        clang_dir = os.path.abspath('clang+llvm-3.5.0-macosx-apple-darwin')
 
         subprocess.check_call(
             ['curl', '-O', 'http://llvm.org/releases/3.5.0/%s' % clang_tarball])
