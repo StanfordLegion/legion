@@ -20,7 +20,7 @@ import os, platform, subprocess
 def install_dependencies():
     if platform.system() == 'Darwin':
         subprocess.check_call(['brew', 'update'])
-        subprocess.check_call(['brew', 'install', 'llvm', '--with-clang'])
+        subprocess.check_call(['brew', 'install', '-v', 'llvm', '--with-clang'])
         os.environ['PATH'] = ':'.join(
             ['/usr/local/opt/llvm/bin', os.environ['PATH']])
         os.environ['DYLD_LIBRARY_PATH'] = ':'.join(
