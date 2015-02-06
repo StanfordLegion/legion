@@ -45,6 +45,10 @@ end
 task test(n: uint)
   var x = region(float, n)
   var y = region(float, n)
+  for i = 0, n do
+    var px = new(ptr(float, x))
+    var py = new(ptr(float, y))
+  end
 
   for i : uint = 0, n do
     var px = [index_to_ptr(ptr(float, x))](i)
