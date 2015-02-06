@@ -27,7 +27,7 @@ def install_dependencies():
 
         subprocess.check_call(
             ['curl', '-O', 'http://llvm.org/releases/3.5.0/%s' % clang_tarball])
-        shasum = subprocess.Popen(['shasum'], stdin=subprocess.PIPE)
+        shasum = subprocess.Popen(['shasum', '-c'], stdin=subprocess.PIPE)
         shasum.communicate(
             'ea15cfe99022fb2abce219d7e8a4377b81f7b1fb  %s' % clang_tarball)
         assert shasum.wait() == 0
@@ -39,6 +39,13 @@ def install_dependencies():
             [os.path.join(clang_dir, 'lib')] +
             ([os.environ['DYLD_LIBRARY_PATH']]
              if 'DYLD_LIBRARY_PATH' in os.environ else []))
+
+        print 'clang is:'
+        subprocess.check_call(
+            ['which', 'clang'])
+        print 'clang++ is:'
+        subprocess.check_call(
+            ['which', 'clang++'])
 
 def test(root_dir, install_args, install_env):
     subprocess.check_call(
