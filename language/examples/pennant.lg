@@ -1890,7 +1890,7 @@ terra read_input(runtime : c.legion_runtime_t,
 
   do
     var rm_mcolor = c.legion_physical_region_get_field_accessor_array(
-      rm_physical[5], rm_fields[5])
+      rm_physical[15], rm_fields[15])
 
     for i = 0, conf.npieces do
       var p = c.legion_ptr_t { value = i }
