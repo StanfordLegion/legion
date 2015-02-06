@@ -1,7 +1,7 @@
 Legion
 ======
 
-The primary homepage for Legion is now located at [legion.stanford.edu](http://legion.stanford.edu).
+The Legion homepage is now at [legion.stanford.edu](http://legion.stanford.edu).
 
 Publicly visible repository for the Legion parallel programming project at Stanford University.
 
@@ -201,8 +201,8 @@ to dump the files.
 
 Other Features
 ==================================================================================
-- Pointer Checks: Users can enable dynamic pointer checks of all physical region
-accesses by compiling with the '-DPOINTER_CHECKS' flag.
+- Bounds Checks: Users can enable dynamic pointer checks of all physical region
+accesses by compiling with the '-DBOUNDS_CHECKS' flag.
 
 - Inorder Execution: Users can force the high-level runtime to execute all tasks
 in program order by compiling with the '-DINORDER_EXECUTION' flag and then passing
