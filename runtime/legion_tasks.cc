@@ -1574,7 +1574,7 @@ namespace LegionRuntime {
     {
       // Invoke the mapper to perform the early mappings
       bool notify = runtime->invoke_mapper_pre_map_task(current_proc, this);
-      std::vector<MappingRef> mapping_refs(regions.size());
+      LegionVector<MappingRef>::aligned mapping_refs(regions.size());
       bool success = true;
       bool has_early_maps = false;
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -2230,8 +2230,8 @@ namespace LegionRuntime {
       std::set<Event> wait_on_events;
       {
         AutoLock o_lock(op_lock);
-        std::map<RegionTreeID,std::map<Event,FieldMask> >::iterator finder = 
-          premapping_events.find(tid);
+        std::map<RegionTreeID,LegionMap<Event,FieldMask>::aligned >::iterator 
+          finder = premapping_events.find(tid);
         if (finder == premapping_events.end())
         {
           // Couldn't find it, so add it
@@ -2239,8 +2239,8 @@ namespace LegionRuntime {
         }
         else
         {
-          std::map<Event,FieldMask> &pre_events = finder->second;
-          for (std::map<Event,FieldMask>::iterator it = 
+          LegionMap<Event,FieldMask>::aligned &pre_events = finder->second;
+          for (LegionMap<Event,FieldMask>::aligned::iterator it = 
                 pre_events.begin(); it != pre_events.end(); it++)
           {
             // See if we have anything to wait on
@@ -2274,8 +2274,8 @@ namespace LegionRuntime {
       term_premap.trigger();
       AutoLock o_lock(op_lock);
       // Remove it from the map
-      std::map<RegionTreeID,std::map<Event,FieldMask> >::iterator finder = 
-        premapping_events.find(tid);
+      std::map<RegionTreeID,LegionMap<Event,FieldMask>::aligned >::iterator 
+        finder = premapping_events.find(tid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != premapping_events.end());
 #endif
@@ -4248,7 +4248,7 @@ namespace LegionRuntime {
       locally_mapped.resize(regions.size(),true);
       num_virtual_mappings = 0;
       // Info for actual mappings
-      std::vector<MappingRef> mapping_refs(regions.size());
+      LegionVector<MappingRef>::aligned mapping_refs(regions.size());
       physical_instances.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -6720,7 +6720,7 @@ namespace LegionRuntime {
 #endif
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::map<LogicalView*,FieldMask> needed_views;
+      LegionMap<LogicalView*,FieldMask>::aligned needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());
@@ -9011,7 +9011,7 @@ namespace LegionRuntime {
     {
       // Send state for anything that was not premapped and has not
       // already been mapped
-      std::map<LogicalView*,FieldMask> needed_views;
+      LegionMap<LogicalView*,FieldMask>::aligned needed_views;
       std::set<PhysicalManager*> needed_managers;
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing_physical_contexts.size() == regions.size());

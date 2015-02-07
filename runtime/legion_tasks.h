@@ -513,7 +513,8 @@ namespace LegionRuntime {
       // Support for serializing premapping operations.  Note
       // we make it possible for operations accessing different
       // region trees or different fields to premap in parallel.
-      std::map<RegionTreeID,std::map<Event,FieldMask> > premapping_events;
+      std::map<RegionTreeID,
+               LegionMap<Event,FieldMask>::aligned > premapping_events;
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
     protected:
       Event legion_spy_start;

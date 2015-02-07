@@ -4891,8 +4891,8 @@ namespace LegionRuntime {
     {
       if (sum_mask & rhs.sum_mask)
       {
-#if defined(__AVX2__) and not defined(__MACH__)
-        __m256i temp_sum = _mm_set1_epi32(0);
+#ifdef __AVX2__
+        __m256i temp_sum = _mm256_set1_epi32(0);
         for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
         {
           bits.avx_vector[idx] = _mm256_and_si256(bits.avx_vector[idx], 
@@ -4926,8 +4926,8 @@ namespace LegionRuntime {
                                                        const AVXTLBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-#if defined(__AVX2__) and not defined(__MACH__)
-      __m256i temp_sum = _mm_set1_epi32(0);
+#ifdef __AVX2__
+      __m256i temp_sum = _mm256_set1_epi32(0);
       for (unsigned idx = 0; idx < AVX_ELMTS; idx++)
       {
         bits.avx_vector[idx] = _mm256_xor_si256(bits.avx_vector[idx], rhs(idx));

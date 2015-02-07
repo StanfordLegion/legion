@@ -26,6 +26,9 @@
 #include <cstddef>
 #include <functional>
 #include <stdlib.h>
+#ifndef __MACH__
+#include <malloc.h>
+#endif
 #include "legion_types.h" // StaticAssert
 
 namespace LegionRuntime {
@@ -311,7 +314,7 @@ namespace LegionRuntime {
       LegionAllocation::trace_free(T::alloc_type, sizeof(T));
 #endif
       delete to_free;
-    }
+    } 
 
     /**
      * A helper class for determining alignment of types
@@ -326,13 +329,48 @@ namespace LegionRuntime {
       enum { AlignmentOf = sizeof(AlignmentFinder) - sizeof(T) };
     };
 
+    template<size_t SIZE, size_t ALIGNMENT, bool BYTES>
+    inline void* legion_alloc_aligned(size_t cnt)
+    {
+      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
+      size_t alloc_size = cnt;
+      if (!BYTES)
+        alloc_size *= SIZE;
+      void *result;
+      if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert((alloc_size % ALIGNMENT) == 0);
+#endif
+      // memalign is faster than posix_memalign so use it if we have it
+#ifdef __MACH__
+        int error = 
+          posix_memalign(&result, ALIGNMENT, alloc_size);
+        assert(error == 0);
+#else
+        result = memalign(ALIGNMENT, alloc_size);
+#endif
+      }
+      else
+        result = malloc(alloc_size);
+
+      return result;
+    }
+
+    template<typename T, bool BYTES>
+    inline void* legion_alloc_aligned(size_t cnt)
+    {
+      return legion_alloc_aligned<sizeof(T),
+              AlignmentTrait<T>::AlignmentOf,BYTES>(cnt);
+    }
+
     /**
      * \class AlignedAllocator
      * A class for doing aligned allocation of memory for
      * STL data structures containing data types that require
      * larger alignments than the default malloc provides.
      */
-    template<typename T, size_t N = 8>
+    template<typename T>
     class AlignedAllocator {
     public:
       typedef size_t          size_type;
@@ -345,14 +383,14 @@ namespace LegionRuntime {
     public:
       template<typename U>
       struct rebind {
-        typedef AlignedAllocator<U, N> other;
+        typedef AlignedAllocator<U> other;
       };
     public:
       inline explicit AlignedAllocator(void) { }
       inline ~AlignedAllocator(void) { }
-      inline AlignedAllocator(const AlignedAllocator<T, N> &rhs) { }
+      inline AlignedAllocator(const AlignedAllocator<T> &rhs) { }
       template<typename U>
-      inline AlignedAllocator(const AlignedAllocator<U, N> &rhs) { }
+      inline AlignedAllocator(const AlignedAllocator<U> &rhs) { }
     public:
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
@@ -360,16 +398,8 @@ namespace LegionRuntime {
       inline pointer allocate(size_type cnt,
                               typename std::allocator<void>::const_pointer = 0)
       {
-        size_type alloc_size = cnt * sizeof(T);
-        if (AlignmentTrait<T>::AlignmentOf >= N)
-        {
-          void *result;
-          int error = 
-            posix_memalign(&result, AlignmentTrait<T>::AlignmentOf, alloc_size);
-          assert(error == 0);
-          return reinterpret_cast<pointer>(result);
-        }
-        return reinterpret_cast<pointer>(malloc(alloc_size));
+        void *result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        return reinterpret_cast<pointer>(result);
       }
       inline void deallocate(pointer p, size_type size) {
         free(p);
@@ -393,7 +423,7 @@ namespace LegionRuntime {
      * data structures. When tracing is disabled, it defaults back
      * to using the standard malloc/free and new/delete operations.
      */
-    template<typename T, AllocationType A, size_t N = 8>
+    template<typename T, AllocationType A, bool ALIGNED>
     class LegionAllocator {
     public:
       typedef size_t          size_type;
@@ -406,7 +436,7 @@ namespace LegionRuntime {
     public:
       template<typename U>
       struct rebind {
-        typedef LegionAllocator<U, A, N> other;
+        typedef LegionAllocator<U, A, ALIGNED> other;
       };
     public:
       inline explicit LegionAllocator(void) 
@@ -415,13 +445,13 @@ namespace LegionRuntime {
 #endif
       { }
       inline ~LegionAllocator(void) { }
-      inline LegionAllocator(const LegionAllocator<T, A, N> &rhs)
+      inline LegionAllocator(const LegionAllocator<T, A, ALIGNED> &rhs)
 #ifdef TRACE_ALLOCATION
         : runtime(rhs.runtime) 
 #endif
       { }
       template<typename U>
-      inline LegionAllocator(const LegionAllocator<U, A, N> &rhs) 
+      inline LegionAllocator(const LegionAllocator<U, A, ALIGNED> &rhs) 
 #ifdef TRACE_ALLOCATION
         : runtime(rhs.runtime) 
 #endif  
@@ -432,19 +462,15 @@ namespace LegionRuntime {
     public:
       inline pointer allocate(size_type cnt,
                       typename std::allocator<void>::const_pointer = 0) {
-        size_type alloc_size = cnt * sizeof(T);
 #ifdef TRACE_ALLOCATION
         LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
 #endif
-        if (AlignmentTrait<T>::AlignmentOf >= N)
-        {
-          void *result;
-          int error = 
-            posix_memalign(&result, AlignmentTrait<T>::AlignmentOf, alloc_size);
-          assert(error == 0);
-          return reinterpret_cast<pointer>(result);
-        }
-        return reinterpret_cast<pointer>(malloc(alloc_size));
+        void *result;
+        if (ALIGNED)
+          result = legion_alloc_aligned<T, false/*bytes*/>(cnt);
+        else
+          result = malloc(cnt * sizeof(T));
+        return reinterpret_cast<pointer>(result);
       }
       inline void deallocate(pointer p, size_type size) {
 #ifdef TRACE_ALLOCATION
@@ -469,69 +495,48 @@ namespace LegionRuntime {
 #endif
     };
 
-#if defined(__AVX__)
-#define MAX_ALIGN 32
-#elif defined(__SSE2__)
-#define MAX_ALIGN 16
-#else
-#define MAX_ALIGN 8
-#endif
     template<typename T, AllocationType A = LAST_ALLOC>
     struct LegionSet {
-      typedef std::set<T, std::less<T>, LegionAllocator<T, A> > tracked;
       typedef std::set<T, std::less<T>, 
-                       AlignedAllocator<T, MAX_ALIGN> > aligned;
+                       LegionAllocator<T, A, false/*aligned*/> > tracked;
+      typedef std::set<T, std::less<T>, AlignedAllocator<T> > aligned;
       typedef std::set<T, std::less<T>,
-                       LegionAllocator<T, A, MAX_ALIGN> > track_aligned;
+                       LegionAllocator<T, A, true/*aligned*/> > track_aligned;
     };
 
     template<typename T, AllocationType A = LAST_ALLOC>
     struct LegionList {
-      typedef std::list<T, LegionAllocator<T, A> > tracked;
-      typedef std::list<T, AlignedAllocator<T, MAX_ALIGN> > aligned;
-      typedef std::list<T, LegionAllocator<T, A, MAX_ALIGN> > track_aligned;
+      typedef std::list<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
+      typedef std::list<T, AlignedAllocator<T> > aligned;
+      typedef std::list<T, 
+                        LegionAllocator<T, A, true/*aligned*/> > track_aligned;
     };
 
     template<typename T, AllocationType A = LAST_ALLOC>
     struct LegionDeque {
-      typedef std::deque<T, LegionAllocator<T, A> > tracked;
-      typedef std::deque<T, AlignedAllocator<T, MAX_ALIGN> > aligned;
-      typedef std::deque<T, LegionAllocator<T, A, MAX_ALIGN> > track_aligned;
+      typedef std::deque<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
+      typedef std::deque<T, AlignedAllocator<T> > aligned;
+      typedef std::deque<T, 
+                         LegionAllocator<T, A, true/*aligned*/> > track_aligned;
     };
 
     template<typename T, AllocationType A = LAST_ALLOC>
     struct LegionVector {
-      typedef std::vector<T, LegionAllocator<T, A> > tracked;
-      typedef std::vector<T, AlignedAllocator<T, MAX_ALIGN> > aligned;
-      typedef std::vector<T, LegionAllocator<T, A, MAX_ALIGN> > track_aligned;
+      typedef std::vector<T, LegionAllocator<T, A, false/*aligned*/> > tracked;
+      typedef std::vector<T, AlignedAllocator<T> > aligned;
+      typedef std::vector<T, 
+                         LegionAllocator<T, A, true/*aligned*/> > track_aligned;
     };
 
     template<typename T1, typename T2, AllocationType A = LAST_ALLOC>
     struct LegionMap {
       typedef std::map<T1, T2, std::less<T1>,
-               LegionAllocator<std::pair<const T1, T2>, A> > tracked;
+        LegionAllocator<std::pair<const T1, T2>, A, false/*aligned*/> > tracked;
       typedef std::map<T1, T2, std::less<T1>,
-               AlignedAllocator<std::pair<const T1, T2>, MAX_ALIGN> > aligned;
-      typedef std::map<T1, T2, std::less<T1>,
-       LegionAllocator<std::pair<const T1, T2>, A, MAX_ALIGN> > track_aligned;
+                           AlignedAllocator<std::pair<const T1, T2> > > aligned;
+      typedef std::map<T1, T2, std::less<T1>, LegionAllocator<
+                   std::pair<const T1, T2>, A, true/*aligned*/> > track_aligned;
     };
-#undef MAX_ALIGN
-
-#if 0
-    template<typename T, AllocationType A>
-    struct LegionContainer {
-      typedef std::set<T, std::less<T>, LegionAllocator<T, A> > set;
-      typedef std::list<T, LegionAllocator<T, A> > list;
-      typedef std::deque<T, LegionAllocator<T, A> > deque;
-      typedef std::vector<T, LegionAllocator<T, A> > vector;
-    };
-
-    template<typename T1, typename T2, AllocationType A>
-    struct LegionKeyValue {
-      typedef std::map<T1, T2, std::less<T1>, 
-                       LegionAllocator<std::pair<const T1, T2>, A> > map;
-    };
-#endif
   };
 };
 

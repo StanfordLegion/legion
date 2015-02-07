@@ -2669,7 +2669,8 @@ namespace LegionRuntime {
       // Now ask the mapper how to map this copy operation
       bool notify = runtime->invoke_mapper_map_copy(local_proc, this);
       // Map all the destination instances
-      std::vector<MappingRef> src_mapping_refs(src_requirements.size());
+      LegionVector<MappingRef>::aligned 
+                            src_mapping_refs(src_requirements.size());
       for (unsigned idx = 0; (idx < src_requirements.size()) && 
             map_success; idx++)
       {
@@ -2698,7 +2699,8 @@ namespace LegionRuntime {
           break;
         }
       }
-      std::vector<MappingRef> dst_mapping_refs(dst_requirements.size());
+      LegionVector<MappingRef>::aligned 
+                          dst_mapping_refs(dst_requirements.size());
       for (unsigned idx = 0; (idx < dst_requirements.size()) && 
             map_success; idx++)
       {

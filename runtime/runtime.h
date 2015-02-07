@@ -1754,7 +1754,7 @@ namespace LegionRuntime {
       std::deque<RegionTreeContext> available_contexts;
     protected:
       Reservation group_lock;
-      LegionMap<uint64_t,std::deque<ProcessorGroupInfo>,
+      LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
     protected:
       Reservation distributed_id_lock;

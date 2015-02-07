@@ -549,10 +549,10 @@ namespace LegionRuntime {
 	  inline T read(ptr_t ptr) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_READ>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -560,10 +560,10 @@ namespace LegionRuntime {
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -572,10 +572,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges when getting pointers
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -584,10 +584,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges when getting references
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -596,10 +596,10 @@ namespace LegionRuntime {
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->template region, ptr);
+	    check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -665,10 +665,10 @@ namespace LegionRuntime {
 	  inline T read(ptr_t ptr) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_READ>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -676,10 +676,10 @@ namespace LegionRuntime {
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -688,10 +688,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges on pointers 
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -700,10 +700,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges on references
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -712,10 +712,10 @@ namespace LegionRuntime {
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->template region, ptr);
+	    check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -766,7 +766,7 @@ namespace LegionRuntime {
 	    : Untyped(_base, _stride, _block_size, _block_stride) {}
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
-          inline void set_region(void *r) { this->template region = r; }
+          inline void set_region(void *r) { this->region = r; }
 #endif
 #ifdef PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { this->priv = p; }
@@ -776,10 +776,10 @@ namespace LegionRuntime {
 	  inline T read(ptr_t ptr) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_READ>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -787,10 +787,10 @@ namespace LegionRuntime {
 	  inline void write(ptr_t ptr, const T& newval) const 
           { 
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -799,10 +799,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges on pointers
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -811,10 +811,10 @@ namespace LegionRuntime {
           { 
 #ifdef PRIVILEGE_CHECKS
             // Don't check privileges on references
-            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->template region);
+            //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -823,10 +823,10 @@ namespace LegionRuntime {
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->template region, ptr);
+	    check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -845,7 +845,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(typename REDOP::RHS)));
 	  }
@@ -877,7 +877,7 @@ namespace LegionRuntime {
 	  Typed(void *_base) : Untyped(_base) {}
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
-          inline void set_region(void *r) { this->template region = r; }
+          inline void set_region(void *r) { this->region = r; }
 #endif
 #ifdef PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) 
@@ -892,10 +892,10 @@ namespace LegionRuntime {
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->template region, ptr);
+	    check_bounds(this->region, ptr);
 #endif
 	    REDOP::template fold<false>(*(typename REDOP::RHS *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -916,7 +916,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->template region, ptr);
+            check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(ReductionListEntry)));
 	  }
@@ -958,7 +958,7 @@ namespace LegionRuntime {
 	  Typed(void *_base, ptr_t *_next_entry) : Untyped(_base, _next_entry) {}
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
-        inline void set_region(void *r) { this->template region = r; } 
+        inline void set_region(void *r) { this->region = r; } 
 #endif
 #ifdef PRIVILEGE_CHECKS
         inline void set_privileges(AccessorPrivilege p) 
@@ -972,10 +972,10 @@ namespace LegionRuntime {
 	  inline void reduce(ptr_t ptr, typename REDOP::RHS newval) const
 	  {
 #ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->template region);
+            check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->template region, ptr);
+	    check_bounds(this->region, ptr);
 #endif
 	    ptr_t listptr = Untyped::get_next();
 	    ReductionListEntry *entry = reinterpret_cast<ReductionListEntry *>(Untyped::elem_ptr(listptr));

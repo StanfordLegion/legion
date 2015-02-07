@@ -11237,11 +11237,11 @@ namespace LegionRuntime {
       }
       uint64_t hash = local_mask.get_hash_key();
       AutoLock g_lock(group_lock);
-      std::map<uint64_t,std::deque<ProcessorGroupInfo> >::iterator finder = 
-        processor_groups.find(hash);
+      std::map<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned >::iterator 
+        finder = processor_groups.find(hash);
       if (finder != processor_groups.end())
       {
-        for (std::deque<ProcessorGroupInfo>::const_iterator it = 
+        for (LegionDeque<ProcessorGroupInfo>::aligned::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           if (local_mask == it->processor_mask)

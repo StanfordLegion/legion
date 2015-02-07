@@ -50,7 +50,7 @@
 #endif
 
 #ifndef MAX_FIELDS
-#define MAX_FIELDS         128 // must be a power of 2
+#define MAX_FIELDS         512 // must be a power of 2
 #endif
 
 // Some default values
@@ -131,6 +131,13 @@
 // based on the number of scheduler invocations
 #ifndef TRACE_ALLOCATION_FREQUENCY
 #define TRACE_ALLOCATION_FREQUENCY      1024
+#endif
+
+// The maximum alignment guaranteed on the 
+// target machine bytes.  For most 64-bit 
+// systems this should be 16 bytes.
+#ifndef LEGION_MAX_ALIGNMENT
+#define LEGION_MAX_ALIGNMENT            16
 #endif
 
 // Some helper macros

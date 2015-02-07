@@ -383,7 +383,7 @@ namespace LegionRuntime {
 #define FIELD_MASK          0x3F
 #define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
-#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
+#if defined(__AVX__)
 #if (MAX_FIELDS > 256)
     typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
 #elif (MAX_FIELDS > 128)
@@ -422,7 +422,7 @@ namespace LegionRuntime {
 #define NODE_MASK           0x3F
 #define NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
-#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
+#if defined(__AVX__)
 #if (MAX_NUM_NODES > 256)
     typedef AVXTLBitMask<MAX_NUM_NODES> NodeMask;
 #elif (MAX_NUM_NODES > 128)
@@ -458,7 +458,7 @@ namespace LegionRuntime {
 #define PROC_MASK           0x3F
 #define PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
-#if defined(ALIGNED_FIELD_MASKS) && defined(__AVX__)
+#if defined(__AVX__)
 #if (MAX_NUM_PROCS > 256)
     typedef AVXTLBitMask<MAX_NUM_PROCS> ProcessorMask;
 #elif (MAX_NUM_PROCS > 128)

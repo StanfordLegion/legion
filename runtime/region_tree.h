@@ -257,7 +257,7 @@ namespace LegionRuntime {
                                const RegionRequirement &req,
                                StateDirectory *directory,
                                AddressSpaceID target,
-                               std::map<LogicalView*,FieldMask> &needed_views,
+                   LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void send_tree_shape(const IndexSpaceRequirement &req,
                            AddressSpaceID target);
@@ -276,7 +276,7 @@ namespace LegionRuntime {
           const std::set<PhysicalManager*> &needed_managers,
           AddressSpaceID target);
       void send_remote_references(
-          const std::map<LogicalView*,FieldMask> &needed_views,
+          const LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
           const std::set<PhysicalManager*> &needed_managers, 
           AddressSpaceID target);
       void handle_remote_references(Deserializer &derez);
@@ -655,12 +655,12 @@ namespace LegionRuntime {
       public:
         FieldMask valid_fields;
         // Each field should be set in exactly one of these entries
-        LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked node_states;
+        LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned node_states;
       };
       struct RemoteForestState {
       public:
         FieldMask valid_fields;
-        std::map<RegionTreeNode*,RemoteTreeState> remote_tree_states;
+        LegionMap<RegionTreeNode*,RemoteTreeState>::aligned remote_tree_states;
       };
     public:
       StateDirectory(UniqueID remote_owner_uid, RegionTreeForest *forest,
@@ -669,6 +669,8 @@ namespace LegionRuntime {
       ~StateDirectory(void);
     public:
       StateDirectory& operator=(const StateDirectory &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       inline UniqueID get_owner_uid(void) const { return remote_owner_uid; }
     public:
@@ -710,7 +712,7 @@ namespace LegionRuntime {
     protected:
       void insert_node_state(AddressSpaceID node,
                              const FieldMask &node_mask,
-       LegionList<RemoteNodeState,DIRECTORY_ALLOC>::tracked &node_states);
+       LegionList<RemoteNodeState,DIRECTORY_ALLOC>::track_aligned &node_states);
     private:
       UniqueID remote_owner_uid;
       RegionTreeForest *const forest;
@@ -742,7 +744,7 @@ namespace LegionRuntime {
       // remote node in at most one RemoteNodeState for the
       // corresponding RegionTreeNode. This guarantees that our
       // information about fields on remote nodes is precise.
-      std::map<RegionTreeID,RemoteForestState> remote_forest_states;
+      LegionMap<RegionTreeID,RemoteForestState>::aligned remote_forest_states;
     };
 
     /**
@@ -809,7 +811,7 @@ namespace LegionRuntime {
       std::map<IndexTreeNode*,IntersectInfo> intersections;
       std::map<IndexTreeNode*,bool> dominators;
     protected:
-      std::map<SemanticTag,SemanticInfo> semantic_info;
+      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
 
     /**
@@ -824,6 +826,8 @@ namespace LegionRuntime {
       virtual ~IndexSpaceNode(void);
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
     public:
@@ -902,6 +906,8 @@ namespace LegionRuntime {
       virtual ~IndexPartNode(void);
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
     public:
@@ -984,6 +990,8 @@ namespace LegionRuntime {
       ~FieldSpaceNode(void);
     public:
       FieldSpaceNode& operator=(const FieldSpaceNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void attach_semantic_information(SemanticTag tag, 
                                        const NodeMask &sources,
@@ -1070,7 +1078,7 @@ namespace LegionRuntime {
        * can translate a field mask from any other node onto
        * this node.
        */
-      std::map<AddressSpaceID,FieldPermutation> transformers;
+      LegionMap<AddressSpaceID,FieldPermutation>::aligned transformers;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
@@ -1078,8 +1086,9 @@ namespace LegionRuntime {
       std::map<FIELD_TYPE,LegionDeque<LayoutDescription*,
                           LAYOUT_DESCRIPTION_ALLOC>::tracked> layouts;
     private:
-      std::map<SemanticTag,SemanticInfo> semantic_info;
-      std::map<std::pair<FieldID,SemanticTag>,SemanticInfo> semantic_field_info;
+      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
+      LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>::aligned 
+                                                    semantic_field_info;
     };
  
     /**
@@ -1157,9 +1166,11 @@ namespace LegionRuntime {
       ~TreeCloseImpl(void);
     public:
       TreeCloseImpl& operator=(const TreeCloseImpl &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void add_close_op(const FieldMask &close_mask,
-                        std::deque<CloseInfo> &needed_ops);
+                        LegionDeque<CloseInfo>::aligned &needed_ops);
       void return_close_op(const FieldMask &close_mask);
     public:
       const int target_child;
@@ -1194,7 +1205,7 @@ namespace LegionRuntime {
       { return impl->remaining_logical; }
     public:
       void add_close_op(const FieldMask &close_mask,
-                        std::deque<CloseInfo> &needed_ops);
+                        LegionDeque<CloseInfo>::aligned &needed_ops);
       void return_close_op(const FieldMask &close_mask);
     private:
       TreeCloseImpl *impl;
@@ -1264,7 +1275,7 @@ namespace LegionRuntime {
       }
     public:
       FieldMask valid_fields;
-      std::map<Color,FieldMask> open_children;
+      LegionMap<Color,FieldMask>::aligned open_children;
     };
 
     /**
@@ -1302,15 +1313,22 @@ namespace LegionRuntime {
       ~LogicalState(void);
     public:
       LogicalState& operator=(const LogicalState &rhs);
+      void* operator new(size_t count);
+      void* operator new[](size_t count);
+      void operator delete(void *ptr);
+      void operator delete[](void *ptr);
     public:
       void reset(void);
     public:
       LegionMap<VersionID,FieldMask,
-                LOGICAL_FIELD_VERSIONS_ALLOC>::tracked field_versions;
-      LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC>::tracked field_states;
+                LOGICAL_FIELD_VERSIONS_ALLOC>::track_aligned field_versions;
+      LegionList<FieldState,
+                 LOGICAL_FIELD_STATE_ALLOC>::track_aligned field_states;
 #ifndef LOGICAL_FIELD_TREE
-      LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::tracked curr_epoch_users;
-      LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::tracked prev_epoch_users;
+      LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned 
+                                                            curr_epoch_users;
+      LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
+                                                            prev_epoch_users;
 #else
       FieldTree<LogicalUser> *curr_epoch_users;
       FieldTree<LogicalUser> *prev_epoch_users;
@@ -1377,7 +1395,7 @@ namespace LegionRuntime {
     private:
       const FieldMask filter_mask;
       FieldTree<LogicalUser> *const target;
-      std::deque<LogicalUser> reinsert;
+      LegionDeque<LogicalUser>::aligned reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
     };
@@ -1418,12 +1436,12 @@ namespace LegionRuntime {
       bool validates;
       // All the fields that we close for this traversal
       FieldMask closed_mask;
-      std::deque<LogicalUser> closed_users;
+      LegionDeque<LogicalUser>::aligned closed_users;
       std::deque<TreeClose> close_operations;
 #ifdef LOGICAL_FIELD_TREE
     public:
       FieldMask local_closing_mask;
-      std::deque<LogicalUser> reinsert;
+      LegionDeque<LogicalUser>::aligned reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
 #endif
@@ -1446,16 +1464,20 @@ namespace LegionRuntime {
       PhysicalState(const PhysicalState &rhs);
     public:
       PhysicalState& operator=(const PhysicalState &rhs);
+      void* operator new(size_t count);
+      void* operator new[](size_t count);
+      void operator delete(void *ptr);
+      void operator delete[](void *ptr);
     public:
       FieldMask dirty_mask;
       FieldMask reduction_mask;
       FieldMask remote_mask; // which fields are valid remote copies
       ChildState children;
       LegionMap<InstanceView*, FieldMask,
-                VALID_VIEW_ALLOC>::tracked valid_views;
+                VALID_VIEW_ALLOC>::track_aligned valid_views;
       LegionMap<ReductionView*, FieldMask,
-                VALID_REDUCTION_ALLOC>::tracked reduction_views;
-      LegionMap<MaterializedView*, std::map<Event,FieldMask>,
+                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
+      LegionMap<MaterializedView*, LegionMap<Event,FieldMask>::aligned,
                 PENDING_UPDATES_ALLOC>::tracked pending_updates;
     public:
       // These are used for managing access to the physical state
@@ -1528,8 +1550,8 @@ namespace LegionRuntime {
       bool permit_leave_open;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
-      std::map<CompositeNode*,FieldMask> collapsed_nodes;
-      std::map<ReductionView*,FieldMask> reduction_views;
+      LegionMap<CompositeNode*,FieldMask>::aligned collapsed_nodes;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**
@@ -1562,11 +1584,11 @@ namespace LegionRuntime {
       FieldMask non_dominated;
       FieldMask observed;
     private:
-      std::deque<PhysicalUser> reinsert;
+      LegionDeque<PhysicalUser>::aligned reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
     private:
-      std::deque<PhysicalUser> filtered_users;
+      LegionDeque<PhysicalUser>::aligned filtered_users;
     };
 
     /**
@@ -1584,7 +1606,7 @@ namespace LegionRuntime {
       void end_node(FieldTree<PhysicalUser> *node);
     private:
       const FieldMask filter_mask;
-      std::deque<PhysicalUser> reinsert;
+      LegionDeque<PhysicalUser>::aligned reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
     };
@@ -1677,8 +1699,7 @@ namespace LegionRuntime {
      */
     class PhysicalUnpacker {
     public:
-      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source);//,
-                       /*std::map<Event,FieldMask> &deferred_events);*/
+      PhysicalUnpacker(FieldSpaceNode *field_node, AddressSpaceID source);
     public:
       void begin_node(FieldTree<PhysicalUser> *node);
       void end_node(FieldTree<PhysicalUser> *node);
@@ -1687,9 +1708,8 @@ namespace LegionRuntime {
     private:
       FieldSpaceNode *const field_node;
       const AddressSpaceID source;
-      //std::map<Event,FieldMask> &deferred_events;
     private:
-      std::deque<PhysicalUser> reinsert;
+      LegionDeque<PhysicalUser>::aligned reinsert;
       unsigned reinsert_count;
       std::deque<unsigned> reinsert_stack;
     };
@@ -1787,12 +1807,12 @@ namespace LegionRuntime {
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
                                     bool record_close_operations,
-                                    std::deque<FieldState> &new_states,
+                                   LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &need_open);
       void merge_new_field_state(LogicalState &state, 
                                  const FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
-                                  const std::deque<FieldState> &new_states);
+                            const LegionDeque<FieldState>::aligned &new_states);
       void record_field_versions(LogicalState &state, RegionTreePath &path,
                                  const FieldMask &field_mask, 
                                  unsigned depth, bool before);
@@ -1822,8 +1842,8 @@ namespace LegionRuntime {
                                const FieldMask &closing_mask);
       bool select_close_targets(PhysicalCloser &closer,
                                 const FieldMask &closing_mask,
-                          const std::map<InstanceView*,FieldMask> &valid_views,
-                          std::map<MaterializedView*,FieldMask> &update_views,
+                const LegionMap<InstanceView*,FieldMask>::aligned &valid_views,
+                  LegionMap<MaterializedView*,FieldMask>::aligned &update_views,
                                 bool &create_composite);
       bool siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState *state,
@@ -1862,9 +1882,9 @@ namespace LegionRuntime {
                                      const FieldMask &valid_mask,
                                      const FieldMask &space_mask, 
                                      bool needs_space,
-                             std::map<InstanceView*,FieldMask> &valid_views);
+                   LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
       static void remove_valid_references(
-                       const std::map<InstanceView*,FieldMask> &valid_views);
+             const LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
       void find_valid_reduction_views(PhysicalState *state,
                                       const FieldMask &valid_mask,
                                       std::set<ReductionView*> &valid_views);
@@ -1878,8 +1898,8 @@ namespace LegionRuntime {
                                 std::set<Event> &pending_events);
       void find_copy_across_instances(MappableInfo *info,
                                       MaterializedView *target,
-                           std::map<MaterializedView*,FieldMask> &src_instances,
-                       std::map<CompositeView*,FieldMask> &composite_instances);
+                 LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+             LegionMap<CompositeView*,FieldMask>::aligned &composite_instances);
       // Since figuring out how to issue copies is expensive, try not
       // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
@@ -1887,32 +1907,32 @@ namespace LegionRuntime {
       void issue_update_copies(MappableInfo *info,
                                MaterializedView *target, 
                                FieldMask copy_mask,
-                      const std::map<InstanceView*,FieldMask> &valid_instances);
+            const LegionMap<InstanceView*,FieldMask>::aligned &valid_instances);
       void sort_copy_instances(MappableInfo *info,
                                MaterializedView *target,
                                FieldMask &copy_mask,
-                              std::map<InstanceView*,FieldMask> &copy_instances,
-                           std::map<MaterializedView*,FieldMask> &src_instances,
-                       std::map<CompositeView*,FieldMask> &composite_instances);
+                    LegionMap<InstanceView*,FieldMask>::aligned &copy_instances,
+                 LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+             LegionMap<CompositeView*,FieldMask>::aligned &composite_instances);
       // Issue copies for fields with the same event preconditions
       static void issue_grouped_copies(MappableInfo *info,
                                        MaterializedView *dst,
-                                       std::map<Event,FieldMask> &preconditions,
+                             LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
                                        const std::set<Domain> &copy_domains,
-                     const std::map<MaterializedView*,FieldMask> &src_instances,
-                                     std::map<Event,FieldMask> &postconditions);
+           const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
+                           LegionMap<Event,FieldMask>::aligned &postconditions);
       // Note this function can mutate the preconditions set
       static void compute_precondition_sets(FieldMask update_mask,
-          std::map<Event,FieldMask> &preconditions,
-          std::list<PreconditionSet> &precondition_sets);
+          LegionMap<Event,FieldMask>::aligned &preconditions,
+          LegionList<PreconditionSet>::aligned &precondition_sets);
       Event perform_copy_operation(Event precondition,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    Processor local_proc,
-                    const std::map<ReductionView*,FieldMask> &valid_reductions);
+          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask, 
                                      bool clean, bool force);
@@ -1997,7 +2017,7 @@ namespace LegionRuntime {
       bool pack_send_state(ContextID ctx, Serializer &rez, 
                            AddressSpaceID target,
                            const FieldMask &send_mask,
-                           std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                            std::set<PhysicalManager*> &needed_managers);
       bool pack_send_back_state(ContextID ctx, Serializer &rez,
                                 AddressSpaceID target, const FieldMask &send_mask,
@@ -2042,7 +2062,7 @@ namespace LegionRuntime {
       size_t physical_state_size;
 #endif
     protected:
-      std::map<SemanticTag,SemanticInfo> semantic_info;
+      LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
 
     /**
@@ -2057,6 +2077,8 @@ namespace LegionRuntime {
       virtual ~RegionNode(void);
     public:
       RegionNode& operator=(const RegionNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       bool has_child(Color c);
       PartitionNode* get_child(Color c);
@@ -2115,12 +2137,12 @@ namespace LegionRuntime {
                                           const FieldMask &mask);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                               std::map<Color,FieldMask> &to_traverse,
+                               LegionMap<Color,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
       void print_physical_state(PhysicalState *state,
-                                const FieldMask &capture_mask,
-                                std::map<Color,FieldMask> &to_traverse,
-                                TreeStateLogger *logger);
+                               const FieldMask &capture_mask,
+                               LegionMap<Color,FieldMask>::aligned &to_traverse,
+                               TreeStateLogger *logger);
 #ifdef DEBUG_HIGH_LEVEL
     public:
       // These methods are only ever called by a debugger
@@ -2147,7 +2169,7 @@ namespace LegionRuntime {
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
                       AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::map<LogicalView*,FieldMask> &needed_views,
+                      LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -2181,6 +2203,8 @@ namespace LegionRuntime {
       ~PartitionNode(void);
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       bool has_child(Color c);
       RegionNode* get_child(Color c);
@@ -2237,12 +2261,12 @@ namespace LegionRuntime {
                                           const FieldMask &mask);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                               std::map<Color,FieldMask> &to_traverse,
+                               LegionMap<Color,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
       void print_physical_state(PhysicalState *state,
-                                const FieldMask &capture_mask,
-                                std::map<Color,FieldMask> &to_traverse,
-                                TreeStateLogger *logger);
+                               const FieldMask &capture_mask,
+                               LegionMap<Color,FieldMask>::aligned &to_traverse,
+                               TreeStateLogger *logger);
 #ifdef DEBUG_HIGH_LEVEL
     public:
       // These methods are only ever called by a debugger
@@ -2257,7 +2281,7 @@ namespace LegionRuntime {
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
                       AddressSpaceID target,
                       const FieldMask &send_mask, bool invalidate,
-                      std::map<LogicalView*,FieldMask> &needed_views,
+                      LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                       std::set<PhysicalManager*> &needed_managers);
       static void handle_send_state(RegionTreeForest *context,
                                     Deserializer &derez, 
@@ -2303,10 +2327,11 @@ namespace LegionRuntime {
                                 const FieldMask &version_mask);
     public:
       void get_close_operations(unsigned depth,
-                                std::deque<CloseInfo> &needed_ops);
+                                LegionDeque<CloseInfo>::aligned &needed_ops);
     protected:
       std::vector<int> path;
-      std::vector<std::deque<std::pair<TreeClose,FieldMask> > > close_ops;
+      std::vector<LegionDeque<std::pair<TreeClose,FieldMask> >::aligned > 
+                                                                   close_ops;
       unsigned min_depth;
       unsigned max_depth;
     };
@@ -2566,7 +2591,7 @@ namespace LegionRuntime {
     public:
       StateSender(ContextID ctx, UniqueID remote_owner_uid,
                   AddressSpaceID target,
-                  std::map<LogicalView*,FieldMask> &needed_views,
+                  LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                   std::set<PhysicalManager*> &needed_managers,
                   const FieldMask &send_mask, bool invalidate);
       StateSender(const StateSender &rhs);
@@ -2581,7 +2606,7 @@ namespace LegionRuntime {
       const ContextID ctx;
       const UniqueID remote_owner_uid;
       const AddressSpaceID target;
-      std::map<LogicalView*,FieldMask> &needed_views;
+      LegionMap<LogicalView*,FieldMask>::aligned &needed_views;
       std::set<PhysicalManager*> &needed_managers;
       const FieldMask send_mask;
       const bool invalidate;
@@ -2755,6 +2780,8 @@ namespace LegionRuntime {
       ~LayoutDescription(void);
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalInstance inst,
@@ -2800,7 +2827,8 @@ namespace LegionRuntime {
       std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
     protected:
       Reservation offset_lock; 
-      std::map<FIELD_TYPE,std::vector<OffsetEntry> > memoized_offsets;
+      std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned > 
+                                                  memoized_offsets;
     protected:
       NodeMask known_nodes;
     };
@@ -2852,17 +2880,6 @@ namespace LegionRuntime {
     class InstanceManager : public PhysicalManager {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
-    public:
-      struct OffsetEntry {
-      public:
-        OffsetEntry(void) { }
-        OffsetEntry(const FieldMask &m,
-                    const std::vector<Domain::CopySrcDstField> &f)
-          : offset_mask(m), offsets(f) { }
-      public:
-        FieldMask offset_mask;
-        std::vector<Domain::CopySrcDstField> offsets;
-      };
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
@@ -3101,7 +3118,7 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                 std::map<Event,FieldMask> &preconditions) = 0;
+                     LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
                                  Processor exec_proc) = 0;
@@ -3158,7 +3175,7 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                 std::map<Event,FieldMask> &preconditions) = 0;
+                     LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
                                  Processor exec_proc) = 0;
@@ -3195,7 +3212,7 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                             std::set<PhysicalManager*> &needed_managers) = 0;
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -3261,7 +3278,7 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                   std::map<Event,FieldMask> &preconditions);
+                         LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
                                  Processor exec_proc);
@@ -3286,25 +3303,25 @@ namespace LegionRuntime {
       void find_copy_preconditions_above(Color child_color,
                                    ReductionOpID redop, bool reading,
                                    const FieldMask &copy_mask,
-                                   std::map<Event,FieldMask> &preconditions);
+                   LegionMap<Event,FieldMask>::aligned &preconditions);
       template<bool ABOVE>
       void find_local_copy_preconditions(int local_color,
                                    ReductionOpID redop, bool reading,
                                    const FieldMask &copy_mask,
-                                   std::map<Event,FieldMask> &preconditions);
+                           LegionMap<Event,FieldMask>::aligned &preconditions);
       bool has_war_dependence_above(const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     Color child_color);
       void update_versions(const FieldMask &update_mask);
       void filter_local_users(Event term_event);
       void filter_local_users(const std::set<Event> &term_events);
-      template<typename ALLOC>
-      void condense_user_list(std::list<PhysicalUser,ALLOC> &users, 
-                              bool previous);
+      template<AllocationType ALLOC>
+      void condense_user_list(typename
+          LegionList<PhysicalUser,ALLOC>::track_aligned &users, bool previous);
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                             std::set<PhysicalManager*> &needed_managers);
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -3329,9 +3346,10 @@ namespace LegionRuntime {
       static void handle_send_updates(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
-      template<typename ALLOC>
-      static void filter_list(std::list<PhysicalUser,ALLOC> &user_list,
-                              const FieldMask &filter_mask);
+      template<AllocationType ALLOC>
+      static void filter_list(typename 
+                              LegionList<PhysicalUser,ALLOC>::track_aligned 
+                              &user_list, const FieldMask &filter_mask);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -3347,8 +3365,10 @@ namespace LegionRuntime {
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
 #ifndef PHYSICAL_FIELD_TREE
-      LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::tracked curr_epoch_users;
-      LegionList<PhysicalUser,PREV_PHYSICAL_ALLOC>::tracked prev_epoch_users;
+      LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned 
+                                                      curr_epoch_users;
+      LegionList<PhysicalUser,PREV_PHYSICAL_ALLOC>::track_aligned 
+                                                      prev_epoch_users;
 #else
       FieldTree<PhysicalUser> *const curr_epoch_users;
       FieldTree<PhysicalUser> *const prev_epoch_users;
@@ -3358,7 +3378,7 @@ namespace LegionRuntime {
       LegionSet<Event,EVENT_REFERENCE_ALLOC>::tracked event_references;
       // Version information for each of the fields
       LegionMap<VersionID,FieldMask,
-                PHYSICAL_VERSION_ALLOC>::tracked current_versions;
+                PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
     };
 
     /**
@@ -3392,13 +3412,15 @@ namespace LegionRuntime {
       virtual ~CompositeView(void);
     public:
       CompositeView& operator=(const CompositeView &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       virtual PhysicalManager* get_manager(void) const;
       virtual bool is_persistent(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                 std::map<Event,FieldMask> &preconditions);
+                         LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
                                  Processor exec_proc);
@@ -3437,8 +3459,8 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
-                            std::map<LogicalView*,FieldMask> &needed_views,
-                            std::set<PhysicalManager*> &needed_managers);
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                          std::set<PhysicalManager*> &needed_managers);
       virtual DistributedID send_back_state(AddressSpaceID target,
                             const FieldMask &send_mask,
                             std::set<PhysicalManager*> &needed_managers);
@@ -3452,8 +3474,8 @@ namespace LegionRuntime {
       void issue_composite_copies(MappableInfo *info,
                                   MaterializedView *dst,
                                   const FieldMask &copy_mask,
-                  const std::map<Event,FieldMask> &preconditions,
-                        std::map<Event,FieldMask> &postconditions);
+                  const LegionMap<Event,FieldMask>::aligned &preconditions,
+                        LegionMap<Event,FieldMask>::aligned &postconditions);
     public:
       // Note that copy-across only works for a single field at a time
       void issue_composite_copies_across(MappableInfo *info,
@@ -3466,20 +3488,20 @@ namespace LegionRuntime {
       void flush_reductions(MappableInfo *info,
                             MaterializedView *dst,
                             const FieldMask &event_mask,
-                            const std::map<Event,FieldMask> &preconditions,
+                    const LegionMap<Event,FieldMask>::aligned &preconditions,
                             std::set<Event> &event_set);
     public:
       void pack_composite_view(Serializer &rez, bool send_back,
                                AddressSpaceID target,
                                const FieldMask &pack_mask,
-                               std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void unpack_composite_view(Deserializer &derez, 
                                  AddressSpaceID source,
                                  bool send_back, bool need_lock);
       void send_updates(DistributedID remote_did, AddressSpaceID target, 
                         FieldMask send_mask, 
-                        std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                         std::set<PhysicalManager*> &needed_managers);
     public:
       static void handle_send_composite_view(RegionTreeForest *context, 
@@ -3498,14 +3520,14 @@ namespace LegionRuntime {
       FieldMask valid_mask;
       // Keep track of the roots and their field masks
       // There is exactly one root for every field
-      std::map<CompositeNode*,FieldMask> roots;
+      LegionMap<CompositeNode*,FieldMask>::aligned roots;
       // Track the set of reductions which need to be applied here
       FieldMask reduction_mask;
-      std::map<ReductionView*,ReduceInfo> valid_reductions;
+      LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
       // Keep track of all the child views
       std::map<Color,CompositeView*> children;
       // Keep track of which fields have been sent remotely
-      std::map<AddressSpaceID,FieldMask> remote_state;
+      LegionMap<AddressSpaceID,FieldMask>::aligned remote_state;
     };
 
     /**
@@ -3533,6 +3555,8 @@ namespace LegionRuntime {
       ~CompositeNode(void);
     public:
       CompositeNode& operator=(const CompositeNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void capture_physical_state(RegionTreeNode *tree_node,
                                   PhysicalState *state,
@@ -3549,8 +3573,8 @@ namespace LegionRuntime {
                                MaterializedView *dst,
                                FieldMask traversal_mask,
                                const FieldMask &copy_mask,
-                               const std::map<Event,FieldMask> &preconditions,
-                               std::map<Event,FieldMask> &postconditions);
+                       const LegionMap<Event,FieldMask>::aligned &preconditions,
+                           LegionMap<Event,FieldMask>::aligned &postconditions);
       void issue_across_copies(MappableInfo *info,
                                MaterializedView *dst,
                                unsigned src_index,
@@ -3575,7 +3599,7 @@ namespace LegionRuntime {
       void pack_composite_node(Serializer &rez, bool send_back,
                                AddressSpaceID target,
                                const FieldMask &send_mask,
-                               std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       void unpack_composite_node(Deserializer &derez, AddressSpaceID source);
     public:
@@ -3584,8 +3608,8 @@ namespace LegionRuntime {
       CompositeNode *const parent;
     protected:
       FieldMask dirty_mask;
-      std::map<CompositeNode*,ChildInfo> open_children;
-      std::map<InstanceView*,FieldMask> valid_views;
+      LegionMap<CompositeNode*,ChildInfo>::aligned open_children;
+      LegionMap<InstanceView*,FieldMask>::aligned valid_views;
     };
 
     /**
@@ -3627,7 +3651,7 @@ namespace LegionRuntime {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                   std::map<Event,FieldMask> &preconditions);
+                         LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const FieldMask &mask, bool reading,
                                  Processor exec_proc);
@@ -3649,7 +3673,7 @@ namespace LegionRuntime {
     public:
       DistributedID send_state(AddressSpaceID target,
                                const FieldMask &send_mask,
-                               std::map<LogicalView*,FieldMask> &needed_views,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
       DistributedID send_back_state(AddressSpaceID target,
                                     const FieldMask &send_mask,
@@ -3673,8 +3697,8 @@ namespace LegionRuntime {
     public:
       ReductionManager *const manager;
     protected:
-      std::list<PhysicalUser> reduction_users;
-      std::list<PhysicalUser> reading_users;
+      LegionList<PhysicalUser>::aligned reduction_users;
+      LegionList<PhysicalUser>::aligned reading_users;
       std::set<Event> event_references;
     };
 
