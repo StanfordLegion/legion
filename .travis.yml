@@ -11,6 +11,7 @@ env:
   - CC_FLAGS=-DBOUNDS_CHECKS
   - CC_FLAGS=-DLEGION_PROF
   - CC_FLAGS=-DLEGION_SPY
+  - CC_FLAGS=-std=c++0x
 matrix:
   exclude:
     - os: osx
