@@ -1,5 +1,5 @@
-Legion
-======
+Legion [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=master)](https://travis-ci.org/StanfordLegion/legion)
+==================================================================================
 
 The Legion homepage is now at [legion.stanford.edu](http://legion.stanford.edu).
 
