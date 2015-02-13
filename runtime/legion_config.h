@@ -34,15 +34,6 @@
 //                                Constants
 //==========================================================================
 
-// If we enable field tree acceleration
-// then enable it for both the logical and
-// physical tree analyses.
-#ifdef FIELD_TREE
-#error "FIELD_TREE macro is no longer supported"
-#define LOGICAL_FIELD_TREE
-#define PHYSICAL_FIELD_TREE
-#endif
-
 #define AUTO_GENERATE_ID   UINT_MAX
 
 #ifndef MAX_RETURN_SIZE

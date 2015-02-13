@@ -19,6 +19,7 @@
 #include "legion_ops.h"
 #include "legion_logging.h"
 #include "legion_profiling.h"
+#include "legion_allocation.h"
 
 namespace LegionRuntime {
   namespace HighLevel {
@@ -555,7 +556,7 @@ namespace LegionRuntime {
       Event lock_event = reservation_lock.acquire(mode,exclusive);
       if (!lock_event.has_triggered())
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         Runtime *rt = Runtime::get_runtime(proc);
         rt->pre_wait(proc);
         lock_event.wait();
@@ -679,7 +680,7 @@ namespace LegionRuntime {
 #endif
       if (!phase_barrier.has_triggered())
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         Runtime *rt = Runtime::get_runtime(proc);
         rt->pre_wait(proc);
         phase_barrier.wait();
@@ -1611,6 +1612,19 @@ namespace LegionRuntime {
         return impl->get_untyped_result();
       else
         return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ Future Future::from_buffer(HighLevelRuntime *rt,
+                                          const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      Future result = rt->runtime->help_create_future();
+      // Set the future result, this will make a copy
+      result.impl->set_result(buffer, size, false/*own*/);
+      // Complete the future right away so that it is always complete
+      result.impl->complete_future();
+      return result;
     }
 
     /////////////////////////////////////////////////////////////

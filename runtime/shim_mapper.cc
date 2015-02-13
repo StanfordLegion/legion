@@ -29,7 +29,7 @@ namespace LegionRuntime {
     Logger::Category log_shim("shim_mapper");
 
     //--------------------------------------------------------------------------
-    ShimMapper::ShimMapper(Machine *m, HighLevelRuntime *rt, Processor local)
+    ShimMapper::ShimMapper(Machine m, HighLevelRuntime *rt, Processor local)
       : DefaultMapper(m, rt, local)
     //--------------------------------------------------------------------------
     {
@@ -37,7 +37,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(const ShimMapper &rhs)
-      : DefaultMapper(NULL, NULL, Processor::NO_PROC)
+      : DefaultMapper(Machine::get_machine(), NULL, Processor::NO_PROC)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -541,7 +541,8 @@ namespace LegionRuntime {
         if (best_kind == local_kind)
           return local_proc;
         // Otherwise select a random processor of the right kind
-        const std::set<Processor> &all_procs = machine->get_all_processors();
+        std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         Processor result = 
           select_random_processor(all_procs, best_kind, machine);
         return result;
@@ -552,7 +553,8 @@ namespace LegionRuntime {
         Processor::Kind next_kind = profiler.next_processor_kind(task);
         if (next_kind == local_kind)
           return local_proc;
-        const std::set<Processor> &all_procs = machine->get_all_processors();
+        std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         Processor result = 
           select_random_processor(all_procs, next_kind, machine);
         return result;
@@ -577,7 +579,8 @@ namespace LegionRuntime {
         // Choose a random processor from our group that is 
         // not on the blacklist
         std::set<Processor> diff_procs; 
-        std::set<Processor> all_procs = machine->get_all_processors();
+        std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         // Remove ourselves
         all_procs.erase(local_proc);
         std::set_difference(all_procs.begin(),all_procs.end(),
@@ -614,7 +617,7 @@ namespace LegionRuntime {
                             "in shim mapper for processor " IDFMT "",
                             task->variants->name,
                             task->get_unique_task_id(), local_proc.id);
-      Processor::Kind target_kind = machine->get_processor_kind(target);
+      Processor::Kind target_kind = target.kind();
       if (!task->variants->has_variant(target_kind, 
             !(task->is_index_space), task->is_index_space))
       {
@@ -677,7 +680,7 @@ namespace LegionRuntime {
       }
       // Otherwise, get our processor stack
       machine_interface.find_memory_stack(target, target_ranking, 
-                (machine->get_processor_kind(target) == Processor::LOC_PROC));
+					  (target.kind() == Processor::LOC_PROC));
       memoizer.record_mapping(target, task, index, target_ranking);
       return true;
     }
@@ -725,7 +728,7 @@ namespace LegionRuntime {
                             "using local proc's processor type");
 	target = local_proc;
       }
-      if (machine->get_processor_kind(target) == Processor::TOC_PROC)
+      if (target.kind() == Processor::TOC_PROC)
         return max_blocking_factor;
       return 1;
     }
@@ -830,7 +833,7 @@ namespace LegionRuntime {
                           task->get_unique_task_id(), target.id);
       memoizer.commit_mapping(target, task);
       profiler.update_profiling_info(task, target, 
-          machine->get_processor_kind(target), profiling);
+				     target.kind(), profiling);
     }
 
     //--------------------------------------------------------------------------

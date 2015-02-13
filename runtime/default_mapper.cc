@@ -39,10 +39,10 @@ namespace LegionRuntime {
     Logger::Category log_mapper("default_mapper");
 
     //--------------------------------------------------------------------------
-    DefaultMapper::DefaultMapper(Machine *m, HighLevelRuntime *rt, 
+    DefaultMapper::DefaultMapper(Machine m, HighLevelRuntime *rt, 
                                  Processor local) 
       : Mapper(rt), local_proc(local), 
-        local_kind(m->get_processor_kind(local)), machine(m),
+        local_kind(local.kind()), machine(m),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         splitting_factor(STATIC_SPLIT_FACTOR),
@@ -95,7 +95,7 @@ namespace LegionRuntime {
     DefaultMapper::DefaultMapper(const DefaultMapper &rhs)
       : Mapper(NULL), local_proc(Processor::NO_PROC),
         local_kind(Processor::LOC_PROC), machine(NULL),
-        machine_interface(MappingUtilities::MachineQueryInterface(NULL))
+        machine_interface(MappingUtilities::MachineQueryInterface(Machine::get_machine()))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -141,7 +141,8 @@ namespace LegionRuntime {
         else
         {
           // Otherwise select a random processor of the right kind
-          const std::set<Processor> &all_procs = machine->get_all_processors();
+          std::set<Processor> all_procs;
+	  machine.get_all_processors(all_procs);
           task->target_proc = select_random_processor(all_procs, best_kind, 
                                                       machine);
         }
@@ -154,7 +155,8 @@ namespace LegionRuntime {
           task->target_proc = local_proc;
         else
         {
-          const std::set<Processor> &all_procs = machine->get_all_processors();
+          std::set<Processor> all_procs;
+	  machine.get_all_processors(all_procs);
           task->target_proc = select_random_processor(all_procs, 
                                                       next_kind, machine);
         }
@@ -214,7 +216,8 @@ namespace LegionRuntime {
       {
         // Choose a random processor from our group that is not on the blacklist
         std::set<Processor> diff_procs; 
-        std::set<Processor> all_procs = machine->get_all_processors();
+        std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         // Remove ourselves
         all_procs.erase(local_proc);
         std::set_difference(all_procs.begin(),all_procs.end(),
@@ -353,7 +356,8 @@ namespace LegionRuntime {
         best_kind = profiler.best_processor_kind(task);
       else
         best_kind = profiler.next_processor_kind(task);
-      std::set<Processor> all_procs = machine->get_all_processors();
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
       machine_interface.filter_processors(machine, best_kind, all_procs);
       std::vector<Processor> procs(all_procs.begin(),all_procs.end());
 
@@ -397,8 +401,7 @@ namespace LegionRuntime {
                             "(ID %lld) for processor " IDFMT "",
                             task->variants->name,
                             task->get_unique_task_id(), local_proc.id);
-      Processor::Kind target_kind = 
-        machine->get_processor_kind(task->target_proc);
+      Processor::Kind target_kind = task->target_proc.kind();
       if (!task->variants->has_variant(target_kind, 
             !(task->is_index_space), task->is_index_space))
       {
@@ -432,8 +435,7 @@ namespace LegionRuntime {
                             "(ID %lld) for processor " IDFMT "",
                             task->variants->name,
                             task->get_unique_task_id(), local_proc.id);
-      Processor::Kind target_kind = 
-        machine->get_processor_kind(task->target_proc);
+      Processor::Kind target_kind = task->target_proc.kind();
       for (unsigned idx = 0; idx < task->regions.size(); idx++)
       {
         // See if this instance is restricted
@@ -449,7 +451,7 @@ namespace LegionRuntime {
           {
             machine_interface.find_memory_stack(task->target_proc,
                                                 task->regions[idx].target_ranking,
-                                  (machine->get_processor_kind(task->target_proc) 
+						(task->target_proc.kind()
                                                         == Processor::LOC_PROC));
             memoizer.record_mapping(task->target_proc, task, idx,
                                     task->regions[idx].target_ranking);
@@ -744,7 +746,7 @@ namespace LegionRuntime {
       profiling.start_time = task->start_time;
       profiling.stop_time = task->stop_time;
       profiler.update_profiling_info(task, task->target_proc,
-                   machine->get_processor_kind(task->target_proc), profiling);
+				     task->target_proc.kind(), profiling);
     }
 
     //--------------------------------------------------------------------------
@@ -816,14 +818,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     /*static*/ Processor DefaultMapper::select_random_processor(
                                             const std::set<Processor> &options, 
-                                      Processor::Kind filter, Machine *machine)
+                                      Processor::Kind filter, Machine machine)
     //--------------------------------------------------------------------------
     {
       std::vector<Processor> valid_options;
       for (std::set<Processor>::const_iterator it = options.begin();
             it != options.end(); it++)
       {
-        if (machine->get_processor_kind(*it) == filter)
+        if (it->kind() == filter)
           valid_options.push_back(*it);
       }
       if (!valid_options.empty())

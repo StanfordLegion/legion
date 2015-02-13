@@ -1479,9 +1479,58 @@ namespace LegionRuntime {
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
     };
 
-    class Runtime {
+    struct NodeAnnounceData;
+
+    class Machine::Impl {
     public:
-      static Runtime *get_runtime(void) { return runtime; }
+      void get_all_memories(std::set<Memory>& mset) const;
+      void get_all_processors(std::set<Processor>& pset) const;
+
+      // Return the set of memories visible from a processor
+      void get_visible_memories(Processor p, std::set<Memory>& mset) const;
+
+      // Return the set of memories visible from a memory
+      void get_visible_memories(Memory m, std::set<Memory>& mset) const;
+
+      // Return the set of processors which can all see a given memory
+      void get_shared_processors(Memory m, std::set<Processor>& pset) const;
+
+      int get_proc_mem_affinity(std::vector<Machine::ProcessorMemoryAffinity>& result,
+				Processor restrict_proc /*= Processor::NO_PROC*/,
+				Memory restrict_memory /*= Memory::NO_MEMORY*/) const;
+
+      int get_mem_mem_affinity(std::vector<Machine::MemoryMemoryAffinity>& result,
+			       Memory restrict_mem1 /*= Memory::NO_MEMORY*/,
+			       Memory restrict_mem2 /*= Memory::NO_MEMORY*/) const;
+      
+      void parse_node_announce_data(const void *args, size_t arglen,
+				    const NodeAnnounceData& annc_data,
+				    bool remote);
+    protected:
+      std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
+      std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
+    };
+
+    extern Machine::Impl *machine_singleton;
+    inline Machine::Impl *get_machine(void) { return machine_singleton; }
+
+    class Runtime::Impl {
+    public:
+      Impl(void);
+      ~Impl(void);
+
+      bool init(int *argc, char ***argv);
+
+      bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
+      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+
+      void run(Processor::TaskFuncID task_id = 0, RunStyle style = Runtime::ONE_TASK_ONLY,
+	       const void *args = 0, size_t arglen = 0, bool background = false);
+
+      // requests a shutdown of the runtime
+      void shutdown(bool local_request);
+
+      void wait_for_shutdown(void);
 
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
@@ -1502,7 +1551,11 @@ namespace LegionRuntime {
 
     protected:
     public:
-      static Runtime *runtime;
+      Machine::Impl *machine;
+
+      Processor::TaskIDTable task_table;
+      ReductionOpTable reduce_op_table;
+
 #ifdef NODE_LOGGING
       static const char *prefix;
 #endif
@@ -1516,12 +1569,16 @@ namespace LegionRuntime {
       IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
 
+      pthread_t *background_pthread;
 #ifdef DEADLOCK_TRACE
       unsigned next_thread;
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
     };
+
+    extern Runtime::Impl *runtime_singleton;
+    inline Runtime::Impl *get_runtime(void) { return runtime_singleton; }
 
     template <typename T>
     StaticAccess<T>::StaticAccess(T* thing_with_data, bool already_valid /*= false*/)
@@ -1536,7 +1593,7 @@ namespace LegionRuntime {
 	  //  a shared lock
 	  Event e = thing_with_data->lock.acquire(1, false);
 	  if(!e.has_triggered()) {
-	    GenEventImpl *e_impl = Runtime::get_runtime()->get_genevent_impl(e);
+	    GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
 	    e_impl->external_wait(e.gen);// TODO: must this be blocking?
 	  }
 	  thing_with_data->lock.release();
@@ -1555,7 +1612,7 @@ namespace LegionRuntime {
       } else {
 	Event e = thing_with_data->lock.acquire(1, false);
 	if(!e.has_triggered()) {
-	  GenEventImpl *e_impl = Runtime::get_runtime()->get_genevent_impl(e);
+	  GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
 	  e_impl->external_wait(e.gen);// TODO: must this be blocking?
 	}
       }
@@ -1571,7 +1628,7 @@ namespace LegionRuntime {
       } else {
 	Event e = thing_with_data->lock.acquire(0, true);
 	if(!e.has_triggered()) {
-	  GenEventImpl *e_impl = Runtime::get_runtime()->get_genevent_impl(e);
+	  GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
 	  e_impl->external_wait(e.gen);// TODO: must this be blocking?
 	}
       }

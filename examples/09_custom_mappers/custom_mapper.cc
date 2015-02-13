@@ -111,7 +111,7 @@ enum {
 // how they work.
 class AdversarialMapper : public DefaultMapper {
 public:
-  AdversarialMapper(Machine *machine, 
+  AdversarialMapper(Machine machine, 
       HighLevelRuntime *rt, Processor local);
 public:
   virtual void select_task_options(Task *task);
@@ -123,7 +123,7 @@ public:
 
 class PartitioningMapper : public DefaultMapper {
 public:
-  PartitioningMapper(Machine *machine,
+  PartitioningMapper(Machine machine,
       HighLevelRuntime *rt, Processor local);
 public:
   virtual int get_tunable_value(const Task *task,
@@ -167,7 +167,7 @@ public:
 // DefaultMapper will now use our AdversarialMapper.
 // We create one new mapper for each processor
 // and register it with the runtime.
-void mapper_registration(Machine *machine, HighLevelRuntime *rt,
+void mapper_registration(Machine machine, HighLevelRuntime *rt,
                           const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
@@ -183,7 +183,7 @@ void mapper_registration(Machine *machine, HighLevelRuntime *rt,
 // Here is the constructor for our adversial mapper.
 // We'll use the constructor to illustrate how mappers can
 // get access to information regarding the current machine.
-AdversarialMapper::AdversarialMapper(Machine *m, 
+AdversarialMapper::AdversarialMapper(Machine m, 
                                      HighLevelRuntime *rt, Processor p)
   : DefaultMapper(m, rt, p) // pass arguments through to DefaultMapper
 {
@@ -199,7 +199,8 @@ AdversarialMapper::AdversarialMapper(Machine *m,
   // Typedefs in legion_types.h ensure that all necessary
   // types for querying the machine object are in scope
   // in the Legion HighLevel namespace.
-  const std::set<Processor> &all_procs = machine->get_all_processors();
+  std::set<Processor> all_procs;
+  machine.get_all_processors(all_procs);
   // Recall that we create one mapper for every processor.  We
   // only want to print out this information one time, so only
   // do it if we are the mapper for the first processor in the
@@ -213,7 +214,7 @@ AdversarialMapper::AdversarialMapper(Machine *m,
           it != all_procs.end(); it++)
     {
       // For every processor there is an associated kind
-      Processor::Kind kind = machine->get_processor_kind(*it);
+      Processor::Kind kind = it->kind();
       switch (kind)
       {
         // Latency-optimized cores (LOCs) are CPUs
@@ -242,13 +243,14 @@ AdversarialMapper::AdversarialMapper(Machine *m,
     }
     // We can also get the list of all the memories available
     // on the target architecture and print out their info.
-    const std::set<Memory> &all_mems = machine->get_all_memories();
+    std::set<Memory> all_mems;
+    machine.get_all_memories(all_mems);
     printf("There are %ld memories:\n", all_mems.size());
     for (std::set<Memory>::const_iterator it = all_mems.begin();
           it != all_mems.end(); it++)
     {
-      Memory::Kind kind = machine->get_memory_kind(*it);
-      size_t memory_size_in_kb = machine->get_memory_size(*it) >> 10;
+      Memory::Kind kind = it->kind();
+      size_t memory_size_in_kb = it->capacity() >> 10;
       switch (kind)
       {
         // RDMA addressable memory when running with GASNet
@@ -332,7 +334,8 @@ AdversarialMapper::AdversarialMapper(Machine *m,
     // all the memories visible to our local processor in 
     // this mapper.  We can get our set of visible memories
     // using the 'get_visible_memories' method on the machine.
-    const std::set<Memory> vis_mems = machine->get_visible_memories(local_proc);
+    std::set<Memory> vis_mems;
+    machine.get_visible_memories(local_proc, vis_mems);
     printf("There are %ld memories visible from processor %x\n",
             vis_mems.size(), local_proc.id);
     for (std::set<Memory>::const_iterator it = vis_mems.begin();
@@ -347,7 +350,7 @@ AdversarialMapper::AdversarialMapper(Machine *m,
       // and further increase the portability of Legion applications.
       std::vector<ProcessorMemoryAffinity> affinities;
       int results = 
-        machine->get_proc_mem_affinity(affinities, local_proc, *it);
+        machine.get_proc_mem_affinity(affinities, local_proc, *it);
       // We should only have found 1 results since we
       // explicitly specified both values.
       assert(results == 1);
@@ -396,7 +399,8 @@ void AdversarialMapper::select_task_options(Task *task)
   task->map_locally = false;
   task->profile_task = false;
   task->task_priority = 0;
-  const std::set<Processor> &all_procs = machine->get_all_processors();
+  std::set<Processor> all_procs;
+  machine.get_all_processors(all_procs);
   task->target_proc = 
     DefaultMapper::select_random_processor(all_procs, Processor::LOC_PROC, machine);
 }
@@ -425,7 +429,8 @@ void AdversarialMapper::select_task_options(Task *task)
 void AdversarialMapper::slice_domain(const Task *task, const Domain &domain,
                                      std::vector<DomainSplit> &slices)
 {
-  const std::set<Processor> &all_procs = machine->get_all_processors();
+  std::set<Processor> all_procs;
+  machine.get_all_processors(all_procs);
   std::vector<Processor> split_set;
   for (unsigned idx = 0; idx < 2; idx++)
   {
@@ -476,8 +481,8 @@ void AdversarialMapper::slice_domain(const Task *task, const Domain &domain,
 // of data moved through random sets of memories.
 bool AdversarialMapper::map_task(Task *task)
 { 
-  const std::set<Memory> &vis_mems = 
-      machine->get_visible_memories(task->target_proc);  
+  std::set<Memory> vis_mems;
+  machine.get_visible_memories(task->target_proc, vis_mems);  
   assert(!vis_mems.empty());
   for (unsigned idx = 0; idx < task->regions.size(); idx++)
   {
@@ -526,7 +531,7 @@ void AdversarialMapper::notify_mapping_result(const Mappable *mappable)
   }
 }
 
-PartitioningMapper::PartitioningMapper(Machine *m,
+PartitioningMapper::PartitioningMapper(Machine m,
                                        HighLevelRuntime *rt,
                                        Processor p)
   : DefaultMapper(m, rt, p)

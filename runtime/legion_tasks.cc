@@ -1429,10 +1429,10 @@ namespace LegionRuntime {
         arrive_barriers.back().phase_barrier.arrive(1, get_task_completion());
 #ifdef LEGION_LOGGING
         LegionLogging::log_event_dependence(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             it->phase_barrier, arrive_barriers.back().phase_barrier);
         LegionLogging::log_event_dependence(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             get_task_completion(), arrive_barriers.back().phase_barrier);
 #endif
 #ifdef LEGION_SPY
@@ -1603,6 +1603,11 @@ namespace LegionRuntime {
               success = false;
               regions[idx].mapping_failed = true;
               break;
+            }
+            else if (IS_NO_ACCESS(req))
+            {
+              // If it is a no-access then we are done
+              continue;
             }
             else if (IS_WRITE(regions[idx]))
             {
@@ -1899,7 +1904,7 @@ namespace LegionRuntime {
                  (req.handle_type == REG_PROJECTION);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_logical_requirement(Machine::get_executing_processor(),
+      LegionLogging::log_logical_requirement(Processor::get_executing_processor(),
                                            uid, idx, reg,
                                            reg ? req.region.index_space.id :
                                                  req.partition.index_partition,
@@ -4226,7 +4231,7 @@ namespace LegionRuntime {
       assert(enclosing_physical_contexts.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       BEGIN_MAPPING);
 #endif
@@ -4283,7 +4288,7 @@ namespace LegionRuntime {
                                                   , unique_op_id
 #endif
                                                   );
-        if (mapping_refs[idx].has_ref())
+        if (mapping_refs[idx].has_ref() || IS_NO_ACCESS(regions[idx]))
         {
           virtual_mapped[idx] = false;
         }
@@ -4310,8 +4315,9 @@ namespace LegionRuntime {
         // list of InstanceRefs for this task
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-          // See if this is a virtual mapping
-          if (virtual_mapped[idx])
+          // See if this is a virtual mapping or a region
+          // with no privileges
+          if ((virtual_mapped[idx]) || IS_NO_ACCESS(regions[idx]))
           {
             physical_instances[idx] = InstanceRef();
             continue;
@@ -4323,9 +4329,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             // Check to make sure the pre-mapped region is visible to
             // the target processor
-            Machine *machine = Machine::get_machine();
-            const std::set<Memory> &visible_memories = 
-                                  machine->get_visible_memories(target);
+            Machine machine = Machine::get_machine();
+            std::set<Memory> visible_memories;
+	    machine.get_visible_memories(target, visible_memories);
             Memory premap_memory = premapped.get_memory();
             if (visible_memories.find(premap_memory) != visible_memories.end())
             {
@@ -4378,7 +4384,7 @@ namespace LegionRuntime {
           runtime->invoke_mapper_notify_result(current_proc, this);
       }
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_MAPPING);
 #endif
@@ -4415,7 +4421,7 @@ namespace LegionRuntime {
                                                     regions[idx].region); 
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
-        if (!virtual_mapped[idx])
+        if ((!virtual_mapped[idx]) && (regions[idx].privilege != NO_ACCESS))
         {
           local_instances[idx] = 
             runtime->forest->initialize_physical_context(context,
@@ -4473,8 +4479,9 @@ namespace LegionRuntime {
       // If we're debugging do one last check to make sure
       // that all the memories are visible on this processor
 #ifdef DEBUG_HIGH_LEVEL
-      const std::set<Memory> &visible_memories = 
-        runtime->machine->get_visible_memories(executing_processor);
+      std::set<Memory> visible_memories;
+      runtime->machine.get_visible_memories(executing_processor, 
+                                            visible_memories);
 #endif
       // If we have any additional processors, filter them on processor
       // kind before we actually do the launch
@@ -4482,13 +4489,12 @@ namespace LegionRuntime {
       if (!additional_procs.empty())
       {
         std::vector<Processor> to_erase;
-        Processor::Kind exec_kind = 
-          runtime->machine->get_processor_kind(executing_processor); 
+        Processor::Kind exec_kind = executing_processor.kind();
         AddressSpace exec_space = executing_processor.address_space();
         for (std::set<Processor>::const_iterator it = additional_procs.begin();
               it != additional_procs.end(); it++)
         {
-          Processor::Kind add_kind = runtime->machine->get_processor_kind(*it);
+          Processor::Kind add_kind = (*it).kind();
           if (add_kind != exec_kind)
           {
             to_erase.push_back(*it);
@@ -4507,8 +4513,8 @@ namespace LegionRuntime {
         for (std::set<Processor>::const_iterator it = additional_procs.begin();
               it != additional_procs.end(); it++)
         {
-          additional_visible_memories[*it] = 
-            runtime->machine->get_visible_memories(*it);
+	  runtime->machine.get_visible_memories(*it, 
+                                    additional_visible_memories[*it]);
         }
       }
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4601,7 +4607,7 @@ namespace LegionRuntime {
       // Record the dependences
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), wait_on_events, start_condition);
+          Processor::get_executing_processor(), wait_on_events, start_condition);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
@@ -4629,7 +4635,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
           LegionLogging::log_event_dependence(
-              Machine::get_executing_processor(), start_condition, next);
+              Processor::get_executing_processor(), start_condition, next);
 #endif
 #ifdef LEGION_SPY
           LegionSpy::log_event_dependence(start_condition, next);
@@ -4777,7 +4783,7 @@ namespace LegionRuntime {
       {
 #ifdef LEGION_LOGGING
         LegionLogging::log_task_instance_requirement(
-                                 Machine::get_executing_processor(),
+                                 Processor::get_executing_processor(),
                                  get_unique_task_id(), idx, 
                                  regions[idx].region.get_index_space());
 #endif
@@ -4804,7 +4810,7 @@ namespace LegionRuntime {
         // we don't log a dependence on the parent's start event, because
         // log_individual_task and log_index_space_task log this relationship
         LegionLogging::log_operation_events(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   get_unique_task_id(),
                                   start_condition, get_task_completion());
 #endif
@@ -4823,10 +4829,10 @@ namespace LegionRuntime {
           {
 #ifdef LEGION_LOGGING
             LegionLogging::log_event_dependence(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   all_unmap_event, unmap_events[idx]);
             LegionLogging::log_event_dependence(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   unmap_events[idx], get_task_completion());
 #endif
 #ifdef LEGION_SPY
@@ -4851,7 +4857,7 @@ namespace LegionRuntime {
       // Mark that we have an outstanding task in this context 
       parent_ctx->increment_pending();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       LAUNCH_TASK);
 #endif
@@ -4918,7 +4924,7 @@ namespace LegionRuntime {
 #endif
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
-      executing_processor = Machine::get_executing_processor();
+      executing_processor = Processor::get_executing_processor();
 #ifdef LEGION_LOGGING
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
@@ -4941,12 +4947,12 @@ namespace LegionRuntime {
         }
       }
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       BEGIN_EXECUTION);
 #endif
@@ -5005,7 +5011,8 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < local_instances.size(); idx++)
         {
           if (!virtual_mapped[idx] && !region_deleted[idx]
-              && !IS_READ_ONLY(regions[idx]))
+              && !IS_READ_ONLY(regions[idx]) &&
+              !IS_NO_ACCESS(regions[idx]))
           {
 #ifdef DEBUG_HIGH_LEVEL
             assert(local_instances[idx].has_ref());
@@ -5042,7 +5049,7 @@ namespace LegionRuntime {
       local_instances.clear();
 
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_EXECUTION);
 #endif
@@ -5083,7 +5090,7 @@ namespace LegionRuntime {
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
                                       BEGIN_POST_EXEC);
 #endif
@@ -5128,7 +5135,7 @@ namespace LegionRuntime {
       LegionProf::register_event(local_id, PROF_END_POST);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
                                       END_POST_EXEC);
 #endif
@@ -5201,7 +5208,7 @@ namespace LegionRuntime {
       assert(!sliced);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       BEGIN_SLICING);
 #endif
@@ -5322,7 +5329,7 @@ namespace LegionRuntime {
 #endif
       bool success = trigger_slices(); 
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id, END_SLICING);
 #endif
       // If we succeeded and this is an intermediate slice task
@@ -5887,7 +5894,7 @@ namespace LegionRuntime {
       assert(privilege_paths.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(), 
                                       BEGIN_DEPENDENCE_ANALYSIS);
 #endif
@@ -5900,7 +5907,10 @@ namespace LegionRuntime {
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
       {
-        register_dependence(it->impl->task, it->impl->task_gen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(it->impl != NULL);
+#endif
+        it->impl->register_dependence(this);
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
@@ -5912,7 +5922,7 @@ namespace LegionRuntime {
       }
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_DEPENDENCE_ANALYSIS);
 #endif
@@ -6009,7 +6019,7 @@ namespace LegionRuntime {
       assert(enclosing_physical_contexts.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       BEGIN_PRE_MAPPING);
 #endif
@@ -6047,7 +6057,7 @@ namespace LegionRuntime {
       if (premapped)
         premapped = early_map_regions();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_PRE_MAPPING);
 #endif
@@ -6182,7 +6192,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_task_instance_variant(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   get_unique_task_id(),
                                   selected_variant);
 #endif
@@ -6297,7 +6307,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
 #endif
       if (!is_remote())
@@ -6498,7 +6508,7 @@ namespace LegionRuntime {
       if (is_locally_mapped() && (num_virtual_mappings == 0))
         complete_mapping();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_point_point(Machine::get_executing_processor(),
+      LegionLogging::log_point_point(Processor::get_executing_processor(),
                                      remote_unique_id,
                                      get_unique_task_id());
 #endif
@@ -7076,7 +7086,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
 #endif
       // If we had any virtual mappings, we can now be considered mapped
@@ -7159,7 +7169,7 @@ namespace LegionRuntime {
         complete_mapping();
       }
 #ifdef LEGION_LOGGING
-      LegionLogging::log_slice_point(Machine::get_executing_processor(),
+      LegionLogging::log_slice_point(Processor::get_executing_processor(),
                                      slice_owner->get_unique_task_id(),
                                      get_unique_task_id(), index_point);
 #endif
@@ -8259,7 +8269,7 @@ namespace LegionRuntime {
       assert(privilege_paths.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(), 
                                       BEGIN_DEPENDENCE_ANALYSIS);
 #endif
@@ -8272,7 +8282,10 @@ namespace LegionRuntime {
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
       {
-        register_dependence(it->impl->task, it->impl->task_gen);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(it->impl != NULL);
+#endif
+        it->impl->register_dependence(this);
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
@@ -8284,7 +8297,7 @@ namespace LegionRuntime {
       }
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_DEPENDENCE_ANALYSIS);
 #endif
@@ -8430,7 +8443,7 @@ namespace LegionRuntime {
       assert(enclosing_physical_contexts.size() == regions.size());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       BEGIN_PRE_MAPPING);
 #endif
@@ -8468,7 +8481,7 @@ namespace LegionRuntime {
       if (premapped)
         premapped = early_map_regions();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_PRE_MAPPING);
 #endif
@@ -8616,10 +8629,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
       LegionLogging::log_operation_events(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   get_unique_task_id(),
                                   Event::NO_EVENT, get_task_completion());
 #endif
@@ -8782,7 +8795,7 @@ namespace LegionRuntime {
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_task_id();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_index_slice(Machine::get_executing_processor(),
+      LegionLogging::log_index_slice(Processor::get_executing_processor(),
                                      unique_op_id, result->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
@@ -9564,7 +9577,7 @@ namespace LegionRuntime {
           enclosing_physical_contexts[idx] = remote_ctx->get_context();
       }
 #ifdef LEGION_LOGGING
-      LegionLogging::log_slice_slice(Machine::get_executing_processor(),
+      LegionLogging::log_slice_slice(Processor::get_executing_processor(),
                                      remote_unique_id, get_unique_task_id());
 #endif
 #ifdef LEGION_PROF
@@ -9585,7 +9598,7 @@ namespace LegionRuntime {
         point->enclosing_physical_contexts = enclosing_physical_contexts;
         points.push_back(point);
 #ifdef LEGION_LOGGING
-        LegionLogging::log_slice_point(Machine::get_executing_processor(),
+        LegionLogging::log_slice_point(Processor::get_executing_processor(),
                                        get_unique_task_id(),
                                        point->get_unique_task_id(),
                                        point->index_point);
@@ -9631,7 +9644,7 @@ namespace LegionRuntime {
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
 #ifdef LEGION_LOGGING
-      LegionLogging::log_slice_slice(Machine::get_executing_processor(),
+      LegionLogging::log_slice_slice(Processor::get_executing_processor(),
                                      unique_op_id, result->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
@@ -9723,7 +9736,7 @@ namespace LegionRuntime {
                 result->local_arglen);
       }
 #ifdef LEGION_LOGGING
-      LegionLogging::log_slice_point(Machine::get_executing_processor(),
+      LegionLogging::log_slice_point(Processor::get_executing_processor(),
                                      unique_op_id,
                                      result->get_unique_op_id(),
                                      result->index_point);
@@ -9762,7 +9775,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_task_instance_variant(
-                                  Machine::get_executing_processor(),
+                                  Processor::get_executing_processor(),
                                   get_unique_task_id(),
                                   selected_variant);
 #endif
@@ -9795,7 +9808,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
 #endif
       trigger_slice_complete();

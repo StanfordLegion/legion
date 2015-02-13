@@ -931,6 +931,16 @@ namespace LegionRuntime {
        * legion_serialize method.
        */
       inline const void* get_untyped_pointer(void);
+    public:
+      /**
+       * Allow users to generate their own futures. These
+       * futures are guaranteed to always have completed
+       * and to always have concrete values.
+       */
+      template<typename T>
+      static inline Future from_value(HighLevelRuntime *rt, const T &value);
+      static Future from_buffer(HighLevelRuntime *rt,
+                                const void *buffer, size_t size);
     private:
       void* get_untyped_result(void); 
     };
@@ -2820,6 +2830,7 @@ namespace LegionRuntime {
       // The HighLevelRuntime bootstraps itself and should
       // never need to be explicitly created.
       friend class Runtime;
+      friend class Future;
       HighLevelRuntime(Runtime *rt);
     public:
       //------------------------------------------------------------------------
@@ -5444,6 +5455,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return get_untyped_result();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    /*static*/ inline Future Future::from_value(HighLevelRuntime *rt, 
+                                                const T &value)
+    //--------------------------------------------------------------------------
+    {
+      return Future::from_buffer(rt, &value, sizeof(T));
     }
 
     //--------------------------------------------------------------------------

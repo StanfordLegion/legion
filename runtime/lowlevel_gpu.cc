@@ -72,7 +72,7 @@ namespace LegionRuntime {
       {
         // If we have a finish event then trigger it
         if (finish_event.exists())
-	  Runtime::get_runtime()->get_genevent_impl(finish_event)->
+	  get_runtime()->get_genevent_impl(finish_event)->
             trigger(finish_event.gen, gasnet_mynode());
         // Destroy our event
         CHECK_CU( cuEventDestroy(complete_event) );
@@ -242,6 +242,11 @@ namespace LegionRuntime {
         // allocate frame buffer memory
         CHECK_CU( cuMemAlloc((CUdeviceptr*)&fbmem_gpu_base, fbmem_size + fbmem_reserve) );
 
+        // allocate pinned buffer for kernel arguments
+        kernel_buffer_size = 8192; // default four pages
+        kernel_arg_size = 0;
+        CHECK_CU( cuMemAllocHost((void**)&kernel_arg_buffer, kernel_buffer_size) );
+
         // initialize the streams for copy operations
         CHECK_CU( cuStreamCreate(&host_to_device_stream,
                                  CU_STREAM_NON_BLOCKING) );
@@ -272,6 +277,19 @@ namespace LegionRuntime {
 	    gasnett_cond_wait(&worker_condvar, &mutex.lock);
 	  }
 	}
+
+        // Check to see if we should run a start-up task
+        {
+          Processor::TaskIDTable::iterator it = 
+            get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+          if (it != get_runtime()->task_table.end()) {
+            log_gpu(LEVEL_INFO, "calling processor initialization task: proc=" IDFMT "", 
+                    gpu->me.id);
+            (it->second)(0, 0, gpu->me);
+            log_gpu(LEVEL_INFO, "finished processor initialization task: proc=" IDFMT "", 
+                    gpu->me.id);
+          } 
+        }
 
 	while(!shutdown_requested) {
 	  // get all the copies and a job off the job queue - sleep if nothing there
@@ -360,8 +378,6 @@ namespace LegionRuntime {
 	    //printf("executing job %p\n", job);
             task->pre_execute();
             assert(task_modules.empty());
-            assert(kernel_arguments.empty());
-            argument_offset = 0;
 	    task->execute();
             // When we are done, tell the task about all the modules
             // it needs to unload
@@ -386,14 +402,19 @@ namespace LegionRuntime {
 	}
 
 	log_gpu.info("shutting down");
-        Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
-        if(it != task_id_table.end()) {
+        Processor::TaskIDTable::iterator it = 
+          get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+        if(it != get_runtime()->task_table.end()) {
           log_gpu(LEVEL_INFO, "calling processor shutdown task: proc=" IDFMT "", gpu->me.id);
 
           (it->second)(0, 0, gpu->me);
 
           log_gpu(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", gpu->me.id);
         }
+
+        // Synchronize the device so we can flush any printf buffers
+        CHECK_CU( cuCtxSynchronize() );
+
 	gpu->finished();
       }
 
@@ -416,7 +437,7 @@ namespace LegionRuntime {
 				      (void *)this) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 #ifdef DEADLOCK_TRACE
-        Runtime::get_runtime()->add_thread(&gpu_thread);
+        get_runtime()->add_thread(&gpu_thread);
 #endif
 
 	// now wait until worker thread is ready
@@ -667,8 +688,9 @@ namespace LegionRuntime {
       std::map<const void*,CUfunction> device_functions;
       std::map<const void*,VarInfo> device_variables;
       std::deque<LaunchConfig> launch_configs;
-      size_t argument_offset;
-      std::vector<void*> kernel_arguments;
+      char *kernel_arg_buffer;
+      size_t kernel_arg_size;
+      size_t kernel_buffer_size;
       // Modules allocated just during this task's lifetime
       std::set<void**> task_modules;
     public:
@@ -748,7 +770,7 @@ namespace LegionRuntime {
 
     void GPUTask::execute(void)
     {
-      Processor::TaskFuncPtr fptr = task_id_table[func_id];
+      Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
       //char argstr[100];
       //argstr[0] = 0;
       //for(size_t i = 0; (i < arglen) && (i < 40); i++)
@@ -1215,14 +1237,14 @@ namespace LegionRuntime {
                                             gpu_dma_thread, _streams);
 
       // enqueue a GPU init job before we do anything else
-      Processor::TaskIDTable::iterator it = task_id_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+      Processor::TaskIDTable::iterator it = get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
 #ifndef EVENT_GRAPH_TRACE
-      if(it != task_id_table.end())
+      if(it != get_runtime()->task_table.end())
 	internal->enqueue_task(new GPUTask(this, Event::NO_EVENT,
 					  Processor::TASK_ID_PROCESSOR_INIT, 0, 0, 0));
 #else
       enclosing_stack.push_back(Event::NO_EVENT);
-      if(it != task_id_table.end())
+      if(it != get_runtime()->task_table.end())
         internal->enqueue_task(new GPUTask(this, Event::Impl::create_event(), 
                                            Processor::TASK_ID_PROCESSOR_INIT, 0, 0, 0));
 #endif
@@ -1485,7 +1507,7 @@ namespace LegionRuntime {
       CHECK_PTHREAD( pthread_attr_destroy(&attr) );
       dma_threads.push_back(thread);
 #ifdef DEADLOCK_TRACE
-      Runtime::get_runtime()->add_thread(&thread);
+      get_runtime()->add_thread(&thread);
 #endif
     }
 
@@ -1819,6 +1841,7 @@ namespace LegionRuntime {
       // It's never safe to unload our modules here
       // We need to wait until we synchronize the current
       // task stream with all the things that we've done
+      CHECK_CU( cuCtxSynchronize() );
       std::map<void**,ModuleInfo>::iterator finder = modules.find(fat_bin);
       assert(finder != modules.end());
       CHECK_CU( cuModuleUnload(finder->second.module) );
@@ -2006,12 +2029,26 @@ namespace LegionRuntime {
     cudaError_t GPUProcessor::Internal::setup_argument(const void *arg,
                                                        size_t size, size_t offset)
     {
-      // Should always be pushing onto the back
-      assert(offset >= argument_offset);
-      argument_offset = offset + size;
-      void *arg_copy = malloc(size);
-      memcpy(arg_copy, arg, size);
-      kernel_arguments.push_back(arg_copy);
+      const size_t required = offset + size;
+      // If we need more memory, allocate it now
+      if (required > kernel_buffer_size)
+      {
+        // Just make it twice as big to be safe
+        size_t needed = required * 2;
+        // Allocate a new buffer
+        char *new_buffer; 
+        CHECK_CU( cuMemAllocHost((void**)&new_buffer, needed) );
+        // Copy over the old data
+        memcpy(new_buffer, kernel_arg_buffer, kernel_arg_size);
+        // Free the old buffer
+        CHECK_CU( cuMemFreeHost(kernel_arg_buffer) );
+        // Update our buffer
+        kernel_arg_buffer = new_buffer;
+        kernel_buffer_size = needed;
+      }
+      memcpy(kernel_arg_buffer+offset, arg, size);
+      if (required > kernel_arg_size)
+        kernel_arg_size = required;
       return cudaSuccess;
     }
 
@@ -2032,20 +2069,20 @@ namespace LegionRuntime {
       std::map<const void*,CUfunction>::const_iterator finder = 
         device_functions.find(func);
       assert(finder != device_functions.end());
+      void *args[] = { 
+        CU_LAUNCH_PARAM_BUFFER_POINTER, kernel_arg_buffer,
+        CU_LAUNCH_PARAM_BUFFER_SIZE, (void*)&kernel_arg_size,
+        CU_LAUNCH_PARAM_END
+      };
+
       // Launch the kernel on our stream dammit!
       CHECK_CU( cuLaunchKernel(finder->second, config.grid.x, config.grid.y, config.grid.z,
                                config.block.x, config.block.y, config.block.z,
-                               config.shared, get_current_task_stream(), 
-                               (kernel_arguments.empty() ? 0 : &(kernel_arguments[0])), 0) );
+                               config.shared, get_current_task_stream(), NULL, args) );
       // Clean everything up from the launch
       launch_configs.pop_back();
-      for (std::vector<void*>::iterator it = kernel_arguments.begin();
-            it != kernel_arguments.end(); it++)
-      {
-        free(*it);
-      }
-      kernel_arguments.clear();
-      argument_offset = 0;
+      // Reset the kernel arg size
+      kernel_arg_size = 0;
       return cudaSuccess;
     }
 

@@ -120,7 +120,6 @@ namespace LegionRuntime {
       HLR_RESOLVE_FUTURE_PRED_ID,
       HLR_MPI_RANK_ID,
       HLR_CONTRIBUTE_COLLECTIVE_ID,
-      HLR_COLLECTIVE_FUTURE_ID,
       HLR_CHECK_STATE_ID,
       HLR_MAPPER_TASK_ID,
     };
@@ -199,6 +198,7 @@ namespace LegionRuntime {
     class CloseOp;
     class AcquireOp;
     class ReleaseOp;
+    class DynamicCollectiveOp;
     class FuturePredOp;
     class NotPredOp;
     class AndPredOp;
@@ -306,6 +306,7 @@ namespace LegionRuntime {
     // legion_logging.h
     class TreeStateLogger;
 
+    typedef LowLevel::Runtime LLRuntime;
     typedef LowLevel::Machine Machine;
     typedef LowLevel::Domain Domain;
     typedef LowLevel::DomainPoint DomainPoint;
@@ -351,7 +352,7 @@ namespace LegionRuntime {
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
     typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-    typedef void (*RegistrationCallbackFnptr)(Machine *machine, 
+    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
         HighLevelRuntime *rt, const std::set<Processor> &local_procs);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
         const DomainPoint&, HighLevelRuntime *rt);
@@ -368,13 +369,6 @@ namespace LegionRuntime {
       Context,HighLevelRuntime*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
-    // Disable the use of AVX field masks for now since many data
-    // structures don't know how to properly align them. If you want
-    // to try it, you can build with -DALIGNED_FIELD_MASKS which
-    // will cause all the AVXFieldMasks to allocate their own
-    // aligned backing store on the heap.  While correct, this
-    // will disable many compiler optimizations due to GCC and
-    // other C compilers being awful at alias analysis.
 
 // The folowing macros are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
@@ -502,6 +496,7 @@ namespace LegionRuntime {
     friend class CopyOp;                          \
     friend class FenceOp;                         \
     friend class FutureOp;                        \
+    friend class DynamicCollectiveOp;             \
     friend class FuturePredOp;                    \
     friend class DeletionOp;                      \
     friend class CloseOp;                         \

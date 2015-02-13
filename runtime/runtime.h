@@ -148,7 +148,7 @@ namespace LegionRuntime {
     public:
       Impl(Runtime *rt, bool register_future, DistributedID did, 
            AddressSpaceID owner_space, AddressSpaceID local_space,
-           TaskOp *task = NULL);
+           Operation *op = NULL);
       Impl(const Future::Impl &rhs);
       virtual ~Impl(void);
     public:
@@ -178,6 +178,8 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
       virtual void notify_new_remote(AddressSpaceID);
+    public:
+      void register_dependence(Operation *consumer_op);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
@@ -193,8 +195,8 @@ namespace LegionRuntime {
       static void handle_contribute_to_collective(const void *args);
     public:
       // These three fields are only valid on the owner node
-      TaskOp *const task;
-      const GenerationID task_gen;
+      Operation *const producer_op;
+      const GenerationID op_gen;
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       UserEvent ready_event;
@@ -978,7 +980,7 @@ namespace LegionRuntime {
         ProcessorMask       processor_mask;
       };
     public:
-      Runtime(Machine *m, AddressSpaceID space_id,
+      Runtime(Machine m, AddressSpaceID space_id,
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
@@ -1305,8 +1307,8 @@ namespace LegionRuntime {
       unsigned sample_unmapped_tasks(Processor proc, Mapper *mapper);
     public:
       // Messaging functions
-      MessageManager* find_messenger(AddressSpaceID sid) const;
-      MessageManager* find_messenger(Processor target) const;
+      MessageManager* find_messenger(AddressSpaceID sid);
+      MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
       void send_task(Processor target, TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
@@ -1598,27 +1600,28 @@ namespace LegionRuntime {
       void decrement_outstanding_top_level_tasks(void);
       void initiate_runtime_shutdown(void);
     public:
-      IndividualTask*  get_available_individual_task(void);
-      PointTask*       get_available_point_task(void);
-      IndexTask*       get_available_index_task(void);
-      SliceTask*       get_available_slice_task(void);
-      RemoteTask*      get_available_remote_task(void);
-      InlineTask*      get_available_inline_task(void);
-      MapOp*           get_available_map_op(void);
-      CopyOp*          get_available_copy_op(void);
-      FenceOp*         get_available_fence_op(void);
-      FrameOp*         get_available_frame_op(void);
-      DeletionOp*      get_available_deletion_op(void);
-      CloseOp*         get_available_close_op(void);
-      FuturePredOp*    get_available_future_pred_op(void);
-      NotPredOp*       get_available_not_pred_op(void);
-      AndPredOp*       get_available_and_pred_op(void);
-      OrPredOp*        get_available_or_pred_op(void);
-      AcquireOp*       get_available_acquire_op(void);
-      ReleaseOp*       get_available_release_op(void);
-      TraceCaptureOp*  get_available_capture_op(void);
-      TraceCompleteOp* get_available_trace_op(void);
-      MustEpochOp*     get_available_epoch_op(void);
+      IndividualTask*      get_available_individual_task(void);
+      PointTask*           get_available_point_task(void);
+      IndexTask*           get_available_index_task(void);
+      SliceTask*           get_available_slice_task(void);
+      RemoteTask*          get_available_remote_task(void);
+      InlineTask*          get_available_inline_task(void);
+      MapOp*               get_available_map_op(void);
+      CopyOp*              get_available_copy_op(void);
+      FenceOp*             get_available_fence_op(void);
+      FrameOp*             get_available_frame_op(void);
+      DeletionOp*          get_available_deletion_op(void);
+      CloseOp*             get_available_close_op(void);
+      DynamicCollectiveOp* get_available_dynamic_collective_op(void);
+      FuturePredOp*        get_available_future_pred_op(void);
+      NotPredOp*           get_available_not_pred_op(void);
+      AndPredOp*           get_available_and_pred_op(void);
+      OrPredOp*            get_available_or_pred_op(void);
+      AcquireOp*           get_available_acquire_op(void);
+      ReleaseOp*           get_available_release_op(void);
+      TraceCaptureOp*      get_available_capture_op(void);
+      TraceCompleteOp*     get_available_trace_op(void);
+      MustEpochOp*         get_available_epoch_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1632,6 +1635,7 @@ namespace LegionRuntime {
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_close_op(CloseOp *op); 
+      void free_dynamic_collective_op(DynamicCollectiveOp *op);
       void free_future_predicate_op(FuturePredOp *op);
       void free_not_predicate_op(NotPredOp *op);
       void free_and_predicate_op(AndPredOp *op);
@@ -1657,7 +1661,7 @@ namespace LegionRuntime {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(TaskOp *task = NULL);
+      Future help_create_future(Operation *op = NULL);
       void help_complete_future(const Future &f);
       bool help_reset_future(const Future &f);
 #ifdef DYNAMIC_TESTS
@@ -1689,7 +1693,7 @@ namespace LegionRuntime {
       // The HighLevelRuntime wrapper for this class
       HighLevelRuntime *const high_level;
       // The machine object for this runtime
-      Machine *const machine;
+      const Machine machine;
       const AddressSpaceID address_space; 
       const unsigned runtime_stride; // stride for uniqueness
       RegionTreeForest *const forest;
@@ -1712,10 +1716,12 @@ namespace LegionRuntime {
       std::map<Processor,ProcessorManager*> proc_managers;
       // Reservation for looking up memory managers
       Reservation memory_manager_lock;
+      // Reservation for initializing message managers
+      Reservation message_manager_lock;
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
-      std::map<AddressSpaceID,MessageManager*> message_managers;
+      MessageManager *message_managers[MAX_NUM_NODES];
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:
@@ -1815,6 +1821,7 @@ namespace LegionRuntime {
       Reservation frame_op_lock;
       Reservation deletion_op_lock;
       Reservation close_op_lock;
+      Reservation dynamic_collective_op_lock;
       Reservation future_pred_op_lock;
       Reservation not_pred_op_lock;
       Reservation and_pred_op_lock;
@@ -1825,27 +1832,28 @@ namespace LegionRuntime {
       Reservation trace_op_lock;
       Reservation epoch_op_lock;
     protected:
-      std::deque<IndividualTask*>  available_individual_tasks;
-      std::deque<PointTask*>       available_point_tasks;
-      std::deque<IndexTask*>       available_index_tasks;
-      std::deque<SliceTask*>       available_slice_tasks;
-      std::deque<RemoteTask*>      available_remote_tasks;
-      std::deque<InlineTask*>      available_inline_tasks;
-      std::deque<MapOp*>           available_map_ops;
-      std::deque<CopyOp*>          available_copy_ops;
-      std::deque<FenceOp*>         available_fence_ops;
-      std::deque<FrameOp*>         available_frame_ops;
-      std::deque<DeletionOp*>      available_deletion_ops;
-      std::deque<CloseOp*>         available_close_ops;
-      std::deque<FuturePredOp*>    available_future_pred_ops;
-      std::deque<NotPredOp*>       available_not_pred_ops;
-      std::deque<AndPredOp*>       available_and_pred_ops;
-      std::deque<OrPredOp*>        available_or_pred_ops;
-      std::deque<AcquireOp*>       available_acquire_ops;
-      std::deque<ReleaseOp*>       available_release_ops;
-      std::deque<TraceCaptureOp*>  available_capture_ops;
-      std::deque<TraceCompleteOp*> available_trace_ops;
-      std::deque<MustEpochOp*>     available_epoch_ops;
+      std::deque<IndividualTask*>      available_individual_tasks;
+      std::deque<PointTask*>           available_point_tasks;
+      std::deque<IndexTask*>           available_index_tasks;
+      std::deque<SliceTask*>           available_slice_tasks;
+      std::deque<RemoteTask*>          available_remote_tasks;
+      std::deque<InlineTask*>          available_inline_tasks;
+      std::deque<MapOp*>               available_map_ops;
+      std::deque<CopyOp*>              available_copy_ops;
+      std::deque<FenceOp*>             available_fence_ops;
+      std::deque<FrameOp*>             available_frame_ops;
+      std::deque<DeletionOp*>          available_deletion_ops;
+      std::deque<CloseOp*>             available_close_ops;
+      std::deque<DynamicCollectiveOp*> available_dynamic_collective_ops;
+      std::deque<FuturePredOp*>        available_future_pred_ops;
+      std::deque<NotPredOp*>           available_not_pred_ops;
+      std::deque<AndPredOp*>           available_and_pred_ops;
+      std::deque<OrPredOp*>            available_or_pred_ops;
+      std::deque<AcquireOp*>           available_acquire_ops;
+      std::deque<ReleaseOp*>           available_release_ops;
+      std::deque<TraceCaptureOp*>      available_capture_ops;
+      std::deque<TraceCompleteOp*>     available_trace_ops;
+      std::deque<MustEpochOp*>         available_epoch_ops;
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -1914,6 +1922,7 @@ namespace LegionRuntime {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
+      static int* get_startup_arrivals(void);
       static Processor::TaskIDTable& get_task_table(
                                           bool add_runtime_tasks = true);
       static std::map<Processor::TaskFuncID,InlineFnptr>& 
@@ -1926,7 +1935,7 @@ namespace LegionRuntime {
       static PartitionProjectionTable& get_partition_projection_table(void);
       static void register_runtime_tasks(Processor::TaskIDTable &table);
       static Processor::TaskFuncID get_next_available_id(void);
-      static void log_machine(Machine *machine);
+      static void log_machine(Machine machine);
 #ifdef SPECIALIZED_UTIL_PROCS
       static void get_utility_processor_mapping(
           const std::set<Processor> &util_procs, Processor &cleanup_proc,
@@ -1935,7 +1944,6 @@ namespace LegionRuntime {
     public:
       // Static member variables
       static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
-      static unsigned startup_arrivals;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;

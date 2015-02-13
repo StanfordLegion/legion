@@ -127,6 +127,8 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
+      NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
+      NEW_OPAQUE_WRAPPER(legion_processor_t, Processor *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t

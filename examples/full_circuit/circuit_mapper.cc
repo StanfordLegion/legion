@@ -19,14 +19,15 @@ using namespace LegionRuntime::HighLevel;
 
 LegionRuntime::Logger::Category log_mapper("mapper");
 
-CircuitMapper::CircuitMapper(Machine *m, HighLevelRuntime *rt, Processor p)
+CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
   : DefaultMapper(m, rt, p)
 {
-  const std::set<Processor> &all_procs = machine->get_all_processors();
+  std::set<Processor> all_procs;
+  machine.get_all_processors(all_procs);
   for (std::set<Processor>::const_iterator it = all_procs.begin();
         it != all_procs.end(); it++)
   {
-    Processor::Kind k = machine->get_processor_kind(*it);
+    Processor::Kind k = it->kind();
     switch (k)
     {
       case Processor::LOC_PROC:

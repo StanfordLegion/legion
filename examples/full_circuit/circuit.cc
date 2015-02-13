@@ -185,7 +185,7 @@ void top_level_task(const Task *task,
   }
 }
 
-static void update_mappers(Machine *machine, HighLevelRuntime *rt,
+static void update_mappers(Machine machine, HighLevelRuntime *rt,
                            const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
@@ -330,7 +330,7 @@ void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wir
 void allocate_locator_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace locator_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, locator_space);
-  allocator.allocate_field(sizeof(float), FID_LOCATOR);
+  allocator.allocate_field(sizeof(PointerLocation), FID_LOCATOR);
   runtime->attach_name(locator_space, FID_LOCATOR, "locator");
 }
 
@@ -407,6 +407,8 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   Coloring locator_node_map;
 
   Coloring privacy_map;
+  privacy_map[0];
+  privacy_map[1];
 
   // keep a O(1) indexable list of nodes in each piece for connecting wires
   std::vector<std::vector<ptr_t> > piece_node_ptrs(num_pieces);

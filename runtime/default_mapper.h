@@ -39,7 +39,7 @@ namespace LegionRuntime {
      */
     class DefaultMapper : public Mapper {
     public:
-      DefaultMapper(Machine *machine, HighLevelRuntime *rt, Processor local);
+      DefaultMapper(Machine machine, HighLevelRuntime *rt, Processor local);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
     public:
@@ -98,7 +98,7 @@ namespace LegionRuntime {
       // Pick a random processor of a given kind
       static Processor select_random_processor(
                               const std::set<Processor> &options, 
-                              Processor::Kind filter, Machine *machine);
+                              Processor::Kind filter, Machine machine);
       // Break an IndexSpace of tasks into IndexSplits
       static void decompose_index_space(const Domain &domain, 
                               const std::vector<Processor> &targets,
@@ -107,7 +107,7 @@ namespace LegionRuntime {
     protected:
       const Processor local_proc;
       const Processor::Kind local_kind;
-      Machine *const machine;
+      const Machine machine;
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts
       unsigned max_steals_per_theft;

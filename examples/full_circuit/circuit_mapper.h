@@ -24,7 +24,7 @@ using namespace LegionRuntime::HighLevel;
 
 class CircuitMapper : public DefaultMapper {
 public:
-  CircuitMapper(Machine *machine, HighLevelRuntime *runtime, Processor local);
+  CircuitMapper(Machine machine, HighLevelRuntime *runtime, Processor local);
 public:
   virtual void slice_domain(const Task *task, const Domain &domain,
                             std::vector<DomainSplit> &slices);

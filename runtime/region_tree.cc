@@ -60,7 +60,7 @@ namespace LegionRuntime {
       this->perf_trace_lock = Reservation::create_reservation();
       int max_local_id = 1;
       int local_space = 
-        Machine::get_executing_processor().address_space();
+        Processor::get_executing_processor().address_space();
       const std::set<Processor> &procs = runtime->machine->get_all_processors();
       for (std::set<Processor>::const_iterator it = procs.begin();
             it != procs.end(); it++)
@@ -753,6 +753,9 @@ namespace LegionRuntime {
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
+      // If this is a NO_ACCESS, then we'll have no dependences so we're done
+      if (IS_NO_ACCESS(req))
+        return;
 #ifdef DEBUG_PERF
       begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
 #endif
@@ -1017,6 +1020,9 @@ namespace LegionRuntime {
                                                   )
     //--------------------------------------------------------------------------
     {
+      // If we are a NO_ACCESS then we are already done
+      if (IS_NO_ACCESS(req))
+        return true;
 #ifdef DEBUG_PERF
       begin_perf_trace(PREMAP_PHYSICAL_REGION_ANALYSIS);
 #endif
@@ -1092,6 +1098,8 @@ namespace LegionRuntime {
                                                      )
     //--------------------------------------------------------------------------
     {
+      if (IS_NO_ACCESS(req))
+        return MappingRef();
 #ifdef DEBUG_PERF
       begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
 #endif
@@ -1533,7 +1541,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
         LegionLogging::log_event_dependence(exec_proc, 
             src_ref.get_ready_event(), copy_pre);
         LegionLogging::log_event_dependence(exec_proc,
@@ -3298,7 +3306,7 @@ namespace LegionRuntime {
     void RegionTreeForest::record_call(int kind, unsigned long long time)
     //--------------------------------------------------------------------------
     {
-      Processor p = Machine::get_executing_processor();
+      Processor p = Processor::get_executing_processor();
       traces[p.local_id()].record_call(kind, time);
     }
 
@@ -3306,7 +3314,7 @@ namespace LegionRuntime {
     void RegionTreeForest::begin_perf_trace(int kind)
     //--------------------------------------------------------------------------
     {
-      Processor p = Machine::get_executing_processor();
+      Processor p = Processor::get_executing_processor();
       unsigned long long start = TimeStamp::get_current_time_in_micros();
       assert(p.local_id() < traces.size());
       traces[p.local_id()] = PerfTrace(kind, start);
@@ -3316,7 +3324,7 @@ namespace LegionRuntime {
     void RegionTreeForest::end_perf_trace(unsigned long long tolerance)
     //--------------------------------------------------------------------------
     {
-      Processor p = Machine::get_executing_processor();
+      Processor p = Processor::get_executing_processor();
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
       PerfTrace &trace = traces[p.local_id()];
       unsigned long long diff = stop - trace.start;
@@ -8696,9 +8704,9 @@ namespace LegionRuntime {
       if (!chosen_order.empty() && target_proc.exists() &&
           !(info->req.flags & NO_ACCESS_FLAG))
       {
-        Machine *machine = Machine::get_machine();
-        const std::set<Memory> &visible_memories = 
-          machine->get_visible_memories(target_proc);
+        Machine machine = Machine::get_machine();
+        std::set<Memory> visible_memories;
+	machine.get_visible_memories(target_proc, visible_memories);
         std::vector<Memory> filtered_memories;
         filtered_memories.reserve(chosen_order.size());
         for (std::vector<Memory>::const_iterator it = chosen_order.begin();
@@ -8935,9 +8943,9 @@ namespace LegionRuntime {
       // we're targeting (e.g. never do this for premaps)
       if (!chosen_order.empty() && target_proc.exists())
       {
-        Machine *machine = Machine::get_machine();
-        const std::set<Memory> &visible_memories = 
-          machine->get_visible_memories(target_proc);
+        Machine machine = Machine::get_machine();
+        std::set<Memory> visible_memories;
+	machine.get_visible_memories(target_proc, visible_memories);
         std::vector<Memory> filtered_memories;
         filtered_memories.reserve(chosen_order.size());
         for (std::vector<Memory>::const_iterator it = chosen_order.begin();
@@ -9430,10 +9438,6 @@ namespace LegionRuntime {
     {
       // Initialize the version of all fields to zero
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
-#ifdef LOGICAL_FIELD_TREE
-      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9446,22 +9450,12 @@ namespace LegionRuntime {
       // field trees if necessary.
       // Only copy over the field versions
       field_versions = rhs.field_versions;
-#ifdef LOGICAL_FIELD_TREE
-      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-#endif
     }
 
     //--------------------------------------------------------------------------
     LogicalState::~LogicalState(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LOGICAL_FIELD_TREE
-      delete curr_epoch_users;
-      curr_epoch_users = NULL;
-      delete prev_epoch_users;
-      prev_epoch_users = NULL;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9508,16 +9502,8 @@ namespace LegionRuntime {
       field_versions.clear();
       field_versions[0] = FieldMask(FIELD_ALL_ONES);
       field_states.clear();
-#ifndef LOGICAL_FIELD_TREE
       curr_epoch_users.clear();
       prev_epoch_users.clear();
-#else
-      // Free up the old field trees and make new ones
-      delete curr_epoch_users;
-      delete prev_epoch_users;
-      curr_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-      prev_epoch_users = new FieldTree<LogicalUser>(FIELD_ALL_ONES);
-#endif
       close_operations.clear();
       user_level_coherence.clear();
     }
@@ -9562,7 +9548,7 @@ namespace LegionRuntime {
           {
 #ifdef LEGION_LOGGING
             LegionLogging::log_mapping_dependence(
-                Machine::get_executing_processor(),
+                Processor::get_executing_processor(),
                 user.op->get_parent()->get_unique_task_id(),
                 prev_user.uid, prev_user.idx, 
                 user.uid, user.idx, dtype);
@@ -9665,7 +9651,7 @@ namespace LegionRuntime {
     {
 #ifdef LEGION_LOGGING
       LegionLogging::log_mapping_dependence(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             op->get_parent()->get_unique_task_id(),
             prev_user.uid, prev_user.idx, op->get_unique_op_id(),
             0/*idx*/, TRUE_DEPENDENCE);
@@ -10022,62 +10008,6 @@ namespace LegionRuntime {
     {
     }
 
-#ifdef LOGICAL_FIELD_TREE
-    //--------------------------------------------------------------------------
-    void LogicalCloser::begin_node(FieldTree<LogicalUser> *node)
-    //--------------------------------------------------------------------------
-    {
-      // Save the reinsert count from the next level up
-      reinsert_stack.push_back(reinsert_count);
-      reinsert_count = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalCloser::end_node(FieldTree<LogicalUser> *node)
-    //--------------------------------------------------------------------------
-    {
-      // Reinsert any users from this node that we pulled out
-      for (unsigned idx = 0; idx < reinsert_count; idx++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!reinsert.empty());
-#endif
-        // Don't recurse when reinserting into the tree
-        // as it may lead to long chains of unused nodes.
-        node->insert(reinsert.back(), false/*recurse*/);
-        reinsert.pop_back();
-      }
-      // Then restore the reinsert count from the next level up
-      reinsert_count = reinsert_stack.back();
-      reinsert_stack.pop_back();
-    } 
-
-    //--------------------------------------------------------------------------
-    bool LogicalCloser::analyze(LogicalUser &prev_user)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask overlap = local_closing_mask & prev_user.field_mask;
-      if (!overlap)
-        return true;
-      closed_users.push_back(prev_user);
-      // Update the field mask and privilege
-      closed_users.back().field_mask = overlap;
-      closed_users.back().usage.privilege = 
-        (PrivilegeMode)((int)closed_users.back().privilege | PROMOTED);
-      // Remove the close set of fields from this user
-      prev_user.field_mask -= overlap;
-      // If it's empty, remove it from the list and let
-      // the mapping reference go up the tree with it.
-      // Otherwise add a new mapping reference.
-      if (!!prev_user.field_mask)
-      {
-        prev_user.op->add_mapping_reference(prev_user.gen);
-        reinsert.push_back(prev_user);
-        reinsert_count++;
-      }
-      return false; // don't keep it
-    }
-#endif
 
     //--------------------------------------------------------------------------
     PhysicalCloser::PhysicalCloser(MappableInfo *in, bool open, LogicalRegion h)
@@ -11029,18 +10959,9 @@ namespace LegionRuntime {
           // Add the closed users to the prev epoch users, we already
           // registered mapping dependences on them as part of the
           // closing process so we don't need to do it again
-#ifndef LOGICAL_FIELD_TREE
           state.prev_epoch_users.insert(state.prev_epoch_users.end(),
                                         closer.closed_users.begin(),
                                         closer.closed_users.end());
-#else
-          for (LegionDeque<LogicalUser>::aligned::const_iterator it = 
-                closer.closed_users.begin(); it != 
-                closer.closed_users.end(); it++)
-          {
-            state.prev_epoch_users->insert(*it);
-          }
-#endif
         }
         if (!closer.close_operations.empty())
           update_close_operations(state, closer.close_operations);
@@ -11051,12 +10972,8 @@ namespace LegionRuntime {
         {
           // Record a mapping reference on this operation
           user.op->add_mapping_reference(user.gen);
-#ifndef LOGICAL_FIELD_TREE
           // Add ourselves to the current epoch
           state.curr_epoch_users.push_back(user);
-#else
-          state.curr_epoch_users->insert(user);
-#endif
         }
       }
       else
@@ -11096,18 +11013,9 @@ namespace LegionRuntime {
           // Add the closed users to the prev epoch users, we already
           // registered mapping dependences on them as part of the
           // closing process so we don't need to do it again
-#ifndef LOGICAL_FIELD_TREE
           state.prev_epoch_users.insert(state.prev_epoch_users.end(),
                                         closer.closed_users.begin(),
                                         closer.closed_users.end());
-#else
-          for (LegionDeque<LogicalUser>::aligned::const_iterator it = 
-                closer.closed_users.begin(); it != 
-                closer.closed_users.end(); it++)
-          {
-            state.prev_epoch_users->insert(*it);
-          }
-#endif
         }
         
         if (!closer.close_operations.empty())
@@ -11151,11 +11059,7 @@ namespace LegionRuntime {
           // add ourselves as a user
           // Record a mapping reference on this operation
           user.op->add_mapping_reference(user.gen);
-#ifndef LOGICAL_FIELD_TREE
           state.curr_epoch_users.push_back(user);
-#else
-          state.curr_epoch_users->insert(user);
-#endif
         }
       }
       else
@@ -11850,7 +11754,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FILTER_PREV_EPOCH_CALL);
 #endif
-#ifndef LOGICAL_FIELD_TREE
       for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.prev_epoch_users.begin(); it != 
             state.prev_epoch_users.end(); /*nothing*/)
@@ -11865,10 +11768,6 @@ namespace LegionRuntime {
         else
           it++; // still has non-dominated fields
       }
-#else
-      LogicalFilter filter(field_mask);
-      state.prev_epoch_users->analyze<LogicalFilter>(field_mask, filter);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11879,7 +11778,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FILTER_CURR_EPOCH_CALL);
 #endif
-#ifndef LOGICAL_FIELD_TREE
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it !=
             state.curr_epoch_users.end(); /*nothing*/)
@@ -11910,10 +11808,6 @@ namespace LegionRuntime {
         else
           it++; // not empty so keep going
       }
-#else
-      LogicalFilter filter(field_mask, state.prev_epoch_users);
-      state.curr_epoch_users->analyze<LogicalFilter>(field_mask, filter);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12025,10 +11919,8 @@ namespace LegionRuntime {
       // Technically these should already be empty
       assert(state.field_versions.size() == 1);
       assert(state.field_states.empty());
-#ifndef LOGICAL_FIELD_TREE
       assert(state.curr_epoch_users.empty());
       assert(state.prev_epoch_users.empty());
-#endif
       assert(state.close_operations.empty());
 #endif
       state.reset();
@@ -12045,7 +11937,6 @@ namespace LegionRuntime {
       assert(ctx < logical_state_size);
 #endif
       LogicalState &state = logical_states[ctx];     
-#ifndef LOGICAL_FIELD_TREE
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::
             const_iterator it = state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); it++)
@@ -12058,14 +11949,6 @@ namespace LegionRuntime {
       {
         it->op->remove_mapping_reference(it->gen); 
       }
-#else
-      LogicalFieldInvalidator invalidator;
-      FieldMask all_ones(FIELD_ALL_ONES);
-      state.curr_epoch_users->
-        analyze<LogicalFieldInvalidator>(all_ones, invalidator);
-      state.prev_epoch_users->
-        analyze<LogicalFieldInvalidator>(all_ones, invalidator);
-#endif
       state.reset();
     }
 
@@ -12082,7 +11965,6 @@ namespace LegionRuntime {
       assert(ctx < logical_state_size);
 #endif
       LogicalState &state = logical_states[ctx];
-#ifndef LOGICAL_FIELD_TREE
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); /*nothing*/)
@@ -12091,7 +11973,7 @@ namespace LegionRuntime {
         {
 #ifdef LEGION_LOGGING
           LegionLogging::log_mapping_dependence(
-              Machine::get_executing_processor(),
+              Processor::get_executing_processor(),
               op->get_parent()->get_unique_task_id(),
               it->uid, it->idx, op->get_unique_op_id(),
               0/*idx*/, TRUE_DEPENDENCE);
@@ -12127,7 +12009,7 @@ namespace LegionRuntime {
         {
 #ifdef LEGION_LOGGING
           LegionLogging::log_mapping_dependence(
-              Machine::get_executing_processor(),
+              Processor::get_executing_processor(),
               op->get_parent()->get_unique_task_id(),
               it->uid, it->idx, op->get_unique_op_id(),
               0/*idx*/, TRUE_DEPENDENCE);
@@ -12155,13 +12037,6 @@ namespace LegionRuntime {
         else
           it++;
       }
-#else
-      LogicalOpAnalyzer<DOMINATE> analyzer(op);
-      state.curr_epoch_users->analyze<LogicalOpAnalyzer<DOMINATE> >(
-                                                          field_mask, analyzer);
-      state.prev_epoch_users->analyze<LogicalOpAnalyzer<DOMINATE> >(
-                                                          field_mask, analyzer);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13410,7 +13285,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
         LegionLogging::log_event_dependences(
-            Machine::get_executing_processor(), 
+            Processor::get_executing_processor(), 
             pre_set.preconditions, copy_pre);
 #endif
 #ifdef LEGION_SPY
@@ -13459,7 +13334,7 @@ namespace LegionRuntime {
             manager_node->column_source->to_field_set(it->second,
                                                       copy_fields);
             LegionLogging::log_lowlevel_copy(
-                Machine::get_executing_processor(),
+                Processor::get_executing_processor(),
                 it->first->manager->get_instance(),
                 dst->manager->get_instance(),
                 copy_index_space,
@@ -14292,7 +14167,6 @@ namespace LegionRuntime {
       release_physical_state(state);
     }
 
-#ifndef LOGICAL_FIELD_TREE
     //--------------------------------------------------------------------------
     template<typename ALLOC>
     FieldMask RegionTreeNode::perform_dependence_checks(
@@ -14343,7 +14217,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
                 if (dtype != PROMOTED_DEPENDENCE)
                   LegionLogging::log_mapping_dependence(
-                      Machine::get_executing_processor(),
+                      Processor::get_executing_processor(),
                       user.op->get_parent()->get_unique_task_id(),
                       it->uid, it->idx, user.uid, user.idx, dtype);
 #endif
@@ -14484,7 +14358,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
         if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
           LegionLogging::log_mapping_dependence(
-              Machine::get_executing_processor(),
+              Processor::get_executing_processor(),
               closer.user.op->get_parent()->get_unique_task_id(),
               it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
@@ -14550,36 +14424,6 @@ namespace LegionRuntime {
       }
     }
 
-#else
-    //--------------------------------------------------------------------------
-    FieldMask RegionTreeNode::perform_dependence_checks(
-        const LogicalUser &user, FieldTree<LogicalUser> *users,
-        const FieldMask &check_mask, bool validates_regions)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask user_check_mask = user.field_mask & check_mask;
-      if (!user_check_mask)
-        return user_check_mask;
-      LogicalDepAnalyzer analyzer(user, check_mask, 
-                                  validates_regions, user.op->is_tracing());
-      users->analyze<LogicalDepAnalyzer>(user_check_mask, analyzer);
-      return analyzer.get_dominator_mask();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::perform_closing_checks(
-        LogicalCloser &closer, FieldTree<LogicalUser> *users,
-        const FieldMask &check_mask)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask user_check_mask = closer.user.field_mask & check_mask;
-      if (!user_check_mask)
-        return;
-      closer.local_closing_mask = user_check_mask;
-      closer.reinsert_count = 0;
-      users->analyze<LogicalCloser>(user_check_mask, closer);
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Region Node 
@@ -14926,7 +14770,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
         LegionLogging::log_physical_instance(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             manager->get_instance(), manager->memory,
             handle.index_space, handle.field_space, handle.tree_id);
 #endif
@@ -14958,7 +14802,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
         LegionLogging::log_physical_instance(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             manager->get_instance(), manager->memory,
             handle.index_space, handle.field_space, handle.tree_id,
             redop, !reduction_list, manager->get_pointer_space());
@@ -18350,7 +18194,7 @@ namespace LegionRuntime {
       LegionProf::register_event(0, PROF_BEGIN_GC);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,
                                       BEGIN_GC);
 #endif     
@@ -18373,7 +18217,7 @@ namespace LegionRuntime {
       LegionProf::register_event(0, PROF_END_GC);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0 /* no unique id */,
                                       END_GC);
 #endif
@@ -18519,12 +18363,6 @@ namespace LegionRuntime {
                                MaterializedView *par, unsigned dep)
       : InstanceView(ctx, did, own_addr, own_did, node), 
         manager(man), parent(par), depth(dep)
-#ifdef PHYSICAL_FIELD_TREE
-        , curr_epoch_users(
-            new FieldTree<PhysicalUser>(FieldMask(FIELD_ALL_ONES)))
-        , prev_epoch_users(
-            new FieldTree<PhysicalUser>(FieldMask(FIELD_ALL_ONES)))
-#endif
     //--------------------------------------------------------------------------
     {
       // If we're the top of the tree and the owner make the instance lock
@@ -18546,9 +18384,6 @@ namespace LegionRuntime {
     MaterializedView::MaterializedView(const MaterializedView &rhs)
       : InstanceView(NULL, 0, 0, 0, NULL),
         manager(NULL), parent(NULL), depth(0)
-#ifdef PHYSICAL_FIELD_TREE
-        , curr_epoch_users(NULL), prev_epoch_users(NULL)
-#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18572,10 +18407,6 @@ namespace LegionRuntime {
         if (it->second->remove_resource_reference())
           legion_delete(it->second);
       }
-#ifdef PHYSICAL_FIELD_TREE
-      delete curr_epoch_users;
-      delete prev_epoch_users;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18801,7 +18632,6 @@ namespace LegionRuntime {
         return true;
       // Do the local analysis
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
-#ifndef PHYSICAL_FIELD_TREE
       for (LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned::
             const_iterator it = curr_epoch_users.begin(); 
             it != curr_epoch_users.end(); it++)
@@ -18812,11 +18642,6 @@ namespace LegionRuntime {
           return true;
       }
       return false;
-#else
-      WARAnalyzer<false> analyzer;
-      curr_epoch_users->analyze(user_mask, analyzer);
-      return analyzer.has_war_dependence();
-#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -18918,7 +18743,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), wait_on_events, ready_event);
+          Processor::get_executing_processor(), wait_on_events, ready_event);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
@@ -19075,11 +18900,7 @@ namespace LegionRuntime {
       // this is safe to do because we previously filtered
       // the previous epoch usrs for these fields in the find
       // copy preconditions call
-#ifndef PHYSICAL_FIELD_TREE
       curr_epoch_users.push_back(user);
-#else
-      curr_epoch_users->insert(user);
-#endif
       event_references.insert(user.term_event);
       if (owner_did != did)
         send_back_user(user);
@@ -19096,7 +18917,6 @@ namespace LegionRuntime {
 #endif
       // Need the lock when doing this analysis
       AutoLock v_lock(view_lock);
-#ifndef PHYSICAL_FIELD_TREE
       FieldMask non_dominated;
       FieldMask observed;
       LegionDeque<PhysicalUser>::aligned new_prev_users;
@@ -19302,36 +19122,6 @@ namespace LegionRuntime {
                             curr_epoch_users, false/*previous*/);
       }
 #endif
-#else
-      // First do the analysis on the current epcoh users and filter
-      // out any that can be sent back to the previous epoch users
-      PhysicalDepAnalyzer<!ABOVE> curr_analyzer(user, user.field_mask,
-                                                logical_node, wait_on);
-      curr_epoch_users->analyze(user.field_mask, curr_analyzer);
-      FieldMask non_dominated = curr_analyzer.get_non_dominated_mask();
-      FieldMask dominated = ((user.field_mask - non_dominated) &
-                              curr_analyzer.get_observed_mask());
-      if (!ABOVE)
-        non_dominated = user.field_mask - dominated;
-      // Filter any dominated users from the previous users
-      if (!ABOVE && !!dominated)
-      {
-        PhysicalFilter filter(dominated);
-        prev_epoch_users->analyze<PhysicalFilter>(dominated, filter);
-      }
-      // If we didn't dominate all the field do another analysis
-      // on the previous epoch users for the non-dominated fields
-      if (ABOVE || !!non_dominated)
-      {
-        PhysicalDepAnalyzer<false> prev_analyzer(user, 
-          (ABOVE ? user.field_mask : non_dominated), logical_node, wait_on);
-        prev_epoch_users->analyze(non_dominated, prev_analyzer);
-      }
-      // Now we can add the filtered users into the previous users
-      curr_analyzer.insert_filtered_users(prev_epoch_users);
-      // Add our user to the list of current users
-      curr_epoch_users->insert(user);
-#endif
       // Only need to do this if termination event exists
       if (user.term_event.exists())
       {
@@ -19404,7 +19194,6 @@ namespace LegionRuntime {
 #endif
       // Need the lock when doing this analysis
       AutoLock v_lock(view_lock);
-#ifndef PHYSICAL_FIELD_TREE
       FieldMask non_dominated;
       FieldMask observed;
       LegionDeque<PhysicalUser>::aligned new_prev_users;
@@ -19578,9 +19367,6 @@ namespace LegionRuntime {
                           (curr_epoch_users, false/*previous*/);
       }
 #endif
-#else // PHYSICAL_FIELD_TREE
-      assert(false); // TODO: Implement this for physical field tree
-#endif
     }
     
 #if 0
@@ -19632,7 +19418,6 @@ namespace LegionRuntime {
       PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
 #endif
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
-#ifndef PHYSICAL_FIELD_TREE
       if (!writing)
       {
         // Only need to track dominated mask when not above
@@ -19758,49 +19543,6 @@ namespace LegionRuntime {
           }
         }
       }
-#else
-      if (!writing)
-      {
-        PhysicalCopyAnalyzer<true,false,!ABOVE,ABOVE> 
-          copy_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
-        curr_epoch_users->analyze(copy_mask, copy_analyzer);
-        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
-        if (ABOVE || !!non_dominated)
-        {
-          PhysicalCopyAnalyzer<true,false,false,ABOVE>
-            prev_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
-          prev_epoch_users->analyze(
-              (ABOVE ? copy_mask : non_dominated), prev_analyzer);
-        }
-      }
-      else if (redop > 0)
-      {
-        PhysicalCopyAnalyzer<false,true,!ABOVE,ABOVE>
-          copy_analyzer(copy_mask, redop, wait_on, local_color, logical_node);
-        curr_epoch_users->analyze(copy_mask, copy_analyzer);
-        const FieldMask &non_dominated = copy_analyzer.get_non_dominated_mask();
-        if (ABOVE || !!non_dominated)
-        {
-          PhysicalCopyAnalyzer<false,true,false,ABOVE>
-            prev_analyzer(copy_mask, redop, wait_on, local_color, logical_node);
-          prev_epoch_users->analyze(
-              (ABOVE ? copy_mask : non_dominated), prev_analyzer);
-        }
-      }
-      else
-      {
-        PhysicalCopyAnalyzer<false,false,false,ABOVE>
-          copy_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
-        curr_epoch_users->analyze(copy_mask, copy_analyzer);
-        // We know we dominated everyone if we're not above
-        if (ABOVE)
-        {
-          PhysicalCopyAnalyzer<false,false,false,ABOVE>
-            prev_analyzer(copy_mask, 0, wait_on, local_color, logical_node);
-          prev_epoch_users->analyze(copy_mask, prev_analyzer);
-        }
-      }
-#endif
     }
 #endif
 
@@ -19819,7 +19561,6 @@ namespace LegionRuntime {
         return true;
       int local_color = child_color;
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
-#ifndef PHYSICAL_FIELD_TREE
       for (LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned::
             const_iterator it = curr_epoch_users.begin(); 
             it != curr_epoch_users.end(); it++)
@@ -19836,11 +19577,6 @@ namespace LegionRuntime {
           return true;
       }
       return false; 
-#else
-      WARAnalyzer<true> analyzer(local_color, logical_node);
-      curr_epoch_users->analyze(user_mask, analyzer);
-      return analyzer.has_war_dependence();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -19890,7 +19626,6 @@ namespace LegionRuntime {
 #if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
       !defined(EVENT_GRAPH_TRACE)
       // should already be holding the lock when this is called
-#ifndef PHYSICAL_FIELD_TREE
       for (LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned::
             iterator it = curr_epoch_users.begin();
             it != curr_epoch_users.end(); /*nothing*/)
@@ -19909,11 +19644,6 @@ namespace LegionRuntime {
         else
           it++;
       }
-#else
-      PhysicalEventFilter filter(term_event);
-      curr_epoch_users->analyze<PhysicalEventFilter>(term_mask, filter);
-      prev_epoch_users->analyze<PhysicalEventFilter>(term_mask, filter);
-#endif
 #endif
     }
 
@@ -20353,7 +20083,6 @@ namespace LegionRuntime {
       // view_lock held from callers
       RezCheck z(rez);
       rez.serialize(inst_lock);
-#ifndef PHYSICAL_FIELD_TREE
       rez.serialize(curr_epoch_users.size());
       for (LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned::
             const_iterator it = curr_epoch_users.begin(); 
@@ -20374,10 +20103,6 @@ namespace LegionRuntime {
         rez.serialize(it->term_event);
         rez.serialize(it->child);
       }
-#else
-      curr_epoch_users->pack_field_tree(rez);
-      prev_epoch_users->pack_field_tree(rez);
-#endif
       rez.serialize(current_versions.size());
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             current_versions.begin(); it != current_versions.end(); it++)
@@ -20402,7 +20127,6 @@ namespace LegionRuntime {
       derez.deserialize(inst_lock);
       FieldSpaceNode *field_node = manager->region_node->column_source;
       LegionMap<Event,FieldMask>::aligned deferred_events;
-#ifndef PHYSICAL_FIELD_TREE
       size_t num_current;
       derez.deserialize(num_current);
       for (unsigned idx = 0; idx < num_current; idx++)
@@ -20441,17 +20165,6 @@ namespace LegionRuntime {
         event_references.insert(user.term_event);
         deferred_events[user.term_event] |= user.field_mask;
       }
-#else
-      // Unpack the field trees
-      curr_epoch_users->unpack_field_tree(derez);
-      prev_epoch_users->unpack_field_tree(derez);
-      // Now transform all the field masks and get the
-      // set of events and field masks on which
-      // to defer garbage collection.
-      PhysicalUnpacker unpacker(field_node, source, deferred_events); 
-      curr_epoch_users->analyze(FieldMask(FIELD_ALL_ONES), unpacker);
-      prev_epoch_users->analyze(FieldMask(FIELD_ALL_ONES), unpacker);
-#endif
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx = 0; idx < num_versions; idx++)
@@ -22886,7 +22599,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), event_preconds, reduce_pre);
+          Processor::get_executing_processor(), event_preconds, reduce_pre);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(event_preconds, reduce_pre);
@@ -22939,7 +22652,7 @@ namespace LegionRuntime {
         manager->region_node->column_source->to_field_set(reduce_mask,
                                                           reduce_fields);
         LegionLogging::log_lowlevel_copy(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             manager->get_instance(),
             target->get_manager()->get_instance(),
             reduce_index_space,
@@ -23000,7 +22713,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), preconditions, reduce_pre);
+          Processor::get_executing_processor(), preconditions, reduce_pre);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(preconditions, reduce_pre);
@@ -23035,7 +22748,7 @@ namespace LegionRuntime {
         manager->region_node->column_source->to_field_set(red_mask,
                                                           reduce_fields);
         LegionLogging::log_lowlevel_copy(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             manager->get_instance(),
             target->get_manager()->get_instance(),
             reduce_index_space,
@@ -23098,7 +22811,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), preconditions, reduce_pre);
+          Processor::get_executing_processor(), preconditions, reduce_pre);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(preconditions, reduce_pre);
@@ -23133,7 +22846,7 @@ namespace LegionRuntime {
         manager->region_node->column_source->to_field_set(red_mask,
                                                           reduce_fields);
         LegionLogging::log_lowlevel_copy(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             manager->get_instance(),
             target->get_manager()->get_instance(),
             reduce_index_space,
@@ -23301,7 +23014,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_event_dependences(
-          Machine::get_executing_processor(), wait_on, result);
+          Processor::get_executing_processor(), wait_on, result);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on, result);

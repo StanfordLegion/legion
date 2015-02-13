@@ -332,7 +332,9 @@ namespace LegionRuntime {
 
       oas_by_inst = new OASByInst;
 
+#ifdef USE_CUDA
       int priority = 0;
+#endif
 
       while(((idata - ((const IDType *)data))*sizeof(IDType)) < datalen) {
 	RegionInstance src_inst = ID((IDType)*idata++).convert<RegionInstance>();
@@ -594,8 +596,6 @@ namespace LegionRuntime {
 					     Event event);
 
     extern void do_remote_fence(Memory mem, unsigned sequence_id, unsigned count, Event event);
-
-    extern ReductionOpTable reduce_op_table;
 
 
     namespace RangeExecutors {
@@ -1483,7 +1483,7 @@ namespace LegionRuntime {
         report_bytes(after_copy);
 #endif
 	if(after_copy.exists())
-	  Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+	  get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
       }
 #ifdef EVENT_GRAPH_TRACE
     public:
@@ -1619,7 +1619,7 @@ namespace LegionRuntime {
 	dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
 	assert(dst_base);
 
-	redop = reduce_op_table[redop_id];
+	redop = get_runtime()->reduce_op_table[redop_id];
 	fold = _fold;
       }
 
@@ -1684,7 +1684,7 @@ namespace LegionRuntime {
       {
 	src_mem = _src_mem.impl();
 	dst_mem = _dst_mem.impl();
-	redop = reduce_op_table[redop_id];
+	redop = get_runtime()->reduce_op_table[redop_id];
 	fold = _fold;
 
 	src_buffer = new char[buffer_size * redop->sizeof_rhs];
@@ -1771,10 +1771,10 @@ namespace LegionRuntime {
 	    Event merged = GenEventImpl::merge_events(events);
 
 	    // deferred trigger based on this merged event
-	    Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), merged);
+	    get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), merged);
 	  } else {
 	    // no actual copies occurred, so manually trigger event ourselves
-	    Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+	    get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
 	  }
 	} else {
 	  if(events.size() > 0) {
@@ -2210,7 +2210,7 @@ namespace LegionRuntime {
             if(num_writes == 0) {
               // an empty dma - no need to send a fence - we can trigger the
               //  completion event here and save a message
-	      Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+	      get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
             } else {
 #ifdef DEBUG_REMOTE_WRITES
 	      printf("remote write fence: " IDFMT "/%d\n", after_copy.id, after_copy.gen);
@@ -2255,7 +2255,7 @@ namespace LegionRuntime {
 	dst_mem = _dst_mem.impl();
 
 	redop_id = _redop_id;
-	redop = reduce_op_table[redop_id];
+	redop = get_runtime()->reduce_op_table[redop_id];
 	fold = _fold;
 
 	sequence_id = __sync_fetch_and_add(&rdma_sequence_no, 1);
@@ -2719,7 +2719,7 @@ namespace LegionRuntime {
       // code path for copies to/from reduction-only instances not done yet
       // are we doing a reduction?
       const ReductionOpUntyped *redop = ((src_data->redopid >= 0) ?
-					   reduce_op_table[src_data->redopid] :
+					   get_runtime()->reduce_op_table[src_data->redopid] :
 					   0);
       bool red_fold = (tgt_data->redopid >= 0);
       // if destination is a reduction, source must be also and must match
@@ -2845,7 +2845,7 @@ namespace LegionRuntime {
 		log_dma.info("triggering event " IDFMT "/%d after empty remote copy",
 			     finish_event.id, finish_event.gen);
 		assert(finish_event == after_copy);
-		Runtime::get_runtime()->get_singleevent_impl(finish_event)->trigger(finish_event.gen, gasnet_mynode());
+		get_runtime()->get_singleevent_impl(finish_event)->trigger(finish_event.gen, gasnet_mynode());
 	      }
 	      
 	      return;
@@ -3252,7 +3252,7 @@ namespace LegionRuntime {
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
-      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
       // single source field for now
       assert(srcs.size() == 1);
@@ -3372,7 +3372,7 @@ namespace LegionRuntime {
       Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
       Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
 
-      const ReductionOpUntyped *redop = reduce_op_table[redop_id];
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
       //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
 
@@ -3420,7 +3420,7 @@ namespace LegionRuntime {
 	      }
 
 	      // all done - we can trigger the event locally in this case
-	      Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+	      get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
               delete e;
 	      break;
 	    }
@@ -3496,7 +3496,7 @@ namespace LegionRuntime {
 	      if(rdma_count > 0) {
 		do_remote_fence(dst_mem, sequence_id, rdma_count, after_copy);
 	      } else {
-		Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+		get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
 	      }
               delete e;
 	      break;
@@ -3567,7 +3567,7 @@ namespace LegionRuntime {
 	      }
 
 	      // all done - we can trigger the event locally in this case
-	      Runtime::get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
+	      get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode());
 
 	      // also release the instance lock
 	      dst_impl->lock.release();
@@ -3655,7 +3655,7 @@ namespace LegionRuntime {
 				      dma_worker_thread_loop, dma_queue) );
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 #ifdef DEADLOCK_TRACE
-        Runtime::get_runtime()->add_thread(&worker_threads[i]);
+        get_runtime()->add_thread(&worker_threads[i]);
 #endif
       }
     }

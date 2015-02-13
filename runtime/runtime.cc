@@ -385,22 +385,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Future::Impl::Impl(Runtime *rt, bool register_future, DistributedID did, 
                        AddressSpaceID own_space, AddressSpaceID loc_space,
-                       TaskOp *t /*= NULL*/)
+                       Operation *o /*= NULL*/)
       : DistributedCollectable(rt, did, own_space, loc_space),
-        task(t), task_gen((t == NULL) ? 0 : t->get_generation()),
+        producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         ready_event(UserEvent::create_user_event()), result(NULL),
         result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
       if (register_future)
         runtime->register_future(did, this);
-      if (task != NULL)
-        task->add_mapping_reference(task_gen);
+      if (producer_op != NULL)
+        producer_op->add_mapping_reference(op_gen);
     }
 
     //--------------------------------------------------------------------------
     Future::Impl::Impl(const Future::Impl &rhs)
-      : DistributedCollectable(NULL, 0, 0, 0), task(NULL), task_gen(0)
+      : DistributedCollectable(NULL, 0, 0, 0), producer_op(NULL), op_gen(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -421,8 +421,8 @@ namespace LegionRuntime {
         result = NULL;
         result_size = 0;
       }
-      if (task != NULL)
-        task->remove_mapping_reference(task_gen);
+      if (producer_op != NULL)
+        producer_op->remove_mapping_reference(op_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -440,43 +440,44 @@ namespace LegionRuntime {
     {
       if (!ready_event.has_triggered())
       {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_begin(exec_proc,
-                                      task->get_parent()->get_unique_task_id(),
-                                      task->get_unique_task_id());
+                              producer_op->get_parent()->get_unique_task_id(),
+                              producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_BEGIN_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_BEGIN_WAIT);
 #endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_end(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_END_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
       else {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
         LegionLogging::log_future_nowait(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
       }
 #endif
       if (empty)
       {
-        log_run(LEVEL_ERROR,"Accessing empty future from task %s "
-                            "(UID %lld)",
-                            task->variants->name,
-                            task->get_unique_task_id());
+        if (producer_op != NULL)
+          log_run(LEVEL_ERROR,"Accessing empty future! (UID %lld)",
+                              producer_op->get_unique_op_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -491,43 +492,44 @@ namespace LegionRuntime {
     {
       if (!ready_event.has_triggered())
       {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_begin(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_BEGIN_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_BEGIN_WAIT);
 #endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_end(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_END_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
       else {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
         LegionLogging::log_future_nowait(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               prodcuer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
       }
 #endif
       if (empty)
       {
-        log_run(LEVEL_ERROR,"Accessing empty future from task %s "
-                            "(UID %lld)",
-                            task->variants->name,
-                            task->get_unique_task_id());
+        if (producer_op != NULL)
+          log_run(LEVEL_ERROR,"Accessing empty future! (UID %lld)",
+                              producer_op->get_unique_op_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -552,35 +554,37 @@ namespace LegionRuntime {
     {
       if (block && !ready_event.has_triggered())
       {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_begin(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_BEGIN_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_BEGIN_WAIT);
 #endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
 #ifdef LEGION_LOGGING
         LegionLogging::log_future_wait_end(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
 #endif
 #ifdef LEGION_PROF
-        LegionProf::register_event(task->get_parent()->get_unique_task_id(), 
-                                   PROF_END_WAIT);
+        LegionProf::register_event(
+                              producer_op->get_parent()->get_unique_task_id(), 
+                              PROF_END_WAIT);
 #endif
       }
 #ifdef LEGION_LOGGING
       else if (block) {
-        Processor exec_proc = Machine::get_executing_processor();
+        Processor exec_proc = Processor::get_executing_processor();
         LegionLogging::log_future_nowait(exec_proc,
-                                       task->get_parent()->get_unique_task_id(),
-                                       task->get_unique_task_id());
+                               producer_op->get_parent()->get_unique_task_id(),
+                               producer_op->get_unique_op_id());
       }
 #endif
       if (block)
@@ -705,6 +709,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // do nothing 
+    }
+
+    //--------------------------------------------------------------------------
+    void Future::Impl::register_dependence(Operation *consumer_op)
+    //--------------------------------------------------------------------------
+    {
+      if (producer_op != NULL)
+        consumer_op->register_dependence(producer_op, op_gen);
+#ifdef DEBUG_HIGH_LEVEL
+      else
+        assert(!empty); // better not be empty if it doesn't have an op
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1051,7 +1067,7 @@ namespace LegionRuntime {
         {
           Processor proc = context->get_executing_processor();
 #ifdef LEGION_LOGGING
-          Processor exec_proc = Machine::get_executing_processor();
+          Processor exec_proc = Processor::get_executing_processor();
           LegionLogging::log_future_wait_begin(exec_proc,
                                           context->get_unique_task_id(),
                                           task->get_unique_task_id());
@@ -3204,7 +3220,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
-      : memory(m), capacity(rt->machine->get_memory_size(m)),
+      : memory(m), capacity(m.capacity()),
         remaining_capacity(capacity), runtime(rt), 
         manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
@@ -4614,7 +4630,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Machine *m, AddressSpaceID unique,
+    Runtime::Runtime(Machine m, AddressSpaceID unique,
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
@@ -4628,6 +4644,7 @@ namespace LegionRuntime {
 #endif
         local_procs(locals), local_utils(local_utilities),
         memory_manager_lock(Reservation::create_reservation()),
+        message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
         mapper_info_lock(Reservation::create_reservation()),
         unique_partition_id((unique == 0) ? runtime_stride : unique), 
@@ -4656,6 +4673,7 @@ namespace LegionRuntime {
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         close_op_lock(Reservation::create_reservation()), 
+        dynamic_collective_op_lock(Reservation::create_reservation()),
         future_pred_op_lock(Reservation::create_reservation()), 
         not_pred_op_lock(Reservation::create_reservation()),
         and_pred_op_lock(Reservation::create_reservation()),
@@ -4710,23 +4728,24 @@ namespace LegionRuntime {
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
-          Processor::Kind kind = machine->get_processor_kind(*it);
+          Processor::Kind kind = it->kind();
           assert(kind != Processor::UTIL_PROC);
           LegionProf::initialize_processor(*it, false/*util*/, kind);
         }
         for (std::set<Processor>::const_iterator it = local_utils.begin();
               it != local_utils.end(); it++)
         {
-          Processor::Kind kind = machine->get_processor_kind(*it);
+          Processor::Kind kind = it->kind();
           assert(kind == Processor::UTIL_PROC);
           LegionProf::initialize_processor(*it, true/*util*/, kind);
         }
         // Tell the profiler about all the memories and their kinds
-        const std::set<Memory> &all_mems = machine->get_all_memories();
+        std::set<Memory> all_mems;
+	machine.get_all_memories(all_mems);
         for (std::set<Memory>::const_iterator it = all_mems.begin();
               it != all_mems.end(); it++)
         {
-          Memory::Kind kind = machine->get_memory_kind(*it);
+          Memory::Kind kind = it->kind();
           LegionProf::initialize_memory(*it, kind);
         } 
         LegionProf::initialize_copy_processor();
@@ -4763,47 +4782,25 @@ namespace LegionRuntime {
             it != local_procs.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(machine->get_processor_kind(*it) != Processor::UTIL_PROC);
+        assert((*it).kind() != Processor::UTIL_PROC);
 #endif
+	std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         ProcessorManager *manager = new ProcessorManager(*it,
-                                    machine->get_processor_kind(*it), this,
+				    (*it).kind(), this,
                                     superscalar_width,
                                     DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
-                                    machine->get_all_processors().size()-1);
+				    all_procs.size()-1);
         proc_managers[*it] = manager;
         manager->add_mapper(0, new DefaultMapper(machine, high_level, *it),
                             false/*needs check*/);
       }
-      // For each of the other address spaces, construct a 
-      // message manager for handling communication
-      for (std::set<AddressSpaceID>::const_iterator it = 
-            address_spaces.begin(); it != address_spaces.end(); it++)
-      {
-        // We don't need to make a message manager for ourself
-        if (address_space == (*it))
-          continue;
-        // Construct the set of processors in the remote address space
-        std::set<Processor> remote_procs;
-        std::set<Processor> remote_util_procs;
-        for (std::map<Processor,AddressSpaceID>::const_iterator pit = 
-              processor_spaces.begin(); pit != processor_spaces.end(); pit++)
-        {
-          if (pit->second != (*it))
-            continue;
-          Processor::Kind k = machine->get_processor_kind(pit->first);
-          if (k == Processor::UTIL_PROC)
-            remote_util_procs.insert(pit->first);
-          else
-            remote_procs.insert(pit->first);
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!remote_procs.empty() || !remote_util_procs.empty());
-#endif
-        message_managers[(*it)] = new MessageManager(*it, this, 
-            max_message_size, (remote_util_procs.empty() ? 
-              remote_procs : remote_util_procs));
-      }
+      // Initialize the message manager array so that we can construct
+      // message managers lazily as they are needed
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        message_managers[idx] = NULL;
+      
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
       for (total_contexts = 0; total_contexts < DEFAULT_CONTEXTS; 
@@ -4844,7 +4841,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
-      : high_level(NULL), machine(NULL), address_space(0), 
+      : high_level(NULL), machine(rhs.machine), address_space(0), 
         runtime_stride(0), forest(NULL),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
 #ifdef SPECIALIZE_UTIL_PROCS
@@ -4874,14 +4871,14 @@ namespace LegionRuntime {
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
-          Processor::Kind kind = machine->get_processor_kind(*it);
+          Processor::Kind kind = it->kind();
           assert(kind != Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
         }
         for (std::set<Processor>::const_iterator it = local_utils.begin();
               it != local_utils.end(); it++)
         {
-          Processor::Kind kind = machine->get_processor_kind(*it);
+          Processor::Kind kind = it->kind();
           assert(kind == Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
         }
@@ -4895,10 +4892,10 @@ namespace LegionRuntime {
         delete it->second;
       }
       proc_managers.clear();
-      for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
-            message_managers.begin(); it != message_managers.end(); it++)
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        delete it->second;
+        if (message_managers[idx] != NULL)
+          delete message_managers[idx];
       }
       for (std::map<ProjectionID,ProjectionFunctor*>::const_iterator it = 
             projection_functors.begin(); it != projection_functors.end(); it++)
@@ -4907,8 +4904,9 @@ namespace LegionRuntime {
       }
       memory_manager_lock.destroy_reservation();
       memory_manager_lock = Reservation::NO_RESERVATION;
+      message_manager_lock.destroy_reservation();
+      message_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
-      message_managers.clear();
       projection_functors.clear();
       mapper_info_lock.destroy_reservation();
       mapper_info_lock = Reservation::NO_RESERVATION;
@@ -5036,6 +5034,15 @@ namespace LegionRuntime {
       available_close_ops.clear();
       close_op_lock.destroy_reservation();
       close_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<DynamicCollectiveOp*>::const_iterator it = 
+            available_dynamic_collective_ops.begin(); it !=
+            available_dynamic_collective_ops.end(); it++)
+      {
+        delete *it;
+      }
+      available_dynamic_collective_ops.end();
+      dynamic_collective_op_lock.destroy_reservation();
+      dynamic_collective_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<FuturePredOp*>::const_iterator it = 
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
@@ -5155,7 +5162,8 @@ namespace LegionRuntime {
         args.mpi_rank = rank;
         args.source_space = address_space;
         std::set<AddressSpace> sent_targets;
-        const std::set<Processor> &all_procs = machine->get_all_processors();
+        std::set<Processor> all_procs;
+	machine.get_all_processors(all_procs);
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {
@@ -5164,7 +5172,7 @@ namespace LegionRuntime {
             continue;
           if (sent_targets.find(target_space) != sent_targets.end())
             continue;
-          Processor::Kind kind = machine->get_processor_kind(*it);
+          Processor::Kind kind = it->kind();
           if (kind != Processor::LOC_PROC)
             continue;
           it->spawn(HLR_TASK_ID, &args, sizeof(args));
@@ -5174,7 +5182,7 @@ namespace LegionRuntime {
         Runtime::mpi_rank_table[rank] = address_space;
         unsigned count = 
           __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
-        const size_t total_ranks = machine->get_address_space_count();
+        const size_t total_ranks = machine.get_address_space_count();
         if (count == total_ranks)
           Runtime::mpi_rank_event.trigger();
         // Wait on the event
@@ -5292,14 +5300,16 @@ namespace LegionRuntime {
     {
 #ifdef LEGION_LOGGING
       // First log information about the machine 
-      const std::set<Processor> &all_procs = machine->get_all_processors();
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
       // Log all the memories
-      const std::set<Memory> &all_mems = machine->get_all_memories();
+      std::set<Memory> all_mems;
+      machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
-        Memory::Kind kind = machine->get_memory_kind(*it);
-        size_t mem_size = machine->get_memory_size(*it);
+        Memory::Kind kind = (*it).kind();
+        size_t mem_size = (*it).capacity();
         LegionLogging::log_memory(*it, kind, mem_size);
       }
       // Log processor-memory affinities
@@ -5307,7 +5317,7 @@ namespace LegionRuntime {
             pit != all_procs.end(); pit++)
       {
         std::vector<ProcessorMemoryAffinity> affinities;
-        machine->get_proc_mem_affinity(affinities, *pit);
+        machine.get_proc_mem_affinity(affinities, *pit);
         for (std::vector<ProcessorMemoryAffinity>::const_iterator it = 
               affinities.begin(); it != affinities.end(); it++)
         {
@@ -5321,7 +5331,7 @@ namespace LegionRuntime {
             mit != all_mems.begin(); mit++)
       {
         std::vector<MemoryMemoryAffinity> affinities;
-        machine->get_mem_mem_affinity(affinities, *mit);
+        machine.get_mem_mem_affinity(affinities, *mit);
         for (std::vector<MemoryMemoryAffinity>::const_iterator it = 
               affinities.begin(); it != affinities.end(); it++)
         {
@@ -7098,7 +7108,7 @@ namespace LegionRuntime {
         }
         // Otherwise check to see if we have a value
         Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/,
-              get_available_distributed_id(), address_space, address_space);
+          get_available_distributed_id(), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -7309,7 +7319,7 @@ namespace LegionRuntime {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         Future::Impl *result = legion_new<Future::Impl>(this, true/*register*/, 
-              get_available_distributed_id(), address_space, address_space);
+          get_available_distributed_id(), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -7389,7 +7399,7 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<Future::Impl>(this, true/*register*/,
-              get_available_distributed_id(), address_space, address_space));
+          get_available_distributed_id(), address_space, address_space));
       IndividualTask *task = get_available_individual_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
@@ -7505,7 +7515,7 @@ namespace LegionRuntime {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<Future::Impl>(this, true/*register*/,
-              get_available_distributed_id(), address_space, address_space));
+          get_available_distributed_id(), address_space, address_space));
       IndexTask *task = get_available_index_task();
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
@@ -8271,27 +8281,21 @@ namespace LegionRuntime {
       log_run(LEVEL_DEBUG,"Get dynamic collective result in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
-      // Create a future and then launch a task that will set the
-      // result once the barrier has triggered
-      Future result(legion_new<Future::Impl>(this, true/*register*/,
-              get_available_distributed_id(), address_space, address_space));
-      // Add a garbage collection so that the future doesn't
-      // get prematurely collected
-      result.impl->add_gc_reference();
-
-      // to match behavior of PhaseBarriers, we actually request the result from the
-      //   previous phase
-      Barrier b = dc.phase_barrier.get_previous_phase();
-
-      CollectiveFutureArgs args; 
-      args.hlr_id = HLR_COLLECTIVE_FUTURE_ID;
-      args.future = result.impl;
-      args.barrier = b;
-      args.redop = dc.redop;
-      Processor proc = find_utility_group();
-      // Spawn the task to set the future result contingent
-      // upon the barrier triggering
-      proc.spawn(HLR_TASK_ID, &args, sizeof(args), b);
+      DynamicCollectiveOp *collective = get_available_dynamic_collective_op();
+      Future result = collective->initialize(ctx, dc);
+#ifdef INORDER_EXECUTION
+      Event term_event = collective->get_completion_event();
+#endif
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, collective);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
       return result;
     }
 
@@ -9397,19 +9401,53 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MessageManager* Runtime::find_messenger(AddressSpaceID sid) const
+    MessageManager* Runtime::find_messenger(AddressSpaceID sid)
     //--------------------------------------------------------------------------
     {
-      std::map<AddressSpaceID,MessageManager*>::const_iterator finder = 
-        message_managers.find(sid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != message_managers.end());
+      assert(sid < MAX_NUM_NODES);
+      assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
-      return finder->second;
+      MessageManager *result = message_managers[sid];
+      if (result != NULL)
+        return result;
+      // If we made it here, then we don't have a message manager yet
+      // re-take the lock and re-check to see if we don't have a manager
+      // If we still don't then we need to make one
+      AutoLock m_lock(message_manager_lock);
+      // Re-check to see if we lost the race, force the compiler
+      // to re-load the value here
+      result = *(((MessageManager**volatile)message_managers)+sid);
+      // If we're still NULL then we need to make the message manager
+      if (result == NULL)
+      {
+        // Compute the set of processors in the remote address space
+        std::set<Processor> remote_procs;
+        std::set<Processor> remote_util_procs;
+        for (std::map<Processor,AddressSpaceID>::const_iterator it = 
+              proc_spaces.begin(); it != proc_spaces.end(); it++)
+        {
+          if (it->second != sid)
+            continue;
+          Processor::Kind k = it->first.kind();
+          if (k == Processor::UTIL_PROC)
+            remote_util_procs.insert(it->first);
+          else
+            remote_procs.insert(it->first);
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!remote_procs.empty() || !remote_util_procs.empty());
+#endif
+        result = new MessageManager(sid, this, max_message_size,
+            (remote_util_procs.empty() ? remote_procs : remote_util_procs));
+        // Save the result
+        message_managers[sid] = result;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    MessageManager* Runtime::find_messenger(Processor target) const
+    MessageManager* Runtime::find_messenger(Processor target)
     //--------------------------------------------------------------------------
     {
       return find_messenger(find_address_space(target));
@@ -10687,7 +10725,7 @@ namespace LegionRuntime {
 #ifdef LEGION_LOGGING
       // Note we can't actually trust the 'proc' variable here since
       // it may be the utility processor making this call
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, BEGIN_SCHEDULING);
 #endif
 #ifdef LEGION_PROF
@@ -10708,7 +10746,7 @@ namespace LegionRuntime {
         dump_allocation_info();
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       0/*unique id*/, END_SCHEDULING);
 #endif
 #ifdef LEGION_PROF
@@ -10844,7 +10882,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(machine->get_processor_kind(p) != Processor::UTIL_PROC);
+      assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
       proc_managers[p]->add_to_dependence_queue(op);
@@ -10856,7 +10894,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(machine->get_processor_kind(p) != Processor::UTIL_PROC);
+      assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
       proc_managers[p]->add_to_ready_queue(op, prev_fail);
@@ -10868,7 +10906,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(machine->get_processor_kind(p) != Processor::UTIL_PROC);
+      assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
       proc_managers[p]->add_to_local_ready_queue(op, prev_fail);
@@ -11362,7 +11400,7 @@ namespace LegionRuntime {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
         deferred_recycle_args.did = did;
-        Processor proc = Machine::get_executing_processor(); 
+        Processor proc = Processor::get_executing_processor(); 
         proc.spawn(HLR_TASK_ID, &deferred_recycle_args,
                   sizeof(deferred_recycle_args), recycle_event);
       }
@@ -11527,7 +11565,7 @@ namespace LegionRuntime {
       if (to_trigger != NULL)
       {
 #ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = get_gc_proc(Machine::get_executing_processor());
+        Processor util = get_gc_proc(Processor::get_executing_processor());
 #else
         Processor util = find_utility_group();
 #endif
@@ -11590,23 +11628,25 @@ namespace LegionRuntime {
       }
       // Launch our last garbage collection epoch
 #ifdef SPECIALIZED_UTIL_PROCS
-      Processor util = get_gc_proc(Machine::get_executing_processor());
+      Processor util = get_gc_proc(Processor::get_executing_processor());
 #else
       Processor util = find_utility_group();
 #endif
       current_gc_epoch->launch(util, 0/*priority*/);
       // Make sure any messages that we have sent anywhere are handled
       std::set<Event> shutdown_preconditions;
-      for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
-            message_managers.begin(); it != message_managers.end(); it++)
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        Event last_event = it->second->notify_pending_shutdown();
-        shutdown_preconditions.insert(last_event);
+        if (message_managers[idx] != NULL)
+        {
+          Event last_event = message_managers[idx]->notify_pending_shutdown();
+          shutdown_preconditions.insert(last_event);
+        }
       }
       Event shutdown_precondition = Event::merge_events(shutdown_preconditions);
       shutdown_precondition.wait();
       // Finally shutdown the low-level runtime
-      machine->shutdown();
+      LLRuntime::get_runtime().shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -11883,6 +11923,28 @@ namespace LegionRuntime {
       }
       if (result == NULL)
         result = legion_new<CloseOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollectiveOp* Runtime::get_available_dynamic_collective_op(void)
+    //--------------------------------------------------------------------------
+    {
+      DynamicCollectiveOp *result = NULL;
+      {
+        AutoLock dc_lock(dynamic_collective_op_lock);
+        if (!available_dynamic_collective_ops.empty())
+        {
+          result = available_dynamic_collective_ops.front();
+          available_dynamic_collective_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<DynamicCollectiveOp>(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -12201,6 +12263,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_dynamic_collective_op(DynamicCollectiveOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock dc_lock(dynamic_collective_op_lock);
+      available_dynamic_collective_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_future_predicate_op(FuturePredOp *op)
     //--------------------------------------------------------------------------
     {
@@ -12435,12 +12505,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(TaskOp *task /*= NULL*/)
+    Future Runtime::help_create_future(Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       return Future(legion_new<Future::Impl>(this, true/*register*/,
                                      get_available_distributed_id(),
-                                     address_space, address_space, task));
+                                     address_space, address_space, op));
     }
 
     //--------------------------------------------------------------------------
@@ -12598,6 +12668,8 @@ namespace LegionRuntime {
           return "Deletion Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
+        case DYNAMIC_COLLECTIVE_OP_ALLOC:
+          return "Dynamic Collective Op";
         case FUTURE_PRED_OP_ALLOC:
           return "Future Pred Op";
         case NOT_PRED_OP_ALLOC:
@@ -12934,7 +13006,6 @@ namespace LegionRuntime {
 #endif
 
     /*static*/ Runtime *Runtime::runtime_map[(MAX_NUM_PROCS+1)];
-    /*static*/ unsigned Runtime::startup_arrivals = 0;
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
@@ -13029,9 +13100,26 @@ namespace LegionRuntime {
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
-      Machine *m = new Machine(&argc, &argv, 
-                      Runtime::get_task_table(true/*add runtime tasks*/), 
-		      Runtime::get_reduction_table(), false/*cps style*/);
+      LLRuntime ll;
+
+      bool ok = ll.init(&argc, &argv);
+      assert(ok);
+
+      // register tasks and reduction ops with LLR
+      {
+	const Processor::TaskIDTable& task_table =
+	  get_task_table(true/*add runtime tasks*/);
+	for(Processor::TaskIDTable::const_iterator it = task_table.begin();
+	    it != task_table.end();
+	    it++)
+	  ll.register_task(it->first, it->second);
+      
+	const LowLevel::ReductionOpTable& red_table = get_reduction_table();
+	for(LowLevel::ReductionOpTable::const_iterator it = red_table.begin();
+	    it != red_table.end();
+	    it++)
+	  ll.register_reduction(it->first, it->second);
+      }
       
       // Parse any inputs for the high level runtime
       {
@@ -13050,7 +13138,6 @@ namespace LegionRuntime {
         // Set these values here before parsing the input arguments
         // so that we don't need to trust the C runtime to do 
         // static initialization properly (always risky).
-        startup_arrivals = 0;
         separate_runtime_instances = false;
         record_registration = false;
         stealing_disabled = false;
@@ -13178,7 +13265,7 @@ namespace LegionRuntime {
         }
       } 
       // Kick off the low-level machine
-      m->run(0, Machine::ONE_TASK_ONLY, 0, 0, background);
+      ll.run(0, LLRuntime::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded
       assert(background);
       if (background)
@@ -13191,8 +13278,8 @@ namespace LegionRuntime {
     /*static*/ void Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      Machine *machine = Machine::get_machine();
-      machine->wait_for_shutdown();
+      // TODO: fix this once the LLR can actually return from run()
+      LLRuntime::get_runtime().wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -13660,6 +13747,14 @@ namespace LegionRuntime {
 #endif
 
     //--------------------------------------------------------------------------
+    /*static*/ int* Runtime::get_startup_arrivals(void)
+    //--------------------------------------------------------------------------
+    {
+      static int startup_arrivals = 0;
+      return &startup_arrivals;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ Processor::TaskIDTable& Runtime::get_task_table(
                                             bool add_runtime_tasks /*= true*/)
     //--------------------------------------------------------------------------
@@ -13748,32 +13843,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::log_machine(Machine *machine)
+    /*static*/ void Runtime::log_machine(Machine machine)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
-      const std::set<Processor> &all_procs = machine->get_all_processors();
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
       // Log processors
       for (std::set<Processor>::const_iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
-        Processor::Kind k = machine->get_processor_kind(*it);
+        Processor::Kind k = it->kind();
         if (k == Processor::UTIL_PROC)
           LegionSpy::log_utility_processor(it->id);
         else
           LegionSpy::log_processor(it->id, k); 
       }
       // Log memories
-      const std::set<Memory> &all_mems = machine->get_all_memories();
+      std::set<Memory> all_mems;
+      machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
-        LegionSpy::log_memory(it->id, machine->get_memory_size(*it));
+        LegionSpy::log_memory(it->id, it->capacity());
       // Log Proc-Mem Affinity
       for (std::set<Processor>::const_iterator pit = all_procs.begin();
             pit != all_procs.end(); pit++)
       {
         std::vector<ProcessorMemoryAffinity> affinities;
-        machine->get_proc_mem_affinity(affinities, *pit);
+        machine.get_proc_mem_affinity(affinities, *pit);
         for (std::vector<ProcessorMemoryAffinity>::const_iterator it = 
               affinities.begin(); it != affinities.end(); it++)
         {
@@ -13786,7 +13883,7 @@ namespace LegionRuntime {
             mit != all_mems.begin(); mit++)
       {
         std::vector<MemoryMemoryAffinity> affinities;
-        machine->get_mem_mem_affinity(affinities, *mit);
+        machine.get_mem_mem_affinity(affinities, *mit);
         for (std::vector<MemoryMemoryAffinity>::const_iterator it = 
               affinities.begin(); it != affinities.end(); it++)
         {
@@ -13867,9 +13964,10 @@ namespace LegionRuntime {
     {
       // Always enable the idle task for any processor 
       // that is not a utility processor
-      Machine *machine = Machine::get_machine();
-      const std::set<Processor> &all_procs = machine->get_all_processors();
-      Processor::Kind proc_kind = machine->get_processor_kind(p);
+      Machine machine = Machine::get_machine();
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
+      Processor::Kind proc_kind = p.kind();
       // Make separate runtime instances if they are requested,
       // otherwise only make a runtime instances for each of the
       // separate nodes in the machine.  To do this we exploit a
@@ -13924,7 +14022,7 @@ namespace LegionRuntime {
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++,sid++)
           {
-            Processor::Kind k = machine->get_processor_kind(*it);
+            Processor::Kind k = it->kind();
             if (k == Processor::UTIL_PROC)
             {
               log_run(LEVEL_ERROR,"Separate runtime instances are not "
@@ -13973,7 +14071,7 @@ namespace LegionRuntime {
             proc_spaces[*it] = sid;
             if (sid == local_space_id)
             {
-              if (machine->get_processor_kind(*it) == Processor::UTIL_PROC)
+              if (it->kind() == Processor::UTIL_PROC)
                 local_util_procs.insert(*it);
               else
                 local_procs.insert(*it);
@@ -14018,9 +14116,9 @@ namespace LegionRuntime {
         }
       }
       // Arrive at the barrier
-      __sync_fetch_and_add(&Runtime::startup_arrivals, 1);
+      __sync_fetch_and_add(Runtime::get_startup_arrivals(), 1);
       // Compute the number of processors we need to wait for
-      unsigned needed_count = 0;
+      int needed_count = 0;
       {
         std::set<Processor> utility_procs;
         const unsigned local_space = p.address_space();
@@ -14039,7 +14137,7 @@ namespace LegionRuntime {
       // Have a spinning barrier here to wait for all processors
       // to finish initializing before continuing
 #ifndef VALGRIND
-      while (__sync_fetch_and_add(&Runtime::startup_arrivals, 0) 
+      while (__sync_fetch_and_add(Runtime::get_startup_arrivals(), 0) 
               != needed_count) { }
 #endif
       // Call in the runtime to see if we should launch the top-level task
@@ -14269,7 +14367,7 @@ namespace LegionRuntime {
             unsigned count = 
               __sync_fetch_and_add(&Runtime::remaining_mpi_notifications, 1);
             const size_t total_ranks = 
-              Machine::get_machine()->get_address_space_count();
+              Machine::get_machine().get_address_space_count();
             if (count == total_ranks)
               Runtime::mpi_rank_event.trigger();
             break;
@@ -14279,31 +14377,6 @@ namespace LegionRuntime {
             Future::Impl::handle_contribute_to_collective(args);
             break;
           }
-        case HLR_COLLECTIVE_FUTURE_ID:
-          {
-            const CollectiveFutureArgs *cargs = 
-              (const CollectiveFutureArgs*)args;
-            // Allocate a buffer of the right size and get the result
-            const ReductionOp *redop = get_reduction_op(cargs->redop);
-            const size_t result_size = redop->sizeof_lhs;
-            void *result_buffer = legion_malloc(FUTURE_RESULT_ALLOC, 
-                                                result_size);
-#ifdef DEBUG_HIGH_LEVEL
-            bool result = 
-#endif
-            cargs->barrier.get_result(result_buffer, result_size);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(result);
-#endif
-            // Then set the future value 
-            cargs->future->set_result(result_buffer, result_size, true/*own*/);
-            // Now complete the future
-            cargs->future->complete_future();
-            // Finally remove our reference on the future
-            if (cargs->future->remove_gc_reference())
-              delete cargs->future;
-	    break;
-	  }
         case HLR_CHECK_STATE_ID:
           {
             TaskOp::CheckStateArgs *cargs = (TaskOp::CheckStateArgs*)args;
@@ -14337,7 +14410,7 @@ namespace LegionRuntime {
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(Machine::get_executing_processor());
+      Runtime *rt = Runtime::get_runtime(Processor::get_executing_processor());
       if (rt != NULL)
         rt->trace_allocation(a, size, elems);
     }
@@ -14347,7 +14420,7 @@ namespace LegionRuntime {
                                                  size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(Machine::get_executing_processor());
+      Runtime *rt = Runtime::get_runtime(Processor::get_executing_processor());
       if (rt != NULL)
         rt->trace_free(a, size, elems);
     }
@@ -14356,7 +14429,7 @@ namespace LegionRuntime {
     /*static*/ Runtime* LegionAllocation::find_runtime(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(Machine::get_executing_processor());
+      return Runtime::get_runtime(Processor::get_executing_processor());
     }
 
     //--------------------------------------------------------------------------

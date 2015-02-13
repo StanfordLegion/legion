@@ -25,7 +25,7 @@ namespace LegionRuntime {
        **************************/
 
       //------------------------------------------------------------------------
-      MachineQueryInterface::MachineQueryInterface(Machine *m)
+      MachineQueryInterface::MachineQueryInterface(Machine m)
         : machine(m), global_memory(Memory::NO_MEMORY) { }
       //------------------------------------------------------------------------
 
@@ -41,15 +41,16 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       /*static*/ Memory MachineQueryInterface::find_global_memory(
-                                                              Machine *machine)
+                                                              Machine machine)
       //------------------------------------------------------------------------
       {
         Memory global_memory = Memory::NO_MEMORY;
-        const std::set<Memory> &all_memories = machine->get_all_memories();
+        std::set<Memory> all_memories;
+	machine.get_all_memories(all_memories);
         for (std::set<Memory>::const_iterator it = all_memories.begin();
               it != all_memories.end(); it++)
         {
-          if (machine->get_memory_kind(*it) == Memory::GLOBAL_MEM)
+          if (it->kind() == Memory::GLOBAL_MEM)
           {
             global_memory = *it;
             return global_memory;
@@ -57,13 +58,13 @@ namespace LegionRuntime {
         }
         // Otherwise check to see if there is a memory that is visible
         // to all of the processors
-        const std::set<Processor> &all_processors = 
-                                          machine->get_all_processors();
+        std::set<Processor> all_processors;
+	machine.get_all_processors(all_processors);
         for (std::set<Memory>::const_iterator mit = all_memories.begin();
               mit != all_memories.end(); mit++)
         {
-          const std::set<Processor> &vis_processors = 
-                                  machine->get_shared_processors(*mit);
+          std::set<Processor> vis_processors;
+	  machine.get_shared_processors(*mit, vis_processors);
           if (vis_processors.size() == all_processors.size())
           {
             global_memory = *mit;
@@ -96,12 +97,13 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, 
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine, 
                                                                Processor proc,
                                       std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible = machine->get_visible_memories(proc);
+        std::set<Memory> visible;
+	machine.get_visible_memories(proc, visible);
         stack.insert(stack.end(),visible.begin(),visible.end());
         MachineQueryInterface::sort_memories(machine, proc, stack, latency);
       }
@@ -128,12 +130,13 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::find_memory_stack(Machine *machine, 
+      /*static*/ void MachineQueryInterface::find_memory_stack(Machine machine, 
                                                                Memory mem,
                                       std::vector<Memory> &stack, bool latency)
       //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible = machine->get_visible_memories(mem);
+        std::set<Memory> visible;
+	machine.get_visible_memories(mem, visible);
         stack.insert(stack.end(),visible.begin(),visible.end());
         MachineQueryInterface::sort_memories(machine, mem, stack, latency);
       }
@@ -156,15 +159,15 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       /*static*/ Memory MachineQueryInterface::find_memory_kind(
-                            Machine *machine, Processor proc, Memory::Kind kind)
+                            Machine machine, Processor proc, Memory::Kind kind)
       //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible_memories = 
-                                            machine->get_visible_memories(proc);
+        std::set<Memory> visible_memories;
+	machine.get_visible_memories(proc, visible_memories);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
         {
-          if (machine->get_memory_kind(*it) == kind)
+          if (it->kind() == kind)
             return *it;
         }
         return Memory::NO_MEMORY;
@@ -188,15 +191,15 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       /*static*/ Memory MachineQueryInterface::find_memory_kind(
-                                Machine *machine, Memory mem, Memory::Kind kind)
+                                Machine machine, Memory mem, Memory::Kind kind)
       //------------------------------------------------------------------------
       {
-        const std::set<Memory> &visible_memories = 
-                                        machine->get_visible_memories(mem);
+        std::set<Memory> visible_memories;
+	machine.get_visible_memories(mem, visible_memories);
         for (std::set<Memory>::const_iterator it = visible_memories.begin();
               it != visible_memories.end(); it++)
         {
-          if (machine->get_memory_kind(*it) == kind)
+          if (it->kind() == kind)
             return *it;
         }
         return Memory::NO_MEMORY;
@@ -220,15 +223,15 @@ namespace LegionRuntime {
 
       //------------------------------------------------------------------------
       /*static*/ Processor MachineQueryInterface::find_processor_kind(
-                            Machine *machine, Memory mem, Processor::Kind kind)
+                            Machine machine, Memory mem, Processor::Kind kind)
       //------------------------------------------------------------------------
       {
-        const std::set<Processor> &visible_procs = 
-          machine->get_shared_processors(mem);
+        std::set<Processor> visible_procs;
+	machine.get_shared_processors(mem, visible_procs);
         for (std::set<Processor>::const_iterator it = visible_procs.begin();
               it != visible_procs.end(); it++)
         {
-          if (machine->get_processor_kind(*it) == kind)
+          if (it->kind() == kind)
             return *it;
         }
         return Processor::NO_PROC;
@@ -249,18 +252,19 @@ namespace LegionRuntime {
       }
       
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_processors(Machine *machine, 
+      /*static*/ void MachineQueryInterface::filter_processors(Machine machine, 
                                                            Processor::Kind kind,
                                                      std::set<Processor> &procs)
       //------------------------------------------------------------------------
       {
         if (procs.empty())
         {
-          const std::set<Processor> &all_procs = machine->get_all_processors();
+          std::set<Processor> all_procs;
+	  machine.get_all_processors(all_procs);
           for (std::set<Processor>::const_iterator it = all_procs.begin();
                 it != all_procs.end(); it++)
           {
-            if (machine->get_processor_kind(*it) == kind)
+            if (it->kind() == kind)
               procs.insert(*it);
           }
         }
@@ -270,7 +274,7 @@ namespace LegionRuntime {
           for (std::set<Processor>::const_iterator it = procs.begin();
                 it != procs.end(); it++)
           {
-            if (machine->get_processor_kind(*it) != kind)
+            if (it->kind() != kind)
               to_delete.push_back(*it);
           }
           for (std::vector<Processor>::const_iterator it = to_delete.begin();
@@ -296,18 +300,19 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::filter_memories(Machine *machine, 
+      /*static*/ void MachineQueryInterface::filter_memories(Machine machine, 
                                                              Memory::Kind kind,
                                                         std::set<Memory> &mems)
       //------------------------------------------------------------------------
       {
         if (mems.empty())
         {
-          const std::set<Memory> &all_mems = machine->get_all_memories();
+          std::set<Memory> all_mems;
+	  machine.get_all_memories(all_mems);
           for (std::set<Memory>::const_iterator it = all_mems.begin();
                 it != all_mems.end(); it++)
           {
-            if (machine->get_memory_kind(*it) == kind)
+            if (it->kind() == kind)
               mems.insert(*it);
           }
         }
@@ -317,7 +322,7 @@ namespace LegionRuntime {
           for (std::set<Memory>::const_iterator it = mems.begin();
                 it != mems.end(); it++)
           {
-            if (machine->get_memory_kind(*it) != kind)
+            if (it->kind() != kind)
               to_delete.push_back(*it);
           }
           for (std::vector<Memory>::const_iterator it = to_delete.begin();
@@ -329,7 +334,7 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, 
+      /*static*/ void MachineQueryInterface::sort_memories(Machine machine, 
                                                            Processor proc, 
                                                   std::vector<Memory> &memories, 
                                                             bool latency)
@@ -341,7 +346,7 @@ namespace LegionRuntime {
               it != memories.end(); it++)
         {
           std::vector<Machine::ProcessorMemoryAffinity> affinity; 
-          int size = machine->get_proc_mem_affinity(affinity, proc, *it);
+          int size = machine.get_proc_mem_affinity(affinity, proc, *it);
           assert(size == 1);
           bool inserted = false;
           if (latency)
@@ -390,7 +395,7 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      /*static*/ void MachineQueryInterface::sort_memories(Machine *machine, 
+      /*static*/ void MachineQueryInterface::sort_memories(Machine machine, 
                                                            Memory mem, 
                                                   std::vector<Memory> &memories, 
                                                            bool latency)
@@ -402,7 +407,7 @@ namespace LegionRuntime {
               it != memories.end(); it++)
         {
           std::vector<Machine::MemoryMemoryAffinity> affinity; 
-          int size = machine->get_mem_mem_affinity(affinity, mem, *it);
+          int size = machine.get_mem_mem_affinity(affinity, mem, *it);
 	  if(size == 0) {
 	    // insert a dummy (bad) affinity for when two memories don't 
             // actually have affinity (i.e. a multi-hop copy would be necessary)

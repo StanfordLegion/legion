@@ -26,6 +26,25 @@ typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
 typedef CObjectWrapper::AccessorArray AccessorArray;
 
 // -----------------------------------------------------------------------
+// Pointer Operations
+// -----------------------------------------------------------------------
+
+legion_ptr_t
+legion_ptr_safe_cast(legion_runtime_t runtime_,
+                     legion_context_t ctx_,
+                     legion_ptr_t pointer_,
+                     legion_logical_region_t region_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  ptr_t pointer = CObjectWrapper::unwrap(pointer_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+
+  ptr_t result = runtime->safe_cast(ctx, pointer, region);
+  return CObjectWrapper::wrap(result);
+}
+
+// -----------------------------------------------------------------------
 // Domain Operations
 // -----------------------------------------------------------------------
 
@@ -111,6 +130,21 @@ legion_domain_point_from_point_3d(legion_point_3d_t p_)
   Point<3> p = CObjectWrapper::unwrap(p_);
 
   return CObjectWrapper::wrap(DomainPoint::from_point<3>(p));
+}
+
+legion_domain_point_t
+legion_domain_point_safe_cast(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              legion_domain_point_t point_,
+                              legion_logical_region_t region_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+
+  DomainPoint result = runtime->safe_cast(ctx, point, region);
+  return CObjectWrapper::wrap(result);
 }
 
 // -------------------------------------------------------
@@ -345,6 +379,20 @@ legion_index_partition_create_domain_coloring(
   return ip;
 }
 
+legion_index_space_t
+legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
+                                          legion_context_t ctx_,
+                                          legion_index_partition_t handle,
+                                          legion_color_t color)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+
+  return CObjectWrapper::wrap(is);
+}
+
 void
 legion_index_partition_destroy(legion_runtime_t runtime_,
                                legion_context_t ctx_,
@@ -429,6 +477,22 @@ legion_logical_partition_create(legion_runtime_t runtime_,
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
   LogicalPartition r = runtime->get_logical_partition(ctx, parent, handle);
+  return CObjectWrapper::wrap(r);
+}
+
+legion_logical_partition_t
+legion_logical_partition_create_by_tree(legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_partition_t handle,
+                                        legion_field_space_t fspace_,
+                                        legion_region_tree_id_t tid)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
+
+  LogicalPartition r =
+    runtime->get_logical_partition_by_tree(ctx, handle, fspace, tid);
   return CObjectWrapper::wrap(r);
 }
 
@@ -771,7 +835,17 @@ legion_predicate_false(void)
 // Future Operations
 //------------------------------------------------------------------------
 
-// Caller must have ownership of parameter `handle`.
+legion_future_t
+legion_future_from_buffer(legion_runtime_t runtime_,
+                          const void *buffer,
+                          size_t size)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  Future *result = new Future(Future::from_buffer(runtime, buffer, size));
+  return CObjectWrapper::wrap(result);
+}
+
 void
 legion_future_destroy(legion_future_t handle_)
 {
@@ -1051,6 +1125,48 @@ legion_index_launcher_add_region_requirement_logical_partition(
   return idx;
 }
 
+unsigned
+legion_index_launcher_add_region_requirement_logical_region_reduction(
+  legion_index_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->region_requirements.size();
+  launcher->add_region_requirement(
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_index_launcher_add_region_requirement_logical_partition_reduction(
+  legion_index_launcher_t launcher_,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->region_requirements.size();
+  launcher->add_region_requirement(
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified));
+  return idx;
+}
+
 void
 legion_index_launcher_add_field(legion_index_launcher_t launcher_,
                                unsigned idx,
@@ -1201,6 +1317,16 @@ legion_physical_region_get_logical_region(legion_physical_region_t handle_)
 
   LogicalRegion region = handle->get_logical_region();
   return CObjectWrapper::wrap(region);
+}
+
+legion_accessor_generic_t
+legion_physical_region_get_accessor_generic(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  AccessorGeneric *accessor =
+    new AccessorGeneric(handle->get_accessor());
+  return CObjectWrapper::wrap(accessor);
 }
 
 legion_accessor_generic_t
@@ -1531,6 +1657,37 @@ const legion_input_args_t
 legion_runtime_get_input_args(void)
 {
   return CObjectWrapper::wrap_const(HighLevelRuntime::get_input_args());
+}
+
+// a pointer to the callback function that is last registered
+static legion_registration_callback_pointer_t callback;
+
+void
+registration_callback_wrapper(Machine machine,
+                              HighLevelRuntime *rt,
+                              const std::set<Processor> &local_procs)
+{
+  legion_machine_t machine_ = CObjectWrapper::wrap(&machine);
+  legion_runtime_t rt_ = CObjectWrapper::wrap(rt);
+  legion_processor_t local_procs_[local_procs.size()];
+
+  unsigned idx = 0;
+  for (std::set<Processor>::iterator itr = local_procs.begin();
+      itr != local_procs.end(); ++itr)
+  {
+    const Processor& proc = *itr;
+    local_procs_[idx++] = CObjectWrapper::wrap_const(&proc);
+  }
+
+  callback(machine_, rt_, local_procs_, idx);
+}
+
+void
+legion_runtime_set_registration_callback(
+  legion_registration_callback_pointer_t callback_)
+{
+  callback = callback_;
+  HighLevelRuntime::set_registration_callback(registration_callback_wrapper);
 }
 
 void

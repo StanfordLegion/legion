@@ -756,6 +756,37 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class DynamicCollectiveOp
+     * A class for getting values from a collective operation
+     * and writing them into a future. This will also give
+     * us the framework necessary to handle roll backs on 
+     * collectives so we can memoize their results.
+     */
+    class DynamicCollectiveOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
+    public:
+      DynamicCollectiveOp(Runtime *rt);
+      DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
+      virtual ~DynamicCollectiveOp(void);
+    public:
+      DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
+    public:
+      Future initialize(SingleTask *ctx, const DynamicCollective &dc);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
+      virtual void trigger_complete(void);
+    protected:
+      Future future;
+      DynamicCollective collective;
+    };
+
+    /**
      * \class FuturePredOp
      * A class for making predicates out of futures.
      */

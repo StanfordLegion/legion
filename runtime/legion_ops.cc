@@ -278,7 +278,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMPLETE_OPERATION);
 #endif
       complete_operation();
@@ -397,7 +397,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, RESOLVE_SPECULATION);
 #endif
       // Mark that we are mapped and make a copy of the outgoing
@@ -497,7 +497,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, COMMIT_OPERATION);
 #endif
       // Tell our parent context that we are committed
@@ -1287,7 +1287,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
-      bool result = false; // this is actually set on all paths, but the compiler can't see it
+      // this is actually set on all paths, but the compiler can't see it
+      bool result = false; 
       {
         AutoLock o_lock(op_lock);
         if (speculation_state == RESOLVE_TRUE_STATE)
@@ -1795,7 +1796,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS); 
 #endif
 #ifdef LEGION_PROF
@@ -1807,7 +1808,7 @@ namespace LegionRuntime {
                                                    privilege_path);
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
 #ifdef LEGION_PROF
@@ -1820,7 +1821,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
 #ifdef LEGION_PROF
@@ -1917,24 +1918,24 @@ namespace LegionRuntime {
         runtime->invoke_mapper_notify_result(local_proc, this);
       }
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
       LegionLogging::log_operation_events(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           unique_op_id, Event::NO_EVENT, result.get_ready_event());
       LegionLogging::log_event_dependence(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           termination_event, parent_ctx->get_task_completion());
       LegionLogging::log_event_dependence(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           result.get_ready_event(),
           completion_event);
       LegionLogging::log_event_dependence(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           completion_event,
           termination_event);
       LegionLogging::log_physical_user(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           result.get_handle().get_view()->get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
@@ -1953,7 +1954,7 @@ namespace LegionRuntime {
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
           result.get_handle().get_view()->get_manager()->get_instance().id);
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
@@ -2275,7 +2276,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
         LegionLogging::log_event_dependence(
-            Machine::get_executing_processor(),
+            Processor::get_executing_processor(),
             it->phase_barrier, arrive_barriers.back().phase_barrier);
 #endif
 #ifdef LEGION_SPY
@@ -2545,7 +2546,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
 #ifdef LEGION_PROF
@@ -2571,7 +2572,7 @@ namespace LegionRuntime {
       }
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
 #ifdef LEGION_PROF
@@ -2612,7 +2613,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
 #ifdef LEGION_PROF
@@ -2762,7 +2763,7 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
           LegionLogging::log_event_dependences(
-              Machine::get_executing_processor(), preconditions,
+              Processor::get_executing_processor(), preconditions,
                                               sync_precondition);
 #endif
 #ifdef LEGION_SPY
@@ -2856,7 +2857,7 @@ namespace LegionRuntime {
           }
         }
 #ifdef LEGION_LOGGING
-        LegionLogging::log_timing_event(Machine::get_executing_processor(),
+        LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                         unique_op_id, END_MAPPING);
 #endif
 #ifdef LEGION_PROF
@@ -2874,7 +2875,8 @@ namespace LegionRuntime {
         }
 #endif
 #ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependences(Machine::get_executing_processor(),
+        LegionLogging::log_event_dependences(
+                                    Processor::get_executing_processor(),
                                     copy_complete_events, copy_complete_event);
 #endif
 #ifdef LEGION_SPY
@@ -2893,7 +2895,7 @@ namespace LegionRuntime {
         LegionSpy::log_event_dependence(copy_complete_event,
                                         completion_event);
         {
-          Processor proc = Machine::get_executing_processor();
+          Processor proc = Processor::get_executing_processor();
           LegionSpy::log_op_proc_user(unique_op_id, proc.id);
         }
 #endif
@@ -2907,7 +2909,7 @@ namespace LegionRuntime {
             it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
 #ifdef LEGION_LOGGING
             LegionLogging::log_event_dependence(
-                Machine::get_executing_processor(),       
+                Processor::get_executing_processor(),       
                 copy_complete_event, it->phase_barrier);
 #endif
 #ifdef LEGION_SPY
@@ -2924,9 +2926,10 @@ namespace LegionRuntime {
           runtime->invoke_mapper_notify_result(local_proc, this);
 
 #ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependence(Machine::get_executing_processor(),
-                                            copy_complete_event,
-                                            completion_event);
+        LegionLogging::log_event_dependence(
+                                        Processor::get_executing_processor(),
+                                        copy_complete_event,
+                                        completion_event);
 #endif
 #ifdef LEGION_SPY
         LegionSpy::log_event_dependence(copy_complete_event,
@@ -3289,7 +3292,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
       begin_dependence_analysis();
@@ -3309,7 +3312,7 @@ namespace LegionRuntime {
       parent_ctx->update_current_fence(this);
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
     }
@@ -3443,7 +3446,7 @@ namespace LegionRuntime {
       // Analysis works very similar to a fence except we 
       // don't update the context like we are a fence
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
       begin_dependence_analysis();
@@ -3459,7 +3462,7 @@ namespace LegionRuntime {
       }
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
     }
@@ -3711,7 +3714,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
       begin_dependence_analysis();
@@ -3753,7 +3756,7 @@ namespace LegionRuntime {
       }
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
     }
@@ -3811,7 +3814,7 @@ namespace LegionRuntime {
       }
 #ifdef LEGION_LOGGING
       LegionLogging::log_operation_events(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           unique_op_id, Event::NO_EVENT, completion_event);
 #endif
       // Commit this operation
@@ -3924,7 +3927,7 @@ namespace LegionRuntime {
       LegionProf::register_event(local_id, PROF_BEGIN_POST);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
                                       BEGIN_POST_EXEC);
 #endif
@@ -3933,7 +3936,7 @@ namespace LegionRuntime {
       LegionProf::register_event(local_id, PROF_END_POST);
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       local_id,
                                       BEGIN_POST_EXEC);
 #endif
@@ -3974,7 +3977,7 @@ namespace LegionRuntime {
       assert(completion_event.exists());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
 #endif
 #ifdef LEGION_PROF
@@ -3987,7 +3990,7 @@ namespace LegionRuntime {
                                                    privilege_path);
       end_dependence_analysis();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_DEPENDENCE_ANALYSIS);
 #endif
 #ifdef LEGION_PROF
@@ -4003,7 +4006,7 @@ namespace LegionRuntime {
       assert(completion_event.exists());
 #endif
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, BEGIN_MAPPING);
 #endif
 #ifdef LEGION_PROF
@@ -4026,13 +4029,13 @@ namespace LegionRuntime {
 #endif
                                          );
 #ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Machine::get_executing_processor(),
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
       LegionLogging::log_operation_events(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           unique_op_id, Event::NO_EVENT, close_event);
       LegionLogging::log_physical_user(
-          Machine::get_executing_processor(),
+          Processor::get_executing_processor(),
           reference.get_handle().get_view()->get_manager()->get_instance(),
           unique_op_id, 0/*idx*/);
 #endif
@@ -4049,14 +4052,14 @@ namespace LegionRuntime {
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
           reference.get_handle().get_view()->get_manager()->get_instance().id);
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 
 #endif
       complete_mapping();
 #ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependence(Machine::get_executing_processor(),
+      LegionLogging::log_event_dependence(Processor::get_executing_processor(),
                                           close_event,
                                           completion_event);
 #endif
@@ -4382,7 +4385,7 @@ namespace LegionRuntime {
           result.get_handle().get_view()->get_manager()->get_instance().id);
       LegionSpy::log_event_dependence(acquire_complete, completion_event);
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
@@ -4893,7 +4896,7 @@ namespace LegionRuntime {
           parent_ctx->get_task_completion());
       LegionSpy::log_event_dependence(release_complete, completion_event);
       {
-        Processor proc = Machine::get_executing_processor();
+        Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
@@ -5123,6 +5126,129 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // Dynamic Collective Operation
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollectiveOp::DynamicCollectiveOp(const DynamicCollectiveOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollectiveOp::~DynamicCollectiveOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicCollectiveOp& DynamicCollectiveOp::operator=(
+                                                const DynamicCollectiveOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Future DynamicCollectiveOp::initialize(SingleTask *ctx, 
+                                           const DynamicCollective &dc)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      future = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->address_space, this));
+      collective = dc;
+      return future;
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      // Free the future
+      future = Future();
+      deactivate_operation();
+      runtime->free_dynamic_collective_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* DynamicCollectiveOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Dynamic Collective";
+    }
+
+    //--------------------------------------------------------------------------
+    bool DynamicCollectiveOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      Barrier barrier = collective.phase_barrier.get_previous_phase();
+      if (!barrier.has_triggered())
+      {
+#ifdef SPECIALIZED_UTIL_PROCS
+        Processor util = runtime->get_cleanup_proc(local_proc);
+#else
+        Processor util = runtime->find_utility_group();
+#endif
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                   sizeof(deferred_complete_args), barrier);
+      }
+      else
+        deferred_complete();
+      complete_mapping();
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
+      const size_t result_size = redop->sizeof_lhs;
+      void *result_buffer = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
+#ifdef DEBUG_HIGH_LEVEL
+      bool result = 
+#endif
+      collective.phase_barrier.get_result(result_buffer, result_size);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result);
+#endif
+      future.impl->set_result(result_buffer, result_size, true/*own*/);
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      future.impl->complete_future();
+      complete_operation();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Predicate Operation
     /////////////////////////////////////////////////////////////
 
@@ -5212,12 +5338,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(future.impl->task != NULL);
+      assert(future.impl != NULL);
 #endif
       begin_dependence_analysis();
       // Register this operation as dependent on task that
       // generated the future
-      register_dependence(future.impl->task, future.impl->task_gen);
+      future.impl->register_dependence(this);
       end_dependence_analysis();
     }
 

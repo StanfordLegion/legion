@@ -72,6 +72,7 @@ namespace LegionRuntime {
       FRAME_OP_ALLOC,
       DELETION_OP_ALLOC,
       CLOSE_OP_ALLOC,
+      DYNAMIC_COLLECTIVE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
       NOT_PRED_OP_ALLOC,
       AND_PRED_OP_ALLOC,

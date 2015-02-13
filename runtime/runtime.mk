@@ -80,7 +80,6 @@ ifeq ($(findstring titan,$(shell uname -n)),titan)
 GCC=CC
 MARCH=bdver1
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
-GASNET = ${GASNET_ROOT}
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
@@ -174,10 +173,13 @@ endif
 
 #Extra options for MPI
 ifeq ($(strip $(USE_MPI)),1)
+# not needed on Titan
+ifneq ($(findstring titan,$(shell uname -n)),titan)
 CC 	:= mpicc
 CXX	:= mpicxx
 GCC	:= $(CXX)
 LD_FLAGS+= -L$(MPI)/lib -lmpi
+endif
 endif
 
 endif # ifeq SHARED_LOWLEVEL

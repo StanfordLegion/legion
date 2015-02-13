@@ -286,6 +286,23 @@ namespace LegionRuntime {
     public:
       template<typename T>
       inline void serialize(const T &element);
+      // we need special serializers for bit masks
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void serialize(const BitMask<T,MAX,SHIFT,MASK> &mask);
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void serialize(const TLBitMask<T,MAX,SHIFT,MASK> &mask);
+#ifdef __SSE2__
+      template<unsigned int MAX>
+      inline void serialize(const SSEBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const SSETLBitMask<MAX> &mask);
+#endif
+#ifdef __AVX__
+      template<unsigned int MAX>
+      inline void serialize(const AVXBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void serialize(const AVXTLBitMask<MAX> &mask);
+#endif
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -336,6 +353,23 @@ namespace LegionRuntime {
     public:
       template<typename T>
       inline void deserialize(T &element);
+      // We need specialized deserializers for bit masks
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void deserialize(BitMask<T,MAX,SHIFT,MASK> &mask);
+      template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+      inline void deserialize(TLBitMask<T,MAX,SHIFT,MASK> &mask);
+#ifdef __SSE2__
+      template<unsigned int MAX>
+      inline void deserialize(SSEBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(SSETLBitMask<MAX> &mask);
+#endif
+#ifdef __AVX__
+      template<unsigned int MAX>
+      inline void deserialize(AVXBitMask<MAX> &mask);
+      template<unsigned int MAX>
+      inline void deserialize(AVXTLBitMask<MAX> &mask);
+#endif
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -944,28 +978,56 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Serializer::serialize<FieldMask>(const FieldMask &mask)
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void Serializer::serialize(const BitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Serializer::serialize<NodeMask>(const NodeMask &mask)
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void Serializer::serialize(const TLBitMask<T,MAX,SHIFT,MASK> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+#ifdef __SSE2__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const SSEBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Serializer::serialize<ProcessorMask>(const ProcessorMask &mask)
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const SSETLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.serialize(*this);
     }
+#endif
+
+#ifdef __AVX__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const AVXBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Serializer::serialize(const AVXTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.serialize(*this);
+    }
+#endif
 
     //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
@@ -1065,28 +1127,56 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Deserializer::deserialize<FieldMask>(FieldMask &mask)
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void Deserializer::deserialize(BitMask<T,MAX,SHIFT,MASK> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Deserializer::deserialize<NodeMask>(NodeMask &mask)
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline void Deserializer::deserialize(TLBitMask<T,MAX,SHIFT,MASK> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+#ifdef __SSE2__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(SSEBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
     }
 
     //--------------------------------------------------------------------------
-    template<>
-    inline void Deserializer::deserialize<ProcessorMask>(ProcessorMask &mask)
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(SSETLBitMask<MAX> &mask)
     //--------------------------------------------------------------------------
     {
       mask.deserialize(*this);
     }
+#endif
+
+#ifdef __AVX__
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(AVXBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline void Deserializer::deserialize(AVXTLBitMask<MAX> &mask)
+    //--------------------------------------------------------------------------
+    {
+      mask.deserialize(*this);
+    }
+#endif
       
     //--------------------------------------------------------------------------
     inline void Deserializer::deserialize(void *dst, size_t bytes)

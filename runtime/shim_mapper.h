@@ -37,7 +37,7 @@ namespace LegionRuntime {
      */
     class ShimMapper : public DefaultMapper {
     public:
-      ShimMapper(Machine *machine, HighLevelRuntime *rt, Processor local);
+      ShimMapper(Machine machine, HighLevelRuntime *rt, Processor local);
       ShimMapper(const ShimMapper &rhs);
       virtual ~ShimMapper(void);
     public:

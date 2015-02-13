@@ -47,6 +47,7 @@ namespace LegionRuntime {
     class RegionInstance;
 
     class Machine;
+    class Runtime;
 
     typedef ::legion_lowlevel_id_t IDType;
     typedef ::legion_lowlevel_address_space_t AddressSpace;
@@ -374,6 +375,8 @@ namespace LegionRuntime {
         PROC_GROUP = ::PROC_GROUP, // Processor group
       };
 
+      // Return what kind of processor this is
+      Kind kind(void) const;
       // Return the address space for this processor
       AddressSpace address_space(void) const;
       // Return the local ID within the address space
@@ -393,6 +396,8 @@ namespace LegionRuntime {
 
       Event spawn(TaskFuncID func_id, const void *args, size_t arglen,
 		  Event wait_on = Event::NO_EVENT, int priority = 0) const;
+
+      static Processor get_executing_processor(void);
     };
 
     class Memory {
@@ -427,6 +432,11 @@ namespace LegionRuntime {
         LEVEL2_CACHE, // CPU L2 Visible to all processors on the node, better performance to one processor
         LEVEL1_CACHE, // CPU L1 Visible to all processors on the node, better performance to one processor
       };
+
+      // Return what kind of memory this is
+      Kind kind(void) const;
+      // Return the maximum capacity of this memory
+      size_t capacity(void) const;
     };
 
     class ElementMask {
@@ -1554,54 +1564,29 @@ namespace LegionRuntime {
 
     class Machine {
     public:
-      Machine(int *argc, char ***argv,
-	      const Processor::TaskIDTable &task_table,
-	      const ReductionOpTable &redop_table,
-	      bool cps_style = false, Processor::TaskFuncID init_id = 0);
-      ~Machine(void);
+      class Impl;  // hidden internal implementation
 
-      // there are three potentially interesting ways to start the initial
-      // tasks:
-      enum RunStyle {
-	ONE_TASK_ONLY,  // a single task on a single node of the machine
-	ONE_TASK_PER_NODE, // one task running on one proc of each node
-	ONE_TASK_PER_PROC, // a task for every processor in the machine
-      };
+      explicit Machine(Impl *_impl) : impl(_impl) {}
+      Machine(const Machine& m) : impl(m.impl) {}
+      Machine& operator=(const Machine& m) { impl = m.impl; return *this; }
+      ~Machine(void) {}
 
+      static Machine get_machine(void);
 
-      void run(Processor::TaskFuncID task_id = 0, RunStyle style = ONE_TASK_ONLY,
-	       const void *args = 0, size_t arglen = 0, bool background = false);
+      void get_all_memories(std::set<Memory>& mset) const;
+      void get_all_processors(std::set<Processor>& pset) const;
 
-      // requests a shutdown of all the processors
-      void shutdown(bool local_request = true);
-
-      void wait_for_shutdown(void);
-
-    public:
-      const std::set<Memory>&    get_all_memories(void) const { return memories; }
-      const std::set<Processor>& get_all_processors(void) const { return procs; }
       // Return the set of memories visible from a processor
-      const std::set<Memory>&    get_visible_memories(Processor p) const
-      { return visible_memories_from_procs.find(p)->second; }
+      void get_visible_memories(Processor p, std::set<Memory>& mset) const;
 
       // Return the set of memories visible from a memory
-      const std::set<Memory>&    get_visible_memories(Memory m) const
-      { return visible_memories_from_memory.find(m)->second; }
+      void get_visible_memories(Memory m, std::set<Memory>& mset) const;
 
       // Return the set of processors which can all see a given memory
-      const std::set<Processor>& get_shared_processors(Memory m) const
-      { return visible_procs_from_memory.find(m)->second; }
-
-      Processor::Kind get_processor_kind(Processor p) const;
-      Memory::Kind get_memory_kind(Memory m) const;
-      size_t get_memory_size(const Memory m) const;
+      void get_shared_processors(Memory m, std::set<Processor>& pset) const;
 
       size_t get_address_space_count(void) const;
 
-      //void add_processor(Processor p) { procs.insert(p); }
-      static Machine* get_machine(void);
-
-      static Processor get_executing_processor(void);
     public:
       struct ProcessorMemoryAffinity {
 	Processor p;
@@ -1618,27 +1603,51 @@ namespace LegionRuntime {
 
       int get_proc_mem_affinity(std::vector<ProcessorMemoryAffinity>& result,
 				Processor restrict_proc = Processor::NO_PROC,
-				Memory restrict_memory = Memory::NO_MEMORY);
+				Memory restrict_memory = Memory::NO_MEMORY) const;
 
       int get_mem_mem_affinity(std::vector<MemoryMemoryAffinity>& result,
 			       Memory restrict_mem1 = Memory::NO_MEMORY,
-			       Memory restrict_mem2 = Memory::NO_MEMORY);
+			       Memory restrict_mem2 = Memory::NO_MEMORY) const;
 
     protected:
-      std::set<Processor> procs;
-      std::set<Memory> memories;
-      std::vector<ProcessorMemoryAffinity> proc_mem_affinities;
-      std::vector<MemoryMemoryAffinity> mem_mem_affinities;
-      std::map<Processor,std::set<Memory> > visible_memories_from_procs;
-      std::map<Memory,std::set<Memory> > visible_memories_from_memory;
-      std::map<Memory,std::set<Processor> > visible_procs_from_memory;
-      void *background_pthread; // pointer to pthread_t in the background
-    public:
-      struct NodeAnnounceData;
+      Impl *impl;
+    };
 
-      void parse_node_announce_data(const void *args, size_t arglen,
-				    const NodeAnnounceData& annc_data,
-				    bool remote);
+    class Runtime {
+    public:
+      Runtime(void);
+      Runtime(const Runtime& r) : impl(r.impl) {}
+      Runtime& operator=(const Runtime& r) { impl = r.impl; return *this; }
+
+      ~Runtime(void) {}
+
+      static Runtime get_runtime(void);
+
+      bool init(int *argc, char ***argv);
+
+      bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
+      bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+
+      // there are three potentially interesting ways to start the initial
+      // tasks:
+      enum RunStyle {
+	ONE_TASK_ONLY,  // a single task on a single node of the machine
+	ONE_TASK_PER_NODE, // one task running on one proc of each node
+	ONE_TASK_PER_PROC, // a task for every processor in the machine
+      };
+
+
+      void run(Processor::TaskFuncID task_id = 0, RunStyle style = ONE_TASK_ONLY,
+	       const void *args = 0, size_t arglen = 0, bool background = false);
+
+      // requests a shutdown of the runtime
+      void shutdown(void);
+
+      void wait_for_shutdown(void);
+
+      class Impl;
+    protected:
+      Impl *impl;
     };
 
     // Implementations for template functions

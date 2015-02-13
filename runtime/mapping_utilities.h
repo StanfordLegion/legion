@@ -36,21 +36,21 @@ namespace LegionRuntime {
        */
       class MachineQueryInterface {
       public:
-        MachineQueryInterface(Machine *m);
+        MachineQueryInterface(Machine m);
       public:
         /**
          * Find a memory visible to all the processors
          */
         Memory find_global_memory(void);
         static
-        Memory find_global_memory(Machine *machine);
+        Memory find_global_memory(Machine machine);
         /**
          * Get the memory stack for a given processor sorted
          * by either throughput or latency.
          */
         void find_memory_stack(Processor proc, 
             std::vector<Memory> &stack, bool latency);
-        static void find_memory_stack(Machine *machine, Processor proc, 
+        static void find_memory_stack(Machine machine, Processor proc, 
                               std::vector<Memory> &stack, bool latency);
         /**
          * Get the memory stack for a given memory sorted by either
@@ -58,28 +58,28 @@ namespace LegionRuntime {
          */
         void find_memory_stack(Memory mem, std::vector<Memory> &stack, 
                                bool latency);
-        static void find_memory_stack(Machine *machine, Memory mem, 
+        static void find_memory_stack(Machine machine, Memory mem, 
                             std::vector<Memory> &stack, bool latency);
         /**
          * Find the memory of a given kind that is visible from 
          * the specified processor.
          */
         Memory find_memory_kind(Processor proc, Memory::Kind kind);
-        static Memory find_memory_kind(Machine *machine, Processor proc, 
+        static Memory find_memory_kind(Machine machine, Processor proc, 
                                        Memory::Kind kind);
         /**
          * Find the memory of a given kind that is visible from
          * the specified memory.
          */
         Memory find_memory_kind(Memory mem, Memory::Kind kind);
-        static Memory find_memory_kind(Machine *machine, Memory mem, 
+        static Memory find_memory_kind(Machine machine, Memory mem, 
                                        Memory::Kind kind);
         /**
          * Find the processor of a given kind that is is visible
          * from the specified memory.
          */
         Processor find_processor_kind(Memory mem, Processor::Kind kind);
-        static Processor find_processor_kind(Machine *machine, Memory mem, 
+        static Processor find_processor_kind(Machine machine, Memory mem, 
                                              Processor::Kind kind);
         /**
          * Return a set of processors filtered on the given type.  
@@ -87,7 +87,7 @@ namespace LegionRuntime {
          * with all processors of the given kind.
          */
         const std::set<Processor>& filter_processors(Processor::Kind kind);
-        static void filter_processors(Machine *machine, Processor::Kind kind, 
+        static void filter_processors(Machine machine, Processor::Kind kind, 
                                       std::set<Processor> &procs); 
         /**
          * Return a set of memories filtered on the given type.  
@@ -95,15 +95,15 @@ namespace LegionRuntime {
          * with all processors of the given kind.
          */
         const std::set<Memory>& filter_memories(Memory::Kind kind);
-        static void filter_memories(Machine *machine, Memory::Kind kind, 
+        static void filter_memories(Machine machine, Memory::Kind kind, 
                                     std::set<Memory> &mems);
       protected:
-        static void sort_memories(Machine *machine, Processor proc, 
+        static void sort_memories(Machine machine, Processor proc, 
                                   std::vector<Memory> &memories, bool latency);
-        static void sort_memories(Machine *machine, Memory mem, 
+        static void sort_memories(Machine machine, Memory mem, 
                                   std::vector<Memory> &memories, bool latency);
       protected:
-        Machine *const machine;
+        const Machine machine;
         Memory global_memory;
         std::map<Processor,std::vector<Memory> > proc_mem_stacks;
         std::map<Memory,std::vector<Memory> > mem_mem_stacks;
