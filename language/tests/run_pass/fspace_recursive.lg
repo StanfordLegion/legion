@@ -19,11 +19,13 @@ fspace list(a : region(list(a))) {
   next : ptr(list(a), a),
 }
 
-task flat(b : region(list(b)), c : list(b)) : int, reads(b)
+task flat(b : region(list(b)), c : list(b)) : int
+where reads(b) do
   return c.data
 end
 
-task deep(d : region(list(d)), e : ptr(list(d), d)) : int, reads(d)
+task deep(d : region(list(d)), e : ptr(list(d), d)) : int
+where reads(d) do
   var f : list(d) = @e
   return flat(d, f)
 end

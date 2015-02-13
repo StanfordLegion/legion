@@ -22,7 +22,8 @@ fspace k (r : region(int)) {
   x : ptr(int, s),
 }
 
-task g(a : region(int), b : k(a)) : int, writes(a)
+task g(a : region(int), b : k(a)) : int
+where writes(a) do
   var { c = s, y = x } = b
   @y = 0
 end

@@ -21,9 +21,8 @@ fspace s(a : region(int)) {
   x : ptr(int, a),
 }
 
-task f(b : region(int), c : region(s(b)), y : ptr(s(b), c)) : int,
-  reads(b, c)
-
+task f(b : region(int), c : region(s(b)), y : ptr(s(b), c)) : int
+where reads(b, c) do
   return @(y.x)
 end
 

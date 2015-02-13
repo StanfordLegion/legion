@@ -18,9 +18,10 @@ local c = legionlib.c
 
 fspace k (r : region(int)) {
   s : region(int),
-} where s <= r
+} where s <= r end
 
-task f(m : region(int)) : int, reads(m)
+task f(m : region(int)) : int
+where reads(m) do
   var o = 0
   for n in m do
     o += @n
@@ -28,7 +29,8 @@ task f(m : region(int)) : int, reads(m)
   return o
 end
 
-task g(a : region(int), b : k(a)) : int, reads(a), writes(a)
+task g(a : region(int), b : k(a)) : int
+where reads(a), writes(a) do
   var d = b.s
   var e = new(ptr(int, d))
   @e = 30

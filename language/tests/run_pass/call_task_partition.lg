@@ -16,23 +16,45 @@ import "legion"
 
 local c = legionlib.c
 
-task f(s : region(int), y : ptr(int, s)) : int, reads(s)
-  return @y
+task f(s : region(int), t : partition(disjoint, s), n : int) : int
+where reads(s) do
+  var w = 0
+  for i = 0, n do
+    var si = t[i]
+    for y in si do
+      w += @y
+    end
+  end
+  return w
 end
 
 task g() : int
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+
+  var rc = c.legion_coloring_create()
+  var n = 5
+  for i = 0, n do
+    c.legion_coloring_ensure_color(rc, i)
+  end
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  c.legion_coloring_destroy(rc)
+
   var r0 = p[0]
-  var x = new(ptr(int, r0))
-  @x = 5
-  return f(r0, x)
+  var x0 = new(ptr(int, r0))
+  @x0 = 100
+
+  var r1 = p[1]
+  var x1 = new(ptr(int, r1))
+  @x1 = 20
+
+  var r2 = p[2]
+  var x2 = new(ptr(int, r2))
+  @x2 = 3
+
+  return f(r, p, n)
 end
 
 task main()
-  legionlib.assert(g() == 5)
+  legionlib.assert(g() == 123)
 end
 legionlib.start(main)

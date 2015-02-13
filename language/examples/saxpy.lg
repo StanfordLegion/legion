@@ -31,9 +31,10 @@ function index_to_ptr(ptr_type)
   end
 end
 
-task saxpy(n : uint, x: region(float), y: region(float), a: float),
-  reads(x), reduces +(y)
-
+task saxpy(n : uint, x: region(float), y: region(float), a: float)
+where
+  reads(x), reduces+(y)
+do
   for i : uint = 0, n do
     var px = [index_to_ptr(ptr(float, x))](i)
     var py = [index_to_ptr(ptr(float, y))](i)

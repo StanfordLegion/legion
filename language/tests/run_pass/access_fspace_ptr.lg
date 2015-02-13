@@ -20,7 +20,8 @@ fspace point {
   z : int,
 }
 
-task f(r : region(point), p : ptr(point, r)) : int, reads(r)
+task f(r : region(point), p : ptr(point, r)) : int
+where reads(r) do
   return p.x + p.y + p.z
 end
 

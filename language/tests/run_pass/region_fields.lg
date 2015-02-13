@@ -35,7 +35,8 @@ struct p3 {
   l : p2,
 }
 
-task f(r : region(p1), x : ptr(p1, r)) : int, reads(r.{a, b})
+task f(r : region(p1), x : ptr(p1, r)) : int
+where reads(r.{a, b}) do
   return x.a + x.b
 end
 
@@ -47,7 +48,10 @@ task tf() : int
   return f(r, x)
 end
 
-task g(r : region(p2), x : ptr(p2, r)), reads(r.{}), writes(r.e.a, r.f)
+task g(r : region(p2), x : ptr(p2, r))
+where
+  reads(r.{}), writes(r.e.a, r.f)
+do
   x.e.a = 1
   x.f.a = 20
   x.f.b = 300
@@ -60,7 +64,10 @@ task tg()
   return x.e.a + x.f.a + x.f.b
 end
 
-task z(r : region(p3)), reads(r.{i.a, j.b, k.{c, e.b}, l.{e.{a, b}, d, c, f.{}}})
+task z(r : region(p3))
+where
+  reads(r.{i.a, j.b, k.{c, e.b}, l.{e.{a, b}, d, c, f.{}}})
+do
 end
 z:compile()
 

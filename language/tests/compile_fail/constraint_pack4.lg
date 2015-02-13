@@ -20,7 +20,7 @@ import "legion"
 fspace t {
   a : region(int),
   b : region(int),
-} where b * a
+} where b * a end
 
 task f()
   var r = region(int, 5)

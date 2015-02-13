@@ -17,7 +17,8 @@
 
 import "legion"
 
-task f(r : region(int), p : ptr(int, r)), writes(r)
+task f(r : region(int), p : ptr(int, r))
+where writes(r) do
   @p += 1
 end
 f:compile()

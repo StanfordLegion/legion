@@ -262,13 +262,23 @@ function value:unpack(cx, value_type, field_name, field_type)
     return self:new(region_expr, self.value_type, self.field_path)
   elseif std.is_ptr(field_type) then
     local region_types = field_type:points_to_regions()
+
+    do
+      local has_all_regions = true
+      for _, region_type in ipairs(region_types) do
+        if not cx:has_region(region_type) then
+          has_all_regions = false
+          break
+        end
+      end
+      if has_all_regions then
+        return self
+      end
+    end
+
     -- FIXME: What to do about multi-region pointers?
     assert(#region_types == 1)
     local region_type = region_types[1]
-
-    if cx:has_region(region_type) then
-      return self
-    end
 
     local static_ptr_type = std.get_field(value_type, field_name)
     local static_region_types = static_ptr_type:points_to_regions()
@@ -318,12 +328,47 @@ function ref:__ref(cx)
     function(field_path) return self.field_path .. field_path end)
 
   local region_types = self.value_type:points_to_regions()
-  assert(#region_types == 1) -- FIXME: for multi-region pointers
-  local region_type = region_types[1]
-  local accessors = absolute_field_paths:map(
-    function(field_path)
-      return cx.regions[region_type]:accessor(field_path)
+  local accessors_by_region = region_types:map(
+    function(region_type)
+      return absolute_field_paths:map(
+        function(field_path)
+          return cx.regions[region_type]:accessor(field_path)
+        end)
     end)
+
+  local accessors
+  if #region_types == 1 then
+    accessors = accessors_by_region[1]
+  else
+    -- elliott
+    accessors = absolute_field_paths:map(
+      function(field_path)
+        return terralib.newsymbol(c.legion_accessor_array_t, "accessor_" .. field_path:hash())
+      end)
+
+    local cases = quote c.abort() end
+    for i = #region_types, 1, -1 do
+      local region_accessors = accessors_by_region[i]
+      cases = quote
+        if [value].__index == [i] then
+          [std.zip(accessors, region_accessors):map(
+             function(pair)
+               local accessor, region_accessor = unpack(pair)
+               return quote [accessor] = [region_accessor] end
+             end)]
+        else
+          [cases]
+        end
+      end
+    end
+
+    actions = quote
+      [actions];
+      [accessors:map(
+         function(accessor) return quote var [accessor] end end)];
+      [cases]
+    end
+  end
 
   local values = std.zip(accessors, field_types):map(
     function(pair)
@@ -476,6 +521,10 @@ function rawref:get_field(cx, field_name, field_type)
   return result:__get_field(cx, value_type, field_name)
 end
 
+function codegen.expr_internal(cx, node)
+  return node.value
+end
+
 function codegen.expr_id(cx, node)
   return values.rawref(expr.just(quote end, node.value), &node.expr_type)
 end
@@ -555,6 +604,120 @@ function codegen.expr_method_call(cx, node)
     expr_type)
 end
 
+function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
+                                   params_struct_type, task_args,
+                                   task_args_setup)
+  -- Prepare the by-value arguments to the task.
+  for i, arg in ipairs(args) do
+    local c_field = params_struct_type:getentries()[i]
+    local c_field_name = c_field[1] or c_field.field
+    if terralib.issymbol(c_field_name) then
+      c_field_name = c_field_name.displayname
+    end
+    task_args_setup:insert(quote [task_args].[c_field_name] = [arg] end)
+  end
+
+  -- Prepare the region arguments to the task.
+
+  -- Pass field IDs by-value to the task.
+  local param_field_ids = task:get_field_id_params()
+  do
+    local param_field_id_i = 1
+    for _, i in ipairs(std.fn_param_regions_by_index(task:gettype())) do
+      local arg_type = arg_types[i]
+      local param_type = param_types[i]
+
+      local field_paths, _ = std.flatten_struct_fields(param_type.element_type)
+      for _, field_path in pairs(field_paths) do
+        local arg_field_id = cx.regions[arg_type]:field_id(field_path)
+        local param_field_id = param_field_ids[param_field_id_i]
+        param_field_id_i = param_field_id_i + 1
+        task_args_setup:insert(
+          quote [task_args].[param_field_id] = [arg_field_id] end)
+      end
+    end
+  end
+  return task_args_setup
+end
+
+function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
+                                    index, region_args_setup)
+  local privileges, privilege_field_paths = std.find_task_privileges(
+    param_type, task:getprivileges())
+  local privilege_modes = privileges:map(std.privilege_mode)
+  local parent_region =
+    cx.regions[cx.regions[arg_type].parent_region_type].logical_region
+
+  local add_requirement = c.legion_task_launcher_add_region_requirement_logical_region
+  if index then
+    add_requirement = c.legion_index_launcher_add_region_requirement_logical_region
+  end
+
+  local add_field = c.legion_task_launcher_add_field
+  if index then
+    add_field = c.legion_index_launcher_add_field
+  end
+
+  for i, privilege in ipairs(privileges) do
+    local field_paths = privilege_field_paths[i]
+    local privilege_mode = privilege_modes[i]
+
+    local requirement = terralib.newsymbol("requirement")
+    region_args_setup:insert(
+      quote
+      var [requirement] =
+          add_requirement(
+            [launcher], [cx.regions[arg_type].logical_region].impl,
+            [privilege_mode], c.EXCLUSIVE,
+            [parent_region].impl,
+            0, false)
+        [field_paths:map(
+           function(field_path)
+             local field_id = cx.regions[arg_type]:field_id(field_path)
+             return quote
+               add_field(
+                 [launcher], [requirement], [field_id], true)
+             end
+           end)]
+      end)
+  end
+end
+
+function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
+                                       partition, launcher, index,
+                                       region_args_setup)
+  assert(index)
+  local privileges, privilege_field_paths = std.find_task_privileges(
+    param_type, task:getprivileges())
+  local privilege_modes = privileges:map(std.privilege_mode)
+  local parent_region =
+    cx.regions[cx.regions[arg_type].parent_region_type].logical_region
+
+  for i, privilege in ipairs(privileges) do
+    local field_paths = privilege_field_paths[i]
+    local privilege_mode = privilege_modes[i]
+
+    local requirement = terralib.newsymbol("requirement")
+    region_args_setup:insert(
+      quote
+      var [requirement] =
+          c.legion_index_launcher_add_region_requirement_logical_partition(
+            [launcher], [partition].impl, 0 --[[ default projection ID ]],
+            [privilege_mode], c.EXCLUSIVE,
+            [parent_region].impl,
+            0, false)
+        [field_paths:map(
+           function(field_path)
+             local field_id = cx.regions[arg_type]:field_id(field_path)
+             return quote
+               c.legion_index_launcher_add_field(
+                 [launcher], [requirement], [field_id], true)
+             end
+           end)]
+      end)
+  end
+end
+
 function codegen.expr_call(cx, node)
   local fn = codegen.expr(cx, node.fn):read(cx)
   local args = node.args:map(
@@ -585,39 +748,12 @@ function codegen.expr_call(cx, node)
   if std.is_task(fn.value) then
     value_type = fn.value:gettype().returntype
 
-    -- Prepare the by-value arguments to the task.
     local params_struct_type = fn.value:get_params_struct()
     local task_args = terralib.newsymbol(params_struct_type)
     local task_args_setup = terralib.newlist()
-    for i, arg in ipairs(arg_values) do
-      local c_field = params_struct_type:getentries()[i]
-      local c_field_name = c_field[1] or c_field.field
-      if terralib.issymbol(c_field_name) then
-        c_field_name = c_field_name.displayname
-      end
-      task_args_setup:insert(quote [task_args].[c_field_name] = [arg] end)
-    end
-
-    -- Prepare the region arguments to the task.
-
-    -- Pass field IDs by-value to the task.
-    local param_field_ids = fn.value:get_field_id_params()
-    do
-      local param_field_id_i = 1
-      for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
-        local arg_type = arg_types[i]
-        local param_type = param_types[i]
-
-        local field_paths, _ = std.flatten_struct_fields(param_type.element_type)
-        for _, field_path in pairs(field_paths) do
-          local arg_field_id = cx.regions[arg_type]:field_id(field_path)
-          local param_field_id = param_field_ids[param_field_id_i]
-          param_field_id_i = param_field_id_i + 1
-          task_args_setup:insert(
-            quote [task_args].[param_field_id] = [arg_field_id] end)
-        end
-      end
-    end
+    expr_call_setup_task_args(
+      cx, fn.value, arg_values, arg_types, param_types, params_struct_type,
+      task_args, task_args_setup)
 
     -- Pass regions through region requirements.
     local launcher = terralib.newsymbol("launcher")
@@ -626,35 +762,8 @@ function codegen.expr_call(cx, node)
       local arg_type = arg_types[i]
       local param_type = param_types[i]
 
-      local privileges, privilege_field_paths = std.find_task_privileges(
-        param_type, fn.value:getprivileges())
-      local privilege_modes = privileges:map(std.privilege_mode)
-      local parent_region =
-        cx.regions[cx.regions[arg_type].parent_region_type].logical_region
-
-      for i, privilege in ipairs(privileges) do
-        local field_paths = privilege_field_paths[i]
-        local privilege_mode = privilege_modes[i]
-
-        local requirement = terralib.newsymbol("requirement")
-        region_args_setup:insert(
-          quote
-          var [requirement] =
-              c.legion_task_launcher_add_region_requirement_logical_region(
-                [launcher], [cx.regions[arg_type].logical_region].impl,
-                [privilege_mode], c.EXCLUSIVE,
-                [parent_region].impl,
-                0, false)
-            [field_paths:map(
-               function(field_path)
-                 local field_id = cx.regions[arg_type]:field_id(field_path)
-                 return quote
-                   c.legion_task_launcher_add_field(
-                     [launcher], [requirement], [field_id], true)
-                 end
-               end)]
-          end)
-      end
+      expr_call_setup_region_arg(
+        cx, fn.value, arg_type, param_type, launcher, false, region_args_setup)
     end
 
     local future = terralib.newsymbol("future")
@@ -868,6 +977,90 @@ function codegen.expr_null(cx, node)
     expr_type)
 end
 
+function codegen.expr_dynamic_cast(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = value.actions
+  local input = `([value.value].__ptr)
+  local result
+  local regions = expr_type:points_to_regions()
+  if #regions == 1 then
+    local region = regions[1]
+    assert(cx:has_region(region))
+    local lr = `([cx.regions[region].logical_region].impl)
+    result = `(
+      [expr_type]({
+          __ptr = (c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr]))
+      }))
+  else
+    result = terralib.newsymbol(expr_type)
+    local cases = quote
+      [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
+    end
+    for i = #regions, 1, -1 do
+      local region = regions[i]
+      assert(cx:has_region(region))
+      local lr = `([cx.regions[region].logical_region].impl)
+      cases = quote
+        var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
+        if not c.legion_ptr_is_null(temp) then
+          result = [expr_type]({
+            __ptr = temp,
+            __index = [i],
+          })
+        else
+          [cases]
+        end
+      end
+    end
+
+    actions = quote [actions]; var [result]; [cases] end
+  end
+
+  return values.value(expr.once_only(actions, result), expr_type)
+end
+
+function codegen.expr_static_cast(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local actions = value.actions
+  local input = value.value
+  local result
+  if #(expr_type:points_to_regions()) == 1 then
+    result = `([expr_type]{ __ptr = [input].__ptr })
+  else
+    result = terralib.newsymbol(expr_type)
+    local input_regions = value_type:points_to_regions()
+    local result_last = node.parent_region_map[#input_regions]
+    local cases = quote
+      [result] = [expr_type]({
+          __ptr = [input].__ptr,
+          __index = [result_last]
+      })
+    end
+    for i = #input_regions - 1, 1, -1 do
+      local result_i = node.parent_region_map[i]
+      cases = quote
+        if [input].__index == [i] then
+          [result] = [expr_type]({
+            __ptr = [input].__ptr,
+            __index = [result_i],
+          })
+        else
+          [cases]
+        end
+      end
+    end
+
+    actions = quote [actions]; var [result]; [cases] end
+  end
+
+  return values.value(expr.once_only(actions, result), expr_type)
+end
+
 function codegen.expr_region(cx, node)
   local element_type = node.element_type
   local size = codegen.expr(cx, node.size):read(cx)
@@ -993,7 +1186,10 @@ function codegen.expr_deref(cx, node)
 end
 
 function codegen.expr(cx, node)
-  if node:is(ast.typed.ExprID) then
+  if node:is(ast.typed.ExprInternal) then
+    return codegen.expr_internal(cx, node)
+
+  elseif node:is(ast.typed.ExprID) then
     return codegen.expr_id(cx, node)
 
   elseif node:is(ast.typed.ExprConstant) then
@@ -1040,6 +1236,12 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.ExprNull) then
     return codegen.expr_null(cx, node)
+
+  elseif node:is(ast.typed.ExprDynamicCast) then
+    return codegen.expr_dynamic_cast(cx, node)
+
+  elseif node:is(ast.typed.ExprStaticCast) then
+    return codegen.expr_static_cast(cx, node)
 
   elseif node:is(ast.typed.ExprRegion) then
     return codegen.expr_region(cx, node)
@@ -1177,6 +1379,152 @@ function codegen.stat_block(cx, node)
       [codegen.block(cx, node.block)]
     end
   end
+end
+
+function codegen.stat_index_launch(cx, node)
+  local symbol = node.symbol
+  local domain = codegen.expr_list(cx, node.domain):map(function(value) return value:read(cx) end)
+
+  local fn = codegen.expr(cx, node.expr.fn):read(cx)
+  assert(std.is_task(fn.value))
+  local args = terralib.newlist()
+  local args_partitions = {}
+  for i, arg in ipairs(node.expr.args) do
+    if node.args_invariant[i] then
+      args:insert(codegen.expr(cx, arg):read(cx))
+    else
+      -- Run codegen halfway to get the partition.
+      local partition = codegen.expr(cx, arg.value):read(cx)
+      args_partitions[i] = partition
+
+      -- Now run codegen the rest of the way to get the region.
+      local partition_type = std.as_read(arg.value.expr_type)
+      local region = codegen.expr(
+        cx,
+        ast.typed.ExprIndexAccess {
+          value = ast.typed.ExprInternal {
+            value = values.value(
+              expr.just(quote end, partition.value),
+              partition_type),
+            expr_type = partition_type,
+          },
+          index = arg.index,
+          expr_type = arg.expr_type,
+        }):read(cx)
+      args:insert(region)
+    end
+  end
+
+  local actions = quote
+    [domain[1].actions];
+    [domain[2].actions];
+    -- ignore domain[3] because we know it is a constant
+    [fn.actions];
+    [std.zip(args, node.args_invariant):map(
+       function(pair)
+         local arg, invariant = unpack(pair)
+         if invariant then
+           return arg.actions
+         else
+           return quote end
+         end
+       end)]
+  end
+
+  local arg_types = terralib.newlist()
+  for i, arg in ipairs(args) do
+    arg_types:insert(node.expr.args[i].expr_type)
+  end
+
+  local arg_values = terralib.newlist()
+  local param_types = node.expr.fn.expr_type.parameters
+  for i, arg in ipairs(args) do
+    local arg_value = args[i].value
+    if i <= #param_types and param_types[i] ~= std.untyped then
+      arg_values:insert(std.implicit_cast(arg_types[i], param_types[i], arg_value))
+    else
+      arg_values:insert(arg_value)
+    end
+  end
+
+  local value_type = fn.value:gettype().returntype
+
+  local params_struct_type = fn.value:get_params_struct()
+  local task_args = terralib.newsymbol(params_struct_type)
+  local task_args_setup = terralib.newlist()
+  for i, arg in ipairs(args) do
+    local invariant = node.args_invariant[i]
+    if not invariant then
+      task_args_setup:insert(arg.actions)
+    end
+  end
+  expr_call_setup_task_args(
+    cx, fn.value, arg_values, arg_types, param_types, params_struct_type,
+    task_args, task_args_setup)
+
+  -- Pass regions through region requirements.
+  local launcher = terralib.newsymbol("launcher")
+  local region_args_setup = terralib.newlist()
+  for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
+    local arg_type = arg_types[i]
+    local param_type = param_types[i]
+
+    if node.args_invariant[i] then
+      expr_call_setup_region_arg(
+        cx, fn.value, arg_type, param_type, launcher, true, region_args_setup)
+    else
+      local partition = args_partitions[i]
+      assert(partition)
+      expr_call_setup_partition_arg(
+        cx, fn.value, arg_type, param_type, partition.value, launcher, true,
+        region_args_setup)
+    end
+  end
+
+  local argument_map = terralib.newsymbol("argument_map")
+  local future_map = terralib.newsymbol("future_map")
+  local launcher_setup = quote
+    var [argument_map] = c.legion_argument_map_create()
+    for [node.symbol] = [domain[1].value], [domain[2].value] do
+      var [task_args]
+      [task_args_setup]
+      var t_args : c.legion_task_argument_t
+      t_args.args = [&opaque](&[task_args])
+      t_args.arglen = terralib.sizeof(params_struct_type)
+      c.legion_argument_map_set_point(
+        [argument_map],
+        c.legion_domain_point_from_point_1d(
+          c.legion_point_1d_t { x = arrayof(int32, [node.symbol]) }),
+        t_args, true)
+    end
+    var g_args : c.legion_task_argument_t
+    g_args.args = nil
+    g_args.arglen = 0
+    var [launcher] = c.legion_index_launcher_create(
+      [fn.value:gettaskid()],
+      c.legion_domain_from_rect_1d(
+        c.legion_rect_1d_t {
+          lo = c.legion_point_1d_t { x = arrayof(int32, [domain[1].value]) },
+          hi = c.legion_point_1d_t { x = arrayof(int32, [domain[2].value] - 1) },
+        }),
+      g_args, [argument_map],
+      c.legion_predicate_true(), false, 0, 0)
+    [region_args_setup]
+    var [future_map] = c.legion_index_launcher_execute(
+      [cx.runtime], [cx.context], [launcher])
+  end
+  local launcher_cleanup = quote
+  c.legion_argument_map_destroy([argument_map])
+  c.legion_future_map_destroy([future_map])
+  c.legion_index_launcher_destroy([launcher])
+  end
+
+  actions = quote
+    [actions];
+    [launcher_setup];
+    [launcher_cleanup]
+  end
+  return actions
 end
 
 function codegen.stat_var(cx, node)
@@ -1319,6 +1667,9 @@ function codegen.stat(cx, node)
   elseif node:is(ast.typed.StatBlock) then
     return codegen.stat_block(cx, node)
 
+  elseif node:is(ast.typed.StatIndexLaunch) then
+    return codegen.stat_index_launch(cx, node)
+
   elseif node:is(ast.typed.StatVar) then
     return codegen.stat_var(cx, node)
 
@@ -1396,12 +1747,19 @@ function codegen.stat_task(cx, node)
 
   -- Unpack the by-value parameters to the task.
   local task_args_setup = terralib.newlist()
-  local args = terralib.newsymbol("args")
+  local args = terralib.newsymbol(&params_struct_type, "args")
   if #(task:get_params_struct():getentries()) > 0 then
     task_args_setup:insert(quote
-      var arglen = c.legion_task_get_arglen(c_task)
-      if arglen ~= terralib.sizeof(params_struct_type) then c.abort() end
-      var [args] = [&params_struct_type](c.legion_task_get_args(c_task))
+      var [args]
+      if c.legion_task_get_is_index_space(c_task) then
+        var arglen = c.legion_task_get_local_arglen(c_task)
+        if arglen ~= terralib.sizeof(params_struct_type) then c.abort() end
+        args = [&params_struct_type](c.legion_task_get_local_args(c_task))
+      else
+        var arglen = c.legion_task_get_arglen(c_task)
+        if arglen ~= terralib.sizeof(params_struct_type) then c.abort() end
+        args = [&params_struct_type](c.legion_task_get_args(c_task))
+      end
     end)
     for _, param in ipairs(params) do
       local param_type_alignment = std.min(terralib.sizeof(param.type), 8)
@@ -1436,8 +1794,16 @@ function codegen.stat_task(cx, node)
       local isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
 
-      local _privileges, privilege_field_paths = std.find_task_privileges(
+      local privileges, privilege_field_paths = std.find_task_privileges(
         region_type, task:getprivileges())
+
+      local privileges_by_field_path = {}
+      for i, privilege in ipairs(privileges) do
+        local field_paths = privilege_field_paths[i]
+        for _, field_path in ipairs(field_paths) do
+          privileges_by_field_path[field_path:hash()] = privilege
+        end
+      end
 
       local field_paths, field_types =
         std.flatten_struct_fields(region_type.element_type)
@@ -1471,7 +1837,9 @@ function codegen.stat_task(cx, node)
 
         for i, field_path in ipairs(field_paths) do
           physical_regions_by_field_path[field_path:hash()] = physical_region
-          accessors_by_field_path[field_path:hash()] = physical_region_accessors[i]
+          if privileges_by_field_path[field_path:hash()] ~= "none" then
+            accessors_by_field_path[field_path:hash()] = physical_region_accessors[i]
+          end
         end
       end
 
@@ -1495,10 +1863,12 @@ function codegen.stat_task(cx, node)
           local field_id = field_ids_by_field_path[field_path:hash()]
           assert(accessor and field_id)
 
-          region_args_setup:insert(quote
-            var [accessor] = c.legion_physical_region_get_field_accessor_array(
-              [physical_region], [field_id])
-          end)
+          if privileges_by_field_path[field_path:hash()] ~= "none" then
+            region_args_setup:insert(quote
+              var [accessor] = c.legion_physical_region_get_field_accessor_array(
+                [physical_region], [field_id])
+            end)
+          end
         end
       end
 

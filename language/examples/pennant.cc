@@ -531,7 +531,7 @@ LegionRuntime::Logger::Category log_mapper("mapper");
 class PennantMapper : public DefaultMapper
 {
 public:
-  PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor local);
+  PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local);
   virtual void select_task_options(Task *task);
   virtual void select_task_variant(Task *task);
   virtual bool map_task(Task *task);
@@ -545,13 +545,14 @@ private:
   Memory local_regmem;
 };
 
-PennantMapper::PennantMapper(Machine *machine, HighLevelRuntime *rt, Processor local)
+PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
   : DefaultMapper(machine, rt, local)
 {
-  const std::set<Processor> &procs = machine->get_all_processors();
+  std::set<Processor> procs;
+  machine.get_all_processors(procs);
   for (std::set<Processor>::const_iterator it = procs.begin();
        it != procs.end(); it++) {
-    Processor::Kind kind = machine->get_processor_kind(*it);
+    Processor::Kind kind = it->kind();
     all_processors[kind].push_back(*it);
   }
 
@@ -692,7 +693,7 @@ Color PennantMapper::get_task_color_by_region(Task *task, LogicalRegion region)
   return get_logical_region_color(region);
 }
 
-void create_mappers(Machine *machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
+void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)

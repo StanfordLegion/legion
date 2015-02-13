@@ -17,10 +17,12 @@
 
 import "legion"
 
-task f(r : region(int)), writes(r)
+task f(r : region(int))
+where writes(r) do
 end
 
-task g(s : region(int)), reads(s)
+task g(s : region(int))
+where reads(s) do
   return f(s)
 end
 g:compile()

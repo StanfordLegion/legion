@@ -76,7 +76,7 @@ end
 
 function std.zip(...)
   local lists = terralib.newlist({...})
-  local len = std.reduce(std.min, lists:map(function(list) return #list end))
+  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end))
   local result = terralib.newlist()
   for i = 1, len do
     result:insert(lists:map(function(list) return list[i] end))
@@ -178,7 +178,7 @@ function std.add_privilege(cx, privilege, region, field_path)
   cx.privileges[privilege][region][field_path:hash()] = true
 end
 
-function std.add_constraint(cx, lhs, rhs, op, reflexive)
+function std.add_constraint(cx, lhs, rhs, op, symmetric)
   if not cx.constraints[op] then
     cx.constraints[op] = {}
   end
@@ -186,7 +186,7 @@ function std.add_constraint(cx, lhs, rhs, op, reflexive)
     cx.constraints[op][lhs] = {}
   end
   cx.constraints[op][lhs][rhs] = true
-  if reflexive then
+  if symmetric then
     std.add_constraint(cx, rhs, lhs, op, false)
   end
 end
@@ -194,8 +194,8 @@ end
 function std.add_constraints(cx, constraints)
   for _, constraint in ipairs(constraints) do
     local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
-    local reflexive = op == "*"
-    std.add_constraint(cx, lhs.type, rhs.type, op, reflexive)
+    local symmetric = op == "*"
+    std.add_constraint(cx, lhs.type, rhs.type, op, symmetric)
   end
 end
 
@@ -271,13 +271,33 @@ function std.check_any_privilege(cx, region, field_path)
   return false
 end
 
-function std.search_constraint(cx, region, constraint, visited)
+function std.search_constraint(cx, region, constraint, visited, reflexive, symmetric)
   return std.search_constraint_predicate(
     cx, region, visited,
     function(cx, region)
-      return cx.constraints[constraint.op] and
+      if reflexive and region == constraint.rhs then
+        return true
+      end
+
+      if cx.constraints[constraint.op] and
         cx.constraints[constraint.op][region] and
-        cx.constraints[constraint.op][constraint.lhs]
+        cx.constraints[constraint.op][region][constraint.rhs]
+      then
+        return true
+      end
+
+      if symmetric then
+        local constraint = {
+          lhs = constraint.rhs,
+          rhs = region,
+          op = constraint.op,
+        }
+        if std.search_constraint(cx, constraint.lhs, constraint, {}, reflexive, false) then
+          return true
+        end
+      end
+
+      return false
     end)
 end
 
@@ -287,7 +307,10 @@ function std.check_constraint(cx, constraint)
     rhs = constraint.rhs.type,
     op = constraint.op,
   }
-  return std.search_constraint(cx, constraint.lhs, constraint, {})
+  return std.search_constraint(
+    cx, constraint.lhs, constraint, {},
+    constraint.op == "<=" --[[ reflexive ]],
+    constraint.op == "*" --[[ symmetric ]])
 end
 
 function std.check_constraints(cx, constraints, mapping)
@@ -614,6 +637,41 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
+    elseif std.is_partition(param_type) and std.is_partition(arg_type) then
+      -- Check for previous mappings. This can happen if two
+      -- parameters are aliased to the same partition.
+      if (mapping[param] or mapping[param_type]) and
+        not (mapping[param] == arg or mapping[param_type] == arg_type)
+      then
+        local param_as_arg_type = mapping[param_type]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_type] then
+            param_as_arg_type = v
+          end
+        end
+        log.error("type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg))
+      end
+
+      mapping[param] = arg
+      mapping[param_type] = arg_type
+      if (not param_type.disjoint == arg_type.disjoint) or
+        (not check(param_type:parent_region(), arg_type:parent_region(), mapping))
+      then
+        local param_parent_region = param_type:parent_region()
+        local param_parent_region_as_arg_type = mapping[param_parent_region]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_parent_region] then
+            param_parent_region_as_arg_type = v
+          end
+        end
+        local param_as_arg_type = std.partition(
+          param_type.disjointness, param_parent_region_as_arg_type)
+        log.error("type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg_type))
+      end
     elseif not check(param_type, arg_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
       log.error("type mismatch in argument " .. tostring(i) ..
@@ -869,7 +927,9 @@ function std.get_field_path(value_type, field_path)
 end
 
 function std.implicit_cast(from, to, expr)
-  if std.is_region(to) or std.is_ptr(to) or std.is_fspace_instance(to) then
+  if std.is_region(to) or std.is_partition(to) or std.is_ptr(to) or
+    std.is_fspace_instance(to)
+  then
     return to:force_cast(from, to, expr)
   else
     return quote var v : to = [expr] in v end
@@ -960,7 +1020,10 @@ std.disjoint = terralib.types.newstruct("disjoint")
 std.aliased = terralib.types.newstruct("aliased")
 
 function std.partition(disjointness, region)
-  assert(terralib.issymbol(region))
+  assert(disjointness == std.disjoint or disjointness == std.aliased,
+         "Partition type requires disjointness to be one of disjoint or aliased")
+  assert(terralib.issymbol(region),
+         "Partition type requires region to be a symbol")
   if terralib.types.istype(region.type) then
     assert(std.is_region(region.type),
            "Parition type requires region")
@@ -975,6 +1038,7 @@ function std.partition(disjointness, region)
   end
 
   st.is_partition = true
+  st.disjointness = disjointness
   st.disjoint = disjointness == std.disjoint
   st.parent_region_symbol = region
   st.subregions = {}
@@ -987,15 +1051,28 @@ function std.partition(disjointness, region)
     return region
   end
 
+  function st:subregions_constant()
+    return self.subregions
+  end
+
   function st:subregion_constant(i)
-    if not st.subregions[i] then
-      st.subregions[i] = std.region(st:parent_region().element_type)
+    if not self.subregions[i] then
+      self.subregions[i] = std.region(self:parent_region().element_type)
     end
-    return st.subregions[i]
+    return self.subregions[i]
   end
 
   function st:subregion_dynamic()
-    return std.region(st:parent_region().element_type)
+    return std.region(self:parent_region().element_type)
+  end
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_partition(from) and std.is_partition(to))
+    return `([to] { impl = [expr].impl })
+  end
+
+  function st.metamethods.__typename(st)
+    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
   end
 
   return st
@@ -1028,6 +1105,9 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
   st.entries = terralib.newlist({
       { "__ptr", c.legion_ptr_t },
   })
+  if #regions > 1 then
+    st.entries:insert({ "__index", uint32 })
+  end
 
   st.is_pointer = true
   st.points_to_type = points_to_type
@@ -1062,8 +1142,14 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
   end)
 
   function st:force_cast(from, to, expr)
-    assert(std.is_ptr(from) and std.is_ptr(to))
-    return `([to]{ __ptr = [expr].__ptr })
+    assert(std.is_ptr(from) and std.is_ptr(to) and
+             (#(from:points_to_regions()) > 1) ==
+             (#(to:points_to_regions()) > 1))
+    if #(to:points_to_regions()) == 1 then
+      return `([to]{ __ptr = [expr].__ptr })
+    else
+      return quote var x = [expr] in [to]{ __ptr = x.__ptr, __index = x.__index} end
+    end
   end
 
   function st.metamethods.__typename(st)
@@ -1203,11 +1289,33 @@ function std.privilege(privilege, regions_fields)
 end
 
 -- #####################################
+-- ## Constraints
+-- #################
+
+function std.constraint(lhs, rhs, op)
+  return {
+    lhs = lhs,
+    rhs = rhs,
+    op = op,
+  }
+end
+
+-- #####################################
 -- ## Tasks
 -- #################
 
 local task = {}
 task.__index = task
+
+function task:set_param_symbols(t)
+  assert(not self.param_symbols)
+  self.param_symbols = t
+end
+
+function task:get_param_symbols()
+  assert(self.param_symbols)
+  return self.param_symbols
+end
 
 function task:set_params_struct(t)
   assert(not self.params_struct)
@@ -1246,6 +1354,16 @@ end
 function task:getprivileges()
   assert(self.privileges)
   return self.privileges
+end
+
+function task:set_param_constraints(t)
+  assert(not self.param_constraints)
+  self.param_constraints = t
+end
+
+function task:get_param_constraints()
+  assert(self.param_constraints)
+  return self.param_constraints
 end
 
 function task:set_constraints(t)

@@ -16,6 +16,11 @@
 
 local log = {}
 
+log.warn = function(...)
+  io.stderr:write(...)
+  io.stderr:write("\n")
+end
+
 log.error = function(...)
   io.stderr:write(...)
   io.stderr:write("\n")

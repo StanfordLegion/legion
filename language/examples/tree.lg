@@ -22,10 +22,12 @@ fspace tree(rtop : region(tree(wild))) {
   left : ptr(tree(rleft), rleft),
   right : ptr(tree(rright), rright),
   data : int,
-} where rleft <= rtop, rright <= rtop --, rleft * rright
+} where rleft <= rtop, rright <= rtop, rleft * rright end
 
-task sum_tree(rtop : region(tree(wild)), node : ptr(tree(rtop), rtop))
-  : int, reads(rtop)
+task sum_tree(rtop : region(tree(wild)), node : ptr(tree(rtop), rtop)) : int
+where
+  reads(rtop)
+do
 
   if isnull(node) then
     return 0
@@ -36,7 +38,9 @@ task sum_tree(rtop : region(tree(wild)), node : ptr(tree(rtop), rtop))
 end
 
 task reverse_tree(rtop : region(tree(wild)), node : ptr(tree(rtop), rtop))
-  , reads(rtop), writes(rtop)
+where
+  reads(rtop), writes(rtop)
+do
 
   if not isnull(node) then
     var {rleft, rright, left, right, data } = @node
@@ -47,7 +51,10 @@ task reverse_tree(rtop : region(tree(wild)), node : ptr(tree(rtop), rtop))
 end
 
 task make_tree(rtop : region(tree(wild)), min : int, max : int)
-  : ptr(tree(rtop), rtop), reads(rtop), writes(rtop)
+  : ptr(tree(rtop), rtop)
+where
+  reads(rtop), writes(rtop)
+do
 
   if min > max then
     return null(ptr(tree(rtop), rtop))

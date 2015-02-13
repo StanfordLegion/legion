@@ -17,6 +17,7 @@
 local ast = require("legion/ast")
 local builtins = require("legion/builtins")
 local codegen = require("legion/codegen")
+local optimize_loops = require("legion/optimize_loops")
 local parser = require("legion/parser")
 local specialize = require("legion/specialize")
 local std = require("legion/std")
@@ -39,10 +40,12 @@ function compile(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
     local env = environment_function()
-    local specialized = specialize.entry(env, node)
-    local typed = type_check.entry(specialized)
-    local code = codegen.entry(typed)
-    return code
+    local ast = specialize.entry(env, node)
+    ast = type_check.entry(ast)
+    -- FIXME: fix and re-enable
+    -- ast = optimize_loops.entry(ast)
+    ast = codegen.entry(ast)
+    return ast
   end
   return ctor, {node.name}
 end
@@ -60,6 +63,7 @@ local language = {
     "__fields",
     "__physical",
     "__runtime",
+    "dynamic_cast",
     "isnull",
     "new",
     "null",
@@ -67,6 +71,7 @@ local language = {
     "reads",
     "reduces",
     "region",
+    "static_cast",
     "where",
     "writes",
   },

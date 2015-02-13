@@ -14,7 +14,8 @@
 
 import "legion"
 
-task g(r : region(int), p : ptr(int, r)), writes(r)
+task g(r : region(int), p : ptr(int, r))
+where writes(r) do
   @p = 5
 end
 

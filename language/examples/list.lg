@@ -19,9 +19,10 @@ fspace list(a : region(list(a))) {
   next : ptr(list(a), a),
 }
 
-task make_list(d : region(list(d)), n : int) : ptr(list(d), d),
+task make_list(d : region(list(d)), n : int) : ptr(list(d), d)
+where
   reads(d), writes(d)
-
+do
   var x = null(ptr(list(d), d))
   for i = n, 0, -1 do
     var y = new(ptr(list(d), d))
@@ -31,9 +32,10 @@ task make_list(d : region(list(d)), n : int) : ptr(list(d), d),
   return x
 end
 
-task sum_list(e : region(list(e)), x : ptr(list(e), e)) : int,
+task sum_list(e : region(list(e)), x : ptr(list(e), e)) : int
+where
   reads(e), writes(e)
-
+do
   var s = 0
   while not isnull(x) do
     s = s + x.data

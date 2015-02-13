@@ -238,6 +238,28 @@ function parser.expr_simple(p)
       pointer_type_expr = pointer_type_expr,
     }
 
+  elseif p:nextif("dynamic_cast") then
+    p:expect("(")
+    local type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprDynamicCast {
+      type_expr = type_expr,
+      value = value,
+    }
+
+  elseif p:nextif("static_cast") then
+    p:expect("(")
+    local type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprStaticCast {
+      type_expr = type_expr,
+      value = value,
+    }
+
   elseif p:nextif("region") then
     p:expect("(")
     local element_type_expr = p:luaexpr()
@@ -637,45 +659,45 @@ function parser.stat_task_return(p)
   return function(env) return std.untyped end
 end
 
-function parser.stat_task_privilege_region_field(p)
+function parser.privilege_region_field(p)
   local field_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
-    fields = p:stat_task_privilege_region_fields()
+    fields = p:privilege_region_fields()
   end
-  return ast.unspecialized.StatTaskPrivilegeRegionField {
+  return ast.unspecialized.PrivilegeRegionField {
     field_name = field_name,
     fields = fields,
   }
 end
 
-function parser.stat_task_privilege_region_fields(p)
+function parser.privilege_region_fields(p)
   local fields = terralib.newlist()
   if p:nextif("{") then
     repeat
       if p:matches("}") then break end
-      fields:insert(p:stat_task_privilege_region_field())
+      fields:insert(p:privilege_region_field())
     until not p:sep()
     p:expect("}")
   else
-    fields:insert(p:stat_task_privilege_region_field())
+    fields:insert(p:privilege_region_field())
   end
   return fields
 end
 
-function parser.stat_task_privilege_region(p)
+function parser.privilege_region(p)
   local region_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
-    fields = p:stat_task_privilege_region_fields()
+    fields = p:privilege_region_fields()
   end
-  return ast.unspecialized.StatTaskPrivilegeRegion {
+  return ast.unspecialized.PrivilegeRegion {
     region_name = region_name,
     fields = fields,
   }
 end
 
-function parser.stat_task_privilege(p)
+function parser.privilege(p)
   local privilege
   local op = false
   if p:nextif("reads") then
@@ -702,24 +724,50 @@ function parser.stat_task_privilege(p)
   p:expect("(")
   local regions = terralib.newlist()
   repeat
-    local region = p:stat_task_privilege_region()
+    local region = p:privilege_region()
     regions:insert(region)
   until not p:nextif(",")
   p:expect(")")
 
-  return ast.unspecialized.StatTaskPrivilege {
+  return ast.unspecialized.Privilege {
     privilege = privilege,
     op = op,
     regions = regions,
   }
 end
 
-function parser.stat_task_privileges(p)
-  local privileges = terralib.newlist()
-  while p:nextif(",") do
-    privileges:insert(p:stat_task_privilege())
+function parser.constraint(p)
+  local lhs = p:expect(p.name).value
+  local op
+  if p:nextif("<=") then
+    op = "<="
+  elseif p:nextif("*") then
+    op = "*"
+  else
+    p:error("unexpected token in constraint")
   end
-  return privileges
+  local rhs = p:expect(p.name).value
+  return ast.unspecialized.Constraint {
+    lhs = lhs,
+    op = op,
+    rhs = rhs,
+  }
+end
+
+function parser.stat_task_privileges_and_constraints(p)
+  local privileges = terralib.newlist()
+  local constraints = terralib.newlist()
+  if p:nextif("where") then
+    repeat
+      if p:matches("reads") or p:matches("writes") or p:matches("reduces") then
+        privileges:insert(p:privilege())
+      else
+        constraints:insert(p:constraint())
+      end
+    until not p:nextif(",")
+    p:expect("do")
+  end
+  return privileges, constraints
 end
 
 function parser.stat_task(p)
@@ -727,7 +775,7 @@ function parser.stat_task(p)
   local name = p:expect(p.name).value
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
-  local privileges = p:stat_task_privileges()
+  local privileges, constraints = p:stat_task_privileges_and_constraints()
   local body = p:block()
   p:expect("end")
 
@@ -735,7 +783,8 @@ function parser.stat_task(p)
     name = name,
     params = params,
     return_type_expr = return_type,
-    privilege_exprs = privileges,
+    privileges = privileges,
+    constraints = constraints,
     body = body,
   }
 end
@@ -781,22 +830,9 @@ function parser.stat_fspace_constraints(p)
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
-      local lhs = p:expect(p.name).value
-      local op
-      if p:nextif("<=") then
-        op = "<="
-      elseif p:nextif("*") then
-        op = "*"
-      else
-        p:error("unexpected token in constraint")
-      end
-      local rhs = p:expect(p.name).value
-      constraints:insert(ast.unspecialized.StatFspaceConstraint {
-        lhs = lhs,
-        op = op,
-        rhs = rhs,
-      })
+      constraints:insert(p:constraint())
     until not p:nextif(",")
+    p:expect("end")
   end
   return constraints
 end

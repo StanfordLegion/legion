@@ -19,8 +19,14 @@ fspace tree(rtop : region(tree(wild))) {
   rright : region(tree(wild)),
   left : ptr(tree(rleft), rleft),
   right : ptr(tree(rright), rright),
-} where rleft <= rtop, rright <= rtop, rleft * rright
+}
+where
+  rleft <= rtop,
+  rright <= rtop,
+  rleft * rright
+end
 
-task f(rtop : region(tree(rtop)), t : ptr(tree(rtop), rtop)), reads(rtop)
+task f(rtop : region(tree(rtop)), t : ptr(tree(rtop), rtop))
+where reads(rtop) do
 end
 f:compile()

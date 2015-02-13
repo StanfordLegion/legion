@@ -14,12 +14,14 @@
 
 import "legion"
 
-task g(r : region(int), p : ptr(int, r)), reduces +(r)
+task g(r : region(int), p : ptr(int, r))
+where reduces+(r) do
   @p += 20
 end
 
 -- You can also do reductions with read-write privileges.
-task h(r : region(int), p : ptr(int, r)), reads(r), writes(r)
+task h(r : region(int), p : ptr(int, r))
+where reads(r), writes(r) do
   @p += 300
 end
 

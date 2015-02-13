@@ -14,7 +14,8 @@
 
 import "legion"
 
-task f(s : region(int), y : ptr(int, s)) : int, reads(s)
+task f(s : region(int), y : ptr(int, s)) : int
+where reads(s) do
   return @y
 end
 

@@ -134,6 +134,8 @@ ast.unspecialized("ExprRawRuntime", {})
 ast.unspecialized("ExprIsnull", {"pointer"})
 ast.unspecialized("ExprNew", {"pointer_type_expr"})
 ast.unspecialized("ExprNull", {"pointer_type_expr"})
+ast.unspecialized("ExprDynamicCast", {"type_expr", "value"})
+ast.unspecialized("ExprStaticCast", {"type_expr", "value"})
 ast.unspecialized("ExprRegion", {"element_type_expr", "size"})
 ast.unspecialized("ExprPartition", {"disjointness_expr", "region_type_expr",
                                     "coloring"})
@@ -159,16 +161,16 @@ ast.unspecialized("StatAssignment", {"lhs", "rhs"})
 ast.unspecialized("StatReduce", {"op", "lhs", "rhs"})
 ast.unspecialized("StatExpr", {"expr"})
 
+ast.unspecialized("Constraint", {"lhs", "op", "rhs"})
+ast.unspecialized("Privilege", {"privilege", "op", "regions"})
+ast.unspecialized("PrivilegeRegion", {"region_name", "fields"})
+ast.unspecialized("PrivilegeRegionField", {"field_name", "fields"})
 ast.unspecialized("StatTask", {"name", "params", "return_type_expr",
-                               "privilege_exprs", "body"})
+                               "privileges", "constraints", "body"})
 ast.unspecialized("StatTaskParam", {"param_name", "type_expr"})
-ast.unspecialized("StatTaskPrivilege", {"privilege", "op", "regions"})
-ast.unspecialized("StatTaskPrivilegeRegion", {"region_name", "fields"})
-ast.unspecialized("StatTaskPrivilegeRegionField", {"field_name", "fields"})
 ast.unspecialized("StatFspace", {"name", "params", "fields", "constraints"})
 ast.unspecialized("StatFspaceParam", {"param_name", "type_expr"})
 ast.unspecialized("StatFspaceField", {"field_name", "type_expr"})
-ast.unspecialized("StatFspaceConstraint", {"lhs", "op", "rhs"})
 
 -- Node Types (Specialized)
 
@@ -191,6 +193,8 @@ ast.specialized("ExprRawRuntime", {})
 ast.specialized("ExprIsnull", {"pointer"})
 ast.specialized("ExprNew", {"pointer_type", "region"})
 ast.specialized("ExprNull", {"pointer_type"})
+ast.specialized("ExprDynamicCast", {"value", "expr_type"})
+ast.specialized("ExprStaticCast", {"value", "expr_type"})
 ast.specialized("ExprRegion", {"element_type", "size", "expr_type"})
 ast.specialized("ExprPartition", {"disjointness", "region",
                                   "coloring", "expr_type"})
@@ -218,13 +222,15 @@ ast.specialized("StatReduce", {"op", "lhs", "rhs"})
 ast.specialized("StatExpr", {"expr"})
 
 ast.specialized("StatTask", {"name", "params", "return_type", "privileges",
-                             "body", "prototype"})
+                             "constraints", "body", "prototype"})
 ast.specialized("StatTaskParam", {"symbol"})
 ast.specialized("StatFspace", {"name", "fspace"})
 
 -- Node Types (Typed)
 
 ast.typed = AST_factory("typed")
+
+ast.typed("ExprInternal", {"value", "expr_type"}) -- internal use only
 
 ast.typed("ExprID", {"value", "expr_type"})
 ast.typed("ExprFieldAccess", {"value", "field_name", "expr_type"})
@@ -242,6 +248,8 @@ ast.typed("ExprRawRuntime", {"expr_type"})
 ast.typed("ExprIsnull", {"pointer", "expr_type"})
 ast.typed("ExprNew", {"pointer_type", "region", "expr_type"})
 ast.typed("ExprNull", {"pointer_type", "expr_type"})
+ast.typed("ExprDynamicCast", {"value", "expr_type"})
+ast.typed("ExprStaticCast", {"value", "parent_region_map", "expr_type"})
 ast.typed("ExprRegion", {"element_type", "size", "expr_type"})
 ast.typed("ExprPartition", {"disjointness", "region",
                             "coloring", "expr_type"})
@@ -260,6 +268,7 @@ ast.typed("StatForNum", {"symbol", "values", "block"})
 ast.typed("StatForList", {"symbol", "value", "block"})
 ast.typed("StatRepeat", {"block", "until_cond"})
 ast.typed("StatBlock", {"block"})
+ast.typed("StatIndexLaunch", {"symbol", "domain", "expr", "args_invariant"})
 ast.typed("StatVar", {"symbols", "types", "values"})
 ast.typed("StatVarUnpack", {"symbols", "fields", "field_types", "value"})
 ast.typed("StatReturn", {"value"})
@@ -268,8 +277,8 @@ ast.typed("StatAssignment", {"lhs", "rhs"})
 ast.typed("StatReduce", {"op", "lhs", "rhs"})
 ast.typed("StatExpr", {"expr"})
 
-ast.typed("StatTask", {"name", "params", "return_type", "privileges", "body",
-                       "prototype"})
+ast.typed("StatTask", {"name", "params", "return_type", "privileges",
+                       "constraints", "body", "prototype"})
 ast.typed("StatTaskParam", {"symbol", "param_type"})
 ast.typed("StatFspace", {"name", "fspace"})
 

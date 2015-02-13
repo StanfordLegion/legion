@@ -25,7 +25,8 @@ struct t {
   b : s,
 }
 
-task f(r : region(t), p : ptr(t, r)) : int, reads(r.b.a)
+task f(r : region(t), p : ptr(t, r)) : int
+where reads(r.b.a) do
   var x = p.b
   return x.a
 end

@@ -1,0 +1,117 @@
+-- Copyright 2015 Stanford University
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+import "legion"
+
+-- This tests the various loop optimizations supported by the
+-- compiler.
+
+local c = legionlib.c
+
+terra e(x : int) : int
+  return 3
+end
+
+task f(r : region(int)) : int
+where reads(r) do
+  return 5
+end
+
+task g(r : region(int)) : int
+where reads(r), writes(r) do
+  return 5
+end
+
+task main()
+  var n = 5
+  var r = region(int, n)
+  var rc = c.legion_coloring_create()
+  for i = 0, n do
+    c.legion_coloring_ensure_color(rc, i)
+  end
+  var p_disjoint = partition(disjoint, r, rc)
+  var p_aliased = partition(aliased, r, rc)
+  c.legion_coloring_destroy(rc)
+
+  -- not optimized: can't analyze stride
+  for i = 0, n, 2 do
+    f(p_disjoint[i])
+  end
+
+  -- not optimized: can't analyze stride
+  do
+    var s = 1
+    for i = 0, n, s do
+      f(p_disjoint[i])
+    end
+  end
+
+  -- not optimized: body is not a single statement
+  for i = 0, n do
+    f(p_disjoint[i])
+    f(p_disjoint[i])
+  end
+
+  -- not optimized: body is not a bare function call
+  for i = 0, n do
+    var x = f(p_disjoint[i])
+  end
+
+  -- not optimized: function is not a task
+  for i = 0, n do
+    e(i)
+  end
+
+  -- not optimized: can't analyze loop-variant argument
+  for i = 0, n do
+    f(p_disjoint[(i + 1) % n])
+  end
+
+  -- not optimized: loop-invariant argument is interfering
+  do
+    var j = 3
+    for i = 0, n do
+      g(p_disjoint[(j + 1) % n])
+    end
+  end
+
+  -- not optimized: loop-variant argument is interfering
+  for i = 0, n do
+    g(p_aliased[i])
+  end
+
+  -- optimized: loop-invariant argument is read-only
+  do
+    var j = 3
+    for i = 0, n do
+      f(p_disjoint[(j + 1) % n])
+    end
+  end
+
+  -- optimized: loop-variant argument is non-interfering
+  for i = 0, n do
+    f(p_disjoint[i])
+  end
+
+  -- optimized: loop-variant argument is non-interfering
+  for i = 0, n do
+    f(p_aliased[i])
+  end
+
+  -- optimized: loop-variant argument is non-interfering
+  for i = 0, n do
+    g(p_disjoint[i])
+  end
+end
+legionlib.start(main)

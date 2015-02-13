@@ -18,29 +18,29 @@ local c = legionlib.c
 
 fspace s(a : region(int)) {
   b : region(int),
-} where b <= a
+} where b <= a end
 
 task f()
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  c.legion_coloring_destroy(rc)
   var t = p[0]
   var x = [s(r)] { b = t }
 end
 
 task g()
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  c.legion_coloring_destroy(rc)
   var t = p[0]
-  var tc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](tc, 0)
+  var tc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(tc, 0)
   var q = partition(disjoint, t, tc)
-  [c.legion_coloring_destroy](tc)
+  c.legion_coloring_destroy(tc)
   var u = q[0]
   var x = [s(r)] { b = u }
 end

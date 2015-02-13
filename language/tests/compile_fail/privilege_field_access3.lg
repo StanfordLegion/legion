@@ -22,7 +22,8 @@ struct s {
   b : int,
 }
 
-task f(r : region(s), p : ptr(s, r)) : int, reads(r.b)
+task f(r : region(s), p : ptr(s, r)) : int
+where reads(r.b) do
   return p.a
 end
 f:compile()

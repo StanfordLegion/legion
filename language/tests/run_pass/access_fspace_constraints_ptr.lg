@@ -19,9 +19,10 @@ local c = legionlib.c
 fspace k (r : region(int)) {
   s : region(int),
   x : ptr(int, s),
-} where s <= r
+} where s <= r end
 
-task g(a : region(int), b : k(a)) : int, reads(a)
+task g(a : region(int), b : k(a)) : int
+where reads(a) do
   return @(b.x)
 end
 

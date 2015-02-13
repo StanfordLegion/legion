@@ -22,7 +22,8 @@ struct s {
   b : int,
 }
 
-task f(r : region(s), p : ptr(s, r)) : int, writes(r.b)
+task f(r : region(s), p : ptr(s, r)) : int
+where writes(r.b) do
   p.a = 0
 end
 f:compile()

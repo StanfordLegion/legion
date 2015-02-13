@@ -27,8 +27,8 @@ fspace space(s : region(subsubspace), t : region(subspace(s))) {
 }
 
 task f(u : region(subsubspace), v : region(subspace(u)),
-       w : region(space(u, v)), x : ptr(space(u, v), w))
-  : int, reads(u, v, w)
+       w : region(space(u, v)), x : ptr(space(u, v), w)) : int
+where reads(u, v, w) do
 
   return x.c.b.a
 end

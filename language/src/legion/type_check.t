@@ -142,7 +142,15 @@ function type_check.expr_index_access(cx, node)
       local parent = value_type:parent_region()
       local subregion = value_type:subregion_constant(index.value)
       std.add_constraint(cx, subregion, parent, "<=", false)
-      -- FIXME: Add disjointness constraints
+
+      if value_type.disjoint then
+        local other_subregions = value_type:subregions_constant()
+        for other_index, other_subregion in pairs(other_subregions) do
+          if index.value ~= other_index then
+            std.add_constraint(cx, subregion, other_subregion, "*", true)
+          end
+        end
+      end
 
       return ast.typed.ExprIndexAccess {
         value = value,
@@ -263,7 +271,12 @@ function type_check.expr_call(cx, node)
   -- Store the determined type back into the AST node for the function.
   fn.expr_type = fn_type
 
-  local param_symbols = std.fn_param_symbols(fn_type)
+  local param_symbols
+  if std.is_task(fn.value) then
+    param_symbols = fn.value:get_param_symbols()
+  else
+    param_symbols = std.fn_param_symbols(fn_type)
+  end
   local arg_symbols = terralib.newlist()
   for i, arg in ipairs(args) do
     local arg_type = arg_types[i]
@@ -276,15 +289,17 @@ function type_check.expr_call(cx, node)
   local expr_type = std.validate_args(
     param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, true)
 
-  local privileges = std.is_task(fn.value) and fn.value:getprivileges()
-  if privileges then
+  if std.is_task(fn.value) then
     local mapping = {}
     for i, arg_symbol in ipairs(arg_symbols) do
+      local param_symbol = param_symbols[i]
       local param_type = fn_type.parameters[i]
+      mapping[param_symbol] = arg_symbol
       mapping[param_type] = arg_symbol
     end
 
-    for _, privilege_list in ipairs(fn.value.privileges) do
+    local privileges = fn.value:getprivileges()
+    for _, privilege_list in ipairs(privileges) do
       for _, privilege in ipairs(privilege_list) do
         local privilege_type = privilege.privilege
         local region = privilege.region
@@ -302,6 +317,13 @@ function type_check.expr_call(cx, node)
           assert(false)
         end
       end
+    end
+
+    local constraints = fn.value:get_param_constraints()
+    local satisfied, constraint = std.check_constraints(cx, constraints, mapping)
+    if not satisfied then
+      log.error("invalid call missing constraint " .. tostring(constraint.lhs) ..
+                  " " .. tostring(constraint.op) .. " " .. tostring(constraint.rhs))
     end
   end
 
@@ -493,9 +515,74 @@ function type_check.expr_new(cx, node)
 end
 
 function type_check.expr_null(cx, node)
+  if not std.is_ptr(node.pointer_type) then
+    log.error("null requires ptr type, got " .. tostring(node.pointer_type))
+  end
   return ast.typed.ExprNull {
     pointer_type = node.pointer_type,
     expr_type = node.pointer_type,
+  }
+end
+
+function type_check.expr_dynamic_cast(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value.expr_type)
+
+  if not std.is_ptr(node.expr_type) then
+    log.error("dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
+  end
+  if not std.is_ptr(value_type) then
+    log.error("dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
+  end
+  if not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+    log.error("incompatible pointers for dynamic_cast: " .. tostring(node.expr_type) .. " and " .. tostring(value_type))
+  end
+
+  return ast.typed.ExprDynamicCast {
+    value = value,
+    expr_type = node.expr_type,
+  }
+end
+
+function type_check.expr_static_cast(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value.expr_type)
+  local expr_type = node.expr_type
+
+  if not std.is_ptr(expr_type) then
+    log.error("static_cast requires ptr type as argument 1, got " .. tostring(expr_type))
+  end
+  if not std.is_ptr(value_type) then
+    log.error("static_cast requires ptr as argument 2, got " .. tostring(value_type))
+  end
+  if not std.type_eq(expr_type.points_to_type, value_type.points_to_type) then
+    log.error("incompatible pointers for static_cast: " .. tostring(expr_type) .. " and " .. tostring(value_type))
+  end
+
+  local parent_region_map = {}
+  for i, value_region_symbol in ipairs(value_type.points_to_region_symbols) do
+    local has_bound = false
+    for j, expr_region_symbol in ipairs(expr_type.points_to_region_symbols) do
+      local constraint = {
+        lhs = value_region_symbol,
+        rhs = expr_region_symbol,
+        op = "<="
+      }
+      if std.check_constraint(cx, constraint) then
+        parent_region_map[i] = j
+        has_bound = true
+        break
+      end
+    end
+    if not has_bound then
+      log.error("invalid constraint in static_cast: region " .. tostring(value_region_symbol) .. " has no parent in " .. tostring(expr_type.points_to_region_symbols:mkstring(", ")))
+    end
+  end
+
+  return ast.typed.ExprStaticCast {
+    value = value,
+    parent_region_map = parent_region_map,
+    expr_type = expr_type,
   }
 end
 
@@ -522,6 +609,7 @@ function type_check.expr_partition(cx, node)
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring.expr_type)
 
+  -- Note: This test can't fail because disjointness is tested in specialize.
   if not (disjointness == std.disjoint or disjointness == std.aliased) then
     log.error("type mismatch in argument 1: expected disjoint or aliased but got " ..
                 tostring(disjointness))
@@ -715,6 +803,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprNull) then
     return type_check.expr_null(cx, node)
+
+  elseif node:is(ast.specialized.ExprDynamicCast) then
+    return type_check.expr_dynamic_cast(cx, node)
+
+  elseif node:is(ast.specialized.ExprStaticCast) then
+    return type_check.expr_static_cast(cx, node)
 
   elseif node:is(ast.specialized.ExprRegion) then
     return type_check.expr_region(cx, node)
@@ -1109,13 +1203,14 @@ function type_check.stat_task(cx, node)
 
   local params = node.params:map(
     function(param) return type_check.stat_task_param(cx, param) end)
-  local privileges = node.privileges
   local prototype = node.prototype
+  prototype:set_param_symbols(params:map(function(param) return param.symbol end))
 
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), return_type, false)
   prototype:settype(task_type)
 
+  local privileges = node.privileges
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
       local privilege_type = privilege.privilege
@@ -1126,6 +1221,10 @@ function type_check.stat_task(cx, node)
     end
   end
   prototype:setprivileges(privileges)
+
+  local constraints = node.constraints
+  std.add_constraints(cx, constraints)
+  prototype:set_param_constraints(constraints)
 
   local body = type_check.block(cx, node.body)
 
@@ -1144,6 +1243,7 @@ function type_check.stat_task(cx, node)
     params = params,
     return_type = return_type,
     privileges = privileges,
+    constraints = constraints,
     body = body,
     prototype = prototype,
   }

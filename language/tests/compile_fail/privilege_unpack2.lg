@@ -21,10 +21,12 @@ fspace k (r : region(int)) {
   s : region(int),
 }
 
-task f(m : region(int)), reads(m)
+task f(m : region(int))
+where reads(m) do
 end
 
-task g(a : region(int), b : k(a)), reads(a)
+task g(a : region(int), b : k(a))
+where reads(a) do
   var c = b.s
   return f(c)
 end

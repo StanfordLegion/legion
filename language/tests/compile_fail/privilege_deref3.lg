@@ -17,7 +17,8 @@
 
 import "legion"
 
-task f(r : region(int), p : ptr(int, r)) : int, reads(r.{})
+task f(r : region(int), p : ptr(int, r)) : int
+where reads(r.{}) do
   return @p
 end
 f:compile()

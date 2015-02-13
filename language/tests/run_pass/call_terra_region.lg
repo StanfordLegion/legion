@@ -67,16 +67,16 @@ terra edit(runtime : c.legion_runtime_t,
   c.legion_accessor_generic_destroy(s_c)
   return sum
 end
-edit:compile()
 
 task intermediate(r : region(int64),
                   s : region(fs),
                   x : ptr(int64, r),
-                  y : ptr(fs, s)),
+                  y : ptr(fs, s))
+where
   reads(r),
   reads(s.a, s.b),
   writes(s.a, s.c)
-
+do
   return edit(__runtime(), __context(),
               __physical(r), __fields(r),
               __physical(s), __fields(s))

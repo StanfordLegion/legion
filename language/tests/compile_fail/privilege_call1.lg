@@ -17,7 +17,8 @@
 
 import "legion"
 
-task f(r : region(int)), reads(r)
+task f(r : region(int))
+where reads(r) do
 end
 
 task g(s : region(int))
