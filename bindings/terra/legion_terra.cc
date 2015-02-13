@@ -22,6 +22,9 @@
 
 using namespace std;
 using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::Accessor::AccessorType;
+
+typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
 
 extern "C"
 {
@@ -33,6 +36,113 @@ extern "C"
 #ifdef PROF_BINDING
 LegionRuntime::Logger::Category log("legion_terra");
 #endif
+
+// Pre-defined reduction operators
+#define DECLARE_REDUCTION(REG, SRED, RED, CLASS, T, U, OP1, OP2, ID)    \
+  class CLASS {                                                         \
+  public:                                                               \
+  typedef T LHS, RHS;                                                   \
+  template <bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);       \
+  template <bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);      \
+  static const T identity;                                              \
+  };                                                                    \
+                                                                        \
+  const T CLASS::identity = ID;                                         \
+                                                                        \
+  template <>                                                           \
+  void CLASS::apply<true>(LHS &lhs, RHS rhs)                            \
+  {                                                                     \
+    lhs OP2 rhs;                                                        \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::apply<false>(LHS &lhs, RHS rhs)                           \
+  {                                                                     \
+    U *target = (U *)&(lhs);                                            \
+    union { U as_U; T as_T; } oldval, newval;                           \
+    do {                                                                \
+      oldval.as_U = *target;                                            \
+      newval.as_T = oldval.as_T OP1 rhs;                                \
+    } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::fold<true>(RHS &rhs1, RHS rhs2)                           \
+  {                                                                     \
+    rhs1 OP2 rhs2;                                                      \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::fold<false>(RHS &rhs1, RHS rhs2)                          \
+  {                                                                     \
+    U *target = (U *)&rhs1;                                             \
+    union { U as_U; T as_T; } oldval, newval;                           \
+    do {                                                                \
+      oldval.as_U = *target;                                            \
+      newval.as_T = oldval.as_T OP1 rhs2;                               \
+    } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
+  }                                                                     \
+                                                                        \
+  extern "C"                                                            \
+  {                                                                     \
+  void REG(legion_reduction_op_id_t redop)                              \
+  {                                                                     \
+    HighLevelRuntime::register_reduction_op<CLASS>(redop);              \
+  }                                                                     \
+  void SRED(legion_accessor_generic_t accessor_,                        \
+           legion_ptr_t ptr_, T value)                                  \
+  {                                                                     \
+    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
+    ptr_t ptr = CObjectWrapper::unwrap(ptr_);                           \
+    accessor->typeify<T>().convert<ReductionFold<CLASS> >().reduce(ptr, value); \
+  }                                                                     \
+  void RED(legion_accessor_generic_t accessor_,                         \
+           legion_ptr_t ptr_, T value)                                  \
+  {                                                                     \
+    AccessorGeneric* accessor = CObjectWrapper::unwrap(accessor_);      \
+    ptr_t ptr = CObjectWrapper::unwrap(ptr_);                           \
+    accessor->typeify<T>().reduce<CLASS>(ptr, value);                   \
+  }                                                                     \
+  }                                                                     \
+
+DECLARE_REDUCTION(register_reduction_plus_float,
+                  safe_reduce_plus_float,
+                  reduce_plus_float,
+                  PlusOpFloat, float, int, +, +=, 0.0f)
+DECLARE_REDUCTION(register_reduction_plus_double,
+                  safe_reduce_plus_double,
+                  reduce_plus_double,
+                  PlusOpDouble, double, size_t, +, +=, 0.0)
+DECLARE_REDUCTION(register_reduction_plus_int32,
+                  safe_reduce_plus_int32,
+                  reduce_plus_int32,
+                  PlusOpInt, int, int, +, +=, 0)
+
+DECLARE_REDUCTION(register_reduction_minus_float,
+                  safe_reduce_minus_float,
+                  reduce_minus_float,
+                  MinusOpFloat, float, int, -, -=, 0.0f)
+DECLARE_REDUCTION(register_reduction_minus_double,
+                  safe_reduce_minus_double,
+                  reduce_minus_double,
+                  MinusOpDouble, double, size_t, -, -=, 0.0)
+DECLARE_REDUCTION(register_reduction_minus_int32,
+                  safe_reduce_minus_int32,
+                  reduce_minus_int32,
+                  MinusOpInt, int, int, -, -=, 0)
+
+DECLARE_REDUCTION(register_reduction_times_float,
+                  safe_reduce_times_float,
+                  reduce_times_float,
+                  TImesOPFloat, float, int, *, *=, 0.0f)
+DECLARE_REDUCTION(register_reduction_times_double,
+                  safe_reduce_times_double,
+                  reduce_times_double,
+                  TimesOpDouble, double, size_t, *, *=, 0.0)
+DECLARE_REDUCTION(register_reduction_times_int32,
+                  safe_reduce_times_int32,
+                  reduce_times_int32,
+                  TimesOpInt, int, int, *, *=, 0)
 
 template<typename T>
 void lua_push_opaque_object(lua_State* L, T obj)
@@ -78,6 +188,41 @@ static lua_State* prepare_interpreter(const string& script_file)
     }
   }
   return L;
+}
+
+static string qualified_callback_name;
+
+void set_lua_registration_callback_name(char* qualified_callback_name_)
+{
+  qualified_callback_name = qualified_callback_name_;
+}
+
+void lua_registration_callback_wrapper(legion_machine_t machine,
+                                       legion_runtime_t runtime,
+                                       const legion_processor_t *local_procs,
+                                       unsigned num_local_procs)
+{
+  unsigned n = qualified_callback_name.find_last_of("/");
+  string script_file = qualified_callback_name.substr(0, n);
+  string callback_name = qualified_callback_name.substr(n + 1);
+
+  lua_State* L = prepare_interpreter(script_file);
+
+  lua_getglobal(L, "lua_registration_callback_wrapper_in_lua");
+  lua_pushstring(L, callback_name.c_str());
+  lua_push_opaque_object(L, machine);
+  lua_push_opaque_object(L, runtime);
+  lua_push_opaque_object_array(L, local_procs, num_local_procs);
+
+  if (lua_pcall(L, 4, 0, 0) != 0)
+  {
+    fprintf(stderr,
+        "error running lua_registration_callback_wrapper : %s\n",
+        lua_tostring(L, -1));
+    exit(-1);
+  }
+
+  lua_close(L);
 }
 
 void lua_task_wrapper_void(legion_task_t _task,

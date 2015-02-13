@@ -14,6 +14,7 @@
 
 local ffi = require("ffi")
 local std = terralib.includec("stdlib.h")
+local cstr = terralib.includec("string.h")
 
 legion = {}
 legion.__index = legion
@@ -30,6 +31,19 @@ end
 
 function ite(a, b, c)
   if a then return b else return c end
+end
+
+function inherit(table, metatable)
+  local metatable_ = getmetatable(table)
+  local combined = {
+    __index = function(child, idx)
+      return rawget(metatable_, idx) or
+             rawget(metatable, idx) or
+             rawget(child, idx)
+    end
+  }
+  setmetatable(table, combined)
+  return table
 end
 
 sizeof = terralib.sizeof
@@ -58,10 +72,11 @@ for k, v in pairs(legion_c) do
     end
   end
 
--- Simple Array prototype
+-- Simple array implementation
 Array = {}
 
 function Array:new(values)
+  values = values or {}
   local array = { size = 0, values = {} }
   if values then
     local size = 0
@@ -72,12 +87,23 @@ function Array:new(values)
     array.size = size
   end
   setmetatable(array, self)
-  self.__index = function (child, idx)
+  self.__index = function(child, idx)
     return rawget(self, idx) or
            rawget(rawget(child, "values"), idx) or
            error("Error: invalid access to array: " .. idx)
   end
+  self.__newindex = function(child, idx, value)
+    rawset(rawget(child, "values"), idx, value)
+  end
   return array
+end
+
+function Array:init(num, value)
+  local values = {}
+  for i = 1, num do
+    values[i] = value
+  end
+  return Array:new(values)
 end
 
 function Array:insert(v)
@@ -90,9 +116,157 @@ function Array:clear()
   self.values = {}
 end
 
+function Array:__tostring()
+  local str = ""
+  for i = 0, self.size - 1 do
+    if i > 0 then
+      str = str .. ", "
+    end
+    str = str .. tostring(self.values[i])
+  end
+  return str
+end
+
+-- Simple set implementation
+Set = {}
+PrimSet = {}
+PrimSet.__index = PrimSet
+ObjSet = {}
+ObjSet.__index = ObjSet
+
+function Set:new(l, elem_type)
+  l = l or {}
+  local set = { set = {}, size = 0 }
+
+  if not elem_type or not elem_type.__hash then
+    setmetatable(set, PrimSet)
+  else
+    setmetatable(set, ObjSet)
+  end
+  for _, v in pairs(l) do
+    set:insert(v)
+  end
+
+  return set
+end
+
+function PrimSet:insert(v)
+  self.set[v] = true
+  self.size = self.size + 1
+end
+
+function PrimSet:erase(v)
+  self.set[v] = nil
+  self.size = self.size - 1
+end
+
+function PrimSet:elem(v)
+  return self.set[v]
+end
+
+function PrimSet:itr(f)
+  for v, _ in pairs(self.set) do
+    f(v)
+  end
+end
+
+function PrimSet:__tostring()
+  local str = ""
+  local first = true
+  for k, _ in pairs(self.set) do
+    if not first then
+      str = str .. ", "
+    end
+    first = false
+    str = str .. tostring(k)
+  end
+  return "{" .. str .. "}"
+end
+
+function ObjSet:insert(v)
+  local h = v:__hash()
+  if self.set[h] then
+    self.set[h]:insert(v)
+  else
+    self.set[h] = Array:new{v}
+  end
+  self.size = self.size + 1
+end
+
+local function equivalent(a,b)
+  if type(a) ~= 'table' then return a == b end
+  local counta, countb = 0, 0
+  for k,va in pairs(a) do
+    if not equivalent(va, b[k]) then return false end
+    counta = counta + 1
+  end
+  for _,_ in pairs(b) do countb = countb + 1 end
+  return counta == countb
+end
+
+function ObjSet:erase(v)
+  local h = v:__hash()
+  local arr = self.set[h]
+  if arr then
+    if arr.size == 1 then
+      self.set[h] = nil
+      self.size = self.size - 1
+    else
+      local arr_ = Array:new {}
+      for i = 0, arr.size - 1 do
+        if not equivalent(v, arr[i]) then
+          arr_:insert(arr[i])
+        end
+      end
+      self.set[h] = arr_
+      self.size = self.size - 1
+    end
+  end
+end
+
+function ObjSet:elem(v)
+  local h = v:__hash()
+  local arr = self.set[h]
+  if arr then
+    for i = 0, arr.size - 1 do
+      if equivalent(v, arr[i]) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function ObjSet:itr(f)
+  for _, l in pairs(self.set) do
+    for i = 0, l.size - 1 do
+      f(l.values[i])
+    end
+  end
+end
+
+function ObjSet:__tostring()
+  local str = ""
+  local first = true
+  for k, _ in pairs(self.set) do
+    if not first then
+      str = str .. ", "
+    end
+    first = false
+    str = str .. tostring(k)
+  end
+  return "{" .. str .. "}"
+end
+
 -- Type declarations
 Ptr = {}
 Ptr.__index = Ptr
+
+Pair = {}
+Pair.__index = Pair
+
+Coloring = {}
+Coloring.__index = Coloring
 
 Point = {}
 
@@ -167,8 +341,112 @@ InlineLauncher.__index = InlineLauncher
 GenericPointInRectIterator = {}
 GenericPointInRectIterator.__index = GenericPointInRectIterator
 
+IndexIterator = {}
+IndexIterator.__index = IndexIterator
+
 TaskConfigOptions = {}
 TaskConfigOptions.__index = TaskConfigOptions
+
+Predicate = {}
+Predicate.__index = Predicate
+Predicate.TRUE_PRED = legion_c.legion_predicate_true()
+Predicate.FALSE_PRED = legion_c.legion_predicate_false()
+
+legion.PLUS_OP = 1
+legion.MINUS_OP = 2
+legion.TIMES_OP = 3
+
+ReductionOp = {}
+ReductionOp.__index = ReductionOp
+
+ReductionOp.op_names = {"plus", "minus", "times"}
+ReductionOp.op_types = {float, double, int}
+ReductionOp.register_funcs = {}
+ReductionOp.reduce_funcs = {}
+ReductionOp.safe_reduce_funcs = {}
+
+for idx, name in pairs(ReductionOp.op_names) do
+  do
+    local funcs = {}
+    for _, ty in pairs(ReductionOp.op_types) do
+      local register_func_name =
+        string.format("register_reduction_%s_%s", name, tostring(ty))
+      funcs[ty] = legion_terra[register_func_name]
+    end
+    ReductionOp.register_funcs[idx] = funcs
+  end
+  do
+    local funcs = {}
+    for _, ty in pairs(ReductionOp.op_types) do
+      funcs[ty] = {}
+      local reduce_func_name =
+        string.format("reduce_%s_%s", name, tostring(ty))
+      funcs[ty] = legion_terra[reduce_func_name]
+    end
+    ReductionOp.reduce_funcs[idx] = funcs
+  end
+  do
+    local funcs = {}
+    for _, ty in pairs(ReductionOp.op_types) do
+      funcs[ty] = {}
+      local reduce_func_name =
+        string.format("safe_reduce_%s_%s", name, tostring(ty))
+      funcs[ty] = legion_terra[reduce_func_name]
+    end
+    ReductionOp.safe_reduce_funcs[idx] = funcs
+  end
+end
+
+function ReductionOp:register_reduction_op(op_type, elem_type, redop)
+  local func = ReductionOp.register_funcs[op_type][elem_type]
+  assert(func,
+    string.format("Error: undefined reduction operator %s for type %s",
+    ReductionOp.op_names[op_type], tostring(elem_type)))
+  func(redop)
+end
+
+function ReductionOp:get_reduce_func(op_type, elem_type)
+  return ReductionOp.reduce_funcs[op_type][elem_type]
+end
+
+function ReductionOp:get_safe_reduce_func(op_type, elem_type)
+  return ReductionOp.safe_reduce_funcs[op_type][elem_type]
+end
+
+-- auxiliary function that converts cdata members to lua wrappers
+local function convert_cdata(value)
+  if type(value) ~= "cdata" then
+    return value
+  end
+  local value_type = terralib.typeof(value)
+  if value_type == legion_c.legion_ptr_t then
+    return Ptr:from_cobj(value)
+  end
+  if terralib.typeof(value) == legion_c.legion_logical_region_t then
+    return LogicalRegion:from_cobj(value)
+  end
+  if terralib.typeof(value) == legion_c.legion_logical_partition_t then
+    return LogicalPartition:from_cobj(value)
+  end
+  if terralib.typeof(value) == legion_c.legion_index_space_t then
+    return IndexSpace:from_cobj(value)
+  end
+  if terralib.typeof(value) == legion_c.legion_index_partition_t then
+    return IndexPartition:from_cobj(value)
+  end
+  if terralib.typeof(value) == legion_c.legion_field_space_t then
+    return FieldSpace:from_cobj(value)
+  end
+  if value_type:isstruct() then
+    local new_value = {}
+    for _, v in pairs(value_type.entries) do
+      new_value[v.field] = convert_cdata(value[v.field])
+    end
+    return new_value
+  else
+    return value
+  end
+end
 
 -- Point and rect types
 function Ptr:from_cobj(cobj)
@@ -182,6 +460,77 @@ function Ptr:is_null()
   return legion_c.legion_ptr_is_null(self)
 end
 
+function Ptr:__tostring()
+  return tostring(self.value)
+end
+
+function Ptr:__hash()
+  return self.value
+end
+
+function Pair:new(a, b)
+  local pair = { fst = a, snd = b }
+  pair.is_pair = true
+  setmetatable(pair, self)
+  return pair
+end
+
+function Pair:__tostring()
+  return "(" .. self.fst .. "," .. self.snd .. ")"
+end
+
+function Coloring:new()
+  local c = { coloring = {}, is_coloring = true }
+  setmetatable(c, self)
+  self.__index = function(child, color)
+    if type(color) ~= "number" then
+      return rawget(self, color) or rawget(child, color)
+    end
+    local coloring = rawget(child, "coloring")
+    local coloredPoints = rawget(coloring, color)
+    if not coloredPoints then
+      coloredPoints = { points = Set:new({}, Ptr),
+                        ranges = Set:new({}, Ptr) }
+      rawset(coloring, color, coloredPoints)
+    end
+    return coloredPoints
+  end
+  return c
+end
+
+function Coloring:ensure_color(color)
+  return self[color]
+end
+
+function Coloring:to_cobj()
+  local coloring = legion_c.legion_coloring_create()
+
+  for color, coloredPoints in pairs(self.coloring) do
+    legion_c.legion_coloring_ensure_color(coloring, color)
+    coloredPoints.points:itr(function(ptr)
+      legion_c.legion_coloring_add_point(coloring, color, ptr)
+    end)
+    coloredPoints.ranges:itr(function(pair)
+      legion_c.legion_coloring_add_range(coloring, color, pair.fst, pair.snd)
+    end)
+  end
+
+  return coloring
+end
+
+function Coloring:__tostring()
+  local str = ""
+  for color, coloredPoints in pairs(self.coloring) do
+    if coloredPoints.points.size > 0 then
+      str = str .. color .. " => " .. tostring(coloredPoints.points) .. "\n"
+    end
+    if coloredPoints.ranges.size > 0 then
+      str = str .. color .. " => " .. tostring(coloredPoints.ranges) .. "\n"
+    end
+  end
+  return str
+end
+
 function Point:new(coords)
   local point = {}
   point.is_point = true
@@ -192,10 +541,10 @@ function Point:new(coords)
   point.x = x
   point.dim = #coords
   setmetatable(point, self)
-  self.__index = function (child, idx)
+  self.__index = function(child, idx)
     return rawget(self, idx) or
            rawget(rawget(child, "x"), idx) or
-           error("Error: invalid access to point: " .. idx)
+           error("Error: invalid access to Point: " .. idx)
   end
   return point
 end
@@ -413,12 +762,12 @@ end
 function DomainColoring:new()
   local dc = { coloring = {}, is_domain_coloring = true }
   setmetatable(dc, self)
-  self.__index = function (child, idx)
+  self.__index = function(child, idx)
     return rawget(self, idx) or
            rawget(rawget(child, "coloring"), idx) or
            error("Error: invalid access to array: " .. idx)
   end
-  self.__newindex = function (child, idx, value)
+  self.__newindex = function(child, idx, value)
     rawget(child, "coloring")[idx] = value
   end
   return dc
@@ -667,6 +1016,10 @@ function PhysicalRegion:is_valid()
   return legion_c.legion_physical_region_is_valid(self)
 end
 
+function PhysicalRegion:get_accessor()
+  return RegionAccessor:new(self)
+end
+
 function PhysicalRegion:get_field_accessor(fid)
   return RegionAccessor:new(self, fid)
 end
@@ -717,6 +1070,12 @@ function RegionRequirement:add_field(fid, inst)
   inst = inst or true
   if inst then self.instance_fields:insert(fid) end
   self.privilege_fields:insert(fid)
+end
+
+function RegionRequirement:set_reduction()
+  self.is_reduction = true
+  self.redop = self.privilege
+  self.privilege = legion_c.REDUCE
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::ArgumentMap
@@ -857,7 +1216,7 @@ function Task:get_args(arg_type)
       @[&arg_type](legion_c.legion_task_get_args(task))
     return args
   end
-  return call_capi(self)
+  return convert_cdata(call_capi(self))
 end
 
 function Task:get_local_args(arg_type)
@@ -867,11 +1226,12 @@ function Task:get_local_args(arg_type)
       @[&arg_type](legion_c.legion_task_get_local_args(task))
     return args
   end
-  return call_capi(self)
+  return convert_cdata(call_capi(self))
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::TaskArgument
 function TaskArgument:new(arg, arg_type)
+  assert(arg and arg_type)
   local terra alloc(arg : arg_type)
     var args: &arg_type
     args = [&arg_type](std.malloc(sizeof(arg_type)))
@@ -889,7 +1249,7 @@ function TaskLauncher:new(task_id, task_arg, pred, id, tag)
   local launcher = {}
   launcher.task_id = task_id
   launcher.task_arg = task_arg or { args = terra_null(), arglen = 0 }
-  launcher.pred = pred or legion_c.legion_predicate_true()
+  launcher.pred = pred or Predicate.TRUE_PRED
   launcher.id = id or 0
   launcher.tag = tag or 0
   launcher.is_task_launcher = true
@@ -916,10 +1276,10 @@ function IndexLauncher:new(task_id, domain, global_arg, map,
                            pred, must, id, tag)
   local launcher = {}
   launcher.task_id = task_id
-  launcher.domain = domain
+  launcher.launch_domain = domain
   launcher.global_arg = global_arg or { args = terra_null(), arglen = 0 }
-  launcher.map = map
-  launcher.pred = pred or legion_c.legion_predicate_true()
+  launcher.argument_map = map
+  launcher.pred = pred or Predicate.TRUE_PRED
   launcher.must = must or false
   launcher.id = id or 0
   launcher.tag = tag or 0
@@ -1019,7 +1379,28 @@ function legion:create_index_partition(ctx, parent, arg1, arg2, arg3, arg4)
       func(self, ctx, parent, blockify:to_cobj(), part_color))
     return ip
   end
+  if arg1.is_coloring then
+    local coloring = arg1
+    local disjoint = arg2 or true
+    local part_color = arg3 or -1
+    local coloring_cobj = coloring:to_cobj()
+    local ip = IndexPartition:from_cobj(
+      legion_c.legion_index_partition_create_coloring(self,
+        ctx, parent, coloring_cobj, disjoint, part_color))
+    legion_c.legion_coloring_destroy(coloring_cobj)
+    return ip
+  end
   assert(false)
+end
+
+function legion:get_index_subspace(ctx, part, color)
+  assert(ctx.is_context,
+    "Error: get_index_subspace takes a Context object as the first argument")
+  assert(part.is_index_partition,
+    "Error: get_index_subspace takes an index partition as the second argument")
+  return IndexSpace:from_cobj(
+    legion_c.legion_index_partition_get_index_subspace(self, ctx,
+                                                       part.id, color))
 end
 
 function legion:create_field_space(ctx)
@@ -1048,6 +1429,16 @@ function legion:create_logical_region(ctx, is, fs)
   return LogicalRegion:from_cobj(cobj)
 end
 
+function legion:get_logical_subregion_by_color(ctx, lp, color)
+  assert(ctx.is_context,
+    "Error: get_logical_subregion_by_color takes a Context object as the first argument")
+  assert(lp.is_logical_partition,
+    "Error: get_logical_subregion_by_color takes a LogicalPartition object as the second argument")
+  local cobj =
+    legion_c.legion_logical_partition_get_logical_subregion_by_color(self, ctx, lp:to_cobj(), color)
+  return LogicalRegion:from_cobj(cobj)
+end
+
 function legion:destroy_logical_region(ctx, lr)
   assert(ctx.is_context,
     "Error: destroy_logical_region takes a Context object as the first argument")
@@ -1058,12 +1449,23 @@ end
 
 function legion:get_logical_partition(ctx, parent, ip)
   assert(ctx.is_context,
-    "Error: create_logical_partition takes a Context object as the first argument")
+    "Error: get_logical_partition takes a Context object as the first argument")
   assert(parent.is_logical_region,
-    "Error: create_logical_partition takes a LogicalRegion object as the second argument")
+    "Error: get_logical_partition takes a LogicalRegion object as the second argument")
   assert(ip.is_index_partition,
-    "Error: create_logical_partition takes an IndexPartition object as the third argument")
+    "Error: get_logical_partition takes an IndexPartition object as the third argument")
   local cobj = legion_c.legion_logical_partition_create(self, ctx, parent, ip.id)
+  return LogicalPartition:from_cobj(cobj)
+end
+
+function legion:get_logical_partition_by_tree(ctx, ip, fs, tree_id)
+  assert(ctx.is_context,
+    "Error: get_logical_partition_by_tree takes a Context object as the first argument")
+  assert(ip.is_index_partition,
+    "Error: get_logical_partition_by_tree takes an IndexPartition object as the second argument")
+  assert(fs.is_field_space,
+    "Error: create_logical_region takes a field space as the third argument")
+  local cobj = legion_c.legion_logical_partition_create_by_tree(self, ctx, ip.id, fs, tree_id)
   return LogicalPartition:from_cobj(cobj)
 end
 
@@ -1149,22 +1551,39 @@ function legion:execute_index_space(ctx, launcher)
 
   local launcher_cobj =
     legion_c.legion_index_launcher_create(
-      launcher.task_id, launcher.domain.cobj, launcher.global_arg, launcher.map.cobj,
-      launcher.pred, launcher.must, launcher.id, launcher.tag)
+      launcher.task_id, launcher.launch_domain.cobj, launcher.global_arg,
+      launcher.argument_map.cobj, launcher.pred, launcher.must,
+      launcher.id, launcher.tag)
   for i = 0, launcher.region_requirements.size - 1 do
     local req = launcher.region_requirements[i]
     if req.handle_type == legion_c.PART_PROJECTION then
       assert(req.partition and req.partition.is_logical_partition)
-      legion_c.legion_index_launcher_add_region_requirement_logical_partition(
-        launcher_cobj,
-        req.partition:to_cobj(), req.projection, req.privilege, req.prop,
-        req.parent, req.region_tag, req.verified)
+      if not req.is_reduction then
+        legion_c.legion_index_launcher_add_region_requirement_logical_partition(
+          launcher_cobj,
+          req.partition:to_cobj(), req.projection, req.privilege, req.prop,
+          req.parent, req.region_tag, req.verified)
+      else
+        legion_c
+        .legion_index_launcher_add_region_requirement_logical_partition_reduction(
+          launcher_cobj,
+          req.partition:to_cobj(), req.projection, req.redop, req.prop,
+          req.parent, req.region_tag, req.verified)
+      end
     end
     if req.handle_type == legion_c.REG_PROJECTION then
-      legion_c.legion_index_launcher_add_region_requirement_logical_region(
-        launcher_cobj,
-        req.region, req.projection, req.privilege, req.prop,
-        req.parent, req.region_tag, req.verified)
+      if not req.is_reduction then
+        legion_c.legion_index_launcher_add_region_requirement_logical_region(
+          launcher_cobj,
+          req.region, req.projection, req.privilege, req.prop,
+          req.parent, req.region_tag, req.verified)
+      else
+        legion_c
+        .legion_index_launcher_add_region_requirement_logical_region_reduction(
+          launcher_cobj,
+          req.region, req.projection, req.redop, req.prop,
+          req.parent, req.region_tag, req.verified)
+      end
     end
     local set = {}
     for j = 0, req.instance_fields.size - 1 do
@@ -1187,17 +1606,29 @@ function legion:execute_index_space(ctx, launcher)
   return FutureMap:from_cobj(cobj)
 end
 
-function legion:map_region(ctx, launcher)
+function legion:map_region(ctx, arg0, arg1, arg2)
   assert(ctx.is_context,
     "Error: map_region takes a Context object as the first argument")
-  assert(launcher.is_inline_launcher,
-    "Error: map_region takes a InlineLauncher object as the second argument")
-  local fids = launcher.fids
-  local req = launcher.requirement
-  launcher =
+  local req, id, tag
+  if arg0.is_inline_launcher then
+    req = arg0.requirement
+    id = arg0.id
+    tag = arg0.launcher_tag
+  else
+    if arg0.is_region_requirement then
+      req = arg0
+      id = arg1 or 0
+      tag = arg2 or 0
+    else
+      assert(false,
+        "Error: map_region takes either a InlineLauncher object or " ..
+        "RegionRequirement object as the second argument")
+    end
+  end
+  local launcher =
     legion_c.legion_inline_launcher_create_logical_region(
       req.region, req.privilege, req.prop, req.parent,
-      req.region_tag, req.verified, launcher.id, launcher.launcher_tag)
+      req.region_tag, req.verified, id, tag)
   local set = {}
   for j = 0, req.instance_fields.size - 1 do
     local fid = req.instance_fields[j]
@@ -1263,6 +1694,19 @@ function legion:register_lua_task_void(task_name, task_id, proc, single, index,
                                              vid, opt, qualified_task_name, ptr)
 end
 
+function legion:register_reduction_op(op_type, elem_type, redop)
+  ReductionOp:register_reduction_op(op_type, elem_type, redop)
+end
+
+function legion:set_registration_callback(func_name)
+  local qualified_callback_name = legion.script_name .. "/" .. func_name
+  legion_terra.set_lua_registration_callback_name(qualified_callback_name)
+  local ptr =
+    legion_terra.lua_registration_callback_wrapper:getdefinitions()[1]
+                                                  :getpointer()
+  legion_c.legion_runtime_set_registration_callback(ptr)
+end
+
 function legion:set_top_level_task_id(task_id)
   legion_c.legion_runtime_set_top_level_task_id(task_id)
 end
@@ -1287,7 +1731,22 @@ function legion:start(args)
   main()
 end
 
--- wrapper function for legion tasks in Lua
+function legion:get_current_time_in_micros()
+  return tonumber(legion_c.legion_get_current_time_in_micros())
+end
+
+-- wrapper function for registration callbacks in Lua
+function lua_registration_callback_wrapper_in_lua(func_name, machine,
+                                                  runtime, local_procs_)
+  local local_procs = Array:new {}
+  for i = 1, #local_procs_ do
+    local_procs:insert(local_procs_[i])
+  end
+  setmetatable(runtime, legion)
+  _G[func_name](machine, runtime, local_procs)
+end
+
+-- wrapper functions for legion tasks in Lua
 function lua_task_wrapper_in_lua(script_name, return_type_name,
                                  task_name, task, regions, ctx, runtime)
   legion:set_top_level_script(script_name)
@@ -1329,7 +1788,7 @@ function lua_void_task_wrapper_in_lua(script_name, task_name,
   _G[task_name](task, regions_lua, ctx, runtime)
 end
 
--- Lua wrapper for LegionRuntime::Array::GenericPointInRectIterator
+-- Lua equivalent of LegionRuntime::Array::GenericPointInRectIterator
 function GenericPointInRectIterator:new(r)
   local pir = { r = r, p = r.lo:clone(),
                 any_left = (r.lo <= r.hi), dim = r.lo.dim }
@@ -1352,24 +1811,79 @@ function GenericPointInRectIterator:next()
   self.any_left = false
 end
 
+-- Lua wrapper of LegionRuntime::HighLevel::IndexIterator
+function IndexIterator:new(arg)
+  local is
+  if arg.is_logical_region then
+    is = arg:get_index_space()
+  else
+    if arg.is_index_space then
+      is = arg
+    else
+      assert(false,
+        "Error: IndexIterator takes either a logical region or " ..
+        "an index space to create")
+    end
+  end
+
+  local itr = { cobj = ffi.gc(legion_c.legion_index_iterator_create(is),
+                              legion_c.legion_index_iterator_destroy),
+                is_index_iterator = true }
+  setmetatable(itr, self)
+  return itr
+end
+
+function IndexIterator:has_next()
+  return legion_c.legion_index_iterator_has_next(self.cobj)
+end
+
+function IndexIterator:next()
+  return Ptr:from_cobj(
+    legion_c.legion_index_iterator_next(self.cobj))
+end
+
 -- Lua wrapper for LegionRuntime::Accessor::RegionAccessor
 function RegionAccessor:new(pr, fid)
   assert(pr.is_physical_region)
 
   local accessor = {}
   accessor.is_region_accessor = true
-  local cobj =
-    ffi.gc(
-      legion_c.legion_physical_region_get_field_accessor_generic(pr, fid),
-      legion_c.legion_accessor_generic_destroy)
+  local cobj
+  if fid then
+    cobj =
+      ffi.gc(
+        legion_c.legion_physical_region_get_field_accessor_generic(pr, fid),
+        legion_c.legion_accessor_generic_destroy)
+  else
+    cobj =
+      ffi.gc(
+        legion_c.legion_physical_region_get_accessor_generic(pr),
+        legion_c.legion_accessor_generic_destroy)
+  end
   accessor.cobj = cobj
+  accessor.fid = fid
   setmetatable(accessor, self)
   return accessor
 end
 
 function RegionAccessor:typeify(elem_type)
+  self.elem_type = elem_type
+  assert(elem_type, "Error: a correct type should be given")
+  local terra read(accessor : legion_c.legion_accessor_generic_t,
+                   ptr : legion_c.legion_ptr_t) : elem_type
+    var v : elem_type
+    var size = sizeof(elem_type)
+    legion_c.legion_accessor_generic_read(accessor, ptr, &v, size)
+    return v
+  end
+  local terra write(accessor : legion_c.legion_accessor_generic_t,
+                    ptr : legion_c.legion_ptr_t,
+                    v : elem_type)
+    var size = sizeof(elem_type)
+    legion_c.legion_accessor_generic_write(accessor, ptr, &v, size)
+  end
   local terra read_dp(accessor : legion_c.legion_accessor_generic_t,
-                      dp : legion_c.legion_domain_point_t)
+                      dp : legion_c.legion_domain_point_t) : elem_type
     var v : elem_type
     var size = sizeof(elem_type)
     legion_c.legion_accessor_generic_read_domain_point(accessor, dp, &v, size)
@@ -1387,6 +1901,17 @@ function RegionAccessor:typeify(elem_type)
       "Did you forget to write ':read' to call this read method?")
     if p.is_domain_point then
       return read_dp(self.cobj, p:to_cobj())
+    else if p.is_ptr then
+           local v = read(self.cobj, p)
+           return v
+         end
+         assert(false)
+    end
+  end
+  if elem_type == legion_c.legion_ptr_t then
+    self.read_cobj = self.read
+    self.read = function(self, p)
+      return Ptr:from_cobj(self:read_cobj(p))
     end
   end
   self.write = function(self, p, v)
@@ -1395,7 +1920,34 @@ function RegionAccessor:typeify(elem_type)
       "Did you forget to write ':write' to call this write method?")
     if p.is_domain_point then
       write_dp(self.cobj, p:to_cobj(), v)
+    else if p.is_ptr then
+           return write(self.cobj, p, v)
+         end
+         assert(false)
     end
+  end
+  self.reduce = function(self, op_type, p, v)
+    assert(self.is_region_accessor,
+      "Error: the self object is not a RegionAccessor object. " ..
+      "Did you forget to write ':reduce' to call this reduce method?")
+    assert(p.is_ptr)
+    if p.is_ptr then
+      local reduce = ReductionOp:get_reduce_func(op_type, self.elem_type)
+      reduce(self.cobj, p, v)
+    else
+      assert(false)
+    end
+  end
+  return self
+end
+
+function RegionAccessor:convert(op_type)
+  local safe_reduce =
+    ReductionOp:get_safe_reduce_func(op_type, self.elem_type)
+  self.reduce_cobj = safe_reduce
+  self.reduce = function(self, p, v)
+    assert(p.is_ptr)
+    self.reduce_cobj(self.cobj, p, v)
   end
   return self
 end

@@ -232,7 +232,7 @@ function top_level_task(task, regions, ctx, runtime)
     -- Probably shouldn't check for floating point equivalence but
     -- the order of operations are the same should they should
     -- be bitwise equal.
-    if not (expected == received) then
+    if expected ~= received then
       all_passed = false
     end
     pir:next()

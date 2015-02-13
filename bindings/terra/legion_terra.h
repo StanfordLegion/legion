@@ -22,6 +22,66 @@ extern "C" {
 
 #include "legion_c.h"
 
+void register_reduction_plus_float(legion_reduction_op_id_t redop);
+void register_reduction_plus_double(legion_reduction_op_id_t redop);
+void register_reduction_plus_int32(legion_reduction_op_id_t redop);
+
+void register_reduction_minus_float(legion_reduction_op_id_t redop);
+void register_reduction_minus_double(legion_reduction_op_id_t redop);
+void register_reduction_minus_int32(legion_reduction_op_id_t redop);
+
+void register_reduction_times_float(legion_reduction_op_id_t redop);
+void register_reduction_times_double(legion_reduction_op_id_t redop);
+void register_reduction_times_int32(legion_reduction_op_id_t redop);
+
+void reduce_plus_float(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, float value);
+void reduce_plus_double(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, double value);
+void reduce_plus_int32(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, int value);
+
+void reduce_minus_float(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, float value);
+void reduce_minus_double(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, double value);
+void reduce_minus_int32(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, int value);
+
+void reduce_times_float(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, float value);
+void reduce_times_double(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, double value);
+void reduce_times_int32(legion_accessor_generic_t accessor,
+                       legion_ptr_t ptr, int value);
+
+void safe_reduce_plus_float(legion_accessor_generic_t accessor,
+                            legion_ptr_t ptr, float value);
+void safe_reduce_plus_double(legion_accessor_generic_t accessor,
+                            legion_ptr_t ptr, double value);
+void safe_reduce_plus_int32(legion_accessor_generic_t accessor,
+                            legion_ptr_t ptr, int value);
+
+void safe_reduce_minus_float(legion_accessor_generic_t accessor,
+                             legion_ptr_t ptr, float value);
+void safe_reduce_minus_double(legion_accessor_generic_t accessor,
+                              legion_ptr_t ptr, double value);
+void safe_reduce_minus_int32(legion_accessor_generic_t accessor,
+                             legion_ptr_t ptr, int value);
+
+void safe_reduce_times_float(legion_accessor_generic_t accessor,
+                             legion_ptr_t ptr, float value);
+void safe_reduce_times_double(legion_accessor_generic_t accessor,
+                             legion_ptr_t ptr, double value);
+void safe_reduce_times_int32(legion_accessor_generic_t accessor,
+                             legion_ptr_t ptr, int value);
+
+void set_lua_registration_callback_name(char*);
+
+void lua_registration_callback_wrapper(legion_machine_t,
+                                       legion_runtime_t,
+                                       const legion_processor_t*,
+                                       unsigned);
 
 void lua_task_wrapper_void(legion_task_t,
                            const legion_physical_region_t*,

@@ -93,7 +93,7 @@ function top_level_task(task, reigons, ctx, runtime)
   for i = 0, num_points - 1 do
     local expected = 2*(i+10)
     local received = fm:get_result(int, DomainPoint:from_point(Point:new{i}))
-    if not (expected == received) then
+    if expected ~= received then
       print(
         string.format("Check failed for point %d: %d != %d",
         i, expected, received))

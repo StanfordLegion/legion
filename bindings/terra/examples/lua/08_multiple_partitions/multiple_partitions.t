@@ -347,7 +347,7 @@ function check_task(task, regions, ctx, runtime)
     -- Probably shouldn't bitwise compare floating point
     -- numbers but the order of operations are the same so they
     -- should be bitwise equal.
-    if not (expected == received) then
+    if expected ~= received then
       all_passed = false
     end
     pir:next()

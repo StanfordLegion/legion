@@ -31,3 +31,9 @@ function legion:register_terra_task_void(task_fn, task_id, proc, single, index, 
   legion_c.legion_runtime_register_task_void(task_id, proc, single, index,
                                              -1, opt, name, ptr)
 end
+
+function legion:set_terra_registration_callback(func)
+  legion_c.legion_runtime_set_registration_callback(
+    func:getdefinitions()[1]:getpointer())
+end
+

@@ -94,7 +94,7 @@ function top_level_task(task, regions, ctx, runtime)
   -- which are not covered here.  We'll cover the case of coloring
   -- individual points in an index space in our capstone circuit example.
   local ip = nil
-  if (not ((num_elements % num_subregions) == 0)) then
+  if (num_elements % num_subregions) ~= 0 then
     -- Not evenly divisible
     -- Create domain coloring to store the coloring
     -- maps from colors to domains for each subregion
@@ -349,7 +349,7 @@ function check_task(task, regions, ctx, runtime)
     local expected  = alpha * acc_x:read(DomainPoint:from_point(pir.p)) +
                               acc_y:read(DomainPoint:from_point(pir.p))
     local received = acc_z:read(DomainPoint:from_point(pir.p))
-    if not (expected == received) then
+    if expected ~= received then
       all_passed = false
     end
     pir:next()
