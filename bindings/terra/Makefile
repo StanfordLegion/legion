@@ -43,7 +43,7 @@ GASNET_FLAGS ?=
 INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src
 LD_FLAGS +=
 
-CC_FLAGS += -fPIC -std=c++11
+CC_FLAGS += -fPIC -std=c++0x
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
