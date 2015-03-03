@@ -1,0 +1,2 @@
+add_executable(04_logical_regions logical_regions.cc)
+target_link_libraries(04_logical_regions legion-rt)
