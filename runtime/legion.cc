@@ -1614,19 +1614,6 @@ namespace LegionRuntime {
         return NULL;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ Future Future::from_buffer(HighLevelRuntime *rt,
-                                          const void *buffer, size_t size)
-    //--------------------------------------------------------------------------
-    {
-      Future result = rt->runtime->help_create_future();
-      // Set the future result, this will make a copy
-      result.impl->set_result(buffer, size, false/*own*/);
-      // Complete the future right away so that it is always complete
-      result.impl->complete_future();
-      return result;
-    }
-
     /////////////////////////////////////////////////////////////
     // Future Map 
     /////////////////////////////////////////////////////////////
@@ -2660,13 +2647,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::map_all_regions(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      runtime->map_all_regions(ctx);
-    }
-
-    //--------------------------------------------------------------------------
     void HighLevelRuntime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -2784,6 +2764,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void HighLevelRuntime::arrive_dynamic_collective(Context ctx,
+                                                     DynamicCollective dc,
+                                                     const void *buffer,
+                                                     size_t size, 
+                                                     unsigned count)
+    //--------------------------------------------------------------------------
+    {
+      runtime->arrive_dynamic_collective(ctx, dc, buffer, size, count);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::defer_dynamic_collective_arrival(Context ctx,
                                                       DynamicCollective dc,
                                                       Future f, unsigned count)
@@ -2853,10 +2844,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void HighLevelRuntime::issue_frame(Context ctx)
+    void HighLevelRuntime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
-      runtime->issue_frame(ctx);
+      runtime->complete_frame(ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -3224,6 +3215,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->end_task(ctx, result, result_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    Future HighLevelRuntime::from_value(const void *value, 
+                                        size_t value_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      Future result = runtime->help_create_future();
+      // Set the future result
+      result.impl->set_result(value, value_size, owned);
+      // Complete the future right away so that it is always complete
+      result.impl->complete_future();
+      return result;
     }
 
     //--------------------------------------------------------------------------

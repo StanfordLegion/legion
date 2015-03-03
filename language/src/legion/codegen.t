@@ -75,7 +75,7 @@ function context:add_region_root(region_type, logical_region, index_allocator,
       field_ids = field_ids,
       physical_regions = physical_regions,
       accessors = accessors,
-      parent_region_type = region_type,
+      root_region_type = region_type,
     }, region)
 end
 
@@ -100,7 +100,7 @@ function context:add_region_subregion(region_type, logical_region, index_allocat
       field_ids = self.regions[parent_region_type].field_ids,
       physical_regions = self.regions[parent_region_type].physical_regions,
       accessors = self.regions[parent_region_type].accessors,
-      parent_region_type = parent_region_type,
+      root_region_type = self.regions[parent_region_type].root_region_type,
     }, region)
 end
 
@@ -251,6 +251,13 @@ function value:get_field(cx, field_name, field_type)
 
   local result = self:unpack(cx, value_type, field_name, field_type)
   return result:__get_field(cx, value_type, field_name)
+end
+
+function value:get_index(cx, index, result_type)
+  local value_expr = self:read(cx)
+  local result = expr.just(quote [value_expr.actions]; [index.actions] end,
+                           `([value_expr.value][ [index.value] ]))
+  return values.value(result, result_type, std.newtuple())
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
@@ -417,7 +424,18 @@ function ref:write(cx, value)
   return expr.just(actions, quote end)
 end
 
+local reduction_fold = {
+  ["+"] = "+",
+  ["-"] = "+",
+  ["*"] = "*",
+  ["/"] = "*",
+  ["max"] = "max",
+  ["min"] = "min",
+}
+
 function ref:reduce(cx, value, op)
+  local fold_op = reduction_fold[op]
+  assert(fold_op)
   local value_expr = value:read(cx)
   local actions, values, value_type, field_paths, field_types = self:__ref(cx)
   actions = quote
@@ -432,7 +450,7 @@ function ref:reduce(cx, value, op)
          end
          return quote
            [field_value] = [std.quote_binary_op(
-                              op, field_value, result)]
+                              fold_op, field_value, result)]
          end
       end)]
   end
@@ -445,6 +463,16 @@ function ref:get_field(cx, field_name, field_type)
 
   local result = self:unpack(cx, value_type, field_name, field_type)
   return result:__get_field(cx, value_type, field_name)
+end
+
+function ref:get_index(cx, index, result_type)
+  local actions, value = self:__ref(cx)
+  -- Arrays are never field-sliced, therefore, an array array access
+  -- must be to a single field.
+  assert(#value == 1)
+  value = value[1]
+  local result = expr.just(quote [actions]; [index.actions] end, `([value][ [index.value] ]))
+  return values.rawref(result, &result_type, std.newtuple())
 end
 
 local rawref = setmetatable({}, { __index = value })
@@ -521,6 +549,14 @@ function rawref:get_field(cx, field_name, field_type)
   return result:__get_field(cx, value_type, field_name)
 end
 
+function rawref:get_index(cx, index, result_type)
+  local ref_expr = self:__ref(cx)
+  local result = expr.just(
+    quote [ref_expr.actions]; [index.actions] end,
+    `([ref_expr.value][ [index.value] ]))
+  return values.rawref(result, &result_type, std.newtuple())
+end
+
 function codegen.expr_internal(cx, node)
   return node.value
 end
@@ -551,14 +587,14 @@ function codegen.expr_field_access(cx, node)
 end
 
 function codegen.expr_index_access(cx, node)
-  local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
-  local index = codegen.expr(cx, node.index):read(cx)
-
-  local actions = quote [value.actions]; [index.actions] end
-
   local expr_type = std.as_read(node.expr_type)
   if std.is_partition(value_type) then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local index = codegen.expr(cx, node.index):read(cx)
+
+    local actions = quote [value.actions]; [index.actions] end
+
     local parent_region_type = value_type:parent_region()
 
     local r = terralib.newsymbol(expr_type, "r")
@@ -579,9 +615,8 @@ function codegen.expr_index_access(cx, node)
 
     return values.value(expr.just(actions, r), expr_type)
   else
-    return values.rawref(
-      expr.once_only(actions, `([value.value][ [index.value] ])),
-      &expr_type)
+    local index = codegen.expr(cx, node.index):read(cx)
+    return codegen.expr(cx, node.value):get_index(cx, index, expr_type)
   end
 end
 
@@ -642,16 +677,11 @@ end
 
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
                                     index, region_args_setup)
-  local privileges, privilege_field_paths = std.find_task_privileges(
-    param_type, task:getprivileges())
+  local privileges, privilege_field_paths, privilege_field_types =
+    std.find_task_privileges(param_type, task:getprivileges())
   local privilege_modes = privileges:map(std.privilege_mode)
   local parent_region =
-    cx.regions[cx.regions[arg_type].parent_region_type].logical_region
-
-  local add_requirement = c.legion_task_launcher_add_region_requirement_logical_region
-  if index then
-    add_requirement = c.legion_index_launcher_add_region_requirement_logical_region
-  end
+    cx.regions[cx.regions[arg_type].root_region_type].logical_region
 
   local add_field = c.legion_task_launcher_add_field
   if index then
@@ -660,17 +690,54 @@ function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
 
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
+    local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
 
+    local reduction_op
+    if std.is_reduction_op(privilege) then
+      local op = std.get_reduction_op(privilege)
+      assert(#field_types == 1)
+      local field_type = field_types[1]
+      reduction_op = std.reduction_op_ids[op][field_type]
+    end
+
+    if privilege_mode == c.REDUCE then
+      assert(reduction_op)
+    end
+
+    local add_requirement
+    if index then
+      if reduction_op then
+        add_requirement = c.legion_index_launcher_add_region_requirement_logical_region_reduction
+     else
+        add_requirement = c.legion_index_launcher_add_region_requirement_logical_region
+      end
+    else
+      if reduction_op then
+        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region_reduction
+      else
+        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region
+      end
+    end
+    assert(add_requirement)
+
     local requirement = terralib.newsymbol("requirement")
+    local requirement_args = terralib.newlist({
+        launcher, `([cx.regions[arg_type].logical_region].impl)})
+    if index then
+      requirement_args:insert(0)
+    end
+    if reduction_op then
+      requirement_args:insert(reduction_op)
+    else
+      requirement_args:insert(privilege_mode)
+    end
+    requirement_args:insertall(
+      {c.EXCLUSIVE, `([parent_region].impl), 0, false})
+
     region_args_setup:insert(
       quote
-      var [requirement] =
-          add_requirement(
-            [launcher], [cx.regions[arg_type].logical_region].impl,
-            [privilege_mode], c.EXCLUSIVE,
-            [parent_region].impl,
-            0, false)
+        var [requirement] = [add_requirement]([requirement_args])
         [field_paths:map(
            function(field_path)
              local field_id = cx.regions[arg_type]:field_id(field_path)
@@ -687,25 +754,52 @@ function expr_call_setup_partition_arg(cx, task, arg_type, param_type,
                                        partition, launcher, index,
                                        region_args_setup)
   assert(index)
-  local privileges, privilege_field_paths = std.find_task_privileges(
-    param_type, task:getprivileges())
+  local privileges, privilege_field_paths, privilege_field_types =
+    std.find_task_privileges(param_type, task:getprivileges())
   local privilege_modes = privileges:map(std.privilege_mode)
   local parent_region =
-    cx.regions[cx.regions[arg_type].parent_region_type].logical_region
+    cx.regions[cx.regions[arg_type].root_region_type].logical_region
 
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
+    local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
 
+    local reduction_op
+    if std.is_reduction_op(privilege) then
+      local op = std.get_reduction_op(privilege)
+      assert(#field_types == 1)
+      local field_type = field_types[1]
+      reduction_op = std.reduction_op_ids[op][field_type]
+    end
+
+    if privilege_mode == c.REDUCE then
+      assert(reduction_op)
+    end
+
+    local add_requirement
+    if reduction_op then
+      add_requirement = c.legion_index_launcher_add_region_requirement_logical_partition_reduction
+    else
+      add_requirement = c.legion_index_launcher_add_region_requirement_logical_partition
+    end
+    assert(add_requirement)
+
     local requirement = terralib.newsymbol("requirement")
+    local requirement_args = terralib.newlist({
+        launcher, `([partition].impl), 0 --[[ default projection ID ]]})
+    if reduction_op then
+      requirement_args:insert(reduction_op)
+    else
+      requirement_args:insert(privilege_mode)
+    end
+    requirement_args:insertall(
+      {c.EXCLUSIVE, `([parent_region].impl), 0, false})
+
     region_args_setup:insert(
       quote
       var [requirement] =
-          c.legion_index_launcher_add_region_requirement_logical_partition(
-            [launcher], [partition].impl, 0 --[[ default projection ID ]],
-            [privilege_mode], c.EXCLUSIVE,
-            [parent_region].impl,
-            0, false)
+        [add_requirement]([requirement_args])
         [field_paths:map(
            function(field_path)
              local field_id = cx.regions[arg_type]:field_id(field_path)
@@ -785,14 +879,15 @@ function codegen.expr_call(cx, node)
       c.legion_task_launcher_destroy(launcher)
     end
 
-    if value_type == terralib.types.unit then
+    local result_type = std.type_size_bucket_type(value_type)
+    if result_type == terralib.types.unit then
       actions = quote
         [actions]
         [launcher_setup]
         [launcher_cleanup]
       end
       return values.value(expr.just(actions, quote end), terralib.types.unit)
-    else
+    elseif result_type == c.legion_task_result_t then
       local result_value = terralib.newsymbol("result_value")
       local value_type_alignment = std.min(terralib.sizeof(value_type), 8)
       actions = quote
@@ -805,6 +900,20 @@ function codegen.expr_call(cx, node)
           [&value_type](result.value),
           { align = [value_type_alignment] })
         c.legion_task_result_destroy(result)
+        [launcher_cleanup]
+      end
+      return values.value(
+        expr.just(actions, result_value),
+        value_type)
+    else
+      local result_type_name = std.type_size_bucket_name(result_type)
+      local get_result_fn = c["legion_future_get_result" .. result_type_name]
+      local result_value = terralib.newsymbol("result_value")
+      actions = quote
+        [actions]
+        [launcher_setup]
+        var result = [get_result_fn]([future])
+        var [result_value] = @[&value_type](&result)
         [launcher_cleanup]
       end
       return values.value(
@@ -1385,12 +1494,12 @@ function codegen.stat_index_launch(cx, node)
   local symbol = node.symbol
   local domain = codegen.expr_list(cx, node.domain):map(function(value) return value:read(cx) end)
 
-  local fn = codegen.expr(cx, node.expr.fn):read(cx)
+  local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
   local args = terralib.newlist()
   local args_partitions = {}
-  for i, arg in ipairs(node.expr.args) do
-    if node.args_invariant[i] then
+  for i, arg in ipairs(node.call.args) do
+    if not node.args_provably_variant[i] then
       args:insert(codegen.expr(cx, arg):read(cx))
     else
       -- Run codegen halfway to get the partition.
@@ -1420,10 +1529,10 @@ function codegen.stat_index_launch(cx, node)
     [domain[2].actions];
     -- ignore domain[3] because we know it is a constant
     [fn.actions];
-    [std.zip(args, node.args_invariant):map(
+    [std.zip(args, node.args_provably_variant):map(
        function(pair)
-         local arg, invariant = unpack(pair)
-         if invariant then
+         local arg, variant = unpack(pair)
+         if not variant then
            return arg.actions
          else
            return quote end
@@ -1433,11 +1542,11 @@ function codegen.stat_index_launch(cx, node)
 
   local arg_types = terralib.newlist()
   for i, arg in ipairs(args) do
-    arg_types:insert(node.expr.args[i].expr_type)
+    arg_types:insert(node.call.args[i].expr_type)
   end
 
   local arg_values = terralib.newlist()
-  local param_types = node.expr.fn.expr_type.parameters
+  local param_types = node.call.fn.expr_type.parameters
   for i, arg in ipairs(args) do
     local arg_value = args[i].value
     if i <= #param_types and param_types[i] ~= std.untyped then
@@ -1453,8 +1562,8 @@ function codegen.stat_index_launch(cx, node)
   local task_args = terralib.newsymbol(params_struct_type)
   local task_args_setup = terralib.newlist()
   for i, arg in ipairs(args) do
-    local invariant = node.args_invariant[i]
-    if not invariant then
+    local variant = node.args_provably_variant[i]
+    if variant then
       task_args_setup:insert(arg.actions)
     end
   end
@@ -1469,7 +1578,7 @@ function codegen.stat_index_launch(cx, node)
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
-    if node.args_invariant[i] then
+    if not node.args_provably_variant[i] then
       expr_call_setup_region_arg(
         cx, fn.value, arg_type, param_type, launcher, true, region_args_setup)
     else
@@ -1482,7 +1591,6 @@ function codegen.stat_index_launch(cx, node)
   end
 
   local argument_map = terralib.newsymbol("argument_map")
-  local future_map = terralib.newsymbol("future_map")
   local launcher_setup = quote
     var [argument_map] = c.legion_argument_map_create()
     for [node.symbol] = [domain[1].value], [domain[2].value] do
@@ -1510,18 +1618,54 @@ function codegen.stat_index_launch(cx, node)
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
     [region_args_setup]
-    var [future_map] = c.legion_index_launcher_execute(
-      [cx.runtime], [cx.context], [launcher])
   end
+
+  local execute_fn = c.legion_index_launcher_execute
+  local execute_args = terralib.newlist({
+      cx.runtime, cx.context, launcher})
+  local reduce_as_type = std.as_read(node.call.expr_type)
+  if node.reduce_lhs then
+    execute_fn = c.legion_index_launcher_execute_reduction
+
+    local op = std.reduction_op_ids[node.reduce_op][reduce_as_type]
+    assert(op)
+    execute_args:insert(op)
+  end
+
+  local future = terralib.newsymbol("future")
+  local launcher_execute = quote
+    var [future] = execute_fn(execute_args)
+  end
+
+  if node.reduce_lhs then
+    local lhs = codegen.expr(cx, node.reduce_lhs)
+    local rh = terralib.newsymbol("rhs")
+    local rhs = values.value(expr.just(quote end, rh), reduce_as_type)
+    local result_type_name = std.type_size_bucket_name(reduce_as_type)
+    local get_result_fn = c["legion_future_get_result" .. result_type_name]
+    launcher_execute = quote
+      [launcher_execute]
+      var result = [get_result_fn]([future])
+      var [rh] = @[&value_type](&result)
+      [lhs:reduce(cx, rhs, node.reduce_op).actions]
+    end
+  end
+
+  local destroy_future_fn = c.legion_future_map_destroy
+  if node.reduce_lhs then
+    destroy_future_fn = c.legion_future_destroy
+  end
+
   local launcher_cleanup = quote
-  c.legion_argument_map_destroy([argument_map])
-  c.legion_future_map_destroy([future_map])
-  c.legion_index_launcher_destroy([launcher])
+    c.legion_argument_map_destroy([argument_map])
+    destroy_future_fn([future])
+    c.legion_index_launcher_destroy([launcher])
   end
 
   actions = quote
     [actions];
     [launcher_setup];
+    [launcher_execute];
     [launcher_cleanup]
   end
   return actions
@@ -1581,13 +1725,27 @@ end
 function codegen.stat_return(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
-  local result_type = cx.expected_return_type
-  return quote
+  local return_type = cx.expected_return_type
+  local result_type = std.type_size_bucket_type(return_type)
+
+  local result = terralib.newsymbol("result")
+  local actions = quote
     [value.actions]
-    var result = [std.implicit_cast(value_type, result_type, value.value)]
-    return c.legion_task_result_create(
-      [&opaque](&result),
-      terralib.sizeof([result_type]))
+    var [result] = [std.implicit_cast(value_type, return_type, value.value)]
+  end
+
+  if result_type == c.legion_task_result_t then
+    return quote
+      [actions]
+      return c.legion_task_result_create(
+        [&opaque](&[result]),
+        terralib.sizeof([return_type]))
+    end
+  else
+    return quote
+      [actions]
+      return @[&result_type](&[result])
+    end
   end
 end
 
@@ -1797,13 +1955,8 @@ function codegen.stat_task(cx, node)
       local privileges, privilege_field_paths = std.find_task_privileges(
         region_type, task:getprivileges())
 
-      local privileges_by_field_path = {}
-      for i, privilege in ipairs(privileges) do
-        local field_paths = privilege_field_paths[i]
-        for _, field_path in ipairs(field_paths) do
-          privileges_by_field_path[field_path:hash()] = privilege
-        end
-      end
+      local privileges_by_field_path = std.group_task_privileges_by_field_path(
+        privileges, privilege_field_paths)
 
       local field_paths, field_types =
         std.flatten_struct_fields(region_type.element_type)
@@ -1851,8 +2004,17 @@ function codegen.stat_task(cx, node)
       end)
 
       for i, field_paths in ipairs(privilege_field_paths) do
+        local privilege = privileges[i]
         local physical_region = physical_regions[i]
         local physical_region_index = physical_regions_index[i]
+
+        local get_accessor
+        if std.is_reduction_op(privilege) then
+          get_accessor = c.legion_physical_region_get_accessor_array
+        else
+          get_accessor = c.legion_physical_region_get_field_accessor_array
+        end
+        assert(get_accessor)
 
         region_args_setup:insert(quote
           var [physical_region] = [c_regions][ [physical_region_index] ]
@@ -1863,10 +2025,14 @@ function codegen.stat_task(cx, node)
           local field_id = field_ids_by_field_path[field_path:hash()]
           assert(accessor and field_id)
 
+          local accessor_args = terralib.newlist({physical_region})
+          if not std.is_reduction_op(privilege) then
+            accessor_args:insert(field_id)
+          end
+
           if privileges_by_field_path[field_path:hash()] ~= "none" then
             region_args_setup:insert(quote
-              var [accessor] = c.legion_physical_region_get_field_accessor_array(
-                [physical_region], [field_id])
+              var [accessor] = [get_accessor]([accessor_args])
             end)
           end
         end
@@ -1886,19 +2052,11 @@ function codegen.stat_task(cx, node)
   local body = codegen.block(cx, node.body)
 
   local proto = task:getdefinition()
-  if return_type == terralib.types.unit then
-    terra proto([c_params]): terralib.types.unit
-      [preamble]; -- Semicolon required. This is not an array access.
-      [body]
-    end
-  else
-    terra proto([c_params]): c.legion_task_result_t
-      [preamble]; -- Semicolon required. This is not an array access.
-      [body]
-    end
+  local result_type = std.type_size_bucket_type(return_type)
+  terra proto([c_params]): result_type
+    [preamble]; -- Semicolon required. This is not an array access.
+    [body]
   end
-
-  proto:compile()
 
   return task
 end

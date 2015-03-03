@@ -19,7 +19,7 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-    GASNETT_THREADKEY_DEFINE(gpu_thread);
+    GASNETT_THREADKEY_DEFINE(gpu_thread_ptr);
 
     extern Logger::Category log_gpu;
 #ifdef EVENT_GRAPH_TRACE
@@ -195,7 +195,7 @@ namespace LegionRuntime {
 
       void thread_main(void)
       {
-	gasnett_threadkey_set(gpu_thread, gpu);
+	gasnett_threadkey_set(gpu_thread_ptr, gpu);
 
         // Push our context onto the stack
         CHECK_CU( cuCtxPushCurrent(proc_ctx) );
@@ -1001,7 +1001,7 @@ namespace LegionRuntime {
       {
         log_gpu.info("gpu memcpy 2d: dst=%p src=%p "
                      "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                     dst, src, dst_stride, src_stride, bytes, lines, kind); 
+                     dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind); 
         CUDA_MEMCPY2D copy_info;
         if (kind == GPU_MEMCPY_PEER_TO_PEER) {
           // If we're doing peer to peer, just let unified memory it deal with it
@@ -1030,7 +1030,7 @@ namespace LegionRuntime {
         post_execute();
         log_gpu.info("gpu memcpy 2d complete: dst=%p src=%p "
                      "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                     dst, src, dst_stride, src_stride, bytes, lines, kind);
+                     dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
       }
     protected:
       void *dst;
@@ -1259,7 +1259,7 @@ namespace LegionRuntime {
 
     /*static*/ Processor GPUProcessor::get_processor(void)
     {
-      void *tls_val = gasnett_threadkey_get(gpu_thread);
+      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
       // If this happens there is a case we're not handling
       assert(tls_val != NULL);
       GPUProcessor *gpu = (GPUProcessor*)tls_val;
@@ -1770,7 +1770,7 @@ namespace LegionRuntime {
     // Helper methods for emulating the cuda runtime
     /*static*/ GPUProcessor* GPUProcessor::find_local_gpu(void)
     {
-      void *tls_val = gasnett_threadkey_get(gpu_thread);
+      void *tls_val = gasnett_threadkey_get(gpu_thread_ptr);
       // This can return NULL during start-up
       if (tls_val == NULL)
         return NULL;

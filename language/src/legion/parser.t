@@ -186,6 +186,30 @@ function parser.expr_simple(p)
       expr_type = bool,
     }
 
+  elseif p:nextif("max") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprBinary {
+      op = "max",
+      lhs = lhs,
+      rhs = rhs,
+    }
+
+  elseif p:nextif("min") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.ExprBinary {
+      op = "min",
+      lhs = lhs,
+      rhs = rhs,
+    }
+
   elseif p:nextif("__context") then
     p:expect("(")
     p:expect(")")
@@ -410,7 +434,7 @@ function parser.stat_while(p)
   }
 end
 
-function parser.stat_for_num(p, name, type_expr)
+function parser.stat_for_num(p, name, type_expr, parallel)
   local values = p:expr_list()
 
   if #values < 2 or #values > 3 then
@@ -425,6 +449,7 @@ function parser.stat_for_num(p, name, type_expr)
     type_expr = type_expr,
     values = values,
     block = block,
+    parallel = parallel,
   }
 end
 
@@ -443,6 +468,14 @@ function parser.stat_for_list(p, name, type_expr)
 end
 
 function parser.stat_for(p)
+  local parallel = false
+  if p:nextif("__demand") then
+    p:expect("(")
+    p:expect("__parallel")
+    p:expect(")")
+    parallel = "demand"
+  end
+
   p:expect("for")
 
   local name = p:expect(p.name).value
@@ -454,7 +487,7 @@ function parser.stat_for(p)
   end
 
   if p:nextif("=") then
-    return p:stat_for_num(name, type_expr)
+    return p:stat_for_num(name, type_expr, parallel)
   elseif p:nextif("in") then
     return p:stat_for_list(name, type_expr)
   else
@@ -564,6 +597,10 @@ parser.stat_expr_assignment = function(p, first_lhs)
       op = "*"
     elseif p:nextif("/") then
       op = "/"
+    elseif p:nextif("max") then
+      op = "max"
+    elseif p:nextif("min") then
+      op = "min"
     else
       -- Fall through as if this were the normal = case.
     end
@@ -594,7 +631,9 @@ function parser.stat_expr(p)
     (p:matches("+") and p:lookahead("=")) or
     (p:matches("-") and p:lookahead("=")) or
     (p:matches("*") and p:lookahead("=")) or
-    (p:matches("/") and p:lookahead("="))
+    (p:matches("/") and p:lookahead("=")) or
+    (p:matches("max") and p:lookahead("=")) or
+    (p:matches("min") and p:lookahead("="))
   then
     return p:stat_expr_assignment(first_lhs)
   else
@@ -610,6 +649,11 @@ function parser.stat(p)
 
   elseif p:matches("while") then
     return p:stat_while()
+
+  -- Technically this could be written anywhere but for now it only
+  -- applies to for loops.
+  elseif p:matches("__demand") then
+    return p:stat_for()
 
   elseif p:matches("for") then
     return p:stat_for()
@@ -714,6 +758,10 @@ function parser.privilege(p)
       op = "*"
     elseif p:nextif("/") then
       op = "/"
+    elseif p:nextif("max") then
+      op = "max"
+    elseif p:nextif("min") then
+      op = "min"
     else
       p:error("expected operator")
     end

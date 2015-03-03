@@ -143,7 +143,7 @@ namespace LegionRuntime {
                                        RegionRequirement &req,
                                        RegionTreePath &path);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
-                                  LogicalRegion handle);
+                                  LogicalRegion handle, bool dominate);
       void analyze_destroy_index_space(RegionTreeContext ctx, 
                     IndexSpace handle, Operation *op, LogicalRegion region);
       void analyze_destroy_index_partition(RegionTreeContext ctx,
@@ -224,10 +224,25 @@ namespace LegionRuntime {
                     std::map<PhysicalManager*,LogicalView*> &top_views);
       void invalidate_physical_context(RegionTreeContext ctx,
                                        LogicalRegion handle);
+      bool perform_close_operation(RegionTreeContext ctx,
+                                   RegionRequirement &req,
+                                   SingleTask *parent_ctx,
+                                   Processor local_proc,
+                                   const std::set<Color> &targets,
+                                   bool leave_open,
+                                   int next_child,
+                                   Event &closed
+#ifdef DEBUG_HIGH_LEVEL
+                                   , unsigned index
+                                   , const char *log_name
+                                   , UniqueID uid
+#endif
+                                   );
+
+
       Event close_physical_context(RegionTreeContext ctx,
                                    RegionRequirement &req,
                                    Mappable *mappable,
-                                   SingleTask *parent_ctx,
                                    Processor local_proc,
                                    const InstanceRef &ref
 #ifdef DEBUG_HIGH_LEVEL
@@ -534,9 +549,6 @@ namespace LegionRuntime {
       CLOSE_LOGICAL_NODE_CALL,
       SIPHON_LOGICAL_CHILDREN_CALL,
       PERFORM_LOGICAL_CLOSE_CALL,
-      RECORD_CLOSE_CALL,
-      UPDATE_CLOSE_CALL,
-      ADVANCE_FIELD_CALL,
       FILTER_PREV_EPOCH_CALL,
       FILTER_CURR_EPOCH_CALL,
       FILTER_CLOSE_CALL,
@@ -1016,6 +1028,9 @@ namespace LegionRuntime {
       size_t get_field_size(FieldID fid);
       void get_all_fields(std::set<FieldID> &to_set);
       void get_all_regions(std::set<LogicalRegion> &regions);
+      void get_field_set(const FieldMask &mask, std::set<FieldID> &to_set);
+      void get_field_set(const FieldMask &mask, const std::set<FieldID> &basis,
+                         std::set<FieldID> &to_set);
     public:
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -1137,6 +1152,26 @@ namespace LegionRuntime {
     };
 
     /**
+     * \struct TracingInfo
+     * Information about tracing needed for logical
+     * dependence analysis.
+     */
+    struct TraceInfo {
+    public:
+      TraceInfo(bool already_tr,
+                  LegionTrace *tr,
+                  unsigned idx,
+                  const RegionRequirement &r)
+        : already_traced(already_tr), trace(tr),
+          req_idx(idx), req(r) { }
+    public:
+      bool already_traced;
+      LegionTrace *trace;
+      unsigned req_idx;
+      const RegionRequirement &req;
+    };
+
+    /**
      * \struct PhysicalUser
      * A class for representing physical users of a logical
      * region including necessary information to 
@@ -1151,87 +1186,6 @@ namespace LegionRuntime {
       Event term_event;
       int child;
     }; 
-
-    /**
-     * \class TreeCloseImpl
-     * The base class for storing information about close
-     * operations that need to be performed.
-     */
-    class TreeCloseImpl : public Collectable {
-    public:
-      static const AllocationType alloc_type = TREE_CLOSE_IMPL_ALLOC;
-    public:
-      TreeCloseImpl(int child, const FieldMask &m, bool open);
-      TreeCloseImpl(const TreeCloseImpl &rhs);
-      ~TreeCloseImpl(void);
-    public:
-      TreeCloseImpl& operator=(const TreeCloseImpl &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
-    public:
-      void add_close_op(const FieldMask &close_mask,
-                        LegionDeque<CloseInfo>::aligned &needed_ops);
-      void return_close_op(const FieldMask &close_mask);
-    public:
-      const int target_child;
-      const bool leave_open;
-      // expose this one publicly since we know that all
-      // accesses to it will be serialized by the dependence
-      // analysis process
-      FieldMask remaining_logical;
-    private:
-      FieldMask remaining_physical;
-      Reservation tree_reservation;
-    };
-
-    /**
-     * \class TreeClose
-     * A handle to a close operation that is supports reference
-     * counting for knowing when it is safe to delete close
-     * operations.
-     */
-    class TreeClose {
-    public:
-      TreeClose(void);
-      TreeClose(TreeCloseImpl *op);
-      TreeClose(const TreeClose &rhs);
-      ~TreeClose(void);
-    public:
-      TreeClose& operator=(const TreeClose &rhs);
-    public:
-      inline int get_child(void) const { return impl->target_child; }
-      inline bool get_leave_open(void) const { return impl->leave_open; }
-      inline FieldMask& get_logical_mask(void) const 
-      { return impl->remaining_logical; }
-    public:
-      void add_close_op(const FieldMask &close_mask,
-                        LegionDeque<CloseInfo>::aligned &needed_ops);
-      void return_close_op(const FieldMask &close_mask);
-    private:
-      TreeCloseImpl *impl;
-    };
-
-    /**
-     * \struct CloseInfo
-     * A struct containing information about how to close
-     * a child node including the close mask and whether
-     * the child can be kept open in read mode.
-     */
-    struct CloseInfo {
-    public:
-      CloseInfo(void) { }
-      CloseInfo(const FieldMask &m, TreeCloseImpl *impl)
-        : close_mask(m), close_handle(impl) { }
-    public:
-      inline int get_child(void) const { return close_handle.get_child(); }
-      inline bool get_leave_open(void) const 
-        { return close_handle.get_leave_open(); }
-      inline void return_close_op(void)
-        { close_handle.return_close_op(close_mask); }
-    public:
-      FieldMask close_mask;
-      TreeClose close_handle;
-    };
 
     /**
      * \struct MappableInfo
@@ -1320,99 +1274,17 @@ namespace LegionRuntime {
     public:
       void reset(void);
     public:
-      LegionMap<VersionID,FieldMask,
-                LOGICAL_FIELD_VERSIONS_ALLOC>::track_aligned field_versions;
       LegionList<FieldState,
                  LOGICAL_FIELD_STATE_ALLOC>::track_aligned field_states;
-#ifndef LOGICAL_FIELD_TREE
       LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned 
                                                             curr_epoch_users;
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
-#else
-      FieldTree<LogicalUser> *curr_epoch_users;
-      FieldTree<LogicalUser> *prev_epoch_users;
-#endif
-      std::map<Color,LegionList<TreeClose,TREE_CLOSE_ALLOC>::tracked> 
-                                                            close_operations;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask user_level_coherence;
     };
-
-    /**
-     * \class LogicalDepAnalyzer
-     * A class for use with doing logical dependence
-     * analysis on field tree data structures.
-     */
-    class LogicalDepAnalyzer {
-    public:
-      LogicalDepAnalyzer(const LogicalUser &user,
-                         const FieldMask &check_mask,
-                         bool validates_regions,
-                         bool tracing);
-    public:
-      bool analyze(LogicalUser &user);
-      FieldMask get_dominator_mask(void) const;
-    public:
-      inline void begin_node(FieldTree<LogicalUser> *node) { }
-      inline void end_node(FieldTree<LogicalUser> *node) { }
-    private:
-      const LogicalUser user;
-      const bool validates_regions;
-      const bool tracing;
-      FieldMask dominator_mask;
-      FieldMask observed_mask;
-    };
-
-    template<bool DOMINATE>
-    class LogicalOpAnalyzer {
-    public:
-      LogicalOpAnalyzer(Operation *op);
-    public:
-      bool analyze(LogicalUser &user);
-    public:
-      inline void begin_node(FieldTree<LogicalUser> *node) { }
-      inline void end_node(FieldTree<LogicalUser> *node) { }
-    public:
-      Operation *const op;
-    };
-
-    /**
-     * \class LogicalFilter
-     * A class for helping with filtering logical users
-     * out of a field tree data structure.
-     */
-    class LogicalFilter {
-    public:
-      LogicalFilter(const FieldMask &filter_mask,
-                    FieldTree<LogicalUser> *target = NULL);
-    public:
-      bool analyze(LogicalUser &user);
-    public:
-      void begin_node(FieldTree<LogicalUser> *node);
-      void end_node(FieldTree<LogicalUser> *node);
-    private:
-      const FieldMask filter_mask;
-      FieldTree<LogicalUser> *const target;
-      LegionDeque<LogicalUser>::aligned reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-    };
-
-    /**
-     * \class LogicalFieldInvalidator
-     */
-    class LogicalFieldInvalidator {
-    public:
-      LogicalFieldInvalidator(void) { }
-    public:
-      bool analyze(const LogicalUser &user);
-    public:
-      inline void begin_node(FieldTree<LogicalUser> *node) { }
-      inline void end_node(FieldTree<LogicalUser> *node) { }
-    };
-
+ 
     /**
      * \struct LogicalCloser
      * This structure helps keep track of the state
@@ -1421,30 +1293,69 @@ namespace LegionRuntime {
      */
     struct LogicalCloser {
     public:
+      struct ClosingInfo {
+      public:
+        ClosingInfo(void) { }
+        ClosingInfo(const FieldMask &m,
+                    const LegionDeque<LogicalUser>::aligned &users)
+          : child_fields(m) 
+        { child_users.insert(child_users.end(), users.begin(), users.end()); }
+      public:
+        FieldMask child_fields;
+        LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned child_users;
+      };
+      struct ClosingSet {
+      public:
+        ClosingSet(void) { }
+        ClosingSet(const FieldMask &m)
+          : closing_mask(m) { }
+      public:
+        FieldMask closing_mask;
+        std::set<Color> children;
+      };
+    public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
                     bool validates);
-#ifdef LOGICAL_FIELD_TREE
     public:
-      bool analyze(LogicalUser &user);
-    public:
-      void begin_node(FieldTree<LogicalUser> *node);
-      void end_node(FieldTree<LogicalUser> *node);
-#endif
+      inline bool has_closed_fields(void) const { return !!closed_mask; }
+      const FieldMask& get_closed_mask(void) const { return closed_mask; }
+      void record_closed_child(Color child, const FieldMask &mask,
+                               bool leave_open);
+      void initialize_close_operations(RegionTreeNode *target, 
+                                       Operation *creator,
+                                       int next_child, 
+                                       const TraceInfo &trace_info);
+      void perform_dependence_analysis(const LogicalUser &current,
+             LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
+             LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
+      void register_close_operations(
+              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
+    protected:
+      static void compute_close_sets(
+                      const LegionMap<Color,ClosingInfo>::aligned &children,
+                      LegionList<ClosingSet>::aligned &close_sets);
+      void create_close_operations(RegionTreeNode *target, 
+                          Operation *creator, int next_child,
+                          const TraceInfo &trace_info, bool open,
+                          const LegionList<ClosingSet>::aligned &close_sets,
+                      LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops);
+      void register_dependences(const LogicalUser &current,
+             LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
+             LegionMap<Color,ClosingInfo>::aligned &children,
+             LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
+             LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
     public:
       ContextID ctx;
       const LogicalUser &user;
       bool validates;
-      // All the fields that we close for this traversal
-      FieldMask closed_mask;
       LegionDeque<LogicalUser>::aligned closed_users;
-      std::deque<TreeClose> close_operations;
-#ifdef LOGICAL_FIELD_TREE
-    public:
-      FieldMask local_closing_mask;
-      LegionDeque<LogicalUser>::aligned reinsert;
-      unsigned reinsert_count;
-      std::deque<unsigned> reinsert_stack;
-#endif
+    protected:
+      FieldMask closed_mask;
+      LegionMap<Color,ClosingInfo>::aligned leave_open_children;
+      LegionMap<Color,ClosingInfo>::aligned force_close_children;
+    protected:
+      LegionMap<InterCloseOp*,LogicalUser>::aligned leave_open_closes;
+      LegionMap<InterCloseOp*,LogicalUser>::aligned force_close_closes;
     }; 
 
     /**
@@ -1491,13 +1402,23 @@ namespace LegionRuntime {
 #endif
     }; 
 
+    struct CopyTracker {
+    public:
+      CopyTracker(void);
+    public:
+      inline void add_copy_event(Event e) { copy_events.insert(e); } 
+      Event get_termination_event(void) const;
+    protected:
+      std::set<Event> copy_events;
+    };
+
     /**
      * \struct PhysicalCloser
      * Class for helping with the closing of physical region trees
      */
-    struct PhysicalCloser {
+    struct PhysicalCloser : public CopyTracker {
     public:
-      PhysicalCloser(MappableInfo *info,
+      PhysicalCloser(const MappableInfo &info,
                      bool leave_open,
                      LogicalRegion closing_handle);
       PhysicalCloser(const PhysicalCloser &rhs);
@@ -1516,14 +1437,15 @@ namespace LegionRuntime {
       const FieldMask& get_dirty_mask(void) const;
       void update_node_views(RegionTreeNode *node, PhysicalState *state);
     public:
-      MappableInfo *const info;
+      const MappableInfo &info;
       const LogicalRegion handle;
-      bool permit_leave_open;
+      const bool permit_leave_open;
     protected:
       bool targets_selected;
       FieldMask dirty_mask;
       std::vector<MaterializedView*> upper_targets;
       std::vector<MaterializedView*> lower_targets;
+      std::set<Event> close_events;
     }; 
 
     /**
@@ -1532,7 +1454,7 @@ namespace LegionRuntime {
      */
     struct CompositeCloser {
     public:
-      CompositeCloser(ContextID ctx);
+      CompositeCloser(ContextID ctx, bool permit_leave_open);
       CompositeCloser(const CompositeCloser &rhs);
       ~CompositeCloser(void);
     public:
@@ -1547,7 +1469,7 @@ namespace LegionRuntime {
                               const FieldMask &closed_mask);
     public:
       const ContextID ctx;
-      bool permit_leave_open;
+      const bool permit_leave_open;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<CompositeNode*,FieldMask>::aligned collapsed_nodes;
@@ -1787,7 +1709,7 @@ namespace LegionRuntime {
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
-                                 const bool already_traced);
+                                 const TraceInfo &trace_info);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
@@ -1813,17 +1735,8 @@ namespace LegionRuntime {
                                  const FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
                             const LegionDeque<FieldState>::aligned &new_states);
-      void record_field_versions(LogicalState &state, RegionTreePath &path,
-                                 const FieldMask &field_mask, 
-                                 unsigned depth, bool before);
-      void record_close_operations(LogicalState &state, RegionTreePath &path,
-                                  const FieldMask &field_mask, unsigned depth);
-      void update_close_operations(LogicalState &state, 
-                                   const std::deque<TreeClose> &close_ops);
-      void advance_field_versions(LogicalState &state, const FieldMask &mask);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_close_operations(LogicalState &state, const FieldMask &mask);
       void sanity_check_logical_state(LogicalState &state);
       void initialize_logical_state(ContextID ctx);
       void invalidate_logical_state(ContextID ctx);
@@ -1857,6 +1770,11 @@ namespace LegionRuntime {
                                 int next_child,
                                 bool &create_composite);
       // Analogous methods to those above except for closing to a composite view
+      void create_composite_instance(ContextID ctx_id,
+                                     const std::set<Color> &targets,
+                                     bool leave_open, int next_child,
+                                     const FieldMask &closing_mask,
+                                     StateDirectory *directory);
       void close_physical_node(CompositeCloser &closer,
                                CompositeNode *node,
                                const FieldMask &closing_mask,
@@ -1896,7 +1814,7 @@ namespace LegionRuntime {
                                 MaterializedView *target,
                                 FieldMask &needed_fields,
                                 std::set<Event> &pending_events);
-      void find_copy_across_instances(MappableInfo *info,
+      void find_copy_across_instances(const MappableInfo &info,
                                       MaterializedView *target,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
              LegionMap<CompositeView*,FieldMask>::aligned &composite_instances);
@@ -1904,27 +1822,29 @@ namespace LegionRuntime {
       // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
       // 'TRUE' TO THE find_valid_instance_views METHOD!!!!!!!!
-      void issue_update_copies(MappableInfo *info,
+      void issue_update_copies(const MappableInfo &info,
                                MaterializedView *target, 
                                FieldMask copy_mask,
-            const LegionMap<InstanceView*,FieldMask>::aligned &valid_instances);
-      void sort_copy_instances(MappableInfo *info,
+            const LegionMap<InstanceView*,FieldMask>::aligned &valid_instances,
+                               CopyTracker *tracker = NULL);
+      void sort_copy_instances(const MappableInfo &info,
                                MaterializedView *target,
                                FieldMask &copy_mask,
                     LegionMap<InstanceView*,FieldMask>::aligned &copy_instances,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
              LegionMap<CompositeView*,FieldMask>::aligned &composite_instances);
       // Issue copies for fields with the same event preconditions
-      static void issue_grouped_copies(MappableInfo *info,
+      static void issue_grouped_copies(const MappableInfo &info,
                                        MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
                                        const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                           LegionMap<Event,FieldMask>::aligned &postconditions);
+                           LegionMap<Event,FieldMask>::aligned &postconditions,
+                                       CopyTracker *tracker = NULL);
       // Note this function can mutate the preconditions set
       static void compute_precondition_sets(FieldMask update_mask,
-          LegionMap<Event,FieldMask>::aligned &preconditions,
+          const LegionMap<Event,FieldMask>::aligned &preconditions,
           LegionList<PreconditionSet>::aligned &precondition_sets);
       Event perform_copy_operation(Event precondition,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
@@ -1932,7 +1852,8 @@ namespace LegionRuntime {
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    Processor local_proc,
-          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions);
+          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
+                                   CopyTracker *tracker = NULL);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask, 
                                      bool clean, bool force);
@@ -1951,7 +1872,7 @@ namespace LegionRuntime {
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
       FieldMask flush_reductions(const FieldMask &flush_mask,
-                            ReductionOpID redop, MappableInfo *info);
+                            ReductionOpID redop, const MappableInfo &info);
       // Entry
       void initialize_physical_state(ContextID ctx);
       // Entry
@@ -1988,6 +1909,20 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& 
                             get_intersection_domains(RegionTreeNode *other) = 0;
       virtual size_t get_num_children(void) const = 0;
+      virtual InterCloseOp* create_close_op(Operation *creator, 
+                                            const FieldMask &closing_mask,
+                                            bool leave_open,
+                                            const std::set<Color> &targets,
+                                            int next_child, 
+                                            const TraceInfo &trace_info) = 0;
+      virtual bool perform_close_operation(const MappableInfo &info,
+                                           const FieldMask &closing_mask,
+                                           const std::set<Color> &targets,
+                                           StateDirectory *directory,
+                                           bool leave_open,
+                                           int next_child,
+                                           Event &closed,
+                                           bool &create_composite) = 0;
       virtual MaterializedView * create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
@@ -2025,22 +1960,16 @@ namespace LegionRuntime {
       void unpack_send_state(ContextID ctx, Deserializer &derez, 
                              FieldSpaceNode *column, AddressSpaceID source);
     public:
-#ifndef LOGICAL_FIELD_TREE
       // Logical helper operations
-      template<typename ALLOC> 
-      FieldMask perform_dependence_checks(const LogicalUser &user, 
-            std::list<LogicalUser, ALLOC> &users, const FieldMask &check_mask,
-            bool validates_regions);
-      template<typename ALLOC>
-      void perform_closing_checks(LogicalCloser &closer,
-            std::list<LogicalUser, ALLOC> &users, const FieldMask &check_mask);
-#else
-      FieldMask perform_dependence_checks(const LogicalUser &user,
-            FieldTree<LogicalUser> *users, const FieldMask &check_mask,
-            bool validates_regions);
-      void perform_closing_checks(LogicalCloser &closer,
-            FieldTree<LogicalUser> *users, const FieldMask &check_mask);
-#endif
+      template<AllocationType ALLOC, bool HAS_SKIP> 
+      static FieldMask perform_dependence_checks(const LogicalUser &user, 
+          typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
+          const FieldMask &check_mask, bool validates_regions,
+          Operation *to_skip = NULL, GenerationID skip_gen = 0);
+      template<AllocationType ALLOC>
+      static void perform_closing_checks(LogicalCloser &closer,
+          typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
+          const FieldMask &check_mask);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
       { return column_source; }
@@ -2110,6 +2039,20 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
+      virtual InterCloseOp* create_close_op(Operation *creator, 
+                                            const FieldMask &closing_mask,
+                                            bool leave_open,
+                                            const std::set<Color> &targets,
+                                            int next_child,
+                                            const TraceInfo &trace_info);
+      virtual bool perform_close_operation(const MappableInfo &info,
+                                           const FieldMask &closing_mask,
+                                           const std::set<Color> &targets,
+                                           StateDirectory *directory,
+                                           bool leave_open,
+                                           int next_child,
+                                           Event &closed,
+                                           bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
@@ -2156,14 +2099,14 @@ namespace LegionRuntime {
     public:
       void remap_region(ContextID ctx, MaterializedView *view, 
                         const FieldMask &user_mask, FieldMask &needed_mask);
-      InstanceRef register_region(MappableInfo *info, 
+      InstanceRef register_region(const MappableInfo &info, 
                                   PhysicalUser &user,
                                   LogicalView *view,
                                   const FieldMask &needed_fields);
       InstanceRef seed_state(ContextID ctx, PhysicalUser &user,
                              LogicalView *new_view,
                              Processor local_proc);
-      Event close_state(MappableInfo *info, PhysicalUser &user,
+      Event close_state(const MappableInfo &info, PhysicalUser &user,
                         const InstanceRef &target);
     public:
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
@@ -2236,6 +2179,20 @@ namespace LegionRuntime {
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
+      virtual InterCloseOp* create_close_op(Operation *creator, 
+                                            const FieldMask &closing_mask,
+                                            bool leave_open,
+                                            const std::set<Color> &targets,
+                                            int next_child,
+                                            const TraceInfo &trace_info);
+      virtual bool perform_close_operation(const MappableInfo &info,
+                                           const FieldMask &closing_mask,
+                                           const std::set<Color> &targets,
+                                           StateDirectory *directory,
+                                           bool leave_open,
+                                           int next_child,
+                                           Event &closed,
+                                           bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
@@ -2318,20 +2275,8 @@ namespace LegionRuntime {
       bool has_child(unsigned depth) const;
       Color get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
-    public:
-      void record_close_operation(unsigned depth, const TreeClose &info,
-                                  const FieldMask &close_mask);
-      void record_before_version(unsigned depth, VersionID vid,
-                                 const FieldMask &version_mask);
-      void record_after_version(unsigned depth, VersionID vid,
-                                const FieldMask &version_mask);
-    public:
-      void get_close_operations(unsigned depth,
-                                LegionDeque<CloseInfo>::aligned &needed_ops);
     protected:
       std::vector<int> path;
-      std::vector<LegionDeque<std::pair<TreeClose,FieldMask> >::aligned > 
-                                                                   close_ops;
       unsigned min_depth;
       unsigned max_depth;
     };
@@ -2562,7 +2507,7 @@ namespace LegionRuntime {
      */
     class PremapTraverser : public PathTraverser {
     public:
-      PremapTraverser(RegionTreePath &path, MappableInfo *info,
+      PremapTraverser(RegionTreePath &path, const MappableInfo &info,
                       StateDirectory *directory);  
       PremapTraverser(const PremapTraverser &rhs); 
       ~PremapTraverser(void);
@@ -2577,7 +2522,7 @@ namespace LegionRuntime {
       bool perform_close_operations(RegionTreeNode *node,
                                     LogicalRegion closing_handle);
     protected:
-      MappableInfo *const info;
+      const MappableInfo &info;
       StateDirectory *const directory;
       RegionTreeNode *last_node;
     }; 
@@ -3364,15 +3309,10 @@ namespace LegionRuntime {
       std::map<Color,MaterializedView*> children;
       // These are the sets of users in the current and next epochs
       // for performing dependence analysis
-#ifndef PHYSICAL_FIELD_TREE
       LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned 
                                                       curr_epoch_users;
       LegionList<PhysicalUser,PREV_PHYSICAL_ALLOC>::track_aligned 
                                                       prev_epoch_users;
-#else
-      FieldTree<PhysicalUser> *const curr_epoch_users;
-      FieldTree<PhysicalUser> *const prev_epoch_users;
-#endif
       // Keep track of how many outstanding references we have
       // for each of the user events
       LegionSet<Event,EVENT_REFERENCE_ALLOC>::tracked event_references;
@@ -3468,24 +3408,26 @@ namespace LegionRuntime {
       void add_root(CompositeNode *root, const FieldMask &valid);
       void update_reduction_views(ReductionView *view, 
                                   const FieldMask &valid_mask);
-      void issue_composite_copies(MappableInfo *info,
+      void issue_composite_copies(const MappableInfo &info,
                                   MaterializedView *dst,
-                                  const FieldMask &copy_mask);
-      void issue_composite_copies(MappableInfo *info,
+                                  const FieldMask &copy_mask,
+                                  CopyTracker *tracker = NULL);
+      void issue_composite_copies(const MappableInfo &info,
                                   MaterializedView *dst,
                                   const FieldMask &copy_mask,
                   const LegionMap<Event,FieldMask>::aligned &preconditions,
-                        LegionMap<Event,FieldMask>::aligned &postconditions);
+                        LegionMap<Event,FieldMask>::aligned &postconditions,
+                                  CopyTracker *tracker = NULL);
     public:
       // Note that copy-across only works for a single field at a time
-      void issue_composite_copies_across(MappableInfo *info,
+      void issue_composite_copies_across(const MappableInfo &info,
                                          MaterializedView *dst,
                                          FieldID src_field,
                                          FieldID dst_field,
                                          Event precondition,
                                          std::set<Event> &postconditions);
     protected:
-      void flush_reductions(MappableInfo *info,
+      void flush_reductions(const MappableInfo &info,
                             MaterializedView *dst,
                             const FieldMask &event_mask,
                     const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -3569,13 +3511,14 @@ namespace LegionRuntime {
       void update_instance_views(InstanceView *view,
                                  const FieldMask &valid_mask);
     public:
-      void issue_update_copies(MappableInfo *info,
+      void issue_update_copies(const MappableInfo &info,
                                MaterializedView *dst,
                                FieldMask traversal_mask,
                                const FieldMask &copy_mask,
                        const LegionMap<Event,FieldMask>::aligned &preconditions,
-                           LegionMap<Event,FieldMask>::aligned &postconditions);
-      void issue_across_copies(MappableInfo *info,
+                           LegionMap<Event,FieldMask>::aligned &postconditions,
+                               CopyTracker *tracker = NULL);
+      void issue_across_copies(const MappableInfo &info,
                                MaterializedView *dst,
                                unsigned src_index,
                                FieldID  src_field,
@@ -3629,8 +3572,8 @@ namespace LegionRuntime {
     public:
       ReductionView& operator=(const ReductionView&rhs);
     public:
-      void perform_reduction(LogicalView *target, 
-                             const FieldMask &copy_mask, Processor local_proc);
+      void perform_reduction(LogicalView *target, const FieldMask &copy_mask, 
+                             Processor local_proc, CopyTracker *tracker = NULL);
       Event perform_composite_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         Processor local_proc,
@@ -3804,7 +3747,7 @@ namespace LegionRuntime {
      */
     class MappingTraverser : public PathTraverser {
     public:
-      MappingTraverser(RegionTreePath &path, MappableInfo *info,
+      MappingTraverser(RegionTreePath &path, const MappableInfo &info,
                        const RegionUsage &u, const FieldMask &m,
                        Processor target, unsigned idx);
       MappingTraverser(const MappingTraverser &rhs);
@@ -3821,7 +3764,7 @@ namespace LegionRuntime {
       bool map_physical_region(RegionNode *node);
       bool map_reduction_region(RegionNode *node);
     public:
-      MappableInfo *const info;
+      const MappableInfo &info;
       const RegionUsage usage;
       const FieldMask user_mask;
       const Processor target_proc;

@@ -50,17 +50,17 @@ do
   end
 end
 
-task make_tree(rtop : region(tree(wild)), min : int, max : int)
+task make_tree(rtop : region(tree(wild)), low : int, high : int)
   : ptr(tree(rtop), rtop)
 where
   reads(rtop), writes(rtop)
 do
 
-  if min > max then
+  if low > high then
     return null(ptr(tree(rtop), rtop))
   end
 
-  var mid = (max + min)/2
+  var mid = (high + low)/2
   var colors = [c.legion_coloring_create]();
   [c.legion_coloring_ensure_color](colors, 0);
   [c.legion_coloring_ensure_color](colors, 1)
@@ -68,8 +68,8 @@ do
   [c.legion_coloring_destroy](colors)
   var rleft = part[0]
   var rright = part[1]
-  var left = make_tree(rleft, min, mid - 1)
-  var right = make_tree(rright, mid + 1, max)
+  var left = make_tree(rleft, low, mid - 1)
+  var right = make_tree(rright, mid + 1, high)
   var top = new(ptr(tree(rtop), rtop))
   @top = [tree(rtop)] { rleft = rleft, rright = rright, left = left, right = right, data = mid }
   return top

@@ -318,6 +318,8 @@ namespace LegionRuntime {
       void decrement_outstanding(void);
       void increment_pending(void);
       void decrement_pending(void);
+      void increment_frame(void);
+      void decrement_frame(void);
     public:
       void add_local_field(FieldSpace handle, FieldID fid, size_t size);
       void add_local_fields(FieldSpace handle, 
@@ -400,9 +402,10 @@ namespace LegionRuntime {
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(void);
-      const std::vector<PhysicalRegion>& get_physical_regions(void) const;
+      void unmap_all_mapped_regions(void);
       void inline_child_task(TaskOp *child);
       void restart_task(void);
+      const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
       // These methods are VERY important.  They serialize premapping
       // operations to each individual field which considerably simplifies
@@ -429,9 +432,11 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent) = 0;
       virtual RemoteTask* find_outermost_physical_context(void) = 0;
+    public:
+      // Has a base implementation but can override
+      virtual RegionTreeContext find_enclosing_physical_context(
+                                                LogicalRegion parent);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void);
@@ -497,6 +502,8 @@ namespace LegionRuntime {
       unsigned outstanding_subtasks;
       // Number of mapped sub-tasks that are yet to run
       unsigned pending_subtasks;
+      // Number of pending_frames
+      unsigned pending_frames;
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
@@ -653,8 +660,6 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent);
       virtual RemoteTask* find_outermost_physical_context(void);
     public:
       virtual void trigger_task_complete(void);
@@ -749,8 +754,6 @@ namespace LegionRuntime {
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent);
       virtual RemoteTask* find_outermost_physical_context(void);
     public:
       virtual void trigger_task_complete(void);
@@ -806,8 +809,6 @@ namespace LegionRuntime {
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(UserEvent &chain_event);
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent) = 0;
       virtual RemoteTask* find_outermost_physical_context(void) = 0;
     public:
       virtual Event defer_mapping(void);

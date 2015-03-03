@@ -20,33 +20,29 @@ legion = {}
 legion.__index = legion
 
 require 'legionlib-terra'
+require 'legionlib-mapper'
+require 'legionlib-util'
 
 local legion_c = terralib.includec("legion_c.h")
 local legion_terra = terralib.includec("legion_terra.h")
 local terra terra_null() : &opaque return [&opaque](0) end
 
-function printf(...)
-  print(string.format(...))
+-- coercion functions
+
+local function make_coercion_op(c_type)
+  local terra coerce(ptr : &opaque, idx : uint)
+    var proc = [&c_type](ptr)
+    return proc[idx]
+  end
+  return coerce
 end
 
-function ite(a, b, c)
-  if a then return b else return c end
-end
+coerce_machine = make_coercion_op(legion_c.legion_machine_t)
+coerce_processor = make_coercion_op(legion_c.legion_processor_t)
+coerce_domain = make_coercion_op(legion_c.legion_domain_t)
+coerce_domain_split = make_coercion_op(legion_c.legion_domain_split_t)
 
-function inherit(table, metatable)
-  local metatable_ = getmetatable(table)
-  local combined = {
-    __index = function(child, idx)
-      return rawget(metatable_, idx) or
-             rawget(metatable, idx) or
-             rawget(child, idx)
-    end
-  }
-  setmetatable(table, combined)
-  return table
-end
-
-sizeof = terralib.sizeof
+-- initializing binding library
 
 function legion:set_top_level_script(name)
   self.script_name = name
@@ -71,192 +67,6 @@ for k, v in pairs(legion_c) do
       legion[k] = v
     end
   end
-
--- Simple array implementation
-Array = {}
-
-function Array:new(values)
-  values = values or {}
-  local array = { size = 0, values = {} }
-  if values then
-    local size = 0
-    for _, v in pairs(values) do
-      array.values[size] = v
-      size = size + 1
-    end
-    array.size = size
-  end
-  setmetatable(array, self)
-  self.__index = function(child, idx)
-    return rawget(self, idx) or
-           rawget(rawget(child, "values"), idx) or
-           error("Error: invalid access to array: " .. idx)
-  end
-  self.__newindex = function(child, idx, value)
-    rawset(rawget(child, "values"), idx, value)
-  end
-  return array
-end
-
-function Array:init(num, value)
-  local values = {}
-  for i = 1, num do
-    values[i] = value
-  end
-  return Array:new(values)
-end
-
-function Array:insert(v)
-  self[self.size] = v
-  self.size = self.size + 1
-end
-
-function Array:clear()
-  self.size = 0
-  self.values = {}
-end
-
-function Array:__tostring()
-  local str = ""
-  for i = 0, self.size - 1 do
-    if i > 0 then
-      str = str .. ", "
-    end
-    str = str .. tostring(self.values[i])
-  end
-  return str
-end
-
--- Simple set implementation
-Set = {}
-PrimSet = {}
-PrimSet.__index = PrimSet
-ObjSet = {}
-ObjSet.__index = ObjSet
-
-function Set:new(l, elem_type)
-  l = l or {}
-  local set = { set = {}, size = 0 }
-
-  if not elem_type or not elem_type.__hash then
-    setmetatable(set, PrimSet)
-  else
-    setmetatable(set, ObjSet)
-  end
-  for _, v in pairs(l) do
-    set:insert(v)
-  end
-
-  return set
-end
-
-function PrimSet:insert(v)
-  self.set[v] = true
-  self.size = self.size + 1
-end
-
-function PrimSet:erase(v)
-  self.set[v] = nil
-  self.size = self.size - 1
-end
-
-function PrimSet:elem(v)
-  return self.set[v]
-end
-
-function PrimSet:itr(f)
-  for v, _ in pairs(self.set) do
-    f(v)
-  end
-end
-
-function PrimSet:__tostring()
-  local str = ""
-  local first = true
-  for k, _ in pairs(self.set) do
-    if not first then
-      str = str .. ", "
-    end
-    first = false
-    str = str .. tostring(k)
-  end
-  return "{" .. str .. "}"
-end
-
-function ObjSet:insert(v)
-  local h = v:__hash()
-  if self.set[h] then
-    self.set[h]:insert(v)
-  else
-    self.set[h] = Array:new{v}
-  end
-  self.size = self.size + 1
-end
-
-local function equivalent(a,b)
-  if type(a) ~= 'table' then return a == b end
-  local counta, countb = 0, 0
-  for k,va in pairs(a) do
-    if not equivalent(va, b[k]) then return false end
-    counta = counta + 1
-  end
-  for _,_ in pairs(b) do countb = countb + 1 end
-  return counta == countb
-end
-
-function ObjSet:erase(v)
-  local h = v:__hash()
-  local arr = self.set[h]
-  if arr then
-    if arr.size == 1 then
-      self.set[h] = nil
-      self.size = self.size - 1
-    else
-      local arr_ = Array:new {}
-      for i = 0, arr.size - 1 do
-        if not equivalent(v, arr[i]) then
-          arr_:insert(arr[i])
-        end
-      end
-      self.set[h] = arr_
-      self.size = self.size - 1
-    end
-  end
-end
-
-function ObjSet:elem(v)
-  local h = v:__hash()
-  local arr = self.set[h]
-  if arr then
-    for i = 0, arr.size - 1 do
-      if equivalent(v, arr[i]) then
-        return true
-      end
-    end
-  end
-  return false
-end
-
-function ObjSet:itr(f)
-  for _, l in pairs(self.set) do
-    for i = 0, l.size - 1 do
-      f(l.values[i])
-    end
-  end
-end
-
-function ObjSet:__tostring()
-  local str = ""
-  local first = true
-  for k, _ in pairs(self.set) do
-    if not first then
-      str = str .. ", "
-    end
-    first = false
-    str = str .. tostring(k)
-  end
-  return "{" .. str .. "}"
-end
 
 -- Type declarations
 Ptr = {}
@@ -326,6 +136,9 @@ FutureMap.__index = FutureMap
 Task = {}
 Task.__index = Task
 
+Inline = {}
+Inline.__index = Inline
+
 TaskArgument = {}
 TaskArgument.__index = TaskArgument
 
@@ -364,6 +177,21 @@ ReductionOp.op_types = {float, double, int}
 ReductionOp.register_funcs = {}
 ReductionOp.reduce_funcs = {}
 ReductionOp.safe_reduce_funcs = {}
+
+Machine = {}
+Machine.__index = Machine
+
+Processor = {}
+Processor.__index = Processor
+
+MachineQueryInterface = {}
+MachineQueryInterface.__index = MachineQueryInterface
+
+DomainSplit = {}
+DomainSplit.__index = DomainSplit
+
+DomainSplitVector = {}
+DomainSplitVector.__index = DomainSplitVector
 
 for idx, name in pairs(ReductionOp.op_names) do
   do
@@ -730,6 +558,7 @@ function Blockify:to_cobj()
   return blockify_to_cobj[self.block_size.dim](self.block_size:to_cobj())
 end
 
+-- Lua wrapper for LegionRuntime::LowLevel::Domain
 function Domain:from_cobj(cobj)
   local domain = { cobj = cobj }
   domain.is_domain = true
@@ -759,6 +588,7 @@ function Domain:__tostring()
   return tostring(self:get_rect())
 end
 
+-- Lua wrapper for LegionRuntime::HighLevel::DomainColoring
 function DomainColoring:new()
   local dc = { coloring = {}, is_domain_coloring = true }
   setmetatable(dc, self)
@@ -790,6 +620,7 @@ function DomainColoring:__tostring()
   return str
 end
 
+-- Lua wrapper for LegionRuntime::LowLevel::DomainPoint
 function DomainPoint:from_point(p)
   assert(p.is_point, "Error: DomainPoint:from_point takes only a Point")
   local point_data = {}
@@ -865,6 +696,46 @@ function DomainPoint:__tostring()
                   self.point_data[1] .. "," ..
                   self.point_data[2] .. ")"
   end
+end
+
+-- Lua wrapper for LegionRuntime::HighLevel::DomainSplit
+function DomainSplit:new(domain, proc, recurse, stealable)
+  local ds = { domain = domain, proc = proc,
+               recurse = recurse, stealable = stealable }
+  setmetatable(ds, self)
+  return ds
+end
+
+function DomainSplit:from_cobj(cobj)
+  return DomainSplit:new(Domain:from_cobj(cobj.domain),
+                         Processor:from_cobj(cobj.proc),
+                         cobj.recurse, cobj.stealable)
+end
+
+local terra create_domain_split(domain : legion_c.legion_domain_t,
+                                proc : legion_c.legion_processor_t,
+                                recurse : bool, stealable : bool)
+                                : legion_c.legion_domain_split_t
+  var ds : legion_c.legion_domain_split_t
+  ds.domain = domain
+  ds.proc = proc
+  ds.recurse = recurse
+  ds.stealable = stealable
+  return ds
+end
+
+function DomainSplit:to_cobj()
+  return create_domain_split(self.domain.cobj,
+                             self.proc,
+                             self.recurse,
+                             self.stealable)
+end
+
+function DomainSplit:__tostring()
+  local str = tostring(self.domain) .. " ~> " .. tostring(self.proc)
+  if self.recurse then str = str .. ", recurse" end
+  if self.stealable then str = str .. ", stealable" end
+  return str
 end
 
 -- Lua wrapper for LegionRuntime::LowLevel::IndexSpace
@@ -1078,6 +949,57 @@ function RegionRequirement:set_reduction()
   self.privilege = legion_c.REDUCE
 end
 
+-- TODO: RegionRequirement:from_cobj does not initialize several fields properly
+local attrs_to_get =
+  Array:new
+  { "privilege", "prop", "redop", "tag", "handle_type", "projection",
+    "virtual_map", "early_map", "enable_WAR_optimization",
+    "reduction_list", "make_persistent", "blocking_factor",
+    "max_blocking_factor" }
+local attrs_to_refresh =
+  Array:new
+  { "virtual_map", "early_map", "enable_WAR_optimization",
+    "reduction_list", "make_persistent", "blocking_factor" }
+local function get_req_attr(req, attr)
+  return legion_c["legion_region_requirement_get_" .. attr](req);
+end
+
+function RegionRequirement:refresh_fields()
+  attrs_to_refresh:itr(function(attr)
+    self[attr] = get_req_attr(self.cobj, attr)
+  end)
+end
+
+function RegionRequirement:from_cobj(req_cobj)
+  local req =
+    { cobj = req_cobj,
+      region = LogicalRegion:from_cobj(get_req_attr(req_cobj, "region")),
+      privilege_fields = Array:new {},
+      instance_fields = Array:new {},
+      parent = LogicalRegion:from_cobj(get_req_attr(req_cobj, "parent")),
+      target_ranking = Array:new{}
+    }
+  attrs_to_get:itr(function(attr)
+    req[attr] = get_req_attr(req_cobj, attr)
+  end)
+  local num_privilege_fields =
+    get_req_attr(req_cobj, "privilege_fields_size")
+  for j = 0, num_privilege_fields - 1 do
+    req.privilege_fields:insert(
+      legion_c.legion_region_requirement_get_privilege_field(
+        req_cobj, j))
+  end
+  local num_instance_fields =
+    get_req_attr(req_cobj, "instance_fields_size")
+  for j = 0, num_instance_fields - 1 do
+    req.instance_fields:insert(
+      legion_c.legion_region_requirement_get_instance_field(
+        req_cobj, j))
+  end
+  setmetatable(req, self)
+  return req
+end
+
 -- Lua wrapper for LegionRuntime::HighLevel::ArgumentMap
 function ArgumentMap:new()
   local arg_map = {}
@@ -1149,44 +1071,20 @@ function FutureMap:wait_all_results()
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::Task
-local function get_req_attr(req, attr)
-  return legion_c["legion_region_requirement_get_" .. attr](req);
-end
-
 function Task:from_cobj(cobj)
   local task = { impl = cobj.impl }
   task.is_task = true
+  task.task_id = legion_c.legion_task_get_task_id(cobj)
+  task.target_proc =
+    Processor:from_cobj(legion_c.legion_task_get_target_proc(cobj))
 
   -- initialize RegionRequirement objects
   task.regions = Array:new {}
   local num_regions = legion_c.legion_task_get_regions_size(cobj)
   for i = 0, num_regions - 1 do
-    local req_cobj = legion_c.legion_task_get_region(cobj, i)
     local req =
-      { region = LogicalRegion:from_cobj(get_req_attr(req_cobj, "region")),
-        privilege_fields = Array:new {},
-        instance_fields = Array:new {},
-        privilege = get_req_attr(req_cobj, "privilege"),
-        prop = get_req_attr(req_cobj, "prop"),
-        parent = LogicalRegion:from_cobj(get_req_attr(req_cobj, "parent")),
-        redop = get_req_attr(req_cobj, "redop"),
-        tag = get_req_attr(req_cobj, "tag"),
-        handle_type = get_req_attr(req_cobj, "handle_type"),
-        projection = get_req_attr(req_cobj, "projection") }
-    local num_privilege_fields =
-      get_req_attr(req_cobj, "privilege_fields_size")
-    for j = 0, num_privilege_fields - 1 do
-      req.privilege_fields:insert(
-        legion_c.legion_region_requirement_get_privilege_field(
-          req_cobj, j))
-    end
-    local num_instance_fields =
-      get_req_attr(req_cobj, "instance_fields_size")
-    for j = 0, num_instance_fields - 1 do
-      req.instance_fields:insert(
-        legion_c.legion_region_requirement_get_instance_field(
-          req_cobj, j))
-    end
+      RegionRequirement:from_cobj(
+        legion_c.legion_task_get_region(cobj, i))
     task.regions:insert(req)
   end
 
@@ -1227,6 +1125,17 @@ function Task:get_local_args(arg_type)
     return args
   end
   return convert_cdata(call_capi(self))
+end
+
+-- Lua wrapper for LegionRuntime::HighLevel::Inline
+function Inline:from_cobj(cobj)
+  local inline = { impl = cobj.impl }
+  inline.is_inline = true
+  inline.requirement =
+    RegionRequirement:from_cobj(
+      legion_c.legion_inline_get_requirement(cobj))
+  setmetatable(inline, self)
+  return inline
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::TaskArgument
@@ -1707,6 +1616,16 @@ function legion:set_registration_callback(func_name)
   legion_c.legion_runtime_set_registration_callback(ptr)
 end
 
+function legion:create_mapper(mapper_name, machine, runtime, local_proc)
+  local qualified_mapper_name = legion.script_name .. "/" .. mapper_name
+  return legion_terra.create_mapper(qualified_mapper_name,
+                                    machine, runtime, local_proc)
+end
+
+function legion:replace_default_mapper(mapper, local_proc)
+  legion_c.legion_runtime_replace_default_mapper(self, mapper, local_proc)
+end
+
 function legion:set_top_level_task_id(task_id)
   legion_c.legion_runtime_set_top_level_task_id(task_id)
 end
@@ -1736,11 +1655,13 @@ function legion:get_current_time_in_micros()
 end
 
 -- wrapper function for registration callbacks in Lua
-function lua_registration_callback_wrapper_in_lua(func_name, machine,
-                                                  runtime, local_procs_)
-  local local_procs = Array:new {}
-  for i = 1, #local_procs_ do
-    local_procs:insert(local_procs_[i])
+function lua_registration_callback_wrapper_in_lua(script_name, func_name,
+                                                  machine, runtime,
+                                                  local_procs_, num_local_procs)
+  legion:set_top_level_script(script_name)
+  local local_procs = Array:new{}
+  for i = 0, num_local_procs - 1 do
+    local_procs:insert(coerce_processor(local_procs_, i))
   end
   setmetatable(runtime, legion)
   _G[func_name](machine, runtime, local_procs)
@@ -1958,4 +1879,90 @@ function TaskConfigOptions:new(leaf, inner, idempotent)
                 idempotent = idempotent or false }
   setmetatable(opt, self)
   return opt
+end
+
+-- Lua wrapper of LegionRuntime::LowLevel::Machine
+function Machine:from_cobj(cobj)
+  local machine = { cobj = cobj }
+  setmetatable(machine, self)
+  return machine
+end
+
+function Machine:get_all_processors()
+  local all_processors = Array:new {}
+  local all_processors_size =
+    legion_c.legion_machine_get_all_processors_size(self.cobj)
+  local all_processors_ =
+    gcmalloc(legion_c.legion_processor_t, all_processors_size)
+  legion_c.legion_machine_get_all_processors(self.cobj, all_processors_,
+                                             all_processors_size)
+  for i = 0, all_processors_size - 1 do
+    all_processors:insert(Processor:from_cobj(all_processors_[i]))
+  end
+  return all_processors
+end
+
+-- Lua wrapper of LegionRuntime::LowLevel::Processor
+function Processor:from_cobj(cobj)
+  local proc = { id = cobj.id }
+  setmetatable(proc, self)
+  return proc
+end
+
+function Processor:kind()
+  return legion_c.legion_processor_kind(self)
+end
+
+function Processor:__tostring()
+  return "Proc " .. self.id
+end
+
+-- Lua wrapper for LegionRuntime::HighLevel::MappingUtilities
+--                                         ::MachineQueryInterface
+function MachineQueryInterface:new(machine)
+  local cobj =
+    ffi.gc(legion_c.legion_machine_query_interface_create(machine.cobj),
+           legion_c.legion_machine_query_interface_destroy)
+  local interface = { cobj = cobj }
+  setmetatable(interface, self)
+  return interface
+end
+
+function MachineQueryInterface:find_memory_kind(proc, kind)
+  return
+    legion_c.legion_machine_query_interface_find_memory_kind(self.cobj,
+                                                             proc, kind)
+end
+
+-- Lua wrapper for std::vector<LegionRuntime::HighLevel::DomainSplit>
+function DomainSplitVector:from_cobj(cobj)
+  local vec = { cobj = cobj }
+  setmetatable(vec, self)
+  return vec
+end
+
+function DomainSplitVector:insert(split)
+  assert(split.is_domain_split,
+    "Error: insert only takes a DomainSplit object")
+  legion_terra.vector_legion_domain_split_push_back(self.cobj, split:to_cobj())
+end
+
+function DomainSplitVector:size()
+  return legion_terra.vector_legion_domain_split_size(self.cobj)
+end
+
+function DomainSplitVector:get(idx)
+  return
+    DomainSplit:from_cobj(
+      legion_terra.vector_legion_domain_split_get(self.cobj, idx))
+end
+
+function DomainSplitVector:__tostring()
+  local str = ""
+  local size = self:size()
+  for i = 0, size - 1 do
+    local split = self.get(i)
+    str = str .. tostring(split) .. "\n"
+  end
+  return str
 end

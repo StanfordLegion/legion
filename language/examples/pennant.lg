@@ -14,12 +14,14 @@
 
 -- runs-with:
 -- [
---   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1",
---    "-absolute", "1e-8", "-relative", "1e-8", "-relative_absolute", "1e-17"],
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1"],
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "4"],
 --   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-17"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1",
---    "-absolute", "1e-8", "-relative", "1e-8", "-relative_absolute", "1e-17"]
+--   ["pennant.tests/sedov/sedov.pnt", "-npieces", "4",
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-17"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "4"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -67,21 +69,9 @@ local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
 -- ## Data Structures
 -- #################
 
-terra min(a : double, b : double) : double
-  if a < b then
-    return a
-  else
-    return b
-  end
-end
-
-terra max(a : double, b : double) : double
-  if a > b then
-    return a
-  else
-    return b
-  end
-end
+-- Import max/min for Terra
+local max = legionlib.fmax
+local min = legionlib.fmin
 
 terra abs(a : double) : double
   if a < 0 then
@@ -1403,20 +1393,30 @@ do
       last_time = current_time
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       init_step_points(rp_all_private_p[i])
+    end
+    __demand(__parallel)
+    for i = 0, conf.npieces do
       init_step_points(rp_all_shared_p[i])
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_private_p[i], dt)
+    end
+    __demand(__parallel)
+    for i = 0, conf.npieces do
       adv_pos_half(rp_all_shared_p[i], dt)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       init_step_zones(rz_all_p[i], int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_centers(rz_all_p[i],
                    rp_all_private_p[i],
@@ -1425,6 +1425,7 @@ do
                    int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_volumes(rz_all_p[i],
                    rp_all_private_p[i],
@@ -1433,6 +1434,7 @@ do
                    int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_surface_vecs(rz_all_p[i],
                         rp_all_private_p[i],
@@ -1441,6 +1443,7 @@ do
                         int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_edge_len(rz_all_p[i],
                     rp_all_private_p[i],
@@ -1449,6 +1452,7 @@ do
                     int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_char_len(rz_all_p[i],
                     rp_all_private_p[i],
@@ -1457,10 +1461,12 @@ do
                     int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_rho_half(rz_all_p[i], int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       sum_point_mass(rz_all_p[i],
                      rp_all_private_p[i],
@@ -1469,10 +1475,12 @@ do
                      int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_force_pgas(rz_all_p[i],
                       rp_all_private_p[i],
@@ -1481,6 +1489,7 @@ do
                       int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_force_tts(rz_all_p[i],
                      rp_all_private_p[i],
@@ -1489,6 +1498,7 @@ do
                      alfa, ssmin, int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_force_qcs(rz_all_p[i],
                      rp_all_private_p[i],
@@ -1498,6 +1508,7 @@ do
                      int64(0), int64(0), int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       sum_point_force(rz_all_p[i],
                       rp_all_private_p[i],
@@ -1506,21 +1517,34 @@ do
                       int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       apply_boundary_conditions(rp_all_private_p[i])
+    end
+    __demand(__parallel)
+    for i = 0, conf.npieces do
       apply_boundary_conditions(rp_all_shared_p[i])
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_accel(rp_all_private_p[i])
+    end
+    __demand(__parallel)
+    for i = 0, conf.npieces do
       calc_accel(rp_all_shared_p[i])
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       adv_pos_full(rp_all_private_p[i], dt)
+    end
+    __demand(__parallel)
+    for i = 0, conf.npieces do
       adv_pos_full(rp_all_shared_p[i], dt)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_centers_full(rz_all_p[i],
                         rp_all_private_p[i],
@@ -1529,6 +1553,7 @@ do
                         int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_volumes_full(rz_all_p[i],
                         rp_all_private_p[i],
@@ -1537,6 +1562,7 @@ do
                         int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_work(rz_all_p[i],
                 rp_all_private_p[i],
@@ -1545,21 +1571,25 @@ do
                 dt, int64(0), int64(0), use_foreign)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_work_rate(rz_all_p[i], dt)
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_energy(rz_all_p[i])
     end
 
+    __demand(__parallel)
     for i = 0, conf.npieces do
       calc_rho_full(rz_all_p[i])
     end
 
     dthydro = dtmax
+    __demand(__parallel)
     for i = 0, conf.npieces do
-      dthydro = min(dthydro, calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv))
+      dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv)
     end
 
     cycle += 1
@@ -1856,10 +1886,13 @@ terra read_input(runtime : c.legion_runtime_t,
                  rm_fields : c.legion_field_id_t[20],
                  conf : config)
 
+  var color_words : c.size_t = cmath.ceil(conf.npieces/64.0)
+
   -- Allocate buffers for the mesh generator
   var pointpos_x_size : c.size_t = conf.np
   var pointpos_y_size : c.size_t = conf.np
   var pointcolors_size : c.size_t = conf.np
+  var pointmcolors_size : c.size_t = conf.np * color_words
   var zonestart_size : c.size_t = conf.nz
   var zonesize_size : c.size_t = conf.nz
   var zonepoints_size : c.size_t = conf.nz * conf.maxznump
@@ -1868,6 +1901,7 @@ terra read_input(runtime : c.legion_runtime_t,
   var pointpos_x : &double = [&double](c.malloc(pointpos_x_size*sizeof(double)))
   var pointpos_y : &double = [&double](c.malloc(pointpos_y_size*sizeof(double)))
   var pointcolors : &int64 = [&int64](c.malloc(pointcolors_size*sizeof(int64)))
+  var pointmcolors : &uint64 = [&uint64](c.malloc(pointmcolors_size*sizeof(uint64)))
   var zonestart : &int64 = [&int64](c.malloc(zonestart_size*sizeof(int64)))
   var zonesize : &int64 = [&int64](c.malloc(zonesize_size*sizeof(int64)))
   var zonepoints : &int64 = [&int64](c.malloc(zonepoints_size*sizeof(int64)))
@@ -1876,6 +1910,7 @@ terra read_input(runtime : c.legion_runtime_t,
   legionlib.assert(pointpos_x ~= nil)
   legionlib.assert(pointpos_y ~= nil)
   legionlib.assert(pointcolors ~= nil)
+  legionlib.assert(pointmcolors ~= nil)
   legionlib.assert(zonestart ~= nil)
   legionlib.assert(zonesize ~= nil)
   legionlib.assert(zonepoints ~= nil)
@@ -1896,6 +1931,7 @@ terra read_input(runtime : c.legion_runtime_t,
     pointpos_x, &pointpos_x_size,
     pointpos_y, &pointpos_y_size,
     pointcolors, &pointcolors_size,
+    pointmcolors, &pointmcolors_size,
     zonestart, &zonestart_size,
     zonesize, &zonesize_size,
     zonepoints, &zonepoints_size,
@@ -2072,12 +2108,40 @@ terra read_input(runtime : c.legion_runtime_t,
     end
   end
 
-  -- FIXME: Need ghost/shared coloring
   for i = 0, conf.npieces do
     c.legion_coloring_ensure_color(result.rp_all_ghost_c, i)
   end
+  for i = 0, conf.np do
+    for color = 0, conf.npieces do
+      var word = i + color/64
+      var bit = color % 64
+
+      if (pointmcolors[word] and (1 << bit)) ~= 0 then
+        c.legion_coloring_add_point(
+          result.rp_all_ghost_c,
+          color,
+          c.legion_ptr_t { value = i })
+      end
+    end
+  end
+
   for i = 0, conf.npieces do
     c.legion_coloring_ensure_color(result.rp_all_shared_c, i)
+  end
+  for i = 0, conf.np do
+    var done = false
+    for color = 0, conf.npieces do
+      var word = i + color/64
+      var bit = color % 64
+
+      if not  done and (pointmcolors[word] and (1 << bit)) ~= 0 then
+        c.legion_coloring_add_point(
+          result.rp_all_shared_c,
+          color,
+          c.legion_ptr_t { value = i })
+        done = true
+      end
+    end
   end
 
   for i = 0, conf.npieces do
@@ -2102,6 +2166,7 @@ terra read_input(runtime : c.legion_runtime_t,
   c.free(pointpos_x)
   c.free(pointpos_y)
   c.free(pointcolors)
+  c.free(pointmcolors)
   c.free(zonestart)
   c.free(zonesize)
   c.free(zonepoints)
@@ -2109,6 +2174,7 @@ terra read_input(runtime : c.legion_runtime_t,
 
   return result
 end
+read_input:compile()
 
 do
 local solution_filename_maxlen = 1024
@@ -2213,10 +2279,10 @@ terra validate_output(runtime : c.legion_runtime_t,
   end
 
   -- FIXME: This is kind of silly, but some of the really small values
-  -- (around 1e-30) have fairly large relative error (1e-3), tripping
+  -- (around 1e-17) have fairly large relative error (1e-3), tripping
   -- up the validator. For now, stop complaining about those cases if
   -- the absolute error is small.
-  var relative_absolute_eps = 1.0e-30
+  var relative_absolute_eps = 1.0e-17
   var relative_absolute_eps_text = get_optional_arg("-relative_absolute")
   if relative_absolute_eps_text ~= nil then
     relative_absolute_eps = c.atof(relative_absolute_eps_text)
@@ -2301,11 +2367,6 @@ task test()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
-
-  -- FIXME: this will break with npieces != 1
-  -- ghost/shared colorings won't work
-  -- non-constant partition access won't work
-  legionlib.assert(conf.npieces == 1)
 
   var rz_all = region(zone, conf.nz)
   var rp_all = region(point, conf.np)

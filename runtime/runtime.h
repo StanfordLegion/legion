@@ -474,10 +474,46 @@ namespace LegionRuntime {
       void replace_default_mapper(Mapper *m);
       Mapper* find_mapper(MapperID mid) const; 
     public:
+      // 1 argument, no return
+      template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
+      void invoke_mapper(MapperID map_id, const T1 &arg1);
+      // 1 argument with return
+      template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
+      T invoke_mapper(MapperID map_id, T init, const T1 &arg1);
+      // 2 arguments, no return
+      template<typename T1, typename T2, 
+               void (Mapper::*CALL)(T1,T2), bool BLOCK>
+      void invoke_mapper(MapperID map_id, const T1 &arg1, const T2 &arg2);
+      // 2 arguments with return
+      template<typename T, typename T1, typename T2, 
+               T (Mapper::*CALL)(T1,T2), bool BLOCK>
+      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, const T2 &args);
+      // 3 arguments, no return
+      template<typename T1, typename T2, 
+               typename T3, void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+      void invoke_mapper(MapperID map_id, const T1 &arg1, 
+                         const T2 &arg2, const T3 &arg3);
+      // 3 arguments with return
+      template<typename T, typename T1, typename T2, 
+               typename T3, T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
+      T invoke_mapper(MapperID map_id, T init, 
+                      const T1 &arg1, const T2 &arg2, const T3 &arg3);
+      // 4 arguments, no return
+      template<typename T1, typename T2, typename T3, 
+               typename T4, void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+      void invoke_mapper(MapperID map_id, const T1 &arg1, 
+                         const T2 &arg2, const T3 &arg3, const T4 &arg4);
+      // 4 argument with return
+      template<typename T, typename T1, typename T2, typename T3, 
+               typename T4, T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
+      T invoke_mapper(MapperID map_id, T init, const T1 &arg1, 
+                      const T2 &arg2, const T3 &arg3, const T4 &arg4);
+    public:
       // Functions that perform mapping calls
+      // We really need variadic templates here
       void invoke_mapper_set_task_options(TaskOp *task);
-      void invoke_mapper_select_variant(TaskOp *task);
       bool invoke_mapper_pre_map_task(TaskOp *task);
+      void invoke_mapper_select_variant(TaskOp *task);
       bool invoke_mapper_map_task(TaskOp *task);
       void invoke_mapper_failed_mapping(Mappable *mappable);
       void invoke_mapper_notify_result(Mappable *mappable);
@@ -510,6 +546,16 @@ namespace LegionRuntime {
                                         const void *message, size_t length);
       void invoke_mapper_task_result(MapperID map_id, Event event,
                                      const void *result, size_t result_size);
+      void invoke_mapper_permit_task_steal(MapperID map_id, Processor thief, 
+                                     const std::vector<const Task*> &stealable,
+                                     std::set<const Task*> &to_steal);
+      // This method cannot support waiting
+      void invoke_mapper_target_task_steal(MapperID map_id,
+                                           const std::set<Processor> &blacklist,
+                                           std::set<Processor> &steal_targets);
+      // This method cannot support waiting
+      void invoke_mapper_select_tasks_to_schedule(MapperID map_id,
+                                           const std::list<Task*> &ready_tasks);
     public:
       // Handle mapper messages
       void defer_mapper_message(Processor target, MapperID map_id,
@@ -1178,7 +1224,6 @@ namespace LegionRuntime {
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
-      void map_all_regions(Context ctx);
       void unmap_all_regions(Context ctx);
     public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
@@ -1206,6 +1251,9 @@ namespace LegionRuntime {
                                                   const void *init_value,
                                                   size_t init_size);
       void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
+      void arrive_dynamic_collective(Context ctx, DynamicCollective dc,
+                                     const void *buffer, size_t size,
+                                     unsigned count);
       void defer_dynamic_collective_arrival(Context ctx, 
                                             DynamicCollective dc,
                                             Future f, unsigned count);
@@ -1219,7 +1267,7 @@ namespace LegionRuntime {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
-      void issue_frame(Context ctx);
+      void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
       int get_tunable_value(Context ctx, TunableID tid, 
@@ -1611,7 +1659,8 @@ namespace LegionRuntime {
       FenceOp*             get_available_fence_op(void);
       FrameOp*             get_available_frame_op(void);
       DeletionOp*          get_available_deletion_op(void);
-      CloseOp*             get_available_close_op(void);
+      InterCloseOp*        get_available_inter_close_op(void);
+      PostCloseOp*         get_available_post_close_op(void);
       DynamicCollectiveOp* get_available_dynamic_collective_op(void);
       FuturePredOp*        get_available_future_pred_op(void);
       NotPredOp*           get_available_not_pred_op(void);
@@ -1634,7 +1683,8 @@ namespace LegionRuntime {
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
-      void free_close_op(CloseOp *op); 
+      void free_inter_close_op(InterCloseOp *op); 
+      void free_post_close_op(PostCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
       void free_future_predicate_op(FuturePredOp *op);
       void free_not_predicate_op(NotPredOp *op);
@@ -1820,7 +1870,8 @@ namespace LegionRuntime {
       Reservation fence_op_lock;
       Reservation frame_op_lock;
       Reservation deletion_op_lock;
-      Reservation close_op_lock;
+      Reservation inter_close_op_lock;
+      Reservation post_close_op_lock;
       Reservation dynamic_collective_op_lock;
       Reservation future_pred_op_lock;
       Reservation not_pred_op_lock;
@@ -1843,7 +1894,8 @@ namespace LegionRuntime {
       std::deque<FenceOp*>             available_fence_ops;
       std::deque<FrameOp*>             available_frame_ops;
       std::deque<DeletionOp*>          available_deletion_ops;
-      std::deque<CloseOp*>             available_close_ops;
+      std::deque<InterCloseOp*>        available_inter_close_ops;
+      std::deque<PostCloseOp*>         available_post_close_ops;
       std::deque<DynamicCollectiveOp*> available_dynamic_collective_ops;
       std::deque<FuturePredOp*>        available_future_pred_ops;
       std::deque<NotPredOp*>           available_not_pred_ops;
@@ -1958,6 +2010,7 @@ namespace LegionRuntime {
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
+      static bool unsafe_launch;
       static bool resilient_mode;
       static unsigned shutdown_counter;
       static int mpi_rank;

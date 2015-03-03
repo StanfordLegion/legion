@@ -25,6 +25,7 @@ local std = {}
 require('legionlib')
 local c = terralib.includecstring([[
 #include "legion_c.h"
+#include "legion_terra.h"
 #include <stdio.h>
 #include <stdlib.h>
 ]])
@@ -302,9 +303,21 @@ function std.search_constraint(cx, region, constraint, visited, reflexive, symme
 end
 
 function std.check_constraint(cx, constraint)
+  local lhs = constraint.lhs
+  if terralib.issymbol(lhs) then
+    lhs = lhs.type
+  end
+  assert(std.is_region(lhs))
+
+  local rhs = constraint.rhs
+  if terralib.issymbol(rhs) then
+    rhs = rhs.type
+  end
+  assert(std.is_region(rhs))
+
   local constraint = {
-    lhs = constraint.lhs.type,
-    rhs = constraint.rhs.type,
+    lhs = lhs,
+    rhs = rhs,
     op = constraint.op,
   }
   return std.search_constraint(
@@ -343,7 +356,15 @@ function std.meet_privilege(a, b)
   end
 end
 
-local function find_field_privilege(privileges, region_type, field_path)
+function std.is_reduction_op(privilege)
+  return string.sub(privilege, 1, string.len("reduces ")) == "reduces "
+end
+
+function std.get_reduction_op(privilege)
+  return string.sub(privilege, string.len("reduces ") + 1)
+end
+
+local function find_field_privilege(privileges, region_type, field_path, field_type)
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
@@ -364,9 +385,12 @@ local function find_field_privilege(privileges, region_type, field_path)
     return "reads_writes"
   end
 
-  -- FIXME: For now, render all reduction privileges as read-write.
-  if string.sub(field_privilege, 1, string.len("reduces ")) == "reduces " then
-    return "reads_writes"
+  if std.is_reduction_op(field_privilege) then
+    local op = std.get_reduction_op(field_privilege)
+    if not (std.reduction_op_ids[op] and std.reduction_op_ids[op][field_type]) then
+      log.warn("Warning: Unsupported privilege " .. tostring(field_privilege) .. " " .. tostring(field_type) .. " on field " .. tostring(field_path) .. " falling back to reads writes")
+      return "reads_writes"
+    end
   end
 
   return field_privilege
@@ -375,30 +399,55 @@ end
 function std.find_task_privileges(region_type, privileges)
   local grouped_privileges = terralib.newlist()
   local grouped_field_paths = terralib.newlist()
+  local grouped_field_types = terralib.newlist()
 
-  local field_paths, _ = std.flatten_struct_fields(region_type.element_type)
+  local field_paths, field_types = std.flatten_struct_fields(region_type.element_type)
 
   local privilege_index = {}
   local privilege_next_index = 1
-  for _, field_path in ipairs(field_paths) do
-    local privilege = find_field_privilege(privileges, region_type, field_path)
-    if not privilege_index[privilege] then
-      privilege_index[privilege] = privilege_next_index
-      privilege_next_index = privilege_next_index + 1
+  for i, field_path in ipairs(field_paths) do
+    local field_type = field_types[i]
+    local privilege = find_field_privilege(privileges, region_type, field_path, field_type)
+    if privilege ~= "none" then
+      local index = privilege_index[privilege]
+      if not index then
+        index = privilege_next_index
+        privilege_next_index = privilege_next_index + 1
 
-      grouped_privileges:insert(privilege)
-      grouped_field_paths:insert(terralib.newlist())
+        -- Reduction privileges cannot be grouped, because the Legion
+        -- runtime does not know how to handle multi-field reductions.
+        if not std.is_reduction_op(privilege) then
+          privilege_index[privilege] = index
+        end
+
+        grouped_privileges:insert(privilege)
+        grouped_field_paths:insert(terralib.newlist())
+        grouped_field_types:insert(terralib.newlist())
+      end
+
+      grouped_field_paths[index]:insert(field_path)
+      grouped_field_types[index]:insert(field_type)
     end
-
-    grouped_field_paths[privilege_index[privilege]]:insert(field_path)
   end
 
   if #grouped_privileges == 0 then
     grouped_privileges:insert("none")
     grouped_field_paths:insert(terralib.newlist())
+    grouped_field_types:insert(terralib.newlist())
   end
 
-  return grouped_privileges, grouped_field_paths
+  return grouped_privileges, grouped_field_paths, grouped_field_types
+end
+
+function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
+  local privileges_by_field_path = {}
+  for i, privilege in ipairs(privileges) do
+    local field_paths = privilege_field_paths[i]
+    for _, field_path in ipairs(field_paths) do
+      privileges_by_field_path[field_path:hash()] = privilege
+    end
+  end
+  return privileges_by_field_path
 end
 
 local privilege_modes = {
@@ -410,6 +459,9 @@ local privilege_modes = {
 
 function std.privilege_mode(privilege)
   local mode = privilege_modes[privilege]
+  if std.is_reduction_op(privilege) then
+    mode = c.REDUCE
+  end
   assert(mode)
   return mode
 end
@@ -493,6 +545,28 @@ function std.type_eq(a, b, mapping)
         return false
       end
     end
+    return true
+  else
+    return false
+  end
+end
+
+function std.type_maybe_eq(a, b, mapping)
+  -- Returns false ONLY if a and b are provably DIFFERENT types. So
+  --
+  --     type_maybe_eq(ptr(int, a), ptr(int, b))
+  --
+  -- might return true (even if a and b are NOT type_eq) because if
+  -- the regions a and b alias then it is possible for a value to
+  -- inhabit both types.
+
+  if std.type_eq(a, b, mapping) then
+    return true
+  elseif std.is_ptr(a) and std.is_ptr(b) then
+    return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
+  elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
+    a.fspace == b.fspace
+  then
     return true
   else
     return false
@@ -1254,7 +1328,10 @@ end
 std.reads = "reads"
 std.writes = "writes"
 function std.reduces(op)
-  local ops = {["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true}
+  local ops = {
+    ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true,
+    ["max"] = true, ["min"] = true,
+  }
   assert(ops[op])
   return "reduces " .. tostring(op)
 end
@@ -1507,6 +1584,33 @@ end
 -- ## Codegen Helpers
 -- #################
 
+local gen_optimal = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      if [std.quote_binary_op(op, lhs, rhs)] then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
+std.fmax = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+std.fmin = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
 function std.quote_unary_op(op, rhs)
   if op == "-" then
     return `(-[rhs])
@@ -1544,6 +1648,10 @@ function std.quote_binary_op(op, lhs, rhs)
     return `([lhs] and [rhs])
   elseif op == "or" then
     return `([lhs] or [rhs])
+  elseif op == "max" then
+    return `([std.fmax]([lhs], [rhs]))
+  elseif op == "min" then
+    return `([std.fmin]([lhs], [rhs]))
   else
     assert(false, "unknown operator " .. tostring(op))
   end
@@ -1559,6 +1667,64 @@ function std.register_task(task)
   tasks:insert(task)
 end
 
+local reduction_ops = terralib.newlist({
+    {op = "+", name = "plus"},
+    {op = "-", name = "minus"},
+    {op = "*", name = "times"},
+    {op = "/", name = "divide"},
+    {op = "max", name = "max"},
+    {op = "min", name = "min"},
+})
+
+local reduction_types = terralib.newlist({
+    float,
+    double,
+    int32,
+})
+
+std.reduction_op_ids = {}
+
+-- Prefill the table of reduction op IDs.
+do
+  local base_op_id = 101
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(reduction_types) do
+      local op_id = base_op_id
+      base_op_id = base_op_id + 1
+      if not std.reduction_op_ids[op.op] then
+        std.reduction_op_ids[op.op] = {}
+      end
+      std.reduction_op_ids[op.op][op_type] = op_id
+    end
+  end
+end
+
+-- Keep in sync with std.type_size_bucket_type
+function std.type_size_bucket_name(value_type)
+  if value_type == terralib.types.unit then
+    return "_void"
+  elseif terralib.sizeof(value_type) == 4 then
+    return "_uint32"
+  elseif terralib.sizeof(value_type) == 8 then
+    return "_uint64"
+  else
+    return ""
+  end
+end
+
+-- Keep in sync with std.type_size_bucket_name
+function std.type_size_bucket_type(value_type)
+  if value_type == terralib.types.unit then
+    return terralib.types.unit
+  elseif terralib.sizeof(value_type) == 4 then
+    return uint32
+  elseif terralib.sizeof(value_type) == 8 then
+    return uint64
+  else
+    return c.legion_task_result_t
+  end
+end
+
 function std.start(main_task)
   assert(std.is_task(main_task))
   local next_task_id = 100
@@ -1566,17 +1732,14 @@ function std.start(main_task)
     function(task)
       next_task_id = next_task_id + 1
       task:gettaskid():set(next_task_id)
-      local register
-      if task:getdefinition():gettype().returntype == terralib.types.unit then
-        register = c.legion_runtime_register_task_void
-      else
-        register = c.legion_runtime_register_task
-      end
+      local return_type = task:getdefinition():gettype().returntype
+      local result_type_bucket = std.type_size_bucket_name(return_type)
+      local register = c["legion_runtime_register_task" .. result_type_bucket]
       return quote [register](
         [next_task_id],
         c.LOC_PROC,
         true,
-        false,
+        true,
         -1 --[[ AUTO_GENERATE_ID ]],
         c.legion_task_config_options_t {
           leaf = false,
@@ -1587,6 +1750,18 @@ function std.start(main_task)
         [task:getdefinition()])
       end
     end)
+
+  local reduction_registrations = terralib.newlist()
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(reduction_types) do
+      local register = c["register_reduction_" .. op.name .. "_" .. tostring(op_type)]
+      local op_id = std.reduction_op_ids[op.op][op_type]
+      reduction_registrations:insert(
+        quote
+          [register](op_id)
+        end)
+    end
+  end
 
   local args = terralib.newlist()
   for k, v in pairs(rawget(_G, "arg")) do
@@ -1605,8 +1780,9 @@ function std.start(main_task)
   end
 
   local terra main()
-    [argv_setup]
-    [task_registrations]
+    [argv_setup];
+    [task_registrations];
+    [reduction_registrations]
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
     return c.legion_runtime_start(argc, argv, false)
   end

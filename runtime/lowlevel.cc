@@ -67,7 +67,7 @@ namespace LegionRuntime {
     GASNETT_THREADKEY_DEFINE(cur_thread);
     GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
 #ifdef USE_CUDA
-    GASNETT_THREADKEY_DECLARE(gpu_thread);
+    GASNETT_THREADKEY_DECLARE(gpu_thread_ptr);
 #endif
     
 #ifdef USE_CUDA
@@ -128,7 +128,7 @@ namespace LegionRuntime {
         return me->find_enclosing();
       }
 #ifdef USE_CUDA
-      tls_val = gasnett_threadkey_get(gpu_thread);
+      tls_val = gasnett_threadkey_get(gpu_thread_ptr);
       if (tls_val != NULL) {
         GPUProcessor *me = (GPUProcessor*)tls_val;
         return me->find_enclosing();
@@ -1878,6 +1878,10 @@ namespace LegionRuntime {
 
       int subscribe_owner = -1;
       EventSubscribeArgs args;
+      // initialization to make not-as-clever compilers happy
+      args.node = 0;
+      args.event = Event::NO_EVENT;
+      args.previous_subscribe_gen = 0;
       {
 	AutoHSLLock a(mutex);
 
@@ -2419,6 +2423,16 @@ namespace LegionRuntime {
 
       log_barrier.info("barrier adjustment: event=" IDFMT "/%d delta=%d ts=%llx", 
 		       me.id(), barrier_gen, delta, timestamp);
+
+#ifdef DEBUG_BARRIER_REDUCTIONS
+      if(reduce_value_size) {
+        char buffer[129];
+	for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
+	  sprintf(buffer+2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
+	log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
+	                 me.id(), barrier_gen, reduce_value_size, buffer);
+      }
+#endif
 
       if(owner != gasnet_mynode()) {
 	// all adjustments handled by owner node
@@ -3109,6 +3123,10 @@ namespace LegionRuntime {
       bool got_lock = false;
       int lock_request_target = -1;
       LockRequestArgs args;
+      // initialization to make not-as-clever compilers happy
+      args.node = 0;
+      args.lock = Reservation::NO_RESERVATION;
+      args.mode = 0;
 
       {
 	AutoHSLLock a(mutex); // hold mutex on lock while we check things
@@ -3270,6 +3288,9 @@ namespace LegionRuntime {
 
       int release_target = -1;
       LockReleaseArgs r_args;
+      // initialization to make not-as-clever compilers happy
+      r_args.node = 0;
+      r_args.lock = Reservation::NO_RESERVATION;
 
       int grant_target = -1;
       LockGrantArgs g_args;
@@ -4137,6 +4158,7 @@ namespace LegionRuntime {
 	red_fold = true;
       } else {
 	assert(args.redop_id != 0);
+	return;
       }
 
       log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%d, size=%zd, redop=%d(%s), seq=%d/%d, event=" IDFMT "/%d",
@@ -5047,6 +5069,7 @@ namespace LegionRuntime {
 	payload->field_size(i) = field_sizes[i];
 
       CreateInstanceArgs args;
+      args.srcptr = 0; // gcc 4.4.7 wants this!?
       args.m = me;
       args.r = r;
       args.parent_inst = parent_inst;
@@ -6251,7 +6274,7 @@ namespace LegionRuntime {
       }
       // maybe a GPU thread?
 #ifdef USE_CUDA
-      ptr = gasnett_threadkey_get(gpu_thread);
+      ptr = gasnett_threadkey_get(gpu_thread_ptr);
       if(ptr != 0) {
 	//assert(0);
 	//printf("oh, good - we're a gpu thread - we'll spin for now\n");
@@ -8640,7 +8663,11 @@ namespace LegionRuntime {
       : num_local_procs(_num_local_procs)
     {
       valid = false;
-      
+
+#ifdef __MACH__
+      //printf("thread affinity not supported on Mac OS X\n");
+      return;
+#else
       cpu_set_t cset;
       int ret = sched_getaffinity(0, sizeof(cset), &cset);
       if(ret < 0) {
@@ -8784,6 +8811,7 @@ namespace LegionRuntime {
 	printf("\n");
       }
 #endif
+#endif
     }
 
     // binds a thread to the right set of cores based (-1 = not a local proc)
@@ -8794,6 +8822,7 @@ namespace LegionRuntime {
 	return;
       }
 
+#ifndef __MACH__
       if((core_id >= 0) && (core_id < num_local_procs)) {
 	int cpu_id = local_proc_assignments[core_id];
 
@@ -8814,6 +8843,7 @@ namespace LegionRuntime {
 	else
 	  CHECK_PTHREAD( pthread_setaffinity_np(pthread_self(), sizeof(leftover_procs), &leftover_procs) );
       }
+#endif
     }
 
 #ifdef DEADLOCK_TRACE
@@ -9165,6 +9195,7 @@ namespace LegionRuntime {
       size_t gasnet_mem_size_in_mb = 256;
       size_t cpu_mem_size_in_mb = 512;
       size_t reg_mem_size_in_mb = 0;
+      size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
       stack_size_in_mb = 2;
@@ -9209,6 +9240,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:gsize", gasnet_mem_size_in_mb);
 	INT_ARG("-ll:csize", cpu_mem_size_in_mb);
 	INT_ARG("-ll:rsize", reg_mem_size_in_mb);
+        INT_ARG("-ll:dsize", disk_mem_size_in_mb);
         INT_ARG("-ll:stack", stack_size_in_mb);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
@@ -9437,7 +9469,8 @@ namespace LegionRuntime {
       announce_data.node_id = gasnet_mynode();
       announce_data.num_procs = num_local_cpus + num_util_procs;
       announce_data.num_memories = (1 + 
-				    (reg_mem_size_in_mb > 0 ? 1 : 0));
+				    (reg_mem_size_in_mb > 0 ? 1 : 0) +
+				    (disk_mem_size_in_mb > 0 ? 1 : 0));
 #ifdef USE_CUDA
       announce_data.num_procs += num_local_gpus;
       announce_data.num_memories += 2 * num_local_gpus;
@@ -9563,6 +9596,23 @@ namespace LegionRuntime {
       } else
 	regmem = 0;
 
+      // create local disk memory
+      DiskMemory *diskmem;
+      if(disk_mem_size_in_mb > 0) {
+        diskmem = new DiskMemory(ID(ID::ID_MEMORY,
+                                    gasnet_mynode(),
+                                    n->memories.size(), 0).convert<Memory>(),
+                                 disk_mem_size_in_mb << 20,
+                                 "disk_file.tmp");
+        n->memories.push_back(diskmem);
+        adata[apos++] = NODE_ANNOUNCE_MEM;
+        adata[apos++] = diskmem->me.id;
+        adata[apos++] = Memory::DISK_MEM;
+        adata[apos++] = diskmem->size;
+        adata[apos++] = 0;
+      } else
+        diskmem = 0;
+
       // list affinities between local CPUs / memories
       for(std::vector<UtilityProcessor *>::iterator it = local_util_procs.begin();
 	  it != local_util_procs.end();
@@ -9582,6 +9632,14 @@ namespace LegionRuntime {
 	  adata[apos++] = 80;  // "large" bandwidth
 	  adata[apos++] = 5;    // "small" latency
 	}
+
+        if(disk_mem_size_in_mb > 0) {
+          adata[apos++] = NODE_ANNOUNCE_PMA;
+          adata[apos++] = (*it)->me.id;
+          adata[apos++] = diskmem->me.id;
+          adata[apos++] = 5;  // "low" bandwidth
+          adata[apos++] = 100;  // "high" latency
+        }
 
 	if(global_memory) {
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
@@ -9619,6 +9677,14 @@ namespace LegionRuntime {
 	  adata[apos++] = 10;  // "lower" bandwidth
 	  adata[apos++] = 50;    // "higher" latency
 	}
+
+        if(disk_mem_size_in_mb > 0) {
+          adata[apos++] = NODE_ANNOUNCE_PMA;
+          adata[apos++] = (*it)->me.id;
+          adata[apos++] = diskmem->me.id;
+          adata[apos++] = 5;  // "low" bandwidth
+          adata[apos++] = 100;  // "high" latency
+        }
       }
 
       if((cpu_mem_size_in_mb > 0) && global_memory) {
@@ -9627,6 +9693,14 @@ namespace LegionRuntime {
 	adata[apos++] = global_memory->me.id;
 	adata[apos++] = 30;  // "lower" bandwidth
 	adata[apos++] = 25;    // "higher" latency
+      }
+
+      if((disk_mem_size_in_mb > 0) && (cpu_mem_size_in_mb > 0)) {
+        adata[apos++] = NODE_ANNOUNCE_MMA;
+        adata[apos++] = cpumem->me.id;
+        adata[apos++] = diskmem->me.id;
+        adata[apos++] = 15;    // "low" bandwidth
+        adata[apos++] = 50;    // "high" latency
       }
 
 #ifdef USE_CUDA
@@ -9759,7 +9833,7 @@ namespace LegionRuntime {
 				       PAYLOAD_COPY);
 
       // wait until we hear from everyone else?
-      while(announcements_received < (unsigned)(gasnet_nodes() - 1))
+      while((int)announcements_received < (int)(gasnet_nodes() - 1))
 	do_some_polling();
 
       log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
@@ -10152,7 +10226,8 @@ namespace LegionRuntime {
   {
     char base_buffer[1024];
     int pre_len = sprintf(base_buffer, "[%d - %lx] {%d}{%s}: ",
-            gasnet_mynode(), pthread_self(), level, Logger::get_categories_by_id()[category].c_str());
+			  gasnet_mynode(), (unsigned long)pthread_self(),
+			  level, Logger::get_categories_by_id()[category].c_str());
     int full_len = vsnprintf(base_buffer+pre_len, 1023-pre_len, fmt, args);
     assert(full_len >= 0);
     char *buffer;
@@ -10163,8 +10238,8 @@ namespace LegionRuntime {
     } else { 
       buffer = (char*)malloc(pre_len+full_len+2);
       sprintf(buffer, "[%d - %lx] {%d}{%s}: ",
-            gasnet_mynode(), pthread_self(), level, 
-            Logger::get_categories_by_id()[category].c_str());
+	      gasnet_mynode(), (unsigned long)pthread_self(), level, 
+	      Logger::get_categories_by_id()[category].c_str());
       vsnprintf(buffer+pre_len, full_len+1, fmt, args);
       allocated = true;
     }

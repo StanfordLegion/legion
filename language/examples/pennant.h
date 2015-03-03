@@ -41,6 +41,7 @@ void generate_mesh_raw(
   double *pointpos_x, size_t *pointpos_x_size,
   double *pointpos_y, size_t *pointpos_y_size,
   int64_t *pointcolors, size_t *pointcolors_size,
+  uint64_t *pointmcolors, size_t *pointmcolors_size,
   int64_t *zonestart, size_t *zonestart_size,
   int64_t *zonesize, size_t *zonesize_size,
   int64_t *zonepoints, size_t *zonepoints_size,

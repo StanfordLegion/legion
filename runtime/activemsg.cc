@@ -92,7 +92,8 @@ public:
   virtual ~PayloadSource(void) { }
 public:
   virtual void copy_data(void *dest) = 0;
-  virtual void *get_contig_pointer(void) { return 0; }
+  virtual void *get_contig_pointer(void) { assert(false); return 0; }
+  virtual int get_payload_mode(void) { assert(false); return PAYLOAD_NONE; }
 };
 
 class ContiguousPayload : public PayloadSource {
@@ -101,6 +102,7 @@ public:
   virtual ~ContiguousPayload(void) { }
   virtual void copy_data(void *dest);
   virtual void *get_contig_pointer(void) { return srcptr; }
+  virtual int get_payload_mode(void) { return mode; }
 protected:
   void *srcptr;
   size_t size;
@@ -137,6 +139,7 @@ struct OutgoingMessage {
 
   void set_payload(PayloadSource *_payload, size_t _payload_size,
 		   int _payload_mode, void *_dstptr = 0);
+  inline void set_payload_empty(void) { payload_mode = PAYLOAD_EMPTY; }
   void reserve_srcdata(void);
 #if 0
   void set_payload(void *_payload, size_t _payload_size,
@@ -1212,20 +1215,12 @@ void OutgoingMessage::set_payload(PayloadSource *_payload_src,
 {
   // die if a payload has already been attached
   assert(payload_mode == PAYLOAD_NONE);
-
-  // no payload?  easy case
-  if(_payload_mode == PAYLOAD_NONE)
-    return;
-
-  // empty payload?
-  if(_payload_size == 0) {
-    payload_mode = PAYLOAD_EMPTY;
-    return;
-  }
+  // We should never be called if either of these are true
+  assert(_payload_mode != PAYLOAD_NONE);
+  assert(_payload_size > 0);
 
   // payload must be non-empty, and fit in the LMB unless we have a dstptr for it
   log_sdp.info("setting payload (%zd, %d)", _payload_size, _payload_mode);
-  assert(_payload_size > 0);
   assert((_dstptr != 0) || (_payload_size <= lmb_size));
 
   // just copy down everything - we won't attempt to grab a srcptr until
@@ -1303,6 +1298,7 @@ void OutgoingMessage::reserve_srcdata(void)
     if(payload_src->get_contig_pointer() &&
        (payload_mode != PAYLOAD_COPY)) {
       payload = payload_src->get_contig_pointer();
+      payload_mode = payload_src->get_payload_mode();
       delete payload_src;
       payload_src = 0;
     } else {
@@ -1689,9 +1685,15 @@ void enqueue_message(gasnet_node_t target, int msgid,
     payload_mode = PAYLOAD_KEEPREG;
 
   if (payload_mode != PAYLOAD_NONE)
-    hdr->set_payload(new ContiguousPayload((void *)payload, payload_size, payload_mode),
-                     payload_size, payload_mode,
-                     dstptr);
+  {
+    if (payload_size > 0) {
+      PayloadSource *payload_src = 
+        new ContiguousPayload((void *)payload, payload_size, payload_mode);
+      hdr->set_payload(payload_src, payload_size, payload_mode, dstptr);
+    } else {
+      hdr->set_payload_empty();
+    }
+  }
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
@@ -1709,10 +1711,16 @@ void enqueue_message(gasnet_node_t target, int msgid,
 					     args);
 
   if (payload_mode != PAYLOAD_NONE)
-    hdr->set_payload(new TwoDPayload(payload, line_size, 
-                                     line_count, line_stride, payload_mode),
-                                     line_size * line_count, payload_mode, dstptr);
-
+  {
+    size_t payload_size = line_size * line_count;
+    if (payload_size > 0) {
+      PayloadSource *payload_src = new TwoDPayload(payload, line_size, 
+                                       line_count, line_stride, payload_mode);
+      hdr->set_payload(payload_src, payload_size, payload_mode, dstptr);
+    } else {
+      hdr->set_payload_empty();
+    }
+  }
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
@@ -1728,9 +1736,14 @@ void enqueue_message(gasnet_node_t target, int msgid,
   					     args);
 
   if (payload_mode != PAYLOAD_NONE)
-    hdr->set_payload(new SpanPayload(spans, payload_size, payload_mode),
-                     payload_size, payload_mode,
-                     dstptr);
+  {
+    if (payload_size > 0) {
+      PayloadSource *payload_src = new SpanPayload(spans, payload_size, payload_mode);
+      hdr->set_payload(payload_src, payload_size, payload_mode, dstptr);
+    } else {
+      hdr->set_payload_empty();
+    }
+  }
 
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }

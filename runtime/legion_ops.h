@@ -67,6 +67,7 @@ namespace LegionRuntime {
       inline bool is_tracing(void) const { return tracing; }
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
+      inline LegionTrace* get_trace(void) const { return trace; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -129,6 +130,9 @@ namespace LegionRuntime {
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      // This is a special helper method for tracing which
+      // needs to know explicitly about close operations
+      virtual bool is_close_op(void) const { return false; }
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -154,9 +158,8 @@ namespace LegionRuntime {
       // For operations that need to trigger commit early,
       // then they should use this call to avoid races
       // which could result in trigger commit being
-      // called twice.  It will return true if the
-      // caller is allowed to call trigger commit.
-      bool request_early_commit(void);
+      // called twice.
+      void request_early_commit(void);
     public:
       // Everything below here is implementation
       //
@@ -175,19 +178,15 @@ namespace LegionRuntime {
       // Return true if the operation has committed and can be 
       // pruned out of the list of mapping dependences.
       bool register_dependence(Operation *target, GenerationID target_gen);
-      // A more general case of the one above that gives information about
-      // the two regions involved in the dependence and the dependence type.
-      bool register_dependence(unsigned idx, Operation *target, 
-                               GenerationID target_gen, unsigned target_idx,
-                               DependenceType dtype);
-      // This is a special case of register dependence that will
-      // also mark that we can verify a region produced by an earlier
-      // operation so that operation can commit earlier.
+      // This function call does everything that the previous one does, but
+      // it also records information about the regions involved and how
+      // whether or not they will be validated by the consuming operation.
       // Return true if the operation has committed and can be pruned
       // out of the list of dependences.
       bool register_region_dependence(unsigned idx, Operation *target,
                               GenerationID target_gen, unsigned target_idx,
-                              DependenceType dtype);
+                              DependenceType dtype, bool validates,
+                              const FieldMask &dependent_mask);
       // This method is invoked by one of the two above to perform
       // the registration.  Returns true if we have not yet commited
       // and should therefore be notified once the dependent operation
@@ -273,6 +272,8 @@ namespace LegionRuntime {
       bool trigger_complete_invoked;
       // Track whether trigger_commit has already been invoked
       bool trigger_commit_invoked;
+      // Keep track of whether an eary commit was requested
+      bool early_commit_request;
       // Indicate whether we are responsible for
       // triggering the completion event for this operation
       bool need_completion_trigger;
@@ -514,6 +515,12 @@ namespace LegionRuntime {
      */
     class FenceOp : public Operation {
     public:
+      enum FenceKind {
+        MAPPING_FENCE,
+        EXECUTION_FENCE,
+        MIXED_FENCE,
+      };
+    public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
       FenceOp(Runtime *rt);
@@ -522,7 +529,7 @@ namespace LegionRuntime {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      void initialize(SingleTask *ctx, bool mapping);
+      void initialize(SingleTask *ctx, FenceKind kind);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -532,7 +539,7 @@ namespace LegionRuntime {
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
     protected:
-      bool mapping_fence;
+      FenceKind fence_kind;
     };
 
     /**
@@ -543,7 +550,7 @@ namespace LegionRuntime {
      * number of outstanding operations in flight in a context
      * at any given time through the mapper interface.
      */
-    class FrameOp : public Operation {
+    class FrameOp : public FenceOp {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
@@ -559,7 +566,6 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
-      virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
     };
@@ -625,8 +631,9 @@ namespace LegionRuntime {
      * \class CloseOp
      * Close operations are only visible internally inside
      * the runtime and are issued to help close up the 
-     * physical region tree states to an existing physical
-     * instance that a task context initially mapped.
+     * physical region tree. There are two types of close
+     * operations that both inherit from this class:
+     * InterCloseOp and PostCloseOp.
      */
     class CloseOp : public Operation {
     public:
@@ -638,6 +645,91 @@ namespace LegionRuntime {
     public:
       CloseOp& operator=(const CloseOp &rhs);
     public:
+      void activate_close(void);
+      void deactivate_close(void);
+      void initialize_close(SingleTask *ctx,
+                            const RegionRequirement &req, bool track);
+      void perform_logging(void);
+    public:
+      // For recording trace dependences
+    public:
+      virtual void activate(void) = 0;
+      virtual void deactivate(void) = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual bool is_close_op(void) const { return true; }
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void deferred_complete(void);
+    protected:
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+    };
+
+    /**
+     * \class InterCloseOp
+     * Intermediate close operations are issued by the runtime
+     * for closing up region trees as part of the normal execution
+     * of an application.
+     */
+    class InterCloseOp : public CloseOp {
+    public:
+      InterCloseOp(Runtime *runtime);
+      InterCloseOp(const InterCloseOp &rhs);
+      virtual ~InterCloseOp(void);
+    public:
+      InterCloseOp& operator=(const InterCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const RegionRequirement &req,
+                      const std::set<Color> &targets, 
+                      bool leave_open, int next_child, LegionTrace *trace,
+                      int close_idx, const FieldMask &close_mask,
+                      Operation *create_op);
+    public:
+      const RegionRequirement& get_region_requirement(void) const;
+      const std::set<Color>& get_target_children(void) const;
+    public:
+      void record_trace_dependence(Operation *target, GenerationID target_gen,
+                                   int target_idx, int source_idx, 
+                                   DependenceType dtype,
+                                   const FieldMask &dependent_mask);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual bool trigger_execution(void);
+    protected:
+      std::set<Color> target_children;
+      bool leave_open;
+      int next_child;
+    protected:
+      // These things are really only needed for tracing
+      // The source index from the original 
+      // operation that generated this close operation
+      int close_idx;
+      // The field mask for the fields we are closing
+      FieldMask close_mask;
+      // Information about the operation that generated
+      // this close operation so we don't register dependences on it
+      Operation *create_op;
+      GenerationID create_gen;
+    };
+
+    /**
+     * \class PostCloseOp
+     * Post close operations are issued by the runtime after a
+     * task has finished executing and the region tree contexts
+     * need to be closed up to the original physical instance
+     * that was mapped by the parent task.
+     */
+    class PostCloseOp : public CloseOp {
+    public:
+      PostCloseOp(Runtime *runtime);
+      PostCloseOp(const PostCloseOp &rhs);
+      virtual ~PostCloseOp(void);
+    public:
+      PostCloseOp& operator=(const PostCloseOp &rhs);
+    public:
       void initialize(SingleTask *ctx, unsigned index, 
                       const InstanceRef &reference);
     public:
@@ -645,16 +737,9 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
-      virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-      virtual void deferred_complete(void);
     protected:
-      RegionRequirement requirement;
       InstanceRef reference;
-      RegionTreePath privilege_path;
-#ifdef DEBUG_HIGH_LEVEL
-      unsigned parent_index;
-#endif
     };
 
     /**

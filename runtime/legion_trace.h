@@ -40,15 +40,18 @@ namespace LegionRuntime {
           : operation_idx(idx), prev_idx(-1), next_idx(-1),
             validates(false), dtype(TRUE_DEPENDENCE) { }
         DependenceRecord(int op_idx, int pidx, int nidx,
-                         bool val, DependenceType d)
+                         bool val, DependenceType d,
+                         const FieldMask &m)
           : operation_idx(op_idx), prev_idx(pidx), 
-            next_idx(nidx), validates(val), dtype(d) { }
+            next_idx(nidx), validates(val), dtype(d),
+            dependent_mask(m) { }
       public:
         int operation_idx;
         int prev_idx;
         int next_idx;
         bool validates;
         DependenceType dtype;
+        FieldMask dependent_mask;
       };
     public:
       LegionTrace(TraceID tid, SingleTask *ctx);
@@ -69,23 +72,29 @@ namespace LegionRuntime {
       void register_operation(Operation *op, GenerationID gen);
       void record_dependence(Operation *target, GenerationID target_gen,
                              Operation *source, GenerationID source_gen);
-      void record_dependence(Operation *target, GenerationID target_gen,
-                             Operation *source, GenerationID source_gen,
-                             unsigned target_idx, unsigned source_idx,
-                             DependenceType dtype);
       void record_region_dependence(Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
-                                    DependenceType dtype);
+                                    DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask);
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      // Close operations have a nasty interaction with traces because
+      // we can generate different sets of close operations each time we
+      // run the trace depending on the state of the logical region tree.
+      // Therefore, we keep track of closes done when capturing the trace
+      // record transitive dependences on the other operations in the
+      // trace that we would have interfered with had the close operations
+      // not been necessary.
+      std::map<std::pair<Operation*,GenerationID>,
+               LegionVector<DependenceRecord>::aligned> close_dependences;
     protected:
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
       // it dependens on and whether it is a validates the region
-      std::vector<std::vector<DependenceRecord> > dependences;
+      std::deque<LegionVector<DependenceRecord>::aligned> dependences;
     protected:
       const TraceID tid;
       SingleTask *const ctx;

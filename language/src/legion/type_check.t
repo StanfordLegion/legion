@@ -222,7 +222,6 @@ function type_check.expr_method_call(cx, node)
   }
 end
 
-
 function type_check.expr_call(cx, node)
   local fn = type_check.expr(cx, node.fn)
   local args = node.args:map(
@@ -720,6 +719,8 @@ local binary_ops = {
   ["~="] = binary_equality("~="),
   ["and"] = binary_op_type("and"),
   ["or"] = binary_op_type("or"),
+  ["max"] = binary_op_type("max"),
+  ["min"] = binary_op_type("min"),
 }
 
 function type_check.expr_binary(cx, node)
@@ -786,11 +787,11 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.ExprRawContext) then
     return type_check.expr_raw_context(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawFields) then return
-    type_check.expr_raw_fields(cx, node)
+  elseif node:is(ast.specialized.ExprRawFields) then
+    return type_check.expr_raw_fields(cx, node)
 
-  elseif node:is(ast.specialized.ExprRawPhysical) then return
-    type_check.expr_raw_physical(cx, node)
+  elseif node:is(ast.specialized.ExprRawPhysical) then
+    return type_check.expr_raw_physical(cx, node)
 
   elseif node:is(ast.specialized.ExprRawRuntime) then
     return type_check.expr_raw_runtime(cx, node)
@@ -907,6 +908,7 @@ function type_check.stat_for_num(cx, node)
     symbol = node.symbol,
     values = values,
     block = type_check.block(cx, node.block),
+    parallel = node.parallel,
   }
 end
 

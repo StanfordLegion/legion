@@ -494,6 +494,16 @@ namespace LegionRuntime {
       unsigned long long result = (((unsigned long long) spec.tv_sec) * 1000000) + (((unsigned long long)spec.tv_nsec) / 1000);
       return result;
     }
+    static inline unsigned long long get_current_time_in_nanos(void)
+    {
+      mach_timespec_t spec;
+      clock_serv_t cclock;
+      host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+      clock_get_time(cclock, &spec);
+      mach_port_deallocate(mach_task_self(), cclock);
+      unsigned long long result = (((unsigned long long) spec.tv_sec) * 1000000000) + ((unsigned long long)spec.tv_nsec);
+      return result;
+    }
   private:
     double get_diff_us(mach_timespec_t &start, mach_timespec_t &stop)
     {

@@ -539,7 +539,8 @@ namespace LegionRuntime {
           temporary_mappings[key] = MemoizedMapping(task->regions.size());
           finder = temporary_mappings.find(key);
         }
-        finder->second.rankings[index] = ranking;
+        if (index < finder->second.rankings.size())
+          finder->second.rankings[index] = ranking;
       }
 
       //------------------------------------------------------------------------
@@ -555,7 +556,8 @@ namespace LegionRuntime {
           temporary_mappings[key] = MemoizedMapping(task->regions.size());
           finder = temporary_mappings.find(key);
         }
-        finder->second.chosen[index] = result;
+        if (index < finder->second.chosen.size())
+          finder->second.chosen[index] = result;
       }
       
       //------------------------------------------------------------------------

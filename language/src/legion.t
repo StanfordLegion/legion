@@ -42,8 +42,7 @@ function compile(lex)
     local env = environment_function()
     local ast = specialize.entry(env, node)
     ast = type_check.entry(ast)
-    -- FIXME: fix and re-enable
-    -- ast = optimize_loops.entry(ast)
+    ast = optimize_loops.entry(ast)
     ast = codegen.entry(ast)
     return ast
   end
@@ -60,11 +59,15 @@ local language = {
   },
   keywords = {
     "__context",
+    "__demand",
     "__fields",
+    "__parallel",
     "__physical",
     "__runtime",
     "dynamic_cast",
     "isnull",
+    "max",
+    "min",
     "new",
     "null",
     "partition",

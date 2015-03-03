@@ -25,11 +25,13 @@ function legion:import_types()
     end
 end
 
-function legion:register_terra_task_void(task_fn, task_id, proc, single, index, name)
-  local opt = { leaf = false, inner = false, idempotent = false }
+function legion:register_terra_task_void(task_fn, task_id, proc, single, index, vid, opt, name)
+  vid = vid or -1
+  opt = opt or { leaf = false, inner = false, idempotent = false }
+  name = name or task_fn.name
   local ptr = task_fn:getdefinitions()[1]:getpointer()
   legion_c.legion_runtime_register_task_void(task_id, proc, single, index,
-                                             -1, opt, name, ptr)
+                                             vid, opt, name, ptr)
 end
 
 function legion:set_terra_registration_callback(func)

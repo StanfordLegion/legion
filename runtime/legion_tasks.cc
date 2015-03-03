@@ -22,6 +22,15 @@
 #include "legion_profiling.h"
 #include <algorithm>
 
+// A little bit of a hack for now for profiling
+// GPU tasks, this will go away with the new 
+// profiling interface
+#if defined(LEGION_LOGGING) || defined(LEGION_PROF)
+#ifdef USE_CUDA
+#include "cuda_runtime.h"
+#endif
+#endif
+
 #define PRINT_REG(reg) (reg).index_space.id,(reg).field_space.id, (reg).tree_id
 
 namespace LegionRuntime {
@@ -1967,11 +1976,13 @@ namespace LegionRuntime {
       current_trace = NULL;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
+      pending_frames = 0;
       // Set some of the default values for a context
       max_window_size = Runtime::initial_task_window_size;
       hysteresis_percentage = Runtime::initial_task_window_hysteresis;
       max_outstanding_frames = -1;
       min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
+      min_frames_to_schedule = 0;
       max_directory_size = Runtime::initial_directory_size;
     }
 
@@ -2026,6 +2037,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
+      assert(pending_frames == 0);
 #endif
       if (context.exists())
         runtime->free_context(this);
@@ -2226,6 +2238,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& SingleTask::get_physical_regions(void) 
+                                                                          const
+    //--------------------------------------------------------------------------
+    {
+      return physical_regions;
+    }
+
+    //--------------------------------------------------------------------------
     UserEvent SingleTask::begin_premapping(RegionTreeID tid, 
                                            const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -2398,6 +2418,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
+      // Only do this if we are not tracing by frames
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2408,7 +2429,8 @@ namespace LegionRuntime {
         // Put this in the list of child operations that need to map
         executing_children.insert(op);
         // Check to see if we have too many active children
-        if ((max_window_size > 0) && 
+        // Only do this if we are not tracing frames
+        if ((max_outstanding_frames <= 0) && (max_window_size > 0) && 
             (executing_children.size() >= (size_t)max_window_size))
         {
           // Check to see if we have an active wait, if not make
@@ -2423,7 +2445,7 @@ namespace LegionRuntime {
       }
       // See if we need to preempt this task because it has exceeded
       // the maximum number of outstanding operations within its context
-      if (valid_wait_event && !window_wait.has_triggered())
+      if (wait_event.exists() && !wait_event.has_triggered())
       {
 #ifdef LEGION_LOGGING
         LegionLogging::log_timing_event(executing_processor,
@@ -2773,9 +2795,16 @@ namespace LegionRuntime {
     void SingleTask::increment_outstanding(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
+      assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
+#endif
       AutoLock o_lock(op_lock);
       if ((outstanding_subtasks == 0) && 
-          (pending_subtasks < min_tasks_to_schedule))
+          (((min_tasks_to_schedule > 0) && 
+            (pending_subtasks < min_tasks_to_schedule)) ||
+           ((min_frames_to_schedule > 0) &&
+            (pending_frames < min_frames_to_schedule))))
         runtime->activate_context(this);
       outstanding_subtasks++;
     }
@@ -2784,13 +2813,20 @@ namespace LegionRuntime {
     void SingleTask::decrement_outstanding(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
+      assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
+#endif
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(outstanding_subtasks > 0);
 #endif
       outstanding_subtasks--;
       if ((outstanding_subtasks == 0) && 
-          (pending_subtasks < min_tasks_to_schedule))
+          (((min_tasks_to_schedule > 0) &&
+            (pending_subtasks < min_tasks_to_schedule)) ||
+           ((min_frames_to_schedule > 0) &&
+            (pending_frames < min_frames_to_schedule))))
         runtime->deactivate_context(this);
     }
 
@@ -2798,6 +2834,9 @@ namespace LegionRuntime {
     void SingleTask::increment_pending(void)
     //--------------------------------------------------------------------------
     {
+      // Don't need to do this if we are scheduling based on mapped frames
+      if (min_tasks_to_schedule == 0)
+        return;
       AutoLock o_lock(op_lock);
       pending_subtasks++;
       if ((outstanding_subtasks > 0) &&
@@ -2809,6 +2848,9 @@ namespace LegionRuntime {
     void SingleTask::decrement_pending(void)
     //--------------------------------------------------------------------------
     {
+      // Don't need to do this if we are schedule based on mapped frames
+      if (min_tasks_to_schedule == 0)
+        return;
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(pending_subtasks > 0);
@@ -2817,6 +2859,37 @@ namespace LegionRuntime {
           (pending_subtasks == min_tasks_to_schedule))
         runtime->activate_context(this);
       pending_subtasks--;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::increment_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to do this if we are scheduling based on mapped tasks
+      if (min_frames_to_schedule == 0)
+        return;
+      AutoLock o_lock(op_lock);
+      pending_frames++;
+      if ((outstanding_subtasks > 0) &&
+          (pending_frames == min_frames_to_schedule))
+        runtime->deactivate_context(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::decrement_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to do this if we are scheduling based on mapped tasks
+      if (min_frames_to_schedule == 0)
+        return;
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(pending_frames > 0);
+#endif
+      if ((outstanding_subtasks > 0) &&
+          (pending_frames == min_frames_to_schedule))
+        runtime->activate_context(this);
+      pending_frames--;
     }
 
     //--------------------------------------------------------------------------
@@ -4122,6 +4195,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    RegionTreeContext SingleTask::find_enclosing_physical_context(
+                                                           LogicalRegion parent)
+    //--------------------------------------------------------------------------
+    {
+      // Need to hold the lock when accessing these data structures
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(regions.size() == virtual_mapped.size());
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if ((regions[idx].region == parent) && !region_deleted[idx])
+        {
+          if (!virtual_mapped[idx])
+            return context;
+          else
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(idx < enclosing_physical_contexts.size());
+#endif
+            return enclosing_physical_contexts[idx];
+          }
+        }
+      }
+      // If we get here that means that our privilege checking framework
+      // is failing to catch a case where we don't actually have privileges.
+      assert(false);
+      return RegionTreeContext();
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
@@ -4723,7 +4827,27 @@ namespace LegionRuntime {
           // Request a context from the runtime
           runtime->allocate_context(this);
           // Have the mapper configure the properties of the context
+          this->min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
+          this->min_frames_to_schedule = 0;
           runtime->invoke_mapper_configure_context(current_proc, this);
+          // Do a little bit of checking on the output.  Make
+          // sure that we only set one of the two cases so we
+          // are counting by frames or by outstanding tasks.
+          if ((min_tasks_to_schedule == 0) && (min_frames_to_schedule == 0))
+          {
+            log_task(LEVEL_ERROR,"Illegal output from configure context call: "
+                     "one of 'min_tasks_to_schedule' and "
+                     "'min_frames_to_schedule' must be non-zero for "
+                     "task %s (ID %lld)", variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_CONTEXT_CONFIGURATION);
+          }
+          // If we're counting by frames set min_tasks_to_schedule to zero
+          if (min_frames_to_schedule > 0)
+            min_tasks_to_schedule = 0;
+          // otherwise we know min_frames_to_schedule is zero
 #ifdef DEBUG_HIGH_LEVEL
           assert(context.exists());
           runtime->forest->check_context_state(context);
@@ -5017,7 +5141,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(local_instances[idx].has_ref());
 #endif
-            CloseOp *close_op = runtime->get_available_close_op();    
+            PostCloseOp *close_op = runtime->get_available_post_close_op();
             close_op->initialize(this, idx, local_instances[idx]);
             runtime->add_to_dependence_queue(executing_processor, close_op);
           }
@@ -5048,15 +5172,22 @@ namespace LegionRuntime {
       }
       local_instances.clear();
 
+      // Handle the future result
+      handle_future(res, res_size, owned); 
+
+      // If this is a GPU processor and we are profiling, 
+      // synchronize the stream for now
+#if defined(LEGION_LOGGING) || defined(LEGION_PROF)
+#ifdef USE_CUDA
+      if (executing_processor.kind() == Processor::TOC_PROC) 
+        cudaStreamSynchronize(0);
+#endif
+#endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       get_unique_task_id(),
                                       END_EXECUTION);
 #endif
-
-      // Handle the future result
-      handle_future(res, res_size, owned); 
-
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_END_EXECUTION);
 #endif
@@ -5142,10 +5273,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& SingleTask::get_physical_regions() const
+    void SingleTask::unmap_all_mapped_regions(void)
     //--------------------------------------------------------------------------
     {
-      return physical_regions;
+      // Unmap any of our original physical instances
+      for (std::vector<PhysicalRegion>::const_iterator it = 
+            physical_regions.begin(); it != physical_regions.end(); it++)
+      {
+        if (it->impl->is_mapped())
+          it->impl->unmap_region();
+      }
+      // Also unmap any of our inline mapped physical regions
+      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked::
+            const_iterator it = inline_regions.begin();
+            it != inline_regions.end(); it++)
+      {
+        if (it->impl->is_mapped())
+          it->impl->unmap_region();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -6262,37 +6407,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext IndividualTask::find_enclosing_physical_context(
-                                                          LogicalRegion parent)
-    //--------------------------------------------------------------------------
-    {
-      // Need to hold the lock when accessing these data structures
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == virtual_mapped.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if ((regions[idx].region == parent) && !region_deleted[idx])
-        {
-          if (!virtual_mapped[idx])
-            return context;
-          else
-          {
-#ifdef DEBUG_HIGH_LEVEL
-            assert(parent_ctx != NULL);
-#endif
-            return enclosing_physical_contexts[idx];
-          }
-        }
-      }
-      // If we get here that means that our privilege checking framework
-      // is failing to catch a case where we don't actually have privileges.
-      assert(false);
-      return RegionTreeContext();
-    }
-
-    //--------------------------------------------------------------------------
     RemoteTask* IndividualTask::find_outermost_physical_context(void)
     //--------------------------------------------------------------------------
     {
@@ -7029,38 +7143,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return POINT_TASK_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreeContext PointTask::find_enclosing_physical_context(
-                                                          LogicalRegion parent)
-    //--------------------------------------------------------------------------
-    {
-      // Need to hold the lock when accessing these data structures
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == virtual_mapped.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if ((regions[idx].region == parent) && !region_deleted[idx])
-        {
-          if (!virtual_mapped[idx])
-            return context;
-          else
-          {
-#ifdef DEBUG_HIGH_LEVEL
-            assert(parent_ctx != NULL);
-#endif
-            return parent_ctx->find_enclosing_physical_context(
-                                                regions[idx].parent);
-          }
-        }
-      }
-      // If we get here that means that our privilege checking framework
-      // is failing to catch a case where we don't actually have privileges.
-      assert(false);
-      return RegionTreeContext();
     }
 
     //--------------------------------------------------------------------------

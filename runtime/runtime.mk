@@ -36,8 +36,6 @@ GASNET ?= $(GASNET_ROOT)
 else
 GASNET ?= $(LG_RT_DIR)/gasnet/release
 endif
-# newer versions of gasnet seem to need this
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 
 # Handle some of the common machines we frequent
 
@@ -47,27 +45,22 @@ MARCH ?= native
 ifeq ($(shell uname -n),sapling)
 CONDUIT=ibv
 GPU_ARCH=fermi
-USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0000)
 CONDUIT=ibv
 GPU_ARCH=fermi
-USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0001)
 CONDUIT=ibv
 GPU_ARCH=fermi
-USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0002)
 CONDUIT=ibv
 GPU_ARCH=fermi
-USE_MPI=1
 endif
 ifeq ($(shell uname -n),n0003)
 CONDUIT=ibv
 GPU_ARCH=fermi
-USE_MPI=1
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
@@ -82,6 +75,16 @@ MARCH=bdver1
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
+GPU_ARCH=k20
+LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
+ifeq ($(findstring daint,$(shell uname -n)),daint)
+GCC=CC
+MARCH=corei7-avx
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CUDA=${CUDATOOLKIT_HOME}
+CONDUIT=aries
 GPU_ARCH=k20
 LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
@@ -115,10 +118,6 @@ ifeq ($(strip $(USE_CUDA)),1)
   endif
 endif
 
-ifndef GASNET
-$(error GASNET variable is not defined, aborting build)
-endif
-
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 CC_FLAGS        += -DUSE_CUDA
@@ -129,7 +128,11 @@ NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
 else
 NVCC_FLAGS	+= -O2
 endif
+ifneq ($(shell uname -s),Darwin)
 LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
+else
+LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
 NVCC_FLAGS	+= -arch=compute_20 -code=sm_20
@@ -146,40 +149,66 @@ endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
-# General GASNET variables
-INC_FLAGS	+= -I$(GASNET)/include
-LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
-# GASNET conduit variables
-ifeq ($(strip $(CONDUIT)),ibv)
-INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
-CC_FLAGS	+= -DGASNET_CONDUIT_IBV
-LD_FLAGS	+= -lgasnet-ibv-par -libverbs
-endif
-ifeq ($(strip $(CONDUIT)),gemini)
-INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
-CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
-LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
-endif
-ifeq ($(strip $(CONDUIT)),mpi)
-INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
-CC_FLAGS	+= -DGASNET_CONDUIT_MPI
-LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
-endif
-ifeq ($(strip $(CONDUIT)),udp)
-INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
-CC_FLAGS	+= -DGASNET_CONDUIT_UDP
-LD_FLAGS	+= -lgasnet-udp-par -lamudp
+# general low-level uses GASNet by default
+USE_GASNET ?= 1
+ifeq ($(strip $(USE_GASNET)),1)
+  ifndef GASNET
+    $(error GASNET variable is not defined, aborting build)
+  endif
+
+  # General GASNET variables
+  INC_FLAGS	+= -I$(GASNET)/include
+  LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  CC_FLAGS	+= -DUSE_GASNET
+  # newer versions of gasnet seem to need this
+  CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
+
+  # GASNET conduit variables
+  ifeq ($(strip $(CONDUIT)),ibv)
+    INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_IBV
+    LD_FLAGS	+= -lgasnet-ibv-par -libverbs
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
+  ifeq ($(strip $(CONDUIT)),gemini)
+    INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
+    LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
+  ifeq ($(strip $(CONDUIT)),aries)
+    INC_FLAGS   += -I$(GASNET)/include/aries-conduit
+    CC_FLAGS    += -DGASNET_CONDUIT_ARIES
+    LD_FLAGS    += -lgasnet-aries-par -lugni -lpmi -lhugetlbfs
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
+  ifeq ($(strip $(CONDUIT)),mpi)
+    INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_MPI
+    LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
+    USE_MPI	= 1
+  endif
+  ifeq ($(strip $(CONDUIT)),udp)
+    INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_UDP
+    LD_FLAGS	+= -lgasnet-udp-par -lamudp
+  endif
+
 endif
 
-#Extra options for MPI
+SKIP_MACHINES= titan% daint%
+#Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
-# not needed on Titan
-ifneq ($(findstring titan,$(shell uname -n)),titan)
-CC 	:= mpicc
-CXX	:= mpicxx
-GCC	:= $(CXX)
-LD_FLAGS+= -L$(MPI)/lib -lmpi
-endif
+  # Skip any machines on this list list
+  ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
+    CC		:= mpicc
+    CXX		:= mpicxx
+    GCC		:= $(CXX)
+    LD_FLAGS	+= -L$(MPI)/lib -lmpi
+  endif
 endif
 
 endif # ifeq SHARED_LOWLEVEL
@@ -202,11 +231,14 @@ CC_FLAGS        += -Wall -Werror
 
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
-LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc
+LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/lowlevel.cc $(LG_RT_DIR)/lowlevel_disk.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_gpu.cc
 endif
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc $(LG_RT_DIR)/lowlevel_dma.cc
+ifeq ($(strip $(USE_GASNET)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
+endif
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel_dma.cc
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL

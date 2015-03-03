@@ -428,6 +428,7 @@ namespace LegionRuntime {
         SOCKET_MEM, // Memory visible to all processors within a node, better performance to processors on same socket 
         Z_COPY_MEM, // Zero-Copy memory visible to all CPUs within a node and one or more GPUs 
         GPU_FB_MEM,   // Framebuffer memory for one GPU and all its SMs
+        DISK_MEM,   // Disk memory visible to all processors on a node
         LEVEL3_CACHE, // CPU L3 Visible to all processors on the node, better performance to processors on same socket 
         LEVEL2_CACHE, // CPU L2 Visible to all processors on the node, better performance to one processor
         LEVEL1_CACHE, // CPU L1 Visible to all processors on the node, better performance to one processor

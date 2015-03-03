@@ -83,6 +83,7 @@ namespace LegionRuntime {
       trigger_resolution_invoked = false;
       trigger_complete_invoked = false;
       trigger_commit_invoked = false;
+      early_commit_request = false;
       track_parent = false;
       parent_ctx = NULL;
       children_mapped = Event::NO_EVENT;
@@ -461,7 +462,8 @@ namespace LegionRuntime {
 #endif
         completed = true;
         // Check to see if we need to trigger commit
-        if (!trigger_commit_invoked && ((!Runtime::resilient_mode) ||
+        if (!trigger_commit_invoked && 
+            ((!Runtime::resilient_mode) || early_commit_request ||
             ((hardened && unverified_regions.empty()) ||
             ((outstanding_mapping_references == 0) &&
              (outstanding_commit_deps == 0)))))
@@ -558,19 +560,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::request_early_commit(void)
+    void Operation::request_early_commit(void)
     //--------------------------------------------------------------------------
     {
-      bool result = false;
-      {
-        AutoLock o_lock(op_lock);
-        if (!trigger_commit_invoked)
-        {
-          trigger_commit_invoked = true;
-          result = true;
-        }
-      }
-      return result;
+      AutoLock o_lock(op_lock);
+      early_commit_request = true;
     }
 
     //--------------------------------------------------------------------------
@@ -700,10 +694,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::register_dependence(unsigned idx, Operation *target, 
-                                        GenerationID target_gen, 
-                                        unsigned target_idx,
-                                        DependenceType dtype)
+    bool Operation::register_region_dependence(unsigned idx, Operation *target,
+                                          GenerationID target_gen, 
+                                          unsigned target_idx,
+                                          DependenceType dtype, bool validates,
+                                          const FieldMask &dependent_mask)
     //--------------------------------------------------------------------------
     {
       bool do_registration = true;
@@ -728,70 +723,10 @@ namespace LegionRuntime {
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
-            trace->record_dependence(this, target_gen, this, gen,
-                                     target_idx, idx, dtype);
-          return false;
-        }
-        else
-          return (target_gen < gen);
-      }
-      bool registered_dependence = false;
-      AutoLock o_lock(op_lock);
-      bool prune = false;
-      if (do_registration)
-      {
-        Event all_mapped = Event::NO_EVENT;
-        prune = target->perform_registration(target_gen, this, gen,
-                                                registered_dependence,
-                                                outstanding_mapping_deps,
-                                                outstanding_speculation_deps,
-                                                all_mapped);
-        if (all_mapped.exists())
-          dependent_children_mapped.insert(all_mapped);
-      }
-      if (registered_dependence)
-        incoming[target] = target_gen;
-      if (tracing)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(trace != NULL);
-#endif
-        trace->record_dependence(target, target_gen, this, gen,
-                                 target_idx, idx, dtype);
-        // Unsound to prune when tracing
-        prune = false;
-      }
-      return prune;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::register_region_dependence(unsigned idx, Operation *target,
-                                          GenerationID target_gen, 
-                                          unsigned target_idx,
-                                          DependenceType dtype)
-    //--------------------------------------------------------------------------
-    {
-      bool do_registration = true;
-      if (must_epoch != NULL)
-      {
-        do_registration = 
-          must_epoch->record_dependence(this, gen, target, target_gen, 
-                                        idx, target_idx, dtype);
-      }
-      if (target == this)
-      {
-        if (target_gen == gen)
-          report_aliased_requirements(target_idx, idx);
-        // Can't remove this if we are tracing
-        if (tracing)
-        {
-          // Don't forget to record the dependence
-#ifdef DEBUG_HIGH_LEVEL
-          assert(trace != NULL);
-#endif
-          if (target_gen < gen)
             trace->record_region_dependence(this, target_gen, 
-                                            this, gen, target_idx, idx, dtype);
+                                            this, gen, target_idx, 
+                                            idx, dtype, validates,
+                                            dependent_mask);
           return false;
         }
         else
@@ -815,7 +750,8 @@ namespace LegionRuntime {
       {
         incoming[target] = target_gen;
         // If we registered a mapping dependence then we can verify
-        verify_regions[target].insert(idx);
+        if (validates)
+          verify_regions[target].insert(idx);
       }
       if (tracing)
       {
@@ -823,7 +759,9 @@ namespace LegionRuntime {
         assert(trace != NULL);
 #endif
         trace->record_region_dependence(target, target_gen, 
-                                        this, gen, target_idx, idx, dtype);
+                                        this, gen, target_idx, 
+                                        idx, dtype, validates,
+                                        dependent_mask);
         // Unsound to prune when tracing
         prune = false;
       }
@@ -1966,7 +1904,6 @@ namespace LegionRuntime {
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
-      bool commit_early = request_early_commit();
       // Note that a mapping operation terminates as soon as it
       // is done mapping reflecting that after this happens, information
       // has flowed back out into the application task's execution.
@@ -1974,9 +1911,8 @@ namespace LegionRuntime {
       // cannot track how the application task uses their data.
       // This means that any attempts to restart an inline mapping
       // will result in the entire task needing to be restarted.
+      request_early_commit();
       complete_execution();
-      if (commit_early)
-        trigger_commit();
       // return true since we succeeded
       return true;
     }
@@ -3249,11 +3185,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::initialize(SingleTask *ctx, bool mapping)
+    void FenceOp::initialize(SingleTask *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
-      mapping_fence = mapping;
+      fence_kind = kind;
 #ifdef LEGION_LOGGING
       LegionLogging::log_fence_operation(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_op_id(),
@@ -3304,7 +3240,7 @@ namespace LegionRuntime {
         assert(parent_ctx->regions[idx].handle_type == SINGULAR);
 #endif
         runtime->forest->perform_fence_analysis(ctx, this, 
-                                  parent_ctx->regions[idx].region);
+                          parent_ctx->regions[idx].region, true/*dominate*/);
       }
       // Now update the parent context with this fence
       // before we can complete the dependence analysis
@@ -3321,45 +3257,57 @@ namespace LegionRuntime {
     bool FenceOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      if (mapping_fence)
+      switch (fence_kind)
       {
-        // Mark that we are done mapping and done executing
-        complete_mapping();
-        complete_execution();
-      }
-      else
-      {
-        // Go through and launch a completion task dependent upon
-        // all the completion events of our incoming dependences.
-        // Make sure that the events that we pulled out our still valid.
-        // Note since we are performing this operation, then we know
-        // that we are mapped and therefore our set of input dependences
-        // have been fixed so we can read them without holding the lock.
-        std::set<Event> trigger_events;
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              incoming.begin(); it != incoming.end(); it++)
-        {
-          Event complete = it->first->get_completion_event();
-          if (it->second == it->first->get_generation())
-            trigger_events.insert(complete);
-        }
-        Event wait_on = Event::merge_events(trigger_events);
-        if (!wait_on.has_triggered())
-        {
+        case MAPPING_FENCE:
+          {
+            complete_mapping();
+            complete_execution();
+            break;
+          }
+        case MIXED_FENCE:
+          {
+            // Mark that we finished our mapping now
+            complete_mapping();
+            // Intentionally fall through
+          }
+        case EXECUTION_FENCE:
+          {
+            // Go through and launch a completion task dependent upon
+            // all the completion events of our incoming dependences.
+            // Make sure that the events that we pulled out our still valid.
+            // Note since we are performing this operation, then we know
+            // that we are mapped and therefore our set of input dependences
+            // have been fixed so we can read them without holding the lock.
+            std::set<Event> trigger_events;
+            for (std::map<Operation*,GenerationID>::const_iterator it = 
+                  incoming.begin(); it != incoming.end(); it++)
+            {
+              Event complete = it->first->get_completion_event();
+              if (it->second == it->first->get_generation())
+                trigger_events.insert(complete);
+            }
+            Event wait_on = Event::merge_events(trigger_events);
+            if (!wait_on.has_triggered())
+            {
 #ifdef SPECIALIZED_UTIL_PROCS
-          Processor util = runtime->get_cleanup_proc(
-                            parent_ctx->get_executing_processor());
+              Processor util = runtime->get_cleanup_proc(
+                                parent_ctx->get_executing_processor());
 #else
-          Processor util = runtime->find_utility_group();
+              Processor util = runtime->find_utility_group();
 #endif
-          DeferredCompleteArgs deferred_complete_args;
-          deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-          deferred_complete_args.proxy_this = this;
-          util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                     sizeof(deferred_complete_args), wait_on);
-        }
-        else
-          deferred_complete();
+              DeferredCompleteArgs deferred_complete_args;
+              deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+              deferred_complete_args.proxy_this = this;
+              util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                         sizeof(deferred_complete_args), wait_on);
+            }
+            else
+              deferred_complete();
+            break;
+          }
+        default:
+          assert(false); // should never get here
       }
       // If we successfully performed the operation return true
       return true;
@@ -3369,9 +3317,21 @@ namespace LegionRuntime {
     void FenceOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
-      // Mark that we are done mapping and executing
-      complete_mapping();
-      complete_execution();
+      switch (fence_kind)
+      {
+        case EXECUTION_FENCE:
+          {
+            complete_mapping();
+            // Intentionally fall through
+          }
+        case MIXED_FENCE:
+          {
+            complete_execution();
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
     } 
 
     /////////////////////////////////////////////////////////////
@@ -3380,14 +3340,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FrameOp::FrameOp(Runtime *rt)
-      : Operation(rt)
+      : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FrameOp::FrameOp(const FrameOp &rhs)
-      : Operation(NULL)
+      : FenceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3413,7 +3373,7 @@ namespace LegionRuntime {
     void FrameOp::initialize(SingleTask *ctx)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
+      FenceOp::initialize(ctx, MIXED_FENCE);
       parent_ctx->issue_frame(completion_event); 
     }
 
@@ -3440,78 +3400,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // Analysis works very similar to a fence except we 
-      // don't update the context like we are a fence
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
-#endif
-      begin_dependence_analysis();
-      // Register this fence with all previous users in the parent's context
-      RegionTreeContext ctx = parent_ctx->get_context();
-      for (unsigned idx = 0; idx < parent_ctx->regions.size(); idx++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(parent_ctx->regions[idx].handle_type == SINGULAR);
-#endif
-        runtime->forest->perform_fence_analysis(ctx, this, 
-                                  parent_ctx->regions[idx].region);
-      }
-      end_dependence_analysis();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     bool FrameOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      // Go through and launch a completion task dependent upon
-      // all the completion events of our incoming dependences.
-      // Make sure that the events that we pulled out our still valid.
-      // Note since we are performing this operation, then we know
-      // that we are mapped and therefore our set of input dependences
-      // have been fixed so we can read them without holding the lock.
-      std::set<Event> trigger_events;
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            incoming.begin(); it != incoming.end(); it++)
-      {
-        Event complete = it->first->get_completion_event();
-        if (it->second == it->first->get_generation())
-          trigger_events.insert(complete);
-      }
-      Event wait_on = Event::merge_events(trigger_events);
-      if (!wait_on.has_triggered())
-      {
-#ifdef SPECIALIZED_UTIL_PROCS
-        Processor util = runtime->get_cleanup_proc(
-                          parent_ctx->get_executing_processor());
-#else
-        Processor util = runtime->find_utility_group();
-#endif
-        DeferredCompleteArgs deferred_complete_args;
-        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
-        deferred_complete_args.proxy_this = this;
-        util.spawn(HLR_TASK_ID, &deferred_complete_args,
-                   sizeof(deferred_complete_args), wait_on);
-      }
-      else
-        deferred_complete();
-      // If we successfully performed the operation return true
-      return true;
+      // Increment the number of mapped frames
+      parent_ctx->increment_frame();
+      return FenceOp::trigger_execution();
     }
 
     //--------------------------------------------------------------------------
     void FrameOp::deferred_complete(void)
     //--------------------------------------------------------------------------
     {
+      // This frame has finished executing so it is no longer mapped
+      parent_ctx->decrement_frame();
+      // This frame is also finished so we can tell the context
       parent_ctx->finish_frame(completion_event);
-      complete_mapping();
       complete_execution();
     }
 
@@ -3856,32 +3760,26 @@ namespace LegionRuntime {
       // should never be called
       assert(false);
       return *this;
-    }
+    } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::initialize(SingleTask *ctx, unsigned idx, 
-                             const InstanceRef &ref)
+    void CloseOp::initialize_close(SingleTask *ctx,
+                                   const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(completion_event.exists());
 #endif
-      initialize_operation(ctx, true/*track*/, Event::NO_EVENT);
-      reference = ref;
-      requirement.copy_without_mapping_info(parent_ctx->regions[idx]);
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
-      if (requirement.privilege == WRITE_DISCARD)
-        requirement.privilege = READ_WRITE;
-      localize_region_requirement(requirement);
+      initialize_operation(ctx, track, Event::NO_EVENT);
+      requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(requirement);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(reference.has_ref());
-      parent_index = idx;
-#endif
       initialize_privilege_path(privilege_path, requirement);
+    } 
+
+    //--------------------------------------------------------------------------
+    void CloseOp::perform_logging(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef LEGION_LOGGING
       LegionLogging::log_close_operation(parent_ctx->get_executing_processor(),
                                          parent_ctx->get_unique_op_id(),
@@ -3904,15 +3802,78 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_close_operation(parent_ctx->get_unique_task_id(),
                                      unique_op_id);
-      LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, true/*region*/,
-                                requirement.region.index_space.id,
-                                requirement.region.field_space.id,
-                                requirement.region.tree_id,
-                                requirement.privilege,
-                                requirement.prop,
-                                requirement.redop);
+      if (requirement.handle_type == PART_PROJECTION)
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  false/*region*/,
+                                  requirement.partition.index_partition,
+                                  requirement.partition.field_space.id,
+                                  requirement.partition.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop);
+      else
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  true/*region*/,
+                                  requirement.region.index_space.id,
+                                  requirement.region.field_space.id,
+                                  requirement.region.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/,
                                 requirement.privilege_fields);
+#endif
+    } 
+
+    //--------------------------------------------------------------------------
+    void CloseOp::activate_close(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void CloseOp::deactivate_close(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      privilege_path = RegionTreePath();
+    }
+
+    //--------------------------------------------------------------------------
+    void CloseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
+#endif
+      // This stage is only done for close operations issued
+      // at the end of the task as dependence analysis for other
+      // close operations is done inline in the region tree traversal
+      // for other kinds of operations 
+      // see RegionTreeNode::register_logical_node
+      begin_dependence_analysis();
+      runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
+                                                   this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path);
+      end_dependence_analysis();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
+#endif
+#ifdef LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
 #endif
     }
 
@@ -3942,64 +3903,143 @@ namespace LegionRuntime {
 #endif
     }
 
+    /////////////////////////////////////////////////////////////
+    // Inter Close Operation 
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    void CloseOp::activate(void)
+    InterCloseOp::InterCloseOp(Runtime *runtime)
+      : CloseOp(runtime)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    InterCloseOp::InterCloseOp(const InterCloseOp &rhs)
+      : CloseOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InterCloseOp::~InterCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InterCloseOp& InterCloseOp::operator=(const InterCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
+                                  const std::set<Color> &targets, 
+                                  bool open, int next, LegionTrace *trace,
+                                  int close, const FieldMask &close_m,
+                                  Operation *create)
+    //--------------------------------------------------------------------------
+    {
+      // Don't track these kinds of closes
+      // We don't want to be stalling in the analysis pipeline
+      // because we ran out of slots to issue
+      initialize_close(ctx, req, false/*track*/);
+      // Since we didn't register with our parent, we need to set
+      // any trace that we might have explicitly
+      if (trace != NULL)
+        set_trace(trace);
+      requirement.copy_without_mapping_info(req);
+      requirement.initialize_mapping_fields();
+      initialize_privilege_path(privilege_path, requirement);
+      target_children = targets;
+      leave_open = open;
+      next_child = next;
+      close_idx = close;
+      close_mask = close_m;
+      create_op = create;
+      create_gen = create_op->get_generation();
+      perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_close();
+      leave_open = false;
+      next_child = -1;
+      close_idx = -1;
+      create_op = NULL;
+      create_gen = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_close();
+      target_children.clear();
+      close_mask.clear();
+      runtime->free_inter_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* InterCloseOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Inter Close Op";
+    }
+
+    //--------------------------------------------------------------------------
+    const RegionRequirement& InterCloseOp::get_region_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      return requirement;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::set<Color>& InterCloseOp::get_target_children(void) const
+    //--------------------------------------------------------------------------
+    {
+      return target_children;
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::record_trace_dependence(Operation *target, 
+                                               GenerationID target_gen,
+                                               int target_idx,
+                                               int source_idx, 
+                                               DependenceType dtype,
+                                               const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(completion_event.exists());
+      assert(close_idx >= 0);
 #endif
+      // Check to see if the target is also our creator
+      // in which case we can skip it
+      if ((target == create_op) && (target_gen == create_gen))
+        return;
+      // Check to see if the source is our source
+      if (source_idx != close_idx)
+        return;
+      FieldMask overlap = close_mask & dependent_mask;
+      // If the fields also don't overlap then we are done
+      if (!overlap)
+        return;
+      // Otherwise do the registration
+      register_region_dependence(0/*idx*/, target, target_gen,
+                               target_idx, dtype, false/*validates*/, overlap);
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
-      reference = InstanceRef();
-      privilege_path = RegionTreePath();
-      runtime->free_close_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    const char* CloseOp::get_logging_name(void)
-    //--------------------------------------------------------------------------
-    {
-      return "Close";
-    }
-
-    //--------------------------------------------------------------------------
-    void CloseOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(completion_event.exists());
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, BEGIN_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_BEGIN_DEP_ANALYSIS);
-#endif
-      begin_dependence_analysis();
-      runtime->forest->perform_dependence_analysis(parent_ctx->get_context(),
-                                                   this, 0/*idx*/,
-                                                   requirement,
-                                                   privilege_path);
-      end_dependence_analysis();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, END_DEPENDENCE_ANALYSIS);
-#endif
-#ifdef LEGION_PROF
-      LegionProf::register_event(unique_op_id, PROF_END_DEP_ANALYSIS);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    bool CloseOp::trigger_execution(void)
+    bool InterCloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4012,22 +4052,217 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
 #endif
-      // Ask the region tree forest to close up to the specified instance
-      // This operation should never fail since we know the physical instance
-      // already exists
-      Event close_event = runtime->forest->close_physical_context(
-                                         parent_ctx->get_context(), 
-                                         requirement,
-                                         parent_ctx,
-                                         parent_ctx,
-                                         parent_ctx->get_executing_processor(),
-                                         reference
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(requirement.parent);
+      Processor local_proc = parent_ctx->get_executing_processor();
+      // If we haven't already premapped the path, then do so now
+      if (!requirement.premapped)
+      {
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement, 
+                  parent_ctx, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
-                                         , parent_index
-                                         , get_logging_name()
-                                         , unique_op_id
+                  , 0/*idx*/, get_logging_name(), unique_op_id
 #endif
-                                         );
+                  );
+      }
+      // If we couldn't premap, then we need to try again later
+      if (!requirement.premapped)
+        return false;
+ 
+      Event close_event = Event::NO_EVENT;
+      bool success = runtime->forest->perform_close_operation(physical_ctx,
+                                              requirement, parent_ctx,
+                                              local_proc, target_children,
+                                              leave_open, next_child, 
+                                              close_event
+#ifdef DEBUG_HIGH_LEVEL
+                                              , 0 /*idx*/ 
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+      // If we didn't succeed, then return
+      if (!success)
+        return false;
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, END_MAPPING);
+      LegionLogging::log_operation_events(
+          Processor::get_executing_processor(),
+          unique_op_id, Event::NO_EVENT, close_event);
+      LegionLogging::log_physical_user(
+          Processor::get_executing_processor(),
+          reference.get_handle().get_view()->get_manager()->get_instance(),
+          unique_op_id, 0/*idx*/);
+#endif
+#ifdef LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_END_MAP_ANALYSIS);
+#endif
+#ifdef LEGION_SPY
+      // Log an implicit dependence on the parent's start event
+      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(), 
+                                         close_event);
+      {
+        Processor proc = Processor::get_executing_processor();
+        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
+      }
+
+#endif
+      complete_mapping();
+#ifdef LEGION_LOGGING
+      LegionLogging::log_event_dependence(Processor::get_executing_processor(),
+                                          close_event,
+                                          completion_event);
+#endif
+      // See if we need to defer completion of the close operation
+      if (!close_event.has_triggered())
+      {
+        // Issue a deferred trigger of our completion event and mark
+        // that we are no longer responsible for triggering it
+        // when we are complete.
+        completion_event.trigger(close_event);
+        need_completion_trigger = false;
+#ifdef SPECIALIZED_UTIL_PROCS
+        Processor util = runtime->get_cleanup_proc(
+                          parent_ctx->get_executing_processor());
+#else
+        Processor util = runtime->find_utility_group();
+#endif
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args, 
+                   sizeof(deferred_complete_args), close_event);
+      }
+      else
+        deferred_complete();
+      // This should always succeed
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Post Close Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PostCloseOp::PostCloseOp(Runtime *runtime)
+      : CloseOp(runtime)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PostCloseOp::PostCloseOp(const PostCloseOp &rhs)
+      : CloseOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PostCloseOp::~PostCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PostCloseOp& PostCloseOp::operator=(const PostCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx, 
+                                 const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      initialize_close(ctx, ctx->regions[idx], true/*track*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.has_ref());
+#endif
+      reference = ref;
+      // If it was write-discard from the task's perspective, make it
+      // read-write within the task's context
+      if (requirement.privilege == WRITE_DISCARD)
+        requirement.privilege = READ_WRITE;
+      localize_region_requirement(requirement);
+      if (parent_ctx->has_simultaneous_coherence())
+        parent_ctx->check_simultaneous_restricted(requirement);
+      perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_close();
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_close();
+      reference = InstanceRef();
+      runtime->free_post_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* PostCloseOp::get_logging_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return "Post Close Op";
+    }
+
+    //--------------------------------------------------------------------------
+    bool PostCloseOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
+#ifdef LEGION_LOGGING
+      LegionLogging::log_timing_event(Processor::get_executing_processor(),
+                                      unique_op_id, BEGIN_MAPPING);
+#endif
+#ifdef LEGION_PROF
+      LegionProf::register_event(unique_op_id, PROF_BEGIN_MAP_ANALYSIS);
+#endif
+      RegionTreeContext physical_ctx = 
+        parent_ctx->find_enclosing_physical_context(requirement.parent);
+      Processor local_proc = parent_ctx->get_executing_processor();
+      // If we haven't already premapped the path, then do so now
+      if (!requirement.premapped)
+      {
+        requirement.premapped = runtime->forest->premap_physical_region(
+                  physical_ctx, privilege_path, requirement, 
+                  parent_ctx, parent_ctx, local_proc
+#ifdef DEBUG_HIGH_LEVEL
+                  , 0/*idx*/, get_logging_name(), unique_op_id
+#endif
+                  );
+      }
+      // If we couldn't premap, then we need to try again later
+      if (!requirement.premapped)
+        return false;
+ 
+      // If we have a reference then we know we are closing a context
+      // to a specific physical instance, so we can issue that without
+      // worrying about failing.
+      Event close_event = runtime->forest->close_physical_context(physical_ctx,
+                                            requirement, parent_ctx, 
+                                            local_proc, reference
+#ifdef DEBUG_HIGH_LEVEL
+                                            , 0 /*idx*/ 
+                                            , get_logging_name()
+                                            , unique_op_id
+#endif
+                                            );
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
@@ -4047,15 +4282,15 @@ namespace LegionRuntime {
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(), 
                                          close_event);
       // Note this gives us a dependence to the parent's termination event
+      // We log this only when close operations are used for closing contexts
       LegionSpy::log_op_events(unique_op_id, close_event, 
-                               parent_ctx->get_task_completion());
+                             parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
           reference.get_handle().get_view()->get_manager()->get_instance().id);
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
-
 #endif
       complete_mapping();
 #ifdef LEGION_LOGGING
@@ -4839,7 +5074,7 @@ namespace LegionRuntime {
       Event release_event = 
         runtime->forest->close_physical_context(physical_ctx,
                                                 requirement,
-                                                this, parent_ctx,
+                                                this,
                                                 local_proc,
                                                 region.impl->get_reference()
 #ifdef DEBUG_HIGH_LEVEL
@@ -5232,7 +5467,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       bool result = 
 #endif
-      collective.phase_barrier.get_result(result_buffer, result_size);
+      collective.phase_barrier.get_previous_phase().get_result(result_buffer,
+							       result_size);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result);
 #endif

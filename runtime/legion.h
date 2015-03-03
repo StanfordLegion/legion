@@ -939,8 +939,6 @@ namespace LegionRuntime {
        */
       template<typename T>
       static inline Future from_value(HighLevelRuntime *rt, const T &value);
-      static Future from_buffer(HighLevelRuntime *rt,
-                                const void *buffer, size_t size);
     private:
       void* get_untyped_result(void); 
     };
@@ -1571,6 +1569,7 @@ namespace LegionRuntime {
       unsigned                            hysteresis_percentage;
       int                                 max_outstanding_frames;
       unsigned                            min_tasks_to_schedule;
+      unsigned                            min_frames_to_schedule;
       unsigned                            max_directory_size;
     public:
       // Profiling information for the task
@@ -2348,7 +2347,7 @@ namespace LegionRuntime {
        * max_outstanding_frames - instead of specifying the maximum window size
        *                   applications can also launch frames corresponding
        *                   to application specific groups of tasks (see the
-       *                   'issue_frame' runtime call for more information). 
+       *                   'complete_frame' runtime call for more information). 
        *                   The 'max_outstanding_frames' field allows mappers 
        *                   to specify the maximum number of outstanding frames 
        *                   instead. Setting this parameter subsumes the 
@@ -3522,15 +3521,10 @@ namespace LegionRuntime {
       void unmap_region(Context ctx, PhysicalRegion region);
 
       /**
-       * Map all the regions originally requested for a context (if they
-       * haven't already been mapped).
-       * @param ctx enclosing task context
-       */
-      void map_all_regions(Context ctx);
-
-      /**
        * Unmap all the regions originally requested for a context (if
-       * they haven't already been unmapped).
+       * they haven't already been unmapped). WARNING: this call will
+       * invalidate all accessors currently valid in the enclosing
+       * parent task context.
        * @param ctx enclosing task context
        */
       void unmap_all_regions(Context ctx);
@@ -3707,6 +3701,20 @@ namespace LegionRuntime {
       void destroy_dynamic_collective(Context ctx, DynamicCollective dc);
 
       /**
+       * Arrive on a dynamic collective immediately with a value
+       * stored in an untyped buffer.
+       * @param ctx enclosing task context
+       * @param dc dynamic collective on which to arrive
+       * @param buffer pointer to an untyped buffer
+       * @param size size of the buffer in bytes
+       * @param count arrival count on the barrier
+       */
+      void arrive_dynamic_collective(Context ctx,
+                                     DynamicCollective dc,
+                                     const void *buffer, 
+                                     size_t size, unsigned count = 1);
+
+      /**
        * Perform a deferred arrival on a dynamic collective dependent
        * upon a future value.  The runtime will automatically pipe the
        * future value through to the dynamic collective.
@@ -3815,9 +3823,10 @@ namespace LegionRuntime {
        * set of operations are in flight. To facilitate this, applications can 
        * create 'frames' of tasks. Using the 'configure_context' mapper
        * call, custom mappers can specify the maximum number of outstanding
-       * frames that make up the operation window.
+       * frames that make up the operation window. It is best to place these
+       * calls at the end of a frame of tasks.
        */
-      void issue_frame(Context ctx);
+      void complete_frame(Context ctx);
     public:
       //------------------------------------------------------------------------
       // Must Parallelism 
@@ -4246,6 +4255,13 @@ namespace LegionRuntime {
        *              the garbage collection but makes it more efficient.
        *              Decreasing the value reduces latency, but adds
        *              inefficiency to the collection.
+       * -hl:unsafe_launch Tell the runtime to skip any checks for 
+       *              checking for deadlock between a parent task and
+       *              the sub-operations that it is launching. Note
+       *              that this is unsafe for a reason. The application
+       *              can and will deadlock if any currently mapped
+       *              regions conflict with those requested by a child
+       *              task or other operation.
        * ---------------------
        *  Resiliency
        * ---------------------
@@ -4630,6 +4646,7 @@ namespace LegionRuntime {
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
+      Future from_value(const void *value, size_t value_size, bool owned);
       const void* get_local_args(Context ctx, DomainPoint &point, 
                                  size_t &local_size);
     private:
@@ -4730,6 +4747,11 @@ namespace LegionRuntime {
       {
         rt->end_task(ctx, result, result_size, owned);
       }
+      static inline Future from_value_helper(HighLevelRuntime *rt, 
+          const void *value, size_t value_size, bool owned)
+      {
+        return rt->from_value(value, value_size, owned);
+      }
 
       // WARNING: There are two levels of SFINAE (substitution failure is 
       // not an error) here.  Proceed at your own risk. First we have to 
@@ -4749,6 +4771,13 @@ namespace LegionRuntime {
           end_helper(rt, ctx, buffer, buffer_size, true/*owned*/);
           // No need to free the buffer, the Legion runtime owns it now
         }
+        static inline Future from_value(HighLevelRuntime *rt, const T *value)
+        {
+          size_t buffer_size = value->legion_buffer_size();
+          void *buffer = malloc(buffer_size);
+          value->legion_serialize(buffer);
+          return from_value_helper(rt, buffer, buffer_size, true/*owned*/);
+        }
         static inline T unpack(const void *result)
         {
           T derez;
@@ -4763,6 +4792,11 @@ namespace LegionRuntime {
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+        }
+        static inline Future from_value(HighLevelRuntime *rt, const T *value)
+        {
+          return from_value_helper(rt, (const void*)value,
+                                   sizeof(T), false/*owned*/);
         }
         static inline T unpack(const void *result)
         {
@@ -4800,6 +4834,11 @@ namespace LegionRuntime {
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, 
                                                                result);
         }
+        static inline Future from_value(HighLevelRuntime *rt, const T *value)
+        {
+          return NonPODSerializer<T,HasSerialize<T>::value>::from_value(
+                                                                  rt, value);
+        }
         static inline T unpack(const void *result)
         {
           return NonPODSerializer<T,HasSerialize<T>::value>::unpack(result); 
@@ -4812,6 +4851,11 @@ namespace LegionRuntime {
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+        }
+        static inline Future from_value(HighLevelRuntime *rt, const T *value)
+        {
+          return from_value_helper(rt, (const void*)value, 
+                                   sizeof(T), false/*owned*/);
         }
         static inline T unpack(const void *result)
         {
@@ -4838,6 +4882,12 @@ namespace LegionRuntime {
       {
         StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, 
                                                        result); 
+      }
+
+      template<typename T>
+      static inline Future from_value(HighLevelRuntime *rt, const T *value)
+      {
+        return StructHandler<T,IsAStruct<T>::value>::from_value(rt, value);
       }
 
       template<typename T>
@@ -5463,7 +5513,7 @@ namespace LegionRuntime {
                                                 const T &value)
     //--------------------------------------------------------------------------
     {
-      return Future::from_buffer(rt, &value, sizeof(T));
+      return LegionSerialization::from_value(rt, &value);
     }
 
     //--------------------------------------------------------------------------

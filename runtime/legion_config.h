@@ -279,6 +279,7 @@ typedef enum legion_error_t {
   ERROR_INCONSISTENT_SEMANTIC_TAG = 121,
   ERROR_INVALID_SEMANTIC_TAG = 122,
   ERROR_DUMMY_CONTEXT_OPERATION = 123,
+  ERROR_INVALID_CONTEXT_CONFIGURATION = 124,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -341,6 +342,7 @@ enum {
 //==========================================================================
 
 typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
+typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
 typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;
 typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;

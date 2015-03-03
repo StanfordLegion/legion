@@ -33,8 +33,7 @@ function legion_main(arg)
     hello_world_task,
     HELLO_WORLD_ID, legion.LOC_PROC,
     true,  -- single
-    false, -- index
-    "hello_world_task"
+    false  -- index
   )
   legion:start(arg)
 end

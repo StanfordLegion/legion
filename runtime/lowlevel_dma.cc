@@ -2319,6 +2319,104 @@ namespace LegionRuntime {
       const ReductionOpUntyped *redop;
       bool fold;
     };
+
+    // MemPairCopier from disk memory to cpu memory
+    class DisktoCPUMemPairCopier : public MemPairCopier {
+    public:
+      DisktoCPUMemPairCopier(int _fd, Memory _dst_mem)
+      {
+        Memory::Impl *dst_impl = _dst_mem.impl();
+        dst_base = (char *)(dst_impl->get_direct_ptr(0, dst_impl->size));
+        assert(dst_base);
+        fd = _fd;
+      }
+
+      virtual ~DisktoCPUMemPairCopier(void)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &osa_vec)
+      {
+        return new SpanBasedInstPairCopier<DisktoCPUMemPairCopier>(this, src_inst,
+                                           dst_inst, osa_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+        aiocb cb;
+        memset(&cb, 0, sizeof(cb));
+        cb.aio_nbytes = bytes;
+        cb.aio_fildes = fd;
+        cb.aio_offset = src_offset;
+        cb.aio_buf = dst_base + dst_offset;
+        assert(aio_read(&cb) != -1);
+        while (aio_error(&cb) == EINPROGRESS) {}
+        assert((size_t)aio_return(&cb) == bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        while(lines-- > 0) {
+          copy_span(src_offset, dst_offset, bytes);
+          src_offset += src_stride;
+          dst_offset += dst_stride;
+        }
+      }
+    protected:
+      char *dst_base;
+      int fd; // file descriptor
+    };
+
+    // MemPairCopier from disk memory to cpu memory
+    class DiskfromCPUMemPairCopier : public MemPairCopier {
+    public:
+      DiskfromCPUMemPairCopier(Memory _src_mem, int _fd)
+      { 
+        Memory::Impl *src_impl = _src_mem.impl();
+        src_base = (char *)(src_impl->get_direct_ptr(0, src_impl->size));
+        assert(src_base);
+        fd = _fd;
+      }
+
+      virtual ~DiskfromCPUMemPairCopier(void)
+      {
+      }
+
+      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
+                                        OASVec &osa_vec)
+      {
+        return new SpanBasedInstPairCopier<DiskfromCPUMemPairCopier>(this, src_inst,
+                                           dst_inst, osa_vec);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes)
+      {
+        aiocb cb;
+        memset(&cb, 0, sizeof(cb));
+        cb.aio_nbytes = bytes;
+        cb.aio_fildes = fd;
+        cb.aio_offset = dst_offset;
+        cb.aio_buf = src_base + src_offset;
+        assert(aio_write(&cb) != -1);
+        while (aio_error(&cb) == EINPROGRESS) {}
+        assert((size_t)aio_return(&cb) == bytes);
+      }
+
+      void copy_span(off_t src_offset, off_t dst_offset, size_t bytes,
+                     off_t src_stride, off_t dst_stride, size_t lines)
+      {
+        while(lines-- > 0) {
+          copy_span(src_offset, dst_offset, bytes);
+          src_offset += src_stride;
+          dst_offset += dst_stride;
+        }
+      }
+    protected:
+      char *src_base;
+      int fd; // file descriptor
+    };
      
     MemPairCopier *MemPairCopier::create_copier(Memory src_mem, Memory dst_mem,
 						ReductionOpID redop_id /*= 0*/,
@@ -2338,6 +2436,21 @@ namespace LegionRuntime {
 	   ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
 	  return new MemcpyMemPairCopier(src_mem, dst_mem);
 	}
+
+        // can we perform transfer between disk and cpu memory
+        if (((src_kind == Memory::Impl::MKIND_SYSMEM) || (src_kind == Memory::Impl::MKIND_ZEROCOPY)) &&
+            (dst_kind == Memory::Impl::MKIND_DISK)) {
+          printf("Create DiskfromCPUMemPairCopier\n");
+          int fd = ((DiskMemory *)dst_impl)->fd;
+          return new DiskfromCPUMemPairCopier(src_mem, fd);
+        }
+
+        if ((src_kind == Memory::Impl::MKIND_DISK) &&
+            ((dst_kind == Memory::Impl::MKIND_SYSMEM) || (dst_kind == Memory::Impl::MKIND_ZEROCOPY))) {
+          printf("Create DisktoCPUMemPairCopier\n");
+          int fd = ((DiskMemory *)src_impl)->fd;
+          return new DisktoCPUMemPairCopier(fd, dst_mem);
+        }
 
 #ifdef USE_CUDA
 	// copy to a framebuffer

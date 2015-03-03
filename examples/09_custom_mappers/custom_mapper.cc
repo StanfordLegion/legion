@@ -296,6 +296,13 @@ AdversarialMapper::AdversarialMapper(Machine m,
                     it->id, memory_size_in_kb);
             break;
           }
+        // Disk memory on a single node
+        case Memory::DISK_MEM:
+          {
+            printf("  Disk Memory ID %x has %ld KB\n",
+                    it->id, memory_size_in_kb);
+            break;
+          }
         // Block of memory sized for L3 cache
         case Memory::LEVEL3_CACHE:
           {

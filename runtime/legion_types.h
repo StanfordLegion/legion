@@ -196,6 +196,8 @@ namespace LegionRuntime {
     class FrameOp;
     class DeletionOp;
     class CloseOp;
+    class InterCloseOp;
+    class PostCloseOp;
     class AcquireOp;
     class ReleaseOp;
     class DynamicCollectiveOp;
@@ -238,10 +240,6 @@ namespace LegionRuntime {
     class RegionTreePath;
     class PathTraverser;
     class NodeTraverser;
-    template<bool DOM>
-    class LogicalRegistrar;
-    class LogicalInitializer;
-    class LogicalInvalidator;
     class PremapTraverser;
     class MappingTraverser;
 
@@ -277,7 +275,7 @@ namespace LegionRuntime {
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
-    class TreeCloser;
+    struct TraceInfo;
     struct LogicalCloser;
     struct PhysicalCloser;
     class ReductionCloser;
@@ -500,6 +498,8 @@ namespace LegionRuntime {
     friend class FuturePredOp;                    \
     friend class DeletionOp;                      \
     friend class CloseOp;                         \
+    friend class InterCloseOp;                    \
+    friend class PostCloseOp;                     \
     friend class AcquireOp;                       \
     friend class ReleaseOp;                       \
     friend class NotPredOp;                       \

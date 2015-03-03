@@ -50,19 +50,12 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <set>
 #include <list>
 #include <map>
+#include <aio.h>
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
     fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
-    exit(1); \
-  } \
-} while(0)
-
-#define CHECK_GASNET(cmd) do { \
-  int ret = (cmd); \
-  if(ret != GASNET_OK) { \
-    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
     exit(1); \
   } \
 } while(0)
@@ -292,7 +285,7 @@ namespace LegionRuntime {
       if(level > 0) {
 	// an inner node - we can create that ourselves
 	typename ALLOCATOR::INNER_TYPE *inner = new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
-	for(IT i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
+	for(size_t i = 0; i < ALLOCATOR::INNER_TYPE::SIZE; i++)
 	  inner->elems[i] = 0;
 	return inner;
       } else {
@@ -338,7 +331,7 @@ namespace LegionRuntime {
 
 	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (i < ALLOCATOR::INNER_TYPE::SIZE));
+	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 
 	NodeBase *child = inner->elems[i];
 	if(child == 0) {
@@ -403,7 +396,7 @@ namespace LegionRuntime {
 
 	IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) * ALLOCATOR::INNER_BITS)) &
 		((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-	assert((i >= 0) && (i < ALLOCATOR::INNER_TYPE::SIZE));
+	assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 
 	NodeBase *child = inner->elems[i];
 	if(child == 0) {
@@ -883,7 +876,9 @@ namespace LegionRuntime {
       int num_local_procs;
       bool valid;
       std::vector<int> local_proc_assignments;
+#ifndef __MACH__
       cpu_set_t leftover_procs;
+#endif
     };
     extern ProcessorAssignment *proc_assignment;
 
@@ -1140,6 +1135,7 @@ namespace LegionRuntime {
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
 #endif
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
+        MKIND_DISK,    // disk memory accessible by owner node
       };
 
     Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind)
@@ -1270,6 +1266,45 @@ namespace LegionRuntime {
       off_t memory_stride;
       gasnet_seginfo_t *seginfos;
       //std::map<off_t, off_t> free_blocks;
+    };
+
+    class DiskMemory : public Memory::Impl {
+    public:
+      static const size_t ALIGNMENT = 256;
+
+      DiskMemory(Memory _me, size_t _size, std::string file);
+
+      virtual ~DiskMemory(void);
+
+      virtual RegionInstance create_instance(IndexSpace is,
+                                            const int *linearization_bits,
+                                            size_t bytes_needed,
+                                            size_t block_size,
+                                            size_t element_size,
+                                            const std::vector<size_t>& field_sizes,
+                                            ReductionOpID redopid,
+                                            off_t list_size,
+                                            RegionInstance parent_inst);
+
+      virtual void destroy_instance(RegionInstance i,
+                                    bool local_destroy);
+
+      virtual off_t alloc_bytes(size_t size);
+
+      virtual void free_bytes(off_t offset, size_t size);
+
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+
+      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
+                                       size_t count, const void *entry_buffer);
+
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+      virtual int get_home_node(off_t offset, size_t size);
+
+    public:
+      int fd; // file descriptor
     };
 
     class MetadataBase {

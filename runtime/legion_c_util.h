@@ -24,6 +24,8 @@
 
 #include "legion.h"
 #include "legion_c.h"
+#include "mapping_utilities.h"
+#include "default_mapper.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -126,9 +128,14 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
+      NEW_OPAQUE_WRAPPER(legion_inline_t, Inline *);
+      NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
-      NEW_OPAQUE_WRAPPER(legion_processor_t, Processor *);
+      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapper *);
+      NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
+                         MappingUtilities::MachineQueryInterface*);
+      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, DefaultMapper*);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -413,6 +420,22 @@ namespace LegionRuntime {
         return options;
       }
 
+      static legion_processor_t
+      wrap(Processor proc)
+      {
+        legion_processor_t proc_;
+        proc_.id = proc.id;
+        return proc_;
+      }
+
+      static Processor
+      unwrap(legion_processor_t proc_)
+      {
+        Processor proc;
+        proc.id = proc_.id;
+        return proc;
+      }
+
       static legion_processor_kind_t
       wrap(Processor::Kind options)
       {
@@ -425,6 +448,53 @@ namespace LegionRuntime {
         return static_cast<Processor::Kind>(options_);
       }
 
+      static legion_memory_t
+      wrap(Memory mem)
+      {
+        legion_memory_t mem_;
+        mem_.id = mem.id;
+        return mem_;
+      }
+
+      static Memory
+      unwrap(legion_memory_t mem_)
+      {
+        Memory mem;
+        mem.id = mem_.id;
+        return mem;
+      }
+
+      static legion_memory_kind_t
+      wrap(Memory::Kind options)
+      {
+        return static_cast<legion_memory_kind_t>(options);
+      }
+
+      static Memory::Kind
+      unwrap(legion_memory_kind_t options_)
+      {
+        return static_cast<Memory::Kind>(options_);
+      }
+
+      static legion_domain_split_t
+      wrap(Mapper::DomainSplit domain_split) {
+        legion_domain_split_t domain_split_;
+        domain_split_.domain = wrap(domain_split.domain);
+        domain_split_.proc = wrap(domain_split.proc);
+        domain_split_.recurse = domain_split.recurse;
+        domain_split_.stealable = domain_split.stealable;
+        return domain_split_;
+      }
+
+      static Mapper::DomainSplit
+      unwrap(legion_domain_split_t domain_split_) {
+        Mapper::DomainSplit domain_split(
+            unwrap(domain_split_.domain),
+            unwrap(domain_split_.proc),
+            domain_split_.recurse,
+            domain_split_.stealable);
+        return domain_split;
+      }
     };
   }
 }

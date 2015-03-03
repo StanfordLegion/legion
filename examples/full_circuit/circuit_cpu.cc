@@ -67,7 +67,7 @@ CalcNewCurrentsTask::CalcNewCurrentsTask(LogicalPartition lp_pvt_wires,
                  Predicate::TRUE_PRED, false/*must*/, CalcNewCurrentsTask::MAPPER_ID)
 {
   RegionRequirement rr_out(lp_pvt_wires, 0/*identity*/, 
-                             WRITE_DISCARD, EXCLUSIVE, lr_all_wires);
+                             READ_WRITE, EXCLUSIVE, lr_all_wires);
   for (int i = 0; i < WIRE_SEGMENTS; i++)
     rr_out.add_field(FID_CURRENT+i);
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
@@ -265,7 +265,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
                                        soa_in_ptr, soa_in_loc);
       temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
                                        soa_shr_voltage, soa_ghost_voltage,
-                                       soa_in_ptr, soa_in_loc);
+                                       soa_out_ptr, soa_out_loc);
       __m128 inductance = _mm_load_ps(soa_inductance.ptr(current_wire));
       __m128 recip_resistance = _mm_rcp_ps(_mm_load_ps(soa_resistance.ptr(current_wire)));
       __m128 recip_capacitance = _mm_rcp_ps(_mm_load_ps(soa_wire_cap.ptr(current_wire)));
@@ -336,7 +336,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       // dV = R*I + L*I' ==> I = (dV - L*I')/R
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = ((temp_v[i] - temp_v[i+1]) - 
+        temp_i[i] = ((temp_v[i+1] - temp_v[i]) - 
                      (inductance * (temp_i[i] - old_i[i]) * recip_dt)) * recip_resistance; 
       }
       // Now update the inter-node voltages
@@ -408,6 +408,7 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
   {
     ptr_t wire_ptr = itr.next();
     const float dt = p.dt;
+    const float recip_dt = 1.0f / dt;
     const int steps = p.steps;
 
     for (int i = 0; i < WIRE_SEGMENTS; i++)
@@ -433,8 +434,8 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
 
     // Solve the RLC model iteratively
     float inductance = fa_inductance.read(wire_ptr);
-    float resistance = fa_resistance.read(wire_ptr);
-    float capacitance = fa_wire_cap.read(wire_ptr);
+    float recip_resistance = 1.0f / fa_resistance.read(wire_ptr);
+    float recip_capacitance = 1.0f / fa_wire_cap.read(wire_ptr);
     for (int j = 0; j < steps; j++)
     {
       // first, figure out the new current from the voltage differential
@@ -442,13 +443,13 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
       // dV = R*I + L*I' ==> I = (dV - L*I')/R
       for (int i = 0; i < WIRE_SEGMENTS; i++)
       {
-        temp_i[i] = ((temp_v[i] - temp_v[i+1]) - 
-                     (inductance * (temp_i[i] - old_i[i]) / dt)) / resistance; 
+        temp_i[i] = ((temp_v[i+1] - temp_v[i]) - 
+                     (inductance * (temp_i[i] - old_i[i]) * recip_dt)) * recip_resistance;
       }
       // Now update the inter-node voltages
       for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
       {
-        temp_v[i+1] = old_v[i] + dt * (temp_i[i] - temp_i[i+1]) / capacitance;
+        temp_v[i+1] = old_v[i] + dt * (temp_i[i] - temp_i[i+1]) * recip_capacitance;
       }
     }
 

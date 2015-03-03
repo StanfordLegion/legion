@@ -14,13 +14,38 @@
 
 import "legion"
 
-task g(r : region(int), p : ptr(int, r))
+task g_plus(r : region(int), p : ptr(int, r))
 where reduces+(r) do
   @p += 20
 end
 
+task g_times(r : region(int), p : ptr(int, r))
+where reduces*(r) do
+  @p *= 4
+end
+
+task g_minus(r : region(int), p : ptr(int, r))
+where reduces-(r) do
+  @p -= 20
+end
+
+task g_divide(r : region(int), p : ptr(int, r))
+where reduces/(r) do
+  @p /= 2
+end
+
+task g_max(r : region(int), p : ptr(int, r))
+where reduces max(r) do
+  @p max= 1
+end
+
+task g_min(r : region(int), p : ptr(int, r))
+where reduces min(r) do
+  @p min= 10000
+end
+
 -- You can also do reductions with read-write privileges.
-task h(r : region(int), p : ptr(int, r))
+task h_plus(r : region(int), p : ptr(int, r))
 where reads(r), writes(r) do
   @p += 300
 end
@@ -29,12 +54,17 @@ task f() : int
   var r = region(int, 5)
   var p = new(ptr(int, r))
   @p = 1
-  g(r, p)
-  h(r, p)
+  g_plus(r, p)
+  g_times(r, p)
+  g_minus(r, p)
+  g_divide(r, p)
+  g_max(r, p)
+  g_min(r, p)
+  h_plus(r, p)
   return @p
 end
 
 task main()
-  legionlib.assert(f() == 321)
+  legionlib.assert(f() == 332)
 end
 legionlib.start(main)

@@ -17,9 +17,11 @@
 #include "legion_c.h"
 #include "legion_c_util.h"
 #include "utilities.h"
+#include "default_mapper.h"
 
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
+using namespace LegionRuntime::HighLevel::MappingUtilities;
 typedef CObjectWrapper::Generic Generic;
 typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
@@ -185,6 +187,29 @@ legion_coloring_add_point(legion_coloring_t handle_,
   ptr_t point = CObjectWrapper::unwrap(point_);
 
   (*handle)[color].points.insert(point);
+}
+
+void
+legion_coloring_delete_point(legion_coloring_t handle_,
+                             legion_color_t color,
+                             legion_ptr_t point_)
+{
+  Coloring *handle = CObjectWrapper::unwrap(handle_);
+  ptr_t point = CObjectWrapper::unwrap(point_);
+
+  (*handle)[color].points.erase(point);
+}
+
+bool
+legion_coloring_has_point(legion_coloring_t handle_,
+                          legion_color_t color,
+                          legion_ptr_t point_)
+{
+  Coloring *handle = CObjectWrapper::unwrap(handle_);
+  ptr_t point = CObjectWrapper::unwrap(point_);
+  std::set<ptr_t>& points = (*handle)[color].points;
+
+  return points.find(point) != points.end();
 }
 
 void
@@ -691,6 +716,137 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
   return req->projection;
 }
 
+bool
+legion_region_requirement_get_virtual_map(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->virtual_map;
+}
+
+void
+legion_region_requirement_set_virtual_map(
+  legion_region_requirement_t req_,
+  bool value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->virtual_map = value;
+}
+
+bool
+legion_region_requirement_get_early_map(legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->early_map;
+}
+
+void
+legion_region_requirement_set_early_map(
+  legion_region_requirement_t req_,
+  bool value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->early_map = value;
+}
+
+bool
+legion_region_requirement_get_enable_WAR_optimization(
+  legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->enable_WAR_optimization;
+}
+
+void
+legion_region_requirement_set_enable_WAR_optimization(
+  legion_region_requirement_t req_,
+  bool value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->enable_WAR_optimization = value;
+}
+
+bool
+legion_region_requirement_get_reduction_list(
+  legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->reduction_list;
+}
+
+void
+legion_region_requirement_set_reduction_list(
+  legion_region_requirement_t req_,
+  bool value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->reduction_list = value;
+}
+
+unsigned
+legion_region_requirement_get_make_persistent(
+  legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->make_persistent;
+}
+
+void
+legion_region_requirement_set_make_persistent(
+  legion_region_requirement_t req_,
+  unsigned value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->make_persistent = value;
+}
+
+unsigned
+legion_region_requirement_get_blocking_factor(
+  legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->blocking_factor;
+}
+
+void
+legion_region_requirement_set_blocking_factor(
+  legion_region_requirement_t req_,
+  unsigned value)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->blocking_factor = value;
+}
+
+unsigned
+legion_region_requirement_get_max_blocking_factor(
+  legion_region_requirement_t req_)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  return req->max_blocking_factor;
+}
+
+void
+legion_region_requirement_add_target_ranking(
+  legion_region_requirement_t req_,
+  legion_memory_t memory)
+{
+  RegionRequirement *req = CObjectWrapper::unwrap(req_);
+
+  req->target_ranking.push_back(CObjectWrapper::unwrap(memory));
+}
+
 // -------------------------------------------------------
 // Allocator and Argument Map Operations
 // -------------------------------------------------------
@@ -842,7 +998,14 @@ legion_future_from_buffer(legion_runtime_t runtime_,
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
 
-  Future *result = new Future(Future::from_buffer(runtime, buffer, size));
+  // It turns out that you can't just call Future::from_buffer here,
+  // because then the deserializer wouldn't be speaking the same
+  // language. So instead, create a TaskResult, and use
+  // Future::from_value to serialize in properly, so it will
+  // deserialize properly on the other side as well.
+
+  TaskResult task_result(buffer, size);
+  Future *result = new Future(Future::from_value(runtime, task_result));
   return CObjectWrapper::wrap(result);
 }
 
@@ -869,6 +1032,22 @@ legion_future_get_result(legion_future_t handle_)
 
   TaskResult result = handle->get_result<TaskResult>();
   return CObjectWrapper::wrap(result);
+}
+
+uint32_t
+legion_future_get_result_uint32(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->get_result<uint32_t>();
+}
+
+uint64_t
+legion_future_get_result_uint64(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->get_result<uint64_t>();
 }
 
 bool
@@ -1003,6 +1182,26 @@ legion_task_launcher_add_region_requirement_logical_region(
   unsigned idx = launcher->region_requirements.size();
   launcher->add_region_requirement(
     RegionRequirement(handle, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_task_launcher_add_region_requirement_logical_region_reduction(
+  legion_task_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->region_requirements.size();
+  launcher->add_region_requirement(
+    RegionRequirement(handle, redop, prop, parent, tag, verified));
   return idx;
 }
 
@@ -1255,16 +1454,6 @@ legion_runtime_unmap_region(legion_runtime_t runtime_,
 }
 
 void
-legion_runtime_map_all_regions(legion_runtime_t runtime_,
-                               legion_context_t ctx_)
-{
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
-
-  runtime->map_all_regions(ctx);
-}
-
-void
 legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
                                  legion_context_t ctx_)
 {
@@ -1338,6 +1527,18 @@ legion_physical_region_get_field_accessor_generic(
 
   AccessorGeneric *accessor =
     new AccessorGeneric(handle->get_field_accessor(fid));
+  return CObjectWrapper::wrap(accessor);
+}
+
+legion_accessor_array_t
+legion_physical_region_get_accessor_array(
+  legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  AccessorArray *accessor =
+    new AccessorArray(
+      handle->get_accessor().typeify<char>().convert<SOA>());
   return CObjectWrapper::wrap(accessor);
 }
 
@@ -1629,6 +1830,34 @@ legion_task_get_future(legion_task_t task_, unsigned idx)
   return CObjectWrapper::wrap(new Future(future));
 }
 
+legion_task_id_t
+legion_task_get_task_id(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return task->task_id;
+}
+
+legion_processor_t
+legion_task_get_target_proc(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return CObjectWrapper::wrap(task->target_proc);
+}
+
+// -----------------------------------------------------------------------
+// Inline Operations
+// -----------------------------------------------------------------------
+
+legion_region_requirement_t
+legion_inline_get_requirement(legion_inline_t inline_operation_)
+{
+  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
+
+  return CObjectWrapper::wrap(&inline_operation->requirement);
+}
+
 //------------------------------------------------------------------------
 // Start-up Operations
 //------------------------------------------------------------------------
@@ -1676,7 +1905,7 @@ registration_callback_wrapper(Machine machine,
       itr != local_procs.end(); ++itr)
   {
     const Processor& proc = *itr;
-    local_procs_[idx++] = CObjectWrapper::wrap_const(&proc);
+    local_procs_[idx++] = CObjectWrapper::wrap(proc);
   }
 
   callback(machine_, rt_, local_procs_, idx);
@@ -1688,6 +1917,19 @@ legion_runtime_set_registration_callback(
 {
   callback = callback_;
   HighLevelRuntime::set_registration_callback(registration_callback_wrapper);
+}
+
+void
+legion_runtime_replace_default_mapper(
+  legion_runtime_t runtime_,
+  legion_mapper_t mapper_,
+  legion_processor_t proc_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Mapper *mapper = CObjectWrapper::unwrap(mapper_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  runtime->replace_default_mapper(mapper, proc);
 }
 
 void
@@ -1779,6 +2021,90 @@ legion_runtime_register_task(
     id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
 
+uint32_t
+task_wrapper_uint32(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx,
+                    HighLevelRuntime *runtime,
+                    const legion_task_pointer_uint32_t &task_pointer)
+{
+  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
+  std::vector<legion_physical_region_t> regions_;
+  for (size_t i = 0; i < regions.size(); i++) {
+    regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
+  }
+  legion_physical_region_t *regions_ptr = NULL;
+  if (regions_.size() > 0) {
+    regions_ptr = &regions_[0];
+  }
+  unsigned num_regions = regions_.size();
+  legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
+  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
+
+  return task_pointer(task_, regions_ptr, num_regions, ctx_, runtime_);
+}
+
+legion_task_id_t
+legion_runtime_register_task_uint32(
+  legion_task_id_t id,
+  legion_processor_kind_t proc_kind_,
+  bool single,
+  bool index,
+  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
+  legion_task_config_options_t options_,
+  const char *task_name /* = NULL*/,
+  legion_task_pointer_uint32_t task_pointer)
+{
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
+
+  return HighLevelRuntime::register_legion_task<
+    uint32_t, legion_task_pointer_uint32_t, task_wrapper_uint32>(
+    id, proc_kind, single, index, task_pointer, vid, options, task_name);
+}
+
+uint64_t
+task_wrapper_uint64(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx,
+                    HighLevelRuntime *runtime,
+                    const legion_task_pointer_uint64_t &task_pointer)
+{
+  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
+  std::vector<legion_physical_region_t> regions_;
+  for (size_t i = 0; i < regions.size(); i++) {
+    regions_.push_back(CObjectWrapper::wrap_const(&regions[i]));
+  }
+  legion_physical_region_t *regions_ptr = NULL;
+  if (regions_.size() > 0) {
+    regions_ptr = &regions_[0];
+  }
+  unsigned num_regions = regions_.size();
+  legion_context_t ctx_ = CObjectWrapper::wrap(ctx);
+  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
+
+  return task_pointer(task_, regions_ptr, num_regions, ctx_, runtime_);
+}
+
+legion_task_id_t
+legion_runtime_register_task_uint64(
+  legion_task_id_t id,
+  legion_processor_kind_t proc_kind_,
+  bool single,
+  bool index,
+  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
+  legion_task_config_options_t options_,
+  const char *task_name /* = NULL*/,
+  legion_task_pointer_uint64_t task_pointer)
+{
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
+
+  return HighLevelRuntime::register_legion_task<
+    uint64_t, legion_task_pointer_uint64_t, task_wrapper_uint64>(
+    id, proc_kind, single, index, task_pointer, vid, options, task_name);
+}
+
 // -----------------------------------------------------------------------
 // Timing Operations
 // -----------------------------------------------------------------------
@@ -1787,4 +2113,116 @@ unsigned long long
 legion_get_current_time_in_micros(void)
 {
   return TimeStamp::get_current_time_in_micros();
+}
+
+// -----------------------------------------------------------------------
+// Machine Operations
+// -----------------------------------------------------------------------
+
+void
+legion_machine_get_all_processors(
+  legion_machine_t machine_,
+  legion_processor_t *processors_,
+  unsigned processors_size)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  std::set<Processor> pset;
+  machine->get_all_processors(pset);
+  std::set<Processor>::iterator itr = pset.begin();
+
+  unsigned num_to_copy =
+    std::min((unsigned)pset.size(), processors_size);
+
+  for (unsigned i = 0; i < num_to_copy; ++i)
+    processors_[i] = CObjectWrapper::wrap(*itr++);
+}
+
+unsigned
+legion_machine_get_all_processors_size(legion_machine_t machine_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  std::set<Processor> pset;
+  machine->get_all_processors(pset);
+  return pset.size();
+}
+
+// -----------------------------------------------------------------------
+// Processor Operations
+// -----------------------------------------------------------------------
+
+legion_processor_kind_t
+legion_processor_kind(legion_processor_t proc_)
+{
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  return CObjectWrapper::wrap(proc.kind());
+}
+
+// -----------------------------------------------------------------------
+// Memory Operations
+// -----------------------------------------------------------------------
+
+legion_memory_kind_t
+legion_memory_kind(legion_memory_t proc_);
+
+// -----------------------------------------------------------------------
+// Machine Query Interface Operations
+// -----------------------------------------------------------------------
+
+
+legion_machine_query_interface_t
+legion_machine_query_interface_create(legion_machine_t machine_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  return CObjectWrapper::wrap(new MachineQueryInterface(*machine));
+}
+
+void
+legion_machine_query_interface_destroy(
+  legion_machine_query_interface_t handle_)
+{
+  MachineQueryInterface *handle = CObjectWrapper::unwrap(handle_);
+  delete handle;
+}
+
+legion_memory_t
+legion_machine_query_interface_find_memory_kind(
+  legion_machine_query_interface_t handle_,
+  legion_processor_t proc_,
+  legion_memory_kind_t kind_)
+{
+  MachineQueryInterface *handle = CObjectWrapper::unwrap(handle_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  return CObjectWrapper::wrap(handle->find_memory_kind(proc, kind));
+}
+
+// -----------------------------------------------------------------------
+// Default Mapper Operations
+// -----------------------------------------------------------------------
+
+bool
+legion_default_mapper_map_task(
+  legion_default_mapper_t mapper_,
+  legion_task_t task_)
+{
+  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return mapper->DefaultMapper::map_task(task);
+}
+
+bool
+legion_default_mapper_map_inline(
+  legion_default_mapper_t mapper_,
+  legion_inline_t inline_operation_)
+{
+  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
+  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
+
+  return mapper->DefaultMapper::map_inline(inline_operation);
 }

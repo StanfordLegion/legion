@@ -464,6 +464,7 @@ function specialize.stat_for_num(cx, node)
     symbol = symbol,
     values = values,
     block = block,
+    parallel = node.parallel,
   }
 end
 

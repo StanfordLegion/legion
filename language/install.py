@@ -107,7 +107,7 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir, debug):
+def install_bindings(bindings_dir, terra_dir, debug, general_llr):
     luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
         ('LUAJIT_DIR', luajit_dir),                         # for bindings
@@ -120,7 +120,9 @@ def install_bindings(bindings_dir, terra_dir, debug):
         env = env)
     subprocess.check_call(
         ['make',
-         'DEBUG=%s' % (1 if debug else 0)] +
+         'DEBUG=%s' % (1 if debug else 0),
+         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1)] +
+        (['USE_CUDA=0', 'USE_GASNET=0'] if general_llr else []) +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
         ['-j', str(multiprocessing.cpu_count())],
         cwd = bindings_dir,
@@ -155,6 +157,9 @@ def install():
     parser.add_argument(
         '--debug', dest = 'debug', action = 'store_true', required = False,
         help = 'Build Legion with debugging enabled.')
+    parser.add_argument(
+        '--general', dest = 'general_llr', action = 'store_true', required = False,
+        help = 'Build Legion with the general low-level runtime.')
     args = parser.parse_args()
 
     root_dir = os.path.realpath(os.path.dirname(__file__))
@@ -167,7 +172,7 @@ def install():
     install_terra(terra_dir, args.terra)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, terra_dir, args.debug)
+    install_bindings(bindings_dir, terra_dir, args.debug, args.general_llr)
 
 if __name__ == '__main__':
     install()

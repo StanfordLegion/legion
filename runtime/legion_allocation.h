@@ -19,6 +19,7 @@
 
 #include <set>
 #include <map>
+#include <new>
 #include <list>
 #include <deque>
 #include <vector>
@@ -92,6 +93,7 @@ namespace LegionRuntime {
       LOGICAL_FIELD_STATE_ALLOC,
       CURR_LOGICAL_ALLOC,
       PREV_LOGICAL_ALLOC,
+      CLOSE_LOGICAL_ALLOC,
       VALID_VIEW_ALLOC,
       VALID_REDUCTION_ALLOC,
       PENDING_UPDATES_ALLOC,
@@ -122,6 +124,54 @@ namespace LegionRuntime {
       DIRECTORY_ALLOC,
       LAST_ALLOC, // must be last
     };
+
+    /**
+     * A helper class for determining alignment of types
+     */
+    template<typename T>
+    class AlignmentTrait {
+    public:
+      struct AlignmentFinder {
+        char a;
+        T b;
+      };
+      enum { AlignmentOf = sizeof(AlignmentFinder) - sizeof(T) };
+    };
+
+    template<size_t SIZE, size_t ALIGNMENT, bool BYTES>
+    inline void* legion_alloc_aligned(size_t cnt)
+    {
+      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
+      size_t alloc_size = cnt;
+      if (!BYTES)
+        alloc_size *= SIZE;
+      void *result;
+      if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert((alloc_size % ALIGNMENT) == 0);
+#endif
+      // memalign is faster than posix_memalign so use it if we have it
+#ifdef __MACH__
+        int error = 
+          posix_memalign(&result, ALIGNMENT, alloc_size);
+        assert(error == 0);
+#else
+        result = memalign(ALIGNMENT, alloc_size);
+#endif
+      }
+      else
+        result = malloc(alloc_size);
+
+      return result;
+    }
+
+    template<typename T, bool BYTES>
+    inline void* legion_alloc_aligned(size_t cnt)
+    {
+      return legion_alloc_aligned<sizeof(T),
+              AlignmentTrait<T>::AlignmentOf,BYTES>(cnt);
+    }
 
 #ifdef TRACE_ALLOCATION
     // forward declaration of runtime
@@ -174,7 +224,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T();
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T();
+      return result;
     }
 
     template<typename T, typename T1>
@@ -183,7 +235,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1);
+      return result;
     }
 
     template<typename T, typename T1, typename T2>
@@ -192,7 +246,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3>
@@ -201,7 +257,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, typename T4>
@@ -211,7 +269,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -222,7 +282,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -234,7 +296,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -246,7 +310,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -260,7 +326,10 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, 
+                                   arg7, arg8);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -274,7 +343,10 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -289,7 +361,10 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10);
+      return result;
     }
 
     template<typename T, typename T1, typename T2, typename T3, 
@@ -304,8 +379,10 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_allocation(T::alloc_type, sizeof(T));
 #endif
-      return new T(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, 
-                   arg9, arg10, arg11);
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11);
+      return result;
     }
 
     template<typename T>
@@ -314,56 +391,9 @@ namespace LegionRuntime {
 #ifdef TRACE_ALLOCATION
       LegionAllocation::trace_free(T::alloc_type, sizeof(T));
 #endif
-      delete to_free;
-    } 
-
-    /**
-     * A helper class for determining alignment of types
-     */
-    template<typename T>
-    class AlignmentTrait {
-    public:
-      struct AlignmentFinder {
-        char a;
-        T b;
-      };
-      enum { AlignmentOf = sizeof(AlignmentFinder) - sizeof(T) };
-    };
-
-    template<size_t SIZE, size_t ALIGNMENT, bool BYTES>
-    inline void* legion_alloc_aligned(size_t cnt)
-    {
-      LEGION_STATIC_ASSERT((SIZE % ALIGNMENT) == 0);
-      size_t alloc_size = cnt;
-      if (!BYTES)
-        alloc_size *= SIZE;
-      void *result;
-      if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert((alloc_size % ALIGNMENT) == 0);
-#endif
-      // memalign is faster than posix_memalign so use it if we have it
-#ifdef __MACH__
-        int error = 
-          posix_memalign(&result, ALIGNMENT, alloc_size);
-        assert(error == 0);
-#else
-        result = memalign(ALIGNMENT, alloc_size);
-#endif
-      }
-      else
-        result = malloc(alloc_size);
-
-      return result;
-    }
-
-    template<typename T, bool BYTES>
-    inline void* legion_alloc_aligned(size_t cnt)
-    {
-      return legion_alloc_aligned<sizeof(T),
-              AlignmentTrait<T>::AlignmentOf,BYTES>(cnt);
-    }
+      to_free->~T();
+      free(to_free);
+    }  
 
     /**
      * \class AlignedAllocator

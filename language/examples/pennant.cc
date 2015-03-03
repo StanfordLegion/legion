@@ -461,6 +461,7 @@ void generate_mesh_raw(
   double *pointpos_x, size_t *pointpos_x_size,
   double *pointpos_y, size_t *pointpos_y_size,
   int64_t *pointcolors, size_t *pointcolors_size,
+  uint64_t *pointmcolors, size_t *pointmcolors_size,
   int64_t *zonestart, size_t *zonestart_size,
   int64_t *zonesize, size_t *zonesize_size,
   int64_t *zonepoints, size_t *zonepoints_size,
@@ -497,9 +498,12 @@ void generate_mesh_raw(
                 zonepoints_vec,
                 zonecolors_vec);
 
+  int64_t color_words = int64_t(ceil(conf_npieces/64.0));
+
   assert(pointpos_x_vec.size() <= *pointpos_x_size);
   assert(pointpos_y_vec.size() <= *pointpos_y_size);
   assert(pointcolors_vec.size() <= *pointcolors_size);
+  assert(pointcolors_vec.size()*color_words <= *pointmcolors_size);
   assert(zonestart_vec.size() <= *zonestart_size);
   assert(zonesize_vec.size() <= *zonesize_size);
   assert(zonepoints_vec.size() <= *zonepoints_size);
@@ -513,9 +517,22 @@ void generate_mesh_raw(
   memcpy(zonepoints, zonepoints_vec.data(), zonepoints_vec.size()*sizeof(int64_t));
   memcpy(zonecolors, zonecolors_vec.data(), zonecolors_vec.size()*sizeof(int64_t));
 
+  memset(pointmcolors, (*pointmcolors_size)*sizeof(uint64_t), 0);
+  for (std::map<int64_t, std::vector<int64_t> >::iterator it = pointmcolors_map.begin(),
+         ie = pointmcolors_map.end(); it != ie; ++it) {
+    int64_t p = it->first;
+    for (std::vector<int64_t>::iterator ct = it->second.begin(),
+           ce = it->second.end(); ct != ce; ++ct) {
+      int64_t word = (*ct) / 64.0;
+      int64_t bit = (*ct) % 64;
+      pointmcolors[p + word] |= (1 << bit);
+    }
+  }
+
   *pointpos_x_size = pointpos_x_vec.size();
   *pointpos_y_size = pointpos_y_vec.size();
   *pointcolors_size = pointcolors_vec.size();
+  *pointmcolors_size = pointcolors_vec.size()*color_words;
   *zonestart_size = zonestart_vec.size();
   *zonesize_size = zonesize_vec.size();
   *zonepoints_size = zonepoints_vec.size();
@@ -538,24 +555,16 @@ public:
   virtual bool map_inline(Inline *inline_operation);
   virtual void notify_mapping_failed(const Mappable *mappable);
 private:
-  Color get_task_color_by_region(Task *task, LogicalRegion region);
+  Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
 private:
-  std::map<Processor::Kind, std::vector<Processor> > all_processors;
   Memory local_sysmem;
   Memory local_regmem;
+  std::set<Processor> local_procs;
 };
 
 PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
   : DefaultMapper(machine, rt, local)
 {
-  std::set<Processor> procs;
-  machine.get_all_processors(procs);
-  for (std::set<Processor>::const_iterator it = procs.begin();
-       it != procs.end(); it++) {
-    Processor::Kind kind = it->kind();
-    all_processors[kind].push_back(*it);
-  }
-
   local_sysmem =
     machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);
   local_regmem =
@@ -563,27 +572,22 @@ PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor lo
   if(!local_regmem.exists()) {
     local_regmem = local_sysmem;
   }
+
+  machine.get_shared_processors(local_sysmem, local_procs);
+  if (!local_procs.empty()) {
+    machine_interface.filter_processors(machine, Processor::LOC_PROC, local_procs);
+  }
 }
 
 void PennantMapper::select_task_options(Task *task)
 {
-  if (task->regions.size() >= 1) {
-    LogicalRegion region = task->regions[0].region;
-    Color color = get_task_color_by_region(task, region);
+  // Task options:
+  task->inline_task = false;
+  task->spawn_task = false;
+  task->map_locally = false;
+  task->profile_task = false;
 
-    // Task options:
-    task->inline_task = false;
-    task->spawn_task = false;
-    task->map_locally = false;
-    task->profile_task = false;
-
-    // Processor (round robin by piece of graph):
-    std::vector<Processor> &procs = all_processors[Processor::LOC_PROC];
-    task->target_proc = procs[color % procs.size()];
-  } else {
-    DefaultMapper::select_task_options(task);
-    return;
-  }
+  task->additional_procs = local_procs;
 }
 
 void PennantMapper::select_task_variant(Task *task)
@@ -688,9 +692,12 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
   assert(0 && "mapping failed");
 }
 
-Color PennantMapper::get_task_color_by_region(Task *task, LogicalRegion region)
+Color PennantMapper::get_task_color_by_region(Task *task, const RegionRequirement &requirement)
 {
-  return get_logical_region_color(region);
+  if (requirement.handle_type == SINGULAR) {
+    return get_logical_region_color(requirement.region);
+  }
+  return 0;
 }
 
 void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)

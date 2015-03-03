@@ -13,12 +13,17 @@
  * limitations under the License.
  */
 
+#include <cfloat>
 #include <cstdio>
 #include <string>
 #include <cstdlib>
+#include <vector>
 
 #include "legion.h"
+#include "legion_terra.h"
+#include "lua_mapper_wrapper.h"
 #include "legion_c_util.h"
+#include "legion_terra_util.h"
 
 using namespace std;
 using namespace LegionRuntime::HighLevel;
@@ -34,11 +39,16 @@ extern "C"
 }
 
 #ifdef PROF_BINDING
-LegionRuntime::Logger::Category log("legion_terra");
+static LegionRuntime::Logger::Category log("legion_terra");
 #endif
 
+#define ADD(x, y) ((x) + (y))
+#define SUB(x, y) ((x) - (y))
+#define MUL(x, y) ((x) * (y))
+#define DIV(x, y) ((x) / (y))
+
 // Pre-defined reduction operators
-#define DECLARE_REDUCTION(REG, SRED, RED, CLASS, T, U, OP1, OP2, ID)    \
+#define DECLARE_REDUCTION(REG, SRED, RED, CLASS, T, U, APPLY_OP, FOLD_OP, ID) \
   class CLASS {                                                         \
   public:                                                               \
   typedef T LHS, RHS;                                                   \
@@ -52,7 +62,7 @@ LegionRuntime::Logger::Category log("legion_terra");
   template <>                                                           \
   void CLASS::apply<true>(LHS &lhs, RHS rhs)                            \
   {                                                                     \
-    lhs OP2 rhs;                                                        \
+    lhs = APPLY_OP(lhs, rhs);                                           \
   }                                                                     \
                                                                         \
   template <>                                                           \
@@ -62,14 +72,14 @@ LegionRuntime::Logger::Category log("legion_terra");
     union { U as_U; T as_T; } oldval, newval;                           \
     do {                                                                \
       oldval.as_U = *target;                                            \
-      newval.as_T = oldval.as_T OP1 rhs;                                \
+      newval.as_T = APPLY_OP(oldval.as_T, rhs);                         \
     } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
   }                                                                     \
                                                                         \
   template <>                                                           \
   void CLASS::fold<true>(RHS &rhs1, RHS rhs2)                           \
   {                                                                     \
-    rhs1 OP2 rhs2;                                                      \
+    rhs1 = FOLD_OP(rhs1, rhs2);                                         \
   }                                                                     \
                                                                         \
   template <>                                                           \
@@ -79,7 +89,7 @@ LegionRuntime::Logger::Category log("legion_terra");
     union { U as_U; T as_T; } oldval, newval;                           \
     do {                                                                \
       oldval.as_U = *target;                                            \
-      newval.as_T = oldval.as_T OP1 rhs2;                               \
+      newval.as_T = FOLD_OP(oldval.as_T, rhs2);                         \
     } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
   }                                                                     \
                                                                         \
@@ -108,70 +118,85 @@ LegionRuntime::Logger::Category log("legion_terra");
 DECLARE_REDUCTION(register_reduction_plus_float,
                   safe_reduce_plus_float,
                   reduce_plus_float,
-                  PlusOpFloat, float, int, +, +=, 0.0f)
+                  PlusOpFloat, float, int, ADD, ADD, 0.0f)
 DECLARE_REDUCTION(register_reduction_plus_double,
                   safe_reduce_plus_double,
                   reduce_plus_double,
-                  PlusOpDouble, double, size_t, +, +=, 0.0)
+                  PlusOpDouble, double, size_t, ADD, ADD, 0.0)
 DECLARE_REDUCTION(register_reduction_plus_int32,
                   safe_reduce_plus_int32,
                   reduce_plus_int32,
-                  PlusOpInt, int, int, +, +=, 0)
+                  PlusOpInt, int, int, ADD, ADD, 0)
 
 DECLARE_REDUCTION(register_reduction_minus_float,
                   safe_reduce_minus_float,
                   reduce_minus_float,
-                  MinusOpFloat, float, int, -, -=, 0.0f)
+                  MinusOpFloat, float, int, SUB, ADD, 0.0f)
 DECLARE_REDUCTION(register_reduction_minus_double,
                   safe_reduce_minus_double,
                   reduce_minus_double,
-                  MinusOpDouble, double, size_t, -, -=, 0.0)
+                  MinusOpDouble, double, size_t, SUB, ADD, 0.0)
 DECLARE_REDUCTION(register_reduction_minus_int32,
                   safe_reduce_minus_int32,
                   reduce_minus_int32,
-                  MinusOpInt, int, int, -, -=, 0)
+                  MinusOpInt, int, int, SUB, ADD, 0)
 
 DECLARE_REDUCTION(register_reduction_times_float,
                   safe_reduce_times_float,
                   reduce_times_float,
-                  TImesOPFloat, float, int, *, *=, 0.0f)
+                  TImesOPFloat, float, int, MUL, MUL, 1.0f)
 DECLARE_REDUCTION(register_reduction_times_double,
                   safe_reduce_times_double,
                   reduce_times_double,
-                  TimesOpDouble, double, size_t, *, *=, 0.0)
+                  TimesOpDouble, double, size_t, MUL, MUL, 1.0)
 DECLARE_REDUCTION(register_reduction_times_int32,
                   safe_reduce_times_int32,
                   reduce_times_int32,
-                  TimesOpInt, int, int, *, *=, 0)
+                  TimesOpInt, int, int, MUL, MUL, 1)
 
-template<typename T>
-void lua_push_opaque_object(lua_State* L, T obj)
-{
-  void* ptr = CObjectWrapper::unwrap(obj);
+DECLARE_REDUCTION(register_reduction_divide_float,
+                  safe_reduce_divide_float,
+                  reduce_divide_float,
+                  DivideOPFloat, float, int, DIV, MUL, 1.0f)
+DECLARE_REDUCTION(register_reduction_divide_double,
+                  safe_reduce_divide_double,
+                  reduce_divide_double,
+                  DivideOpDouble, double, size_t, DIV, MUL, 1.0)
+DECLARE_REDUCTION(register_reduction_divide_int32,
+                  safe_reduce_divide_int32,
+                  reduce_divide_int32,
+                  DivideOpInt, int, int, DIV, MUL, 1)
 
-  lua_newtable(L);
-  lua_pushstring(L, "impl");
-  lua_pushlightuserdata(L, ptr);
-  lua_settable(L, -3);
-}
+DECLARE_REDUCTION(register_reduction_max_float,
+                  safe_reduce_max_float,
+                  reduce_max_float,
+                  MaxOPFloat, float, int, max, max, -FLT_MAX)
+DECLARE_REDUCTION(register_reduction_max_double,
+                  safe_reduce_max_double,
+                  reduce_max_double,
+                  MaxOpDouble, double, size_t, max, max, -DBL_MAX)
+DECLARE_REDUCTION(register_reduction_max_int32,
+                  safe_reduce_max_int32,
+                  reduce_max_int32,
+                  MaxOpInt, int, int, max, max, INT_MIN)
 
-template<typename T>
-void lua_push_opaque_object_array(lua_State* L, T* objs, unsigned num_objs)
-{
-  lua_newtable(L);
-  for(unsigned i = 0; i < num_objs; ++i)
-  {
-    lua_push_opaque_object(L, objs[i]);
-    lua_pushinteger(L, i + 1);
-    lua_insert(L, -2);
-    lua_settable(L, -3);
-  }
-}
+DECLARE_REDUCTION(register_reduction_min_float,
+                  safe_reduce_min_float,
+                  reduce_min_float,
+                  MinOPFloat, float, int, min, min, FLT_MAX)
+DECLARE_REDUCTION(register_reduction_min_double,
+                  safe_reduce_min_double,
+                  reduce_min_double,
+                  MinOpDouble, double, size_t, min, min, DBL_MAX)
+DECLARE_REDUCTION(register_reduction_min_int32,
+                  safe_reduce_min_int32,
+                  reduce_min_int32,
+                  MinOpInt, int, int, min, min, INT_MAX)
 
 extern "C"
 {
 
-static lua_State* prepare_interpreter(const string& script_file)
+lua_State* prepare_interpreter(const string& script_file)
 {
   lua_State* L = luaL_newstate();
   luaL_openlibs(L);
@@ -197,6 +222,20 @@ void set_lua_registration_callback_name(char* qualified_callback_name_)
   qualified_callback_name = qualified_callback_name_;
 }
 
+legion_mapper_t create_mapper(const char* qualified_mapper_name,
+                              legion_machine_t machine_,
+                              legion_runtime_t runtime_,
+                              legion_processor_t proc_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  Mapper *mapper = new LuaMapperWrapper(qualified_mapper_name,
+                                        *machine, runtime, proc);
+  return CObjectWrapper::wrap(mapper);
+}
+
 void lua_registration_callback_wrapper(legion_machine_t machine,
                                        legion_runtime_t runtime,
                                        const legion_processor_t *local_procs,
@@ -209,15 +248,17 @@ void lua_registration_callback_wrapper(legion_machine_t machine,
   lua_State* L = prepare_interpreter(script_file);
 
   lua_getglobal(L, "lua_registration_callback_wrapper_in_lua");
+  lua_pushstring(L, script_file.c_str());
   lua_pushstring(L, callback_name.c_str());
   lua_push_opaque_object(L, machine);
   lua_push_opaque_object(L, runtime);
-  lua_push_opaque_object_array(L, local_procs, num_local_procs);
+  lua_pushlightuserdata(L, (void*)local_procs);
+  lua_pushinteger(L, num_local_procs);
 
-  if (lua_pcall(L, 4, 0, 0) != 0)
+  if (lua_pcall(L, 6, 0, 0) != 0)
   {
     fprintf(stderr,
-        "error running lua_registration_callback_wrapper : %s\n",
+        "error running lua_registration_callback_wrapper_in_lua : %s\n",
         lua_tostring(L, -1));
     exit(-1);
   }
@@ -336,6 +377,30 @@ legion_task_result_t lua_task_wrapper(legion_task_t _task,
 #endif
 
   return result;
+}
+
+void
+vector_legion_domain_split_push_back(vector_legion_domain_split_t slices_,
+                                     legion_domain_split_t slice_)
+{
+  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  Mapper::DomainSplit slice = CObjectWrapper::unwrap(slice_);
+  slices->push_back(slice);
+}
+
+unsigned
+vector_legion_domain_split_size(vector_legion_domain_split_t slices_)
+{
+  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  return slices->size();
+}
+
+legion_domain_split_t
+vector_legion_domain_split_get(vector_legion_domain_split_t slices_,
+                               unsigned idx)
+{
+  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  return CObjectWrapper::wrap((*slices)[idx]);
 }
 
 }

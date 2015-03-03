@@ -113,7 +113,8 @@ namespace LegionRuntime {
       struct ProcessorProfiler {
       public:
         ProcessorProfiler(void)
-          : proc(Processor::NO_PROC), utility(false), init_time(0) { }
+          : proc(Processor::NO_PROC), utility(false), dumped(0),
+            init_time(0) { }
         ProcessorProfiler(Processor p, bool util, Processor::Kind k) 
           : proc(p), utility(util), kind(k), dumped(0),
             init_time(TimeStamp::get_current_time_in_micros()) { }
@@ -191,11 +192,8 @@ namespace LegionRuntime {
                                               bool util, 
                                               Processor::Kind kind)
       {
-	ProcessorProfiler &p = get_profiler(proc);
-	p.proc = proc;
-	p.utility = util;
-	p.kind = kind;
-	p.init_time = TimeStamp::get_current_time_in_micros();
+        ProcessorProfiler &p = get_profiler(proc);
+        new (&p) ProcessorProfiler(proc, util, kind);
       }
 
       static inline void initialize_memory(Memory mem, Memory::Kind kind)
