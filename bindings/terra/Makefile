@@ -40,7 +40,7 @@ GEN_GPU_SRC	:=		# .cu files
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
-INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src
+INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src -I$(TERRA_DIR)/release/include
 LD_FLAGS +=
 
 CC_FLAGS += -fPIC -std=c++0x
