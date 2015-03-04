@@ -50,9 +50,7 @@ def test(root_dir, install_args, install_env):
         env = install_env,
         cwd = root_dir)
     subprocess.check_call(
-        ['./test.py',
-         '-j1', '-v', # Spew verbose output.
-        ],
+        ['./test.py'],
         cwd = root_dir)
 
 if __name__ == '__main__':
