@@ -31,7 +31,6 @@ terra_path = [
     '?.t',
     os.path.join(root_dir, 'src', '?.t'),
     os.path.join(terra_dir, 'tests', 'lib', '?.t'),
-    os.path.join(terra_dir, 'release', 'include', '?.t'),
     os.path.join(bindings_dir, '?.t'),
 ]
 

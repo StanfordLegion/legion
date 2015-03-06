@@ -33,7 +33,7 @@ end
 
 task saxpy(n : uint, x: region(float), y: region(float), a: float)
 where
-  reads(x, y), writes(y)
+  reads(x), reduces+(y)
 do
   for i : uint = 0, n do
     var px = [index_to_ptr(ptr(float, x))](i)
