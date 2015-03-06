@@ -137,13 +137,15 @@ function type_check.expr_index_access(cx, node)
   local index = type_check.expr(cx, node.index)
   local index_type = std.check_read(cx, index.expr_type)
 
-  if std.is_partition(value_type) then
+  if std.is_partition(value_type) or std.is_cross_product(value_type) or
+    (std.is_region(value_type) and value_type:has_default_partition())
+  then
     if index:is(ast.typed.ExprConstant) then
       local parent = value_type:parent_region()
       local subregion = value_type:subregion_constant(index.value)
       std.add_constraint(cx, subregion, parent, "<=", false)
 
-      if value_type.disjoint then
+      if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
         for other_index, other_subregion in pairs(other_subregions) do
           if index.value ~= other_index then
@@ -633,6 +635,30 @@ function type_check.expr_partition(cx, node)
   }
 end
 
+function type_check.expr_cross_product(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_read(cx, lhs.expr_type)
+
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs.expr_type)
+
+  if not std.is_partition(lhs_type) then
+    log.error("type mismatch in argument 1: expected partition but got " ..
+                tostring(lhs_type))
+  end
+
+  if not std.is_partition(rhs_type) then
+    log.error("type mismatch in argument 1: expected partition but got " ..
+                tostring(rhs_type))
+  end
+
+  return ast.typed.ExprCrossProduct {
+    lhs = lhs,
+    rhs = rhs,
+    expr_type = node.expr_type,
+  }
+end
+
 local function unary_op_type(op)
   return function(cx, rhs_type)
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
@@ -816,6 +842,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprPartition) then
     return type_check.expr_partition(cx, node)
+
+  elseif node:is(ast.specialized.ExprCrossProduct) then
+    return type_check.expr_cross_product(cx, node)
 
   elseif node:is(ast.specialized.ExprUnary) then
     return type_check.expr_unary(cx, node)

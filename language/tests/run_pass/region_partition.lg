@@ -18,10 +18,10 @@ local c = legionlib.c
 
 task f() : int
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  c.legion_coloring_destroy(rc)
   var r0 = p[0]
 
   var x = new(ptr(int, r0))
@@ -31,15 +31,15 @@ end
 
 task g() : int
   var r = region(int, 5)
-  var rc = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](rc, 0)
+  var rc = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)
-  [c.legion_coloring_destroy](rc)
+  c.legion_coloring_destroy(rc)
   var r0 = p[0]
-  var r0c = [c.legion_coloring_create]();
-  [c.legion_coloring_ensure_color](r0c, 0)
+  var r0c = c.legion_coloring_create()
+  c.legion_coloring_ensure_color(r0c, 0)
   var p0 = partition(disjoint, r0, r0c)
-  [c.legion_coloring_destroy](r0c)
+  c.legion_coloring_destroy(r0c)
   var r1 = p0[0]
 
   var x = new(ptr(int, r1))

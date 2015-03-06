@@ -34,16 +34,16 @@ endif
 # Put the binary file name here
 OUTFILE		:= liblegion_terra.so
 # List all the application source files here
-GEN_SRC		:= legion_terra.cc lua_mapper_wrapper.cc # .cc files
+GEN_SRC		:= legion_terra.cc lua_mapper_wrapper.cc legion_terra_partitions.cc # .cc files
 GEN_GPU_SRC	:=		# .cu files
 
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
-INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src
+INC_FLAGS += -I$(LUAJIT_DIR)/src -I$(TERRA_DIR)/src -I$(TERRA_DIR)/release/include
 LD_FLAGS +=
 
-CC_FLAGS += -fPIC -std=c++11
+CC_FLAGS += -fPIC -std=c++0x
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else

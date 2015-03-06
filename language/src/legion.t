@@ -64,6 +64,7 @@ local language = {
     "__parallel",
     "__physical",
     "__runtime",
+    "cross_product",
     "dynamic_cast",
     "isnull",
     "max",

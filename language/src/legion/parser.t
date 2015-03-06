@@ -309,6 +309,17 @@ function parser.expr_simple(p)
       coloring = coloring,
     }
 
+  elseif p:nextif("cross_product") then
+    p:expect("(")
+    local lhs_type_expr = p:luaexpr()
+    p:expect(",")
+    local rhs_type_expr = p:luaexpr()
+    p:expect(")")
+    return ast.unspecialized.ExprCrossProduct {
+      lhs_type_expr = lhs_type_expr,
+      rhs_type_expr = rhs_type_expr,
+    }
+
   elseif p:matches("{") then
     return p:expr_ctor()
 

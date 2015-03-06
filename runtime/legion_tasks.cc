@@ -6360,8 +6360,10 @@ namespace LegionRuntime {
           pack_remote_mapped(rez);
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
+#ifndef S3D_STARTUP_HACK
         else
           issue_invalidations(runtime->address_space, false/*remote*/);
+#endif
         // Mark that we have completed mapping
         complete_mapping();
       }

@@ -318,6 +318,23 @@ function specialize.expr_partition(cx, node)
   }
 end
 
+function specialize.expr_cross_product(cx, node)
+  local lhs_type = node.lhs_type_expr(cx.env:env())
+  local rhs_type = node.rhs_type_expr(cx.env:env())
+  local expr_type = std.cross_product(lhs_type, rhs_type)
+  local lhs = ast.specialized.ExprID {
+    value = expr_type.lhs_partition_symbol,
+  }
+  local rhs = ast.specialized.ExprID {
+    value = expr_type.rhs_partition_symbol,
+  }
+  return ast.specialized.ExprCrossProduct {
+    lhs = lhs,
+    rhs = rhs,
+    expr_type = expr_type,
+  }
+end
+
 function specialize.expr_unary(cx, node)
   return ast.specialized.ExprUnary {
     op = node.op,
@@ -396,6 +413,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.ExprPartition) then
     return specialize.expr_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprCrossProduct) then
+    return specialize.expr_cross_product(cx, node)
 
   elseif node:is(ast.unspecialized.ExprUnary) then
     return specialize.expr_unary(cx, node)

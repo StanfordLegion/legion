@@ -26,6 +26,7 @@ require('legionlib')
 local c = terralib.includecstring([[
 #include "legion_c.h"
 #include "legion_terra.h"
+#include "legion_terra_partitions.h"
 #include <stdio.h>
 #include <stdlib.h>
 ]])
@@ -476,6 +477,10 @@ end
 
 function std.is_partition(t)
   return terralib.types.istype(t) and rawget(t, "is_partition")
+end
+
+function std.is_cross_product(t)
+  return terralib.types.istype(t) and rawget(t, "is_cross_product")
 end
 
 function std.is_ptr(t)
@@ -1066,11 +1071,66 @@ function std.region(element_type)
 
   local st = terralib.types.newstruct("region")
 
+  st.is_region = true
+  st.element_type = element_type
+
   function st.metamethods.__getentries(st)
     local entries = terralib.newlist({
         { "impl", c.legion_logical_region_t },
     })
     return entries
+  end
+
+  -- Region types can have an optional partition. This is used by
+  -- cross_product to enable patterns like prod[i][j]. Of course, the
+  -- region can have other partitions as well. This is simply used as
+  -- the default partition when attempting to access something out of
+  -- a region.
+  function st:set_default_partition(partition)
+    local previous_default = rawget(self, "partition")
+    if previous_default and previous_default ~= partition then
+      assert(false, "Region type can only have one default partition")
+    end
+    if not std.is_partition(partition) then
+      assert(false, "Region type requires default partition to be a partition")
+    end
+    if partition:parent_region() ~= self then
+      assert(false, "Region type requires default partition to be a partition of self")
+    end
+    self.partition = partition
+  end
+
+  function st:has_default_partition()
+    return rawget(self, "partition")
+  end
+
+  function st:default_partition()
+    local partition = rawget(self, "partition")
+    if not partition then
+      assert(false, "Region type has no default partition")
+    end
+    return partition
+  end
+
+  -- Methods for the partition API:
+  function st:is_disjoint()
+    return self:default_partition():is_disjoint()
+  end
+
+  function st:parent_region()
+    return self
+  end
+
+  function st:subregion_constant(i)
+    return self:default_partition():subregion_constant(i)
+  end
+
+  function st:subregions_constant()
+    return self:default_partition():subregions_constant()
+  end
+
+  function st:subregion_dynamic(i)
+    return self:default_partition():subregion_dynamic(i)
   end
 
   function st:force_cast(from, to, expr)
@@ -1081,9 +1141,6 @@ function std.region(element_type)
   function st.metamethods.__typename(st)
     return "region(" .. tostring(st.element_type) .. ")"
   end
-
-  st.is_region = true
-  st.element_type = element_type
 
   return st
 end
@@ -1117,6 +1174,10 @@ function std.partition(disjointness, region)
   st.parent_region_symbol = region
   st.subregions = {}
 
+  function st:is_disjoint()
+    return self.disjoint
+  end
+
   function st:parent_region()
     local region = self.parent_region_symbol.type
     assert(terralib.types.istype(region) and
@@ -1138,6 +1199,100 @@ function std.partition(disjointness, region)
 
   function st:subregion_dynamic()
     return std.region(self:parent_region().element_type)
+  end
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_partition(from) and std.is_partition(to))
+    return `([to] { impl = [expr].impl })
+  end
+
+  function st.metamethods.__typename(st)
+    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+  end
+
+  return st
+end
+
+function std.cross_product(lhs, rhs)
+  assert(terralib.issymbol(lhs),
+         "Cross product type requires argument 1 to be a symbol")
+  assert(terralib.issymbol(rhs),
+         "Cross product type requires argument 2 to be a symbol")
+  if terralib.types.istype(lhs.type) then
+    assert(std.is_partition(lhs.type),
+           "Cross prodcut type requires argument 1 to be a partition")
+  end
+  if terralib.types.istype(rhs.type) then
+    assert(std.is_partition(rhs.type),
+           "Cross prodcut type requires argument 1 to be a partition")
+  end
+
+  local st = terralib.types.newstruct("cross_product")
+  function st.metamethods.__getentries()
+    return terralib.newlist({
+        { "impl", c.legion_logical_partition_t },
+        { "product", c.legion_terra_index_cross_product_t },
+    })
+  end
+
+  st.is_cross_product = true
+  st.lhs_partition_symbol = lhs
+  st.rhs_partition_symbol = rhs
+  st.subpartitions = {}
+
+  function st:partition()
+    local partition = self.lhs_partition_symbol.type
+    assert(terralib.types.istype(partition) and
+             std.is_partition(partition),
+           "Cross product type requires partition")
+    return partition
+  end
+
+  function st:cross_partition()
+    local partition = self.rhs_partition_symbol.type
+    assert(terralib.types.istype(partition) and
+             std.is_partition(partition),
+           "Cross product type requires partition")
+    return partition
+  end
+
+  function st:is_disjoint()
+    return self:partition():is_disjoint()
+  end
+
+  function st:parent_region()
+    return self:partition():parent_region()
+  end
+
+  function st:subregion_constant(i)
+    local region_type = self:partition():subregion_constant(i)
+    local partition_type = self:subpartition_constant(i, region_type)
+    region_type:set_default_partition(partition_type)
+    return region_type
+  end
+
+  function st:subregions_constant()
+    return self:partition():subregions_constant()
+  end
+
+  function st:subregion_dynamic(i)
+    local region_type = self:partition():subregion_dynamic(i)
+    local partition_type = self:subpartition_dynamic(i, region_type)
+    region_type:set_default_partition(partition_type)
+    return region_type
+  end
+
+  function st:subpartition_constant(i, region_type)
+    if not self.subpartitions[i] then
+      local region_symbol = terralib.newsymbol(region_type)
+      self.subpartitions[i] = std.partition(self:cross_partition().disjointness, region_symbol)
+    end
+    return self.subpartitions[i]
+  end
+
+  function st:subpartition_dynamic(i, region_type)
+    local region_symbol = terralib.newsymbol(region_type)
+    return std.partition(self:cross_partition().disjointness, region_symbol)
   end
 
   function st:force_cast(from, to, expr)
