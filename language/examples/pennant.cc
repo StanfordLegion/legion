@@ -681,6 +681,15 @@ public:
   virtual bool map_task(Task *task);
   virtual bool map_inline(Inline *inline_operation);
   virtual void notify_mapping_failed(const Mappable *mappable);
+  virtual bool rank_copy_targets(const Mappable *mappable,
+                                 LogicalRegion rebuild_region,
+                                 const std::set<Memory> &current_instances,
+                                 bool complete,
+                                 size_t max_blocking_factor,
+                                 std::set<Memory> &to_reuse,
+                                 std::vector<Memory> &to_create,
+                                 bool &create_one,
+                                 size_t &blocking_factor);
 private:
   Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
 private:
@@ -817,6 +826,25 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
     }
   }
   assert(0 && "mapping failed");
+}
+
+bool PennantMapper::rank_copy_targets(const Mappable *mappable,
+                                      LogicalRegion rebuild_region,
+                                      const std::set<Memory> &current_instances,
+                                      bool complete,
+                                      size_t max_blocking_factor,
+                                      std::set<Memory> &to_reuse,
+                                      std::vector<Memory> &to_create,
+                                      bool &create_one,
+                                      size_t &blocking_factor)
+{
+  DefaultMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
+                                   complete, max_blocking_factor, to_reuse,
+                                   to_create, create_one, blocking_factor);
+  if (create_one) {
+    blocking_factor = max_blocking_factor;
+  }
+  return true;
 }
 
 Color PennantMapper::get_task_color_by_region(Task *task, const RegionRequirement &requirement)

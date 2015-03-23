@@ -1056,7 +1056,7 @@ namespace LegionRuntime {
       DynamicTableNode(const DynamicTableNode &rhs) { assert(false); }
       virtual ~DynamicTableNode(void)
       {
-        for (int i = 0; i < SIZE; i++)
+        for (size_t i = 0; i < SIZE; i++)
         {
           if (elems[i] != 0)
             legion_delete(elems[i]);
