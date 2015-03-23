@@ -23,6 +23,6 @@ task g(a : int, b : int) : int
 end
 
 task main()
-  legionlib.assert(g(1, 10) == 11)
+  legionlib.assert(g(1, 10) == 11, "test failed")
 end
 legionlib.start(main)

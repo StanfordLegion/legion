@@ -35,6 +35,6 @@ task g() : double
 end
 
 task main()
-  legionlib.assert(g() == 4315802.5)
+  legionlib.assert(g() == 4315802.5, "test failed")
 end
 legionlib.start(main)

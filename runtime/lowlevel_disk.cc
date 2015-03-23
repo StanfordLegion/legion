@@ -18,24 +18,29 @@
 #include <aio.h>
 #include <sys/types.h>
 #include <time.h>
+#include <unistd.h>
 
 namespace LegionRuntime {
   namespace LowLevel {
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
-    : Memory::Impl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM)
+      : Memory::Impl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
       printf("file = %s\n", _file.c_str());
-      fd = open(_file.c_str(), O_CREAT | O_RDWR, 00777);
+      // do not overwrite an existing file
+      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00777);
       assert(fd != -1);
-      write(fd, "", _size);
+      // resize the file to what we want
+      int ret = ftruncate(fd, _size);
+      assert(ret == 0);
       free_blocks[0] = _size;
     }
 
     DiskMemory::~DiskMemory(void)
     {
       close(fd);
+      // attempt to delete the file
+      unlink(file.c_str());
     }
-
 
     RegionInstance DiskMemory::create_instance(
                      IndexSpace is,
@@ -77,9 +82,15 @@ namespace LegionRuntime {
       cb.aio_fildes = fd;
       cb.aio_offset = offset;
       cb.aio_buf = dst;
-      assert(aio_read(&cb) != -1);
-      while (aio_error(&cb) == EINPROGRESS) {}
-      assert((size_t)aio_return(&cb) == size);
+      int ret = aio_read(&cb);
+      assert(ret == 0);
+      while(true) {
+	ret = aio_error(&cb);
+	if(ret == 0) break; // completed
+	assert(ret == EINPROGRESS); // only other choice we expect to see
+      }
+      ssize_t count = aio_return(&cb);
+      assert(count == (ssize_t)size);
     }
 
     void DiskMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -90,9 +101,15 @@ namespace LegionRuntime {
       cb.aio_fildes = fd;
       cb.aio_offset = offset;
       cb.aio_buf = (void *)src;
-      assert(aio_write(&cb) != -1);
-      while (aio_error(&cb) == EINPROGRESS) {}
-      assert((size_t)aio_return(&cb) == size);
+      int ret = aio_write(&cb);
+      assert(ret == 0);
+      while(true) {
+	ret = aio_error(&cb);
+	if(ret == 0) break; // completed
+	assert(ret == EINPROGRESS); // only other choice we expect to see
+      }
+      ssize_t count = aio_return(&cb);
+      assert(count == (ssize_t)size);
     }
 
     void DiskMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
@@ -109,6 +126,5 @@ namespace LegionRuntime {
     {
       return gasnet_mynode();
     }
-
   }
 }

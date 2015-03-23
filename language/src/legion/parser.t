@@ -464,7 +464,7 @@ function parser.stat_for_num(p, name, type_expr, parallel)
   }
 end
 
-function parser.stat_for_list(p, name, type_expr)
+function parser.stat_for_list(p, name, type_expr, vectorize)
   local value = p:expr()
 
   p:expect("do")
@@ -475,16 +475,26 @@ function parser.stat_for_list(p, name, type_expr)
     type_expr = type_expr,
     value = value,
     block = block,
+    vectorize = vectorize
   }
 end
 
 function parser.stat_for(p)
   local parallel = false
+  local vectorize = false
   if p:nextif("__demand") then
     p:expect("(")
-    p:expect("__parallel")
-    p:expect(")")
-    parallel = "demand"
+    if p:matches("__parallel") then
+      p:expect("__parallel")
+      p:expect(")")
+      parallel = "demand"
+    elseif p:matches("__vectorize") then
+      p:expect("__vectorize")
+      p:expect(")")
+      vectorize = "demand"
+    else
+      p:error("expected __parallel or __vectorize")
+    end
   end
 
   p:expect("for")
@@ -500,7 +510,7 @@ function parser.stat_for(p)
   if p:nextif("=") then
     return p:stat_for_num(name, type_expr, parallel)
   elseif p:nextif("in") then
-    return p:stat_for_list(name, type_expr)
+    return p:stat_for_list(name, type_expr, vectorize)
   else
     p:error("expected = or in")
   end

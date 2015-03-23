@@ -23,6 +23,6 @@ local task g() : int
 end
 
 task main()
-  legionlib.assert(f() == g())
+  legionlib.assert(f() == g(), "test failed")
 end
 legionlib.start(main)

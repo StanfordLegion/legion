@@ -72,7 +72,7 @@ end
 z:compile()
 
 task main()
-  legionlib.assert(tf() == 21)
-  legionlib.assert(tg() == 321)
+  legionlib.assert(tf() == 21, "test failed")
+  legionlib.assert(tg() == 321, "test failed")
 end
 legionlib.start(main)

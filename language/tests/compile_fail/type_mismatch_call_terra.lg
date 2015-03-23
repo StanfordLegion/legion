@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- no applicable overloaded function for arguments int32, int32, int32
+-- no applicable overloaded function f for arguments int32, int32, int32
 
 import "legion"
 

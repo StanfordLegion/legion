@@ -12,13 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- assertion failed: test passed
+
 import "legion"
 
+-- This is just as sanity check that assertions can actually fail.
+
 task main()
-  legionlib.assert(true and true, "test failed")
-  legionlib.assert(true or false, "test failed")
-  legionlib.assert(not false, "test failed")
-  legionlib.assert(true and (not false), "test failed")
-  legionlib.assert(not (false and true), "test failed")
+  legionlib.assert(false, "test passed")
 end
 legionlib.start(main)

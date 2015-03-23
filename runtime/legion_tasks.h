@@ -327,6 +327,9 @@ namespace LegionRuntime {
                             const std::vector<size_t> &fields_sizes);
       void allocate_local_field(const LocalFieldInfo &info);
     public:
+      ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
+      DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
+    public:
       virtual void add_created_index(IndexSpace handle);
       virtual void add_created_region(LogicalRegion handle);
       virtual void add_created_field(FieldSpace handle, FieldID fid);
@@ -516,6 +519,9 @@ namespace LegionRuntime {
       LegionDeque<Barrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
       LegionDeque<InlineTask*,TASK_INLINE_ALLOC>::tracked inline_tasks;
+    protected:
+      // Some help for performing fast safe casts
+      std::map<IndexSpace,Domain> safe_cast_domains;
     protected:
       // Support for serializing premapping operations.  Note
       // we make it possible for operations accessing different

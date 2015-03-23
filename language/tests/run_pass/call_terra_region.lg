@@ -93,6 +93,6 @@ task main()
   y.b = 300
   y.c = 4000
 
-  legionlib.assert(intermediate(r, s, x, y) == 1)
+  legionlib.assert(intermediate(r, s, x, y) == 1, "test failed")
 end
 legionlib.start(main)

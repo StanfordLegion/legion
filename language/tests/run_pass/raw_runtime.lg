@@ -15,7 +15,7 @@
 import "legion"
 
 terra test(ctx : legionlib.c.legion_runtime_t)
-  legionlib.assert(ctx.impl ~= nil)
+  legionlib.assert(ctx.impl ~= nil, "test failed")
 end
 
 task main()

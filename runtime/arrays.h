@@ -394,7 +394,7 @@ namespace LegionRuntime {
     template <unsigned IDIM_, unsigned ODIM_>
     class Mapping {
     private:
-      unsigned references;
+      int references;
     public:
       Mapping(void)
         : references(0) { }
@@ -449,7 +449,7 @@ namespace LegionRuntime {
       }
       inline bool remove_reference(void)
       {
-        unsigned prev = __sync_fetch_and_add(&references, -1);
+        int prev = __sync_fetch_and_sub(&references, 1);
         assert(prev >= 1);
         return (prev == 1);
       }

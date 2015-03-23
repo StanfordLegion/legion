@@ -572,6 +572,7 @@ namespace LegionRuntime {
     public:
       void activate_context(SingleTask *context);
       void deactivate_context(SingleTask *context);
+      void update_max_context_count(unsigned max_contexts);
     public:
       void process_steal_request(Processor thief, 
                                  const std::vector<MapperID> &thieves);
@@ -761,6 +762,7 @@ namespace LegionRuntime {
         HIERARCHICAL_REMOVE_RESOURCE,
         HIERARCHICAL_REMOVE_REMOTE,
         SEND_BACK_USER,
+        SEND_BACK_ATOMIC,
         SEND_SUBSCRIBER,
         SEND_MATERIALIZED_VIEW,
         SEND_MATERIALIZED_UPDATE,
@@ -843,6 +845,7 @@ namespace LegionRuntime {
       void send_remove_hierarchical_resource(Serializer &rez, bool flush);
       void send_remove_hierarchical_remote(Serializer &rez, bool flush);
       void send_back_user(Serializer &rez, bool flush);
+      void send_back_atomic(Serializer &rez, bool flush);
       void send_subscriber(Serializer &rez, bool flush);
       void send_materialized_view(Serializer &rez, bool flush);
       void send_back_materialized_view(Serializer &rez, bool flush);
@@ -1400,6 +1403,7 @@ namespace LegionRuntime {
       void send_remove_hierarchical_remote(AddressSpaceID target, 
                                            Serializer &rez);
       void send_back_user(AddressSpaceID target, Serializer &rez);
+      void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_subscriber(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
@@ -1479,6 +1483,7 @@ namespace LegionRuntime {
       void handle_hierarchical_remove_resource(Deserializer &derez);
       void handle_hierarchical_remove_remote(Deserializer &derez);
       void handle_send_back_user(Deserializer &derez, AddressSpaceID source);
+      void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
       void handle_send_subscriber(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
@@ -1714,6 +1719,8 @@ namespace LegionRuntime {
       Future help_create_future(Operation *op = NULL);
       void help_complete_future(const Future &f);
       bool help_reset_future(const Future &f);
+    public:
+      unsigned generate_random_integer(void);
 #ifdef DYNAMIC_TESTS
     public:
       bool perform_dynamic_independence_tests(void);
@@ -1797,7 +1804,7 @@ namespace LegionRuntime {
       unsigned unique_field_space_id;
       unsigned unique_tree_id;
       unsigned unique_operation_id;
-      unsigned unique_field_id;
+      unsigned unique_field_id; 
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
@@ -1841,6 +1848,10 @@ namespace LegionRuntime {
       Reservation remote_lock;
       LegionMap<UniqueID,RemoteTask*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+    protected:
+      // For generating random numbers
+      Reservation random_lock;
+      unsigned short random_state[3];
 #ifdef TRACE_ALLOCATION
     protected:
       struct AllocationTracker {

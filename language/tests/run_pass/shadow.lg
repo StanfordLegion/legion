@@ -40,10 +40,10 @@ task g(n : int) : int
 end
 
 task main()
-  legionlib.assert(f(false) == 5)
-  legionlib.assert(f(true) == 15)
-  legionlib.assert(g(1) == 1)
-  legionlib.assert(g(2) == 2)
-  legionlib.assert(g(3) == 3)
+  legionlib.assert(f(false) == 5, "test failed")
+  legionlib.assert(f(true) == 15, "test failed")
+  legionlib.assert(g(1) == 1, "test failed")
+  legionlib.assert(g(2) == 2, "test failed")
+  legionlib.assert(g(3) == 3, "test failed")
 end
 legionlib.start(main)

@@ -1263,11 +1263,16 @@ namespace LegionRuntime {
         runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
         // once the reference event is ready
-        if (reference.has_required_lock())
+        if (reference.has_required_locks())
         {
-          Reservation req_lock = reference.get_required_lock();
-          Event locked_event = 
-            req_lock.acquire(0, true/*exclusive*/, ref_ready);
+          std::map<Reservation,bool> required_locks;
+          reference.update_atomic_locks(required_locks, true/*exclusive*/);
+          Event locked_event = ref_ready;
+          for (std::map<Reservation,bool>::const_iterator it = 
+                required_locks.begin(); it != required_locks.end(); it++)
+          {
+            locked_event = it->first.acquire(0, it->second, locked_event);
+          }
           locked_event.wait();
         }
         else
@@ -1399,10 +1404,15 @@ namespace LegionRuntime {
       // Before unmapping, make sure any previous mappings have finished
       wait_until_valid();
       // Unlock our lock now that we're done
-      if (reference.has_required_lock())
+      if (reference.has_required_locks())
       {
-        Reservation req_lock = reference.get_required_lock();
-        req_lock.release();
+        std::map<Reservation,bool> required_locks;
+        reference.update_atomic_locks(required_locks,true/*doesn't matter*/);
+        for (std::map<Reservation,bool>::const_iterator it = 
+              required_locks.begin(); it != required_locks.end(); it++)
+        {
+          it->first.release();
+        }
       }
       mapped = false;
       valid = false;
@@ -1744,8 +1754,8 @@ namespace LegionRuntime {
       this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
-      context_states.resize(MAX_CONTEXTS);
-      dependence_preconditions.resize(MAX_CONTEXTS, Event::NO_EVENT);
+      context_states.resize(DEFAULT_CONTEXTS);
+      dependence_preconditions.resize(DEFAULT_CONTEXTS, Event::NO_EVENT);
       local_scheduler_preconditions.resize(superscalar_width, Event::NO_EVENT);
     }
 
@@ -2670,10 +2680,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ContextID ctx_id = context->get_context_id();
-      // We can do this without holding the lock because we know
-      // the size of this vector is fixed
-      ContextState &state = context_states[ctx_id];
       AutoLock q_lock(queue_lock); 
+      ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_HIGH_LEVEL
       assert(!state.active);
 #endif
@@ -2689,14 +2697,26 @@ namespace LegionRuntime {
       ContextID ctx_id = context->get_context_id();
       // We can do this without holding the lock because we know
       // the size of this vector is fixed
-      ContextState &state = context_states[ctx_id];
       AutoLock q_lock(queue_lock); 
+      ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_HIGH_LEVEL
       assert(state.active);
 #endif
       state.active = false;
       if (state.owned_tasks > 0)
         decrement_active_contexts();
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::update_max_context_count(unsigned max_contexts)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock d_lock(dependence_lock);
+        dependence_preconditions.resize(max_contexts, Event::NO_EVENT);
+      }
+      AutoLock q_lock(queue_lock);
+      context_states.resize(max_contexts);
     }
 
     //--------------------------------------------------------------------------
@@ -2828,8 +2848,8 @@ namespace LegionRuntime {
             // the ready queue
             temp_stolen[idx]->schedule = false;
             ContextID ctx_id = temp_stolen[idx]->get_parent()->get_context_id();
-            ContextState &state = context_states[ctx_id];
             AutoLock q_lock(queue_lock);
+            ContextState &state = context_states[ctx_id];
             ready_queues[stealer].push_front(temp_stolen[idx]);
             if (state.active && (state.owned_tasks == 0))
               increment_active_contexts();
@@ -2915,8 +2935,8 @@ namespace LegionRuntime {
       // We can do this without holding the lock because the
       // vector is of a fixed size
       ContextID ctx_id = task->get_parent()->get_context_id();
-      ContextState &state = context_states[ctx_id];
       AutoLock q_lock(queue_lock);
+      ContextState &state = context_states[ctx_id];
       if (prev_failure)
         ready_queues[task->map_id].push_front(task);
       else
@@ -3722,6 +3742,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_back_atomic(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_BACK_ATOMIC, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_subscriber(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -4281,6 +4308,11 @@ namespace LegionRuntime {
               runtime->handle_send_back_user(derez, remote_address_space);
               break;
             }
+          case SEND_BACK_ATOMIC:
+            {
+              runtime->handle_send_back_atomic(derez, remote_address_space);
+              break;
+            }
           case SEND_SUBSCRIBER:
             {
               runtime->handle_send_subscriber(derez, remote_address_space);
@@ -4654,6 +4686,7 @@ namespace LegionRuntime {
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         future_lock(Reservation::create_reservation()),
         remote_lock(Reservation::create_reservation()),
+        random_lock(Reservation::create_reservation()),
         individual_task_lock(Reservation::create_reservation()), 
         point_task_lock(Reservation::create_reservation()),
         index_task_lock(Reservation::create_reservation()), 
@@ -4805,6 +4838,13 @@ namespace LegionRuntime {
       // Create our first GC epoch
       current_gc_epoch = new GarbageCollectionEpoch(this);
       pending_gc_epochs.insert(current_gc_epoch);
+      // Initialize our random number generator state
+      random_state[0] = address_space & 0xFFFF; // low-order bits of node ID 
+      random_state[1] = (address_space >> 16) & 0xFFFF; // high-order bits
+      random_state[2] = LEGION_INIT_SEED;
+      // Do some mixing
+      for (int i = 0; i < 256; i++)
+        nrand48(random_state);
 
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
@@ -6522,12 +6562,7 @@ namespace LegionRuntime {
 #endif
       if (pointer.is_null())
         return pointer;
-      Domain domain = get_index_space_domain(ctx, region.get_index_space()); 
-      DomainPoint point(pointer.value);
-      if (domain.contains(point))
-        return pointer;
-      else
-        return ptr_t::nil();
+      return ctx->perform_safe_cast(region.get_index_space(), pointer);
     }
 
     //--------------------------------------------------------------------------
@@ -6541,11 +6576,7 @@ namespace LegionRuntime {
 #endif
       if (point.is_null())
         return point;
-      Domain domain = get_index_space_domain(ctx, region.get_index_space());
-      if (domain.contains(point))
-        return point;
-      else
-        return DomainPoint::nil();
+      return ctx->perform_safe_cast(region.get_index_space(), point);
     }
 
     //--------------------------------------------------------------------------
@@ -8975,9 +9006,9 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -8986,9 +9017,9 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -8997,9 +9028,9 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -9008,9 +9039,10 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, fid, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, fid, tag, 
+                                          node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -9019,9 +9051,9 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -9030,9 +9062,9 @@ namespace LegionRuntime {
                                               const void *buffer, size_t size)
     //--------------------------------------------------------------------------
     {
-      NodeMask mask;
-      mask.set_bit(address_space);
-      forest->attach_semantic_information(handle, tag, mask, buffer, size);
+      NodeSet node_set;
+      node_set.add(address_space);
+      forest->attach_semantic_information(handle, tag, node_set, buffer, size);
     }
 
     //--------------------------------------------------------------------------
@@ -9836,6 +9868,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_back_atomic(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_back_atomic(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_subscriber(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -10354,6 +10393,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_send_back_user(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_back_atomic(Deserializer &derez,
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_send_back_atomic(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -11317,8 +11364,8 @@ namespace LegionRuntime {
       // Mark that we doubled the total number of contexts
       // Very important that we do this before calling the
       // RegionTreeForest's resize method!
-      unsigned current_contexts = total_contexts;
-      __sync_fetch_and_add(&total_contexts,current_contexts);
+      total_contexts *= 2;
+#if 0
       if (total_contexts > MAX_CONTEXTS)
       {
         log_run(LEVEL_ERROR,"ERROR: Maximum number of allowed contexts %d "
@@ -11335,12 +11382,16 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_EXCEEDED_MAX_CONTEXTS);
       }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(!available_contexts.empty());
 #endif
-      // Tell the forest to resize the number of available contexts
-      // on all the nodes
-      forest->resize_node_contexts(current_contexts);
+      // Tell all the processor managers about the additional contexts
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->update_max_context_count(total_contexts); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12190,10 +12241,17 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(point_task_lock);
-      available_point_tasks.push_front(task);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_point_tasks.erase(task);
 #endif
+      // Note that we can safely delete point tasks because they are
+      // never registered in the logical state of the region tree
+      // as part of the dependence analysis. This does not apply
+      // to all operation objects.
+      if (available_point_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(task);
+      else
+        available_point_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -12212,10 +12270,17 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(slice_task_lock);
-      available_slice_tasks.push_front(task);
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       out_slice_tasks.erase(task);
 #endif
+      // Note that we can safely delete slice tasks because they are
+      // never registered in the logical state of the region tree
+      // as part of the dependence analysis. This does not apply
+      // to all operation objects.
+      if (available_slice_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(task);
+      else
+        available_slice_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -12223,7 +12288,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(remote_task_lock);
-      available_remote_tasks.push_front(task);
+      // Note that we can safely delete remote tasks because they are
+      // never registered in the logical state of the region tree
+      // as part of the dependence analysis. This does not apply
+      // to all operation objects.
+      if (available_remote_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(task);
+      else
+        available_remote_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -12231,7 +12303,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inline_task_lock);
-      available_inline_tasks.push_front(task);
+      // Note that we can safely delete inline tasks because they are
+      // never registered in the logical state of the region tree
+      // as part of the dependence analysis. This does not apply
+      // to all operation objects.
+      if (available_inline_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(task);
+      else
+        available_inline_tasks.push_front(task);
     }
 
     //--------------------------------------------------------------------------
@@ -12555,6 +12634,15 @@ namespace LegionRuntime {
       return f.impl->reset_future();
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Runtime::generate_random_integer(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock r_lock(random_lock);
+      unsigned result = nrand48(random_state);
+      return result;
+    }
+
 #ifdef DYNAMIC_TESTS
     //--------------------------------------------------------------------------
     bool Runtime::perform_dynamic_independence_tests(void)
@@ -12796,6 +12884,12 @@ namespace LegionRuntime {
           return "Semantic Information";
         case DIRECTORY_ALLOC:
           return "State Directory";
+        case DENSE_INDEX_ALLOC:
+          return "Dense Index Set";
+        case LOGICAL_STATE_ALLOC:
+          return "Logical State";
+        case PHYSICAL_STATE_ALLOC:
+          return "Physical State";
         default:
           assert(false); // should never get here
       }
@@ -13124,7 +13218,6 @@ namespace LegionRuntime {
       LEGION_STATIC_ASSERT((1 << FIELD_LOG2) == MAX_FIELDS);
       LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
       LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(MAX_CONTEXTS > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);

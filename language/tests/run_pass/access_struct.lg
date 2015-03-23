@@ -29,6 +29,6 @@ terra g() : point
 end
 
 task main()
-  legionlib.assert(f(g()) == 321)
+  legionlib.assert(f(g()) == 321, "test failed")
 end
 legionlib.start(main)

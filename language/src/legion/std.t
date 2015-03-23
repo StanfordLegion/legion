@@ -44,6 +44,24 @@ function std.min(a, b)
   end
 end
 
+function std.any(list)
+  for _, elt in ipairs(list) do
+    if elt then
+      return true
+    end
+  end
+  return false
+end
+
+function std.all(list)
+  for _, elt in ipairs(list) do
+    if not elt then
+      return false
+    end
+  end
+  return true
+end
+
 function std.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do
@@ -102,9 +120,9 @@ function std.hash(x)
   end
 end
 
-terra std.assert(x : bool)
+terra std.assert(x : bool, message : rawstring)
   if not x then
-    c.printf("assertion failed!\n")
+    c.printf("assertion failed: %s\n", message)
     c.abort()
   end
 end
@@ -487,8 +505,20 @@ function std.is_ptr(t)
   return terralib.types.istype(t) and rawget(t, "is_pointer")
 end
 
+function std.is_vptr(t)
+  return terralib.types.istype(t) and rawget(t, "is_vpointer")
+end
+
+function std.is_sov(t)
+  return terralib.types.istype(t) and rawget(t, "is_struct_of_vectors")
+end
+
 function std.is_ref(t)
   return terralib.types.istype(t) and rawget(t, "is_ref")
+end
+
+function std.is_future(t)
+  return terralib.types.istype(t) and rawget(t, "is_future")
 end
 
 struct std.untyped {}
@@ -1335,7 +1365,19 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
       { "__ptr", c.legion_ptr_t },
   })
   if #regions > 1 then
-    st.entries:insert({ "__index", uint32 })
+    -- Find the smallest bitmask that will fit.
+    -- TODO: Would be nice to compress smaller than one byte.
+   local bitmask_type
+    if #regions < bit.lshift(1, 8) - 1 then
+      bitmask_type = uint8
+    elseif #regions < bit.lshift(1, 16) - 1 then
+      bitmask_type = uint16
+    elseif #regions < bit.lshift(1, 32) - 1 then
+      bitmask_type = uint32
+    else
+      assert(false) -- really?
+    end
+    st.entries:insert({ "__index", bitmask_type })
   end
 
   st.is_pointer = true
@@ -1390,6 +1432,96 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
   return st
 end)
 
+std.vptr = terralib.memoize(function(width, points_to_type, ...)
+  local regions = terralib.newlist({...})
+
+  local vec = vector(uint32, width)
+  local struct legion_vptr_t {
+    value : vec
+  }
+  local st = terralib.types.newstruct("vptr")
+  st.entries = terralib.newlist({
+      { "__ptr", legion_vptr_t },
+  })
+
+  local bitmask_type
+  if #regions > 1 then
+    -- Find the smallest bitmask that will fit.
+    -- TODO: Would be nice to compress smaller than one byte.
+    if #regions < bit.lshift(1, 8) - 1 then
+      bitmask_type = vector(uint8, width)
+    elseif #regions < bit.lshift(1, 16) - 1 then
+      bitmask_type = vector(uint16, width)
+    elseif #regions < bit.lshift(1, 32) - 1 then
+      bitmask_type = vector(uint32, width)
+    else
+      assert(false) -- really?
+    end
+    st.entries:insert({ "__index", bitmask_type })
+  end
+
+  st.is_vpointer = true
+  st.points_to_type = points_to_type
+  st.points_to_region_symbols = regions
+  st.N = width
+  st.type = ptr(points_to_type, ...)
+
+  function st:points_to_regions()
+    local regions = terralib.newlist()
+    for i, region_symbol in ipairs(self.points_to_region_symbols) do
+      local region = region_symbol.type
+      if not (terralib.types.istype(region) and std.is_region(region)) then
+        log.error("vptr expected a region as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region.type))
+      end
+      if not std.type_eq(region.element_type, points_to_type) then
+        log.error("vptr expected region(" .. tostring(points_to_type) ..
+                    ") as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region))
+      end
+      regions:insert(region)
+    end
+    return regions
+  end
+
+  function st.metamethods.__typename(st)
+    local regions = st.points_to_region_symbols
+
+    return "vptr(" .. st.N .. ", " ..
+           tostring(st.points_to_type) .. ", " ..
+           tostring(regions:mkstring(", ")) .. ")"
+  end
+
+  return st
+end)
+
+std.sov = terralib.memoize(function(struct_type, width)
+  for _, entry in pairs(struct_type.entries) do
+    local entry_type = entry[2] or entry.type
+    if not entry_type:isprimitive() then
+      error("sov expected a struct type of primitive types, got a field " ..
+        entry.field .. " of type " ..  tostring(entry.type))
+    end
+  end
+
+  local st = terralib.types.newstruct("sov")
+  st.entries = terralib.newlist()
+  for _, entry in pairs(struct_type.entries) do
+    local entry_field = entry[1] or entry.field
+    local entry_type = entry[2] or entry.type
+    st.entries:insert{entry_field, vector(entry_type, width)}
+  end
+  st.is_struct_of_vectors = true
+  st.type = struct_type
+  st.N = width
+
+  function st.metamethods.__typename(st)
+    return "sov(" .. tostring(st.type) .. ", " .. tostring(st.N) .. ")"
+  end
+
+  return st
+end)
+
 -- The ref type is a reference to a ptr type. Note that ref is
 -- different from ptr in that it is not intended to be used by code;
 -- it exists mainly to facilitate field-sensitive privilege checks in
@@ -1421,6 +1553,26 @@ std.ref = terralib.memoize(function(pointer_type, ...)
     local regions = st.refers_to_region_symbols
 
     return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(regions:mkstring(", ")) .. ")"
+  end
+
+  return st
+end)
+
+std.future = terralib.memoize(function(result_type)
+  if not terralib.types.istype(result_type) then
+    error("future expected a type as argument 1, got " .. tostring(result_type))
+  end
+
+  local st = terralib.types.newstruct("future")
+  st.entries = terralib.newlist({
+      { "__result", c.legion_future_t },
+  })
+
+  st.is_future = true
+  st.result_type = result_type
+
+  function st.metamethods.__typename(st)
+    return "future(" .. tostring(st.result_type) .. ")"
   end
 
   return st
@@ -1540,32 +1692,52 @@ local task = {}
 task.__index = task
 
 function task:set_param_symbols(t)
-  assert(not self.param_symbols)
+  assert(rawget(self, "param_symbols") == nil)
   self.param_symbols = t
 end
 
 function task:get_param_symbols()
-  assert(self.param_symbols)
+  assert(rawget(self, "param_symbols") ~= nil)
   return self.param_symbols
 end
 
 function task:set_params_struct(t)
-  assert(not self.params_struct)
+  assert(rawget(self, "params_struct") == nil)
   self.params_struct = t
 end
 
 function task:get_params_struct()
-  assert(self.params_struct)
+  assert(rawget(self, "params_struct") ~= nil)
   return self.params_struct
 end
 
+function task:set_params_map_type(t)
+  assert(rawget(self, "params_map_type") == nil)
+  self.params_map_type = t
+end
+
+function task:get_params_map_type()
+  assert(rawget(self, "params_map_type") ~= nil)
+  return self.params_map_type
+end
+
+function task:set_params_map(t)
+  assert(rawget(self, "params_map") == nil)
+  self.params_map = t
+end
+
+function task:get_params_map()
+  assert(rawget(self, "params_map") ~= nil)
+  return self.params_map
+end
+
 function task:set_field_id_params(t)
-  assert(not self.field_id_params)
+  assert(rawget(self, "field_id_params") == nil)
   self.field_id_params = t
 end
 
 function task:get_field_id_params()
-  assert(self.field_id_params)
+  assert(rawget(self, "field_id_params") ~= nil)
   return self.field_id_params
 end
 
@@ -1574,38 +1746,58 @@ function task:settype(t)
 end
 
 function task:gettype()
-  assert(self.type)
+  assert(rawget(self, "type") ~= nil)
   return self.type
 end
 
 function task:setprivileges(t)
-  assert(not self.privileges)
+  assert(rawget(self, "privileges") == nil)
   self.privileges = t
 end
 
 function task:getprivileges()
-  assert(self.privileges)
+  assert(rawget(self, "privileges") ~= nil)
   return self.privileges
 end
 
 function task:set_param_constraints(t)
-  assert(not self.param_constraints)
+  assert(rawget(self, "param_constraints") == nil)
   self.param_constraints = t
 end
 
 function task:get_param_constraints()
-  assert(self.param_constraints)
+  assert(rawget(self, "param_constraints") ~= nil)
   return self.param_constraints
 end
 
 function task:set_constraints(t)
-  assert(not self.constraints)
+  assert(rawget(self, "constraints") == nil)
   self.constraints = t
 end
 
 function task:get_constraints()
-  assert(self.constraints)
+  assert(rawget(self, "constraints") ~= nil)
   return self.constraints
+end
+
+function task:set_region_universe(t)
+  assert(rawget(self, "region_universe") == nil)
+  self.region_universe = t
+end
+
+function task:get_region_universe()
+  assert(rawget(self, "region_universe") ~= nil)
+  return self.region_universe
+end
+
+function task:set_config_options(t)
+  assert(rawget(self, "config_options") == nil)
+  self.config_options = t
+end
+
+function task:get_config_options()
+  assert(rawget(self, "config_options") ~= nil)
+  return self.config_options
 end
 
 function task:gettaskid()
@@ -1626,6 +1818,10 @@ end
 
 function task:compile()
   return self:getdefinition():compile()
+end
+
+function task:disas()
+  return self:getdefinition():disas()
 end
 
 function task:__call(...)
@@ -1887,9 +2083,13 @@ function std.start(main_task)
     function(task)
       next_task_id = next_task_id + 1
       task:gettaskid():set(next_task_id)
+
       local return_type = task:getdefinition():gettype().returntype
       local result_type_bucket = std.type_size_bucket_name(return_type)
       local register = c["legion_runtime_register_task" .. result_type_bucket]
+
+      local options = task:get_config_options()
+
       return quote [register](
         [next_task_id],
         c.LOC_PROC,
@@ -1897,9 +2097,10 @@ function std.start(main_task)
         true,
         -1 --[[ AUTO_GENERATE_ID ]],
         c.legion_task_config_options_t {
-          leaf = false,
-          inner = false,
-          idempotent = false
+          leaf = options.leaf,
+          -- FIXME: Inner appears to be broken.
+          inner = false, -- options.inner,
+          idempotent = options.idempotent,
         },
         [task:getname()],
         [task:getdefinition()])
@@ -1942,6 +2143,91 @@ function std.start(main_task)
     return c.legion_runtime_start(argc, argv, false)
   end
   main()
+end
+
+-- #####################################
+-- ## Vector Operators
+-- #################
+do
+  local to_math_op_name = {}
+  local function math_op_factory(fname)
+    return terralib.memoize(function(arg_type)
+      local intrinsic_name = "llvm." .. fname .. "."
+      local elmt_type = arg_type
+      if arg_type:isvector() then
+        intrinsic_name = intrinsic_name .. "v" .. arg_type.N
+        elmt_type = elmt_type.type
+      end
+      assert(elmt_type == float or elmt_type == double)
+      intrinsic_name = intrinsic_name .. "f" .. (sizeof(elmt_type) * 8)
+      local op = terralib.intrinsic(intrinsic_name, arg_type -> arg_type)
+      to_math_op_name[op] = fname
+      return op
+    end)
+  end
+
+  local supported_math_ops = {
+    "ceil",
+    "cos",
+    "exp",
+    "exp2",
+    "fabs",
+    "floor",
+    "log",
+    "log2",
+    "log10",
+    "sin",
+    "sqrt",
+    "trunc"
+  }
+
+  for _, fname in pairs(supported_math_ops) do
+    std[fname] = math_op_factory(fname)
+  end
+
+  function std.is_math_op(op)
+    return to_math_op_name[op] ~= nil
+  end
+
+  function std.convert_math_op(op, arg_type)
+    return std[to_math_op_name[op]](arg_type)
+  end
+end
+
+do
+  local intrinsic_names = {}
+  intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
+  intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
+  intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
+  intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+
+  local function math_binary_op_factory(fname)
+    return terralib.memoize(function(arg_type)
+      assert(arg_type:isvector())
+      assert((arg_type.type == float and 4 <= arg_type.N and arg_type.N <= 8) or
+             (arg_type.type == double and 2 <= arg_type.N and arg_type.N <= 4))
+
+      local intrinsic_name = string.format(intrinsic_names[arg_type], fname)
+      return terralib.intrinsic(intrinsic_name,
+                                {arg_type, arg_type} -> arg_type)
+    end)
+  end
+
+  local supported_math_binary_ops = { "min", "max", }
+  for _, fname in pairs(supported_math_binary_ops) do
+    std["v" .. fname] = math_binary_op_factory(fname)
+  end
+
+  function std.is_minmax_supported(arg_type)
+    if not arg_type:isvector() then return false end
+    if not ((arg_type.type == float and
+             4 <= arg_type.N and arg_type.N <= 8) or
+            (arg_type.type == double and
+             2 <= arg_type.N and arg_type.N <= 4)) then
+      return false
+    end
+    return true
+  end
 end
 
 return std

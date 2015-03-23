@@ -14,24 +14,58 @@
 
 import "legion"
 
-task f(r : region(int), x : ptr(int, r)) : int
-where reads(r) do
+-- This tests various aspects of the inline mapping optimization.
+
+task f(r : region(int), x : ptr(int, r))
+where reads(r), writes(r) do
+  @x += 10
   return @x
 end
 
 task g(r : region(int), x : ptr(int, r))
 where reads(r), writes(r) do
-  @x = 5
-end
-
-task t() : int
-  var r = region(int, 5)
-  var x = new(ptr(int, r))
-  g(r, x)
-  return f(r, x)
+  f(r, x)
+  f(r, x)
+  f(r, x)
+  @x += 4000
 end
 
 task main()
-  legionlib.assert(t() == 5, "test failed")
+  var r = region(int, 5)
+  var x = new(ptr(int, r))
+  @x = 3
+  f(r, x)
+  f(r, x)
+  legionlib.assert(@x == 23, "test failed")
+
+  if @x < 30 then
+    f(r, x)
+    f(r, x)
+  elseif f(r, x) < 20 then
+    @x += 3
+  end
+  legionlib.assert(@x == 43, "test failed")
+
+  while true do
+    f(r, x)
+    @x += 100
+    break
+  end
+  legionlib.assert(@x == 153, "test failed")
+
+  for i = 0, @x, 100 do
+    f(r, x)
+  end
+  legionlib.assert(@x == 173, "test failed")
+
+  repeat
+    f(r, x)
+    @x += 100
+  until @x > 200
+  legionlib.assert(@x == 283, "test failed")
+
+  @x = 7
+  g(r, x)
+  legionlib.assert(@x == 4037, "test failed")
 end
 legionlib.start(main)

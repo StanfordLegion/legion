@@ -364,8 +364,6 @@ namespace LegionRuntime {
     public:
       template<typename T>
       Color generate_unique_color(const std::map<Color,T> &current_map);
-    public:
-      void resize_node_contexts(unsigned total_contexts);
 #ifdef DEBUG_HIGH_LEVEL
     public:
       // These are debugging methods and are never called from
@@ -375,22 +373,22 @@ namespace LegionRuntime {
 #endif
     public:
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
-                                       const NodeMask &source_mask,
+                                       const NodeSet &source_mask,
                                        const void *buffer, size_t size);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
-                                       const NodeMask &source_mask,
+                                       const NodeSet &source_mask,
                                        const void *buffer, size_t size);
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
-                                       const NodeMask &source_mask,
+                                       const NodeSet &source_mask,
                                        const void *buffer, size_t size);
       void attach_semantic_information(FieldSpace handle, FieldID fid,
-                                       SemanticTag tag, const NodeMask &source,
+                                       SemanticTag tag, const NodeSet &source,
                                        const void *buffer, size_t size);
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                       const NodeMask &source_mask,
+                                       const NodeSet &source_mask,
                                        const void *buffer, size_t size);
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
-                                       const NodeMask &source_mask,
+                                       const NodeSet &source_mask,
                                        const void *buffer, size_t size);
     public:
       void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
@@ -409,7 +407,6 @@ namespace LegionRuntime {
     public:
       Runtime *const runtime;
     protected:
-      Reservation forest_lock;
       Reservation lookup_lock;
       Reservation distributed_lock;
     private:
@@ -534,14 +531,12 @@ namespace LegionRuntime {
       GET_NODE_CALL,
       ARE_DISJOINT_CALL,
       COMPUTE_PATH_CALL,
-      RESIZE_CONTEXTS_CALL,
       CREATE_INSTANCE_CALL,
       CREATE_REDUCTION_CALL,
       PERFORM_PREMAP_CLOSE_CALL,
       MAPPING_TRAVERSE_CALL,
       MAP_PHYSICAL_REGION_CALL,
       MAP_REDUCTION_REGION_CALL,
-      RESERVE_CONTEXTS_CALL,
       ACQUIRE_PHYSICAL_STATE_CALL,
       RELEASE_PHYSICAL_STATE_CALL,
       REGISTER_LOGICAL_NODE_CALL,
@@ -632,12 +627,33 @@ namespace LegionRuntime {
     public:
       SemanticInfo(void)
         : buffer(NULL), size(0) { }  
-      SemanticInfo(void *buf, size_t s, const NodeMask &init)
+      SemanticInfo(void *buf, size_t s, const NodeSet &init)
         : buffer(buf), size(s), node_mask(init) { }
     public:
       void *buffer;
       size_t size;
-      NodeMask node_mask;
+      NodeSet node_mask;
+    };
+
+    enum SemanticInfoKind {
+      INDEX_SPACE_SEMANTIC,
+      INDEX_PARTITION_SEMANTIC,
+      FIELD_SPACE_SEMANTIC,
+      FIELD_SEMANTIC,
+      LOGICAL_REGION_SEMANTIC,
+      LOGICAL_PARTITION_SEMANTIC,
+    };
+
+    template<SemanticInfoKind KIND>
+    struct SendSemanticInfoFunctor {
+    public:
+      SendSemanticInfoFunctor(Runtime *rt, Serializer &r)
+        : runtime(rt), rez(r) { }
+    public:
+      void apply(AddressSpaceID target);
+    private:
+      Runtime *runtime;
+      Serializer &rez;
     };
 
     /**
@@ -658,9 +674,9 @@ namespace LegionRuntime {
       public:
         RemoteNodeState(void) { }
         RemoteNodeState(const FieldMask &m, AddressSpaceID target)
-          : valid_fields(m) { remote_nodes.set_bit(target); }
+          : valid_fields(m) { remote_nodes.add(target); }
       public:
-        NodeMask  remote_nodes;
+        NodeSet  remote_nodes;
         FieldMask valid_fields;
       };
       struct RemoteTreeState {
@@ -673,6 +689,28 @@ namespace LegionRuntime {
       public:
         FieldMask valid_fields;
         LegionMap<RegionTreeNode*,RemoteTreeState>::aligned remote_tree_states;
+      };
+      struct SendRemoteFreeFunctor {
+      public:
+        SendRemoteFreeFunctor(Runtime *rt, Serializer &r)
+          : runtime(rt), rez(r) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        Runtime *runtime;
+        Serializer &rez;
+      };
+      struct InvalidateRemoteStateFunctor {
+      public:
+        InvalidateRemoteStateFunctor(Runtime *rt, RegionTreeNode *n, 
+                                     Serializer &r)
+          : runtime(rt), node(n), rez(r) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        Runtime *runtime;
+        RegionTreeNode *node;
+        Serializer &rez;
       };
     public:
       StateDirectory(UniqueID remote_owner_uid, RegionTreeForest *forest,
@@ -734,7 +772,7 @@ namespace LegionRuntime {
       // Set of nodes that have some remote state, these are
       // monotonically increasing over execution and are only
       // an approximation for detecting quick outs.
-      NodeMask remote_contexts;
+      NodeSet remote_contexts;
       FieldMask remote_fields;
       // There are several trade-offs going on in this data structure.
       // Ideally we would like to track exactly which fields are valid
@@ -789,13 +827,13 @@ namespace LegionRuntime {
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
-      void attach_semantic_information(SemanticTag tag, const NodeMask &mask,
+      void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&result, size_t &size);
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size, 
-                                      const NodeMask &current) = 0;
+                                      const NodeSet &current) = 0;
     public:
       static bool compute_intersections(const std::set<Domain> &left,
                                         const std::set<Domain> &right,
@@ -815,8 +853,8 @@ namespace LegionRuntime {
       const Color color;
       RegionTreeForest *const context;
     public:
-      NodeMask creation_set;
-      NodeMask destruction_set;
+      NodeSet creation_set;
+      NodeSet destruction_set;
     protected:
       Reservation node_lock;
     protected:
@@ -843,9 +881,9 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const;
     public:
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
-                                      const NodeMask &current);
+                                      const NodeSet &current);
       static void handle_semantic_info(RegionTreeForest *forest,
                                        Deserializer &derez);
     public:
@@ -923,9 +961,9 @@ namespace LegionRuntime {
     public:
       virtual IndexTreeNode* get_parent(void) const;
     public:
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
-                                      const NodeMask &current);
+                                      const NodeSet &current);
       static void handle_semantic_info(RegionTreeForest *forest,
                                        Deserializer &derez);
     public:
@@ -996,6 +1034,31 @@ namespace LegionRuntime {
         bool local;
         bool destroyed;
       };
+      struct SendFieldAllocationFunctor {
+      public:
+        SendFieldAllocationFunctor(FieldSpace h, FieldID f, size_t s,
+                                   unsigned i, Runtime *rt)
+          : handle(h), field(f), size(s), index(i), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        FieldSpace handle;
+        FieldID field;
+        size_t size;
+        unsigned index;
+        Runtime *runtime;
+      };
+      struct SendFieldDestructionFunctor {
+      public:
+        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Runtime *rt)
+          : handle(h), field(f), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        FieldSpace handle;
+        FieldID field;
+        Runtime *runtime;
+      };
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
       FieldSpaceNode(const FieldSpaceNode &rhs);
@@ -1006,10 +1069,10 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       void attach_semantic_information(SemanticTag tag, 
-                                       const NodeMask &sources,
+                                       const NodeSet &sources,
                                        const void *buffer, size_t size);
       void attach_semantic_information(FieldID fid, SemanticTag tag,
-                                       const NodeMask &sources,
+                                       const NodeSet &sources,
                                        const void *buffer, size_t size);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&result, size_t &size);
@@ -1080,14 +1143,15 @@ namespace LegionRuntime {
       const FieldSpace handle;
       RegionTreeForest *const context;
     public:
-      NodeMask creation_set;
-      NodeMask destruction_set;
+      NodeSet creation_set;
+      NodeSet destruction_set;
     private:
       Reservation node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<RegionNode*> logical_nodes;
       std::map<FieldID,FieldInfo> fields;
       FieldMask allocated_indexes;
+      int next_allocation_index; // for use in the random case
       /*
        * Every field space contains a permutation transformer that
        * can translate a field mask from any other node onto
@@ -1262,6 +1326,8 @@ namespace LegionRuntime {
      */
     struct LogicalState {
     public:
+      static const AllocationType alloc_type = LOGICAL_STATE_ALLOC;
+    public:
       LogicalState(void);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
@@ -1284,6 +1350,8 @@ namespace LegionRuntime {
       // asked for explicit coherence
       FieldMask user_level_coherence;
     };
+
+    typedef DynamicTableAllocator<LogicalState, 10, 8> LogicalStateAllocator;
  
     /**
      * \struct LogicalCloser
@@ -1367,6 +1435,8 @@ namespace LegionRuntime {
      */
     struct PhysicalState {
     public:
+      static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC; 
+    public:
       PhysicalState(void);
       PhysicalState(ContextID ctx);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1401,6 +1471,8 @@ namespace LegionRuntime {
       RegionTreeNode *node;
 #endif
     }; 
+
+    typedef DynamicTableAllocator<PhysicalState, 10, 8> PhysicalStateAllocator;
 
     struct CopyTracker {
     public:
@@ -1637,33 +1709,6 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class LegionStack
-     * A special runtime class for keeping track of both physical
-     * and logical states.  The stack objects are never allowed
-     * to shrink.  They are always maintained in a consistent state
-     * so they can be accessed even when being appended to.  We assume
-     * that there is only one appender at a time.  Access time is O(1).
-     */
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    class LegionStack {
-    public:
-      LegionStack(void);
-      LegionStack(const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs);
-      ~LegionStack(void);
-    public:
-      LegionStack<T,MAX_SIZE,INC_SIZE>& operator=(
-                          const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs);
-      T& operator[](unsigned int idx);
-    public:
-      void append(unsigned int append_count);
-      size_t size(void) const;
-    private:
-      T* ptr_buffer[(MAX_SIZE+INC_SIZE-1)/INC_SIZE];
-      size_t buffer_size;
-      size_t remaining;
-    };
-
-    /**
      * \struct PreconditionSet
      * A helper class for building sets of fields with 
      * a common set of preconditions for doing copies.
@@ -1691,19 +1736,18 @@ namespace LegionRuntime {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
-      void reserve_contexts(unsigned num_contexts);
       LogicalState& get_logical_state(ContextID ctx);
       PhysicalState* acquire_physical_state(ContextID ctx, bool exclusive);
       void acquire_physical_state(PhysicalState *state, bool exclusive);
       bool release_physical_state(PhysicalState *state);
     public:
-      void attach_semantic_information(SemanticTag tag, const NodeMask &mask,
+      void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
                                        const void *buffer, size_t size);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&result, size_t &size);
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
-                                      const NodeMask &current) = 0;
+                                      const NodeSet &current) = 0;
     public:
       // Logical traversal operations
       void register_logical_node(ContextID ctx,
@@ -1803,7 +1847,7 @@ namespace LegionRuntime {
                    LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
       static void remove_valid_references(
              const LegionMap<InstanceView*,FieldMask>::aligned &valid_views);
-      void find_valid_reduction_views(PhysicalState *state,
+      void find_valid_reduction_views(PhysicalState *state, ReductionOpID redop,
                                       const FieldMask &valid_mask,
                                       std::set<ReductionView*> &valid_views);
       static void remove_valid_references(
@@ -1977,19 +2021,12 @@ namespace LegionRuntime {
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
     public:
-      NodeMask creation_set;
-      NodeMask destruction_set;
+      NodeSet creation_set;
+      NodeSet destruction_set;
     protected:
       Reservation node_lock;
-      LegionStack<LogicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> logical_states;
-      LegionStack<PhysicalState,MAX_CONTEXTS,DEFAULT_CONTEXTS> physical_states;
-#ifdef DEBUG_HIGH_LEVEL
-      // Uses these for debugging to avoid races accessing
-      // the logical and physical deques to check for size
-      // when they are possibly growing and in an inconsistent state
-      size_t logical_state_size;
-      size_t physical_state_size;
-#endif
+      DynamicTable<LogicalStateAllocator> logical_states;
+      DynamicTable<PhysicalStateAllocator> physical_states;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
@@ -2065,9 +2102,9 @@ namespace LegionRuntime {
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
     public:
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
-                                      const NodeMask &current);
+                                      const NodeSet &current);
       static void handle_semantic_info(RegionTreeForest *forest,
                                        Deserializer &derez);
     public:
@@ -2203,9 +2240,9 @@ namespace LegionRuntime {
                                               ReductionOpID redop);
       virtual void send_node(AddressSpaceID target);
     public:
-      virtual void send_semantic_info(const NodeMask &targets, SemanticTag tag,
+      virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
-                                      const NodeMask &current);
+                                      const NodeSet &current);
       static void handle_semantic_info(RegionTreeForest *forest,
                                        Deserializer &derez);
     public:
@@ -2771,11 +2808,10 @@ namespace LegionRuntime {
       // Memoized value for matching physical instances
       std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
     protected:
-      Reservation offset_lock; 
+      Reservation layout_lock; 
       std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned > 
                                                   memoized_offsets;
-    protected:
-      NodeMask known_nodes;
+      NodeSet known_nodes;
     };
  
     /**
@@ -3263,6 +3299,7 @@ namespace LegionRuntime {
       template<AllocationType ALLOC>
       void condense_user_list(typename
           LegionList<PhysicalUser,ALLOC>::track_aligned &users, bool previous);
+      void find_atomic_reservations(InstanceRef &target, const FieldMask &mask);
     public:
       virtual DistributedID send_state(AddressSpaceID target,
                             const FieldMask &send_mask,
@@ -3296,15 +3333,20 @@ namespace LegionRuntime {
                               LegionList<PhysicalUser,ALLOC>::track_aligned 
                               &user_list, const FieldMask &filter_mask);
     public:
+      void send_back_atomic_reservations(
+          const std::vector<std::pair<FieldID,Reservation> > &send_back);
+      void process_atomic_reservations(Deserializer &derez);
+      static void handle_send_back_atomic(RegionTreeForest *ctx,
+                                          Deserializer &derez);
+    public:
       InstanceManager *const manager;
       MaterializedView *const parent;
       const unsigned depth;
     protected:
-      // The lock for the instance shared between all views
-      // of a physical instance within a context.  The top
-      // most view is responsible for deleting the lock
-      // when it is reclaimed.
-      Reservation inst_lock;
+      // Keep track of the locks used for managing atomic coherence
+      // on individual fields of this materialized view. Only the
+      // top-level view for an instance needs to track this.
+      std::map<FieldID,Reservation> atomic_reservations;
       // Keep track of the child views
       std::map<Color,MaterializedView*> children;
       // These are the sets of users in the current and next epochs
@@ -3713,16 +3755,22 @@ namespace LegionRuntime {
     class InstanceRef {
     public:
       InstanceRef(void);
-      InstanceRef(Event ready, Reservation lock, const ViewHandle &handle);
+      InstanceRef(Event ready, const ViewHandle &handle);
+      InstanceRef(Event ready, const ViewHandle &handle,
+                  const std::vector<Reservation> &locks);
     public:
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
       inline bool has_ref(void) const { return handle.has_view(); }
+      inline bool has_required_locks(void) const 
+                                      { return !needed_locks.empty(); }
       inline Event get_ready_event(void) const { return ready_event; }
-      inline bool has_required_lock(void) const { return needed_lock.exists(); }
-      Reservation get_required_lock(void) const { return needed_lock; }
       const ViewHandle& get_handle(void) const { return handle; }
+      inline void add_reservation(Reservation handle) 
+                                  { needed_locks.push_back(handle); }
+      void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
+                               bool exclusive) const;
       Memory get_memory(void) const;
       Accessor::RegionAccessor<Accessor::AccessorType::Generic>
         get_accessor(void) const;
@@ -3736,8 +3784,8 @@ namespace LegionRuntime {
                                           unsigned depth);
     private:
       Event ready_event;
-      Reservation needed_lock;
       ViewHandle handle;
+      std::vector<Reservation> needed_locks;
     };
 
     /**

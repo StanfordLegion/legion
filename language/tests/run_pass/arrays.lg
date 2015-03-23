@@ -23,11 +23,11 @@ task toplevel()
   end
 
   for i = 0, 10 do
-    legionlib.assert(x[i] == 100 + i)
+    legionlib.assert(x[i] == 100 + i, "test failed")
   end
 
   for i = 0, 4 do
-    legionlib.assert((array(1, 2, 3, 4))[i] == i + 1)
+    legionlib.assert((array(1, 2, 3, 4))[i] == i + 1, "test failed")
   end
 end
 legionlib.start(toplevel)

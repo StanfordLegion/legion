@@ -22,9 +22,7 @@ fspace t {
   b : region(int),
 } where b * a end
 
-task f()
-  var r = region(int, 5)
-  var s = region(int, 7)
+task f(r : region(int), s : region(int))
   var x = t { a = r, b = s }
 end
 f:compile()

@@ -1098,12 +1098,30 @@ extern "C" {
    *
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::from_buffer()
+   * @see LegionRuntime::HighLevel::Future::from_value()
    */
   legion_future_t
   legion_future_from_buffer(legion_runtime_t runtime,
                             const void *buffer,
                             size_t size);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::from_value()
+   */
+  legion_future_t
+  legion_future_from_uint32(legion_runtime_t runtime,
+                            uint32_t value);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::from_value()
+   */
+  legion_future_t
+  legion_future_from_uint64(legion_runtime_t runtime,
+                            uint64_t value);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -1392,6 +1410,17 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
+   * @see LegionRuntime::HighLevel::IndexLauncher::add_future()
+   */
+  void
+  legion_index_launcher_add_future(legion_index_launcher_t launcher,
+                                   legion_future_t future);
+
+  // -----------------------------------------------------------------------
+  // Inline Mapping Operations
+  // -----------------------------------------------------------------------
+
+  /**
    * @return Caller takes ownership of return value.
    *
    * @see LegionRuntime::HighLevel::InlineLauncher::InlineLauncher()
@@ -1455,6 +1484,27 @@ extern "C" {
   void
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
                                    legion_context_t ctx);
+
+  // -----------------------------------------------------------------------
+  // Tracing Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::begin_trace()
+   */
+  void
+  legion_runtime_begin_trace(legion_runtime_t runtime,
+                             legion_context_t ctx,
+                             legion_trace_id_t tid);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::end_trace()
+   */
+  void
+  legion_runtime_end_trace(legion_runtime_t runtime,
+                           legion_context_t ctx,
+                           legion_trace_id_t tid);
+
 
   // -----------------------------------------------------------------------
   // Physical Data Operations
@@ -1576,6 +1626,16 @@ extern "C" {
                                              size_t bytes);
 
   /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::raw_span_ptr()
+   */
+  void *
+  legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle,
+                                       legion_ptr_t ptr,
+                                       size_t req_count,
+                                       size_t *act_count,
+                                       legion_byte_offset_t *stride);
+
+  /**
    * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
    */
   void *
@@ -1601,6 +1661,14 @@ extern "C" {
                                           legion_rect_3d_t rect,
                                           legion_rect_3d_t *subrect,
                                           legion_byte_offset_t *offsets);
+
+  /**
+   * @see LegionRuntime::Accessor::Generic::Untyped::get_soa_parameters()
+   */
+  bool
+  legion_accessor_generic_get_soa_parameters(legion_accessor_generic_t handle,
+                                             void **base,
+                                             size_t *stride);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -1660,6 +1728,14 @@ extern "C" {
    */
   legion_ptr_t
   legion_index_iterator_next(legion_index_iterator_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexIterator::next_span()
+   */
+  legion_ptr_t
+  legion_index_iterator_next_span(legion_index_iterator_t handle,
+                                  size_t *act_count,
+                                  size_t req_count /* = -1 */);
 
   // -----------------------------------------------------------------------
   // Task Operations

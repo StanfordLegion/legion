@@ -37,6 +37,6 @@ task h() : int
 end
 
 task main()
-  legionlib.assert(h() == 321)
+  legionlib.assert(h() == 321, "test failed")
 end
 legionlib.start(main)

@@ -38,6 +38,6 @@ task top() : int
 end
 
 task main()
-  legionlib.assert(top() == 5)
+  legionlib.assert(top() == 5, "test failed")
 end
 legionlib.start(main)

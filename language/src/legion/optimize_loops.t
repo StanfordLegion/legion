@@ -21,8 +21,6 @@ local ast = require("legion/ast")
 local log = require("legion/log")
 local std = require("legion/std")
 
-local optimize_loops = {}
-
 local context = {}
 context.__index = context
 
@@ -222,7 +220,7 @@ function analyze_is_side_effect_free.expr(cx, node)
     return false
 
   elseif node:is(ast.typed.ExprRawFields) then
-    return true
+    return false
 
   elseif node:is(ast.typed.ExprRawPhysical) then
     return false
@@ -249,6 +247,9 @@ function analyze_is_side_effect_free.expr(cx, node)
     return false
 
   elseif node:is(ast.typed.ExprPartition) then
+    return false
+
+  elseif node:is(ast.typed.ExprCrossProduct) then
     return false
 
   elseif node:is(ast.typed.ExprUnary) then
@@ -328,7 +329,7 @@ function analyze_is_loop_invariant.expr_dynamic_cast(cx, node)
 end
 
 function analyze_is_loop_invariant.expr_static_cast(cx, node)
-  local value = analyze_is_loop_invariant.expr(cx, node.value)
+  return analyze_is_loop_invariant.expr(cx, node.value)
 end
 
 function analyze_is_loop_invariant.expr_unary(cx, node)
@@ -423,7 +424,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local log_pass = ignore
   local log_fail = ignore
   if node.parallel == "demand" then
-    log_pass = log.warn
+    log_pass = ignore -- log.warn
     log_fail = log.error
   end
 
@@ -518,7 +519,10 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local loop_cx = cx:new_loop_scope(node.symbol)
   local param_types = task:gettype().parameters
   local args = call.args
-  local args_provably_variant = terralib.newlist()
+  local args_provably = ast.typed.StatIndexLaunchArgsProvably {
+    invariant = terralib.newlist(),
+    variant = terralib.newlist(),
+  }
   local regions_previously_used = terralib.newlist()
   local mapping = {}
   for i, arg in ipairs(args) do
@@ -527,7 +531,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       return node
     end
 
-    local arg_invariant = false
+    local arg_invariant = analyze_is_loop_invariant.expr(loop_cx, arg)
     local arg_variant = false
     local partition_type
 
@@ -541,8 +545,6 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       then
         partition_type = std.as_read(arg.value.expr_type)
         arg_variant = true
-      else
-        arg_invariant = analyze_is_loop_invariant.expr(loop_cx, arg)
       end
 
       if not (arg_variant or arg_invariant) then
@@ -569,7 +571,8 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
       end
     end
 
-    args_provably_variant[i] = arg_variant
+    args_provably.invariant[i] = arg_invariant
+    args_provably.variant[i] = arg_variant
 
     regions_previously_used[i] = nil
     if std.is_region(region_type) then
@@ -584,9 +587,11 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     call = call,
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
-    args_provably_variant = args_provably_variant,
+    args_provably = args_provably,
   }
 end
+
+local optimize_loops = {}
 
 function optimize_loops.block(cx, node)
   return ast.typed.Block {
@@ -634,6 +639,17 @@ function optimize_loops.stat_for_list(cx, node)
     symbol = node.symbol,
     value = node.value,
     block = optimize_loops.block(cx, node.block),
+    vectorize = node.vectorize,
+  }
+end
+
+function optimize_loops.stat_for_list_vectorized(cx, node)
+  return ast.typed.StatForListVectorized {
+    symbol = node.symbol,
+    value = node.value,
+    block = optimize_loops.block(cx, node.block),
+    orig_block = optimize_loops.block(cx, node.orig_block),
+    decls = node.decls,
   }
 end
 
@@ -662,6 +678,9 @@ function optimize_loops.stat(cx, node)
 
   elseif node:is(ast.typed.StatForList) then
     return optimize_loops.stat_for_list(cx, node)
+
+  elseif node:is(ast.typed.StatForListVectorized) then
+    return optimize_loops.stat_for_list_vectorized(cx, node)
 
   elseif node:is(ast.typed.StatRepeat) then
     return optimize_loops.stat_repeat(cx, node)
@@ -706,6 +725,7 @@ function optimize_loops.stat_task(cx, node)
     privileges = node.privileges,
     constraints = node.constraints,
     body = body,
+    config_options = node.config_options,
     prototype = node.prototype,
   }
 end

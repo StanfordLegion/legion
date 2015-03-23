@@ -20,6 +20,6 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 320)
+  legionlib.assert(f() == 320, "test failed")
 end
 legionlib.start(main)

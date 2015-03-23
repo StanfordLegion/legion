@@ -17,11 +17,15 @@
 local ast = require("legion/ast")
 local builtins = require("legion/builtins")
 local codegen = require("legion/codegen")
+local optimize_config_options = require("legion/optimize_config_options")
+local optimize_futures = require("legion/optimize_futures")
+local optimize_inlines = require("legion/optimize_inlines")
 local optimize_loops = require("legion/optimize_loops")
 local parser = require("legion/parser")
 local specialize = require("legion/specialize")
 local std = require("legion/std")
 local type_check = require("legion/type_check")
+local vectorize_loops = require("legion/vectorize_loops")
 
 -- Add Language Builtins to Global Environment
 
@@ -43,6 +47,10 @@ function compile(lex)
     local ast = specialize.entry(env, node)
     ast = type_check.entry(ast)
     ast = optimize_loops.entry(ast)
+    ast = optimize_futures.entry(ast)
+    ast = optimize_inlines.entry(ast)
+    ast = optimize_config_options.entry(ast)
+    ast = vectorize_loops.entry(ast)
     ast = codegen.entry(ast)
     return ast
   end
@@ -62,6 +70,7 @@ local language = {
     "__demand",
     "__fields",
     "__parallel",
+    "__vectorize",
     "__physical",
     "__runtime",
     "cross_product",

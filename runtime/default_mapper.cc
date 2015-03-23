@@ -382,7 +382,9 @@ namespace LegionRuntime {
           task->regions[idx].enable_WAR_optimization = war_enabled;
           task->regions[idx].reduction_list = false;
           task->regions[idx].make_persistent = false;
-          task->regions[idx].blocking_factor = 1;
+          // Elliott needs SOA for the compiler.
+          task->regions[idx].blocking_factor = // 1;
+            task->regions[idx].max_blocking_factor;
           Memory global = machine_interface.find_global_memory();
           assert(global.exists());
           task->regions[idx].target_ranking.push_back(global);
@@ -417,7 +419,9 @@ namespace LegionRuntime {
       if (target_kind == Processor::LOC_PROC)
       {
         for (unsigned idx = 0; idx < task->regions.size(); idx++)
-          task->regions[idx].blocking_factor = 1;
+          // Elliott needs SOA for the compiler.
+          task->regions[idx].blocking_factor = // 1;
+            task->regions[idx].max_blocking_factor;
       }
       else
       {
@@ -468,7 +472,9 @@ namespace LegionRuntime {
         task->regions[idx].reduction_list = false;
         task->regions[idx].make_persistent = false;
         if (target_kind == Processor::LOC_PROC)
-          task->regions[idx].blocking_factor = 1;
+          // Elliott needs SOA for the compiler.
+          task->regions[idx].blocking_factor = // 1;
+            task->regions[idx].max_blocking_factor;
         else
           task->regions[idx].blocking_factor = 
             task->regions[idx].max_blocking_factor;
@@ -523,8 +529,11 @@ namespace LegionRuntime {
         }
         if (local_kind == Processor::LOC_PROC)
         {
-          copy->src_requirements[idx].blocking_factor = 1;
-          copy->dst_requirements[idx].blocking_factor = 1;
+          // Elliott needs SOA for the compiler.
+          copy->src_requirements[idx].blocking_factor = // 1;
+            copy->src_requirements[idx].max_blocking_factor;
+          copy->dst_requirements[idx].blocking_factor = // 1;
+            copy->dst_requirements[idx].max_blocking_factor;
         }
         else
         {
@@ -564,7 +573,9 @@ namespace LegionRuntime {
         inline_op->requirement.target_ranking.push_back(target);
       }
       if (local_kind == Processor::LOC_PROC)
-        inline_op->requirement.blocking_factor = 1;
+        // Elliott needs SOA for the compiler.
+        inline_op->requirement.blocking_factor = // 1;
+          inline_op->requirement.max_blocking_factor;
       else
         inline_op->requirement.blocking_factor = 
           inline_op->requirement.max_blocking_factor;

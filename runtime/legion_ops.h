@@ -1095,7 +1095,8 @@ namespace LegionRuntime {
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
     protected:
-      std::vector<DependenceRecord> dependences;
+      std::deque<DependenceRecord> dependences;
+      std::map<SingleTask*,std::deque<SingleTask*> > mapping_dependences;
     };
 
     /**
@@ -1157,7 +1158,8 @@ namespace LegionRuntime {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::set<SingleTask*> &single_tasks);
+      bool map_tasks(const std::set<SingleTask*> &single_tasks,
+          const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_deps);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);

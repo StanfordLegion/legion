@@ -49,6 +49,6 @@ task g()
 end
 
 task main()
-  legionlib.assert(g() == 17)
+  legionlib.assert(g() == 17, "test failed")
 end
 legionlib.start(main)

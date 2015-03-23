@@ -122,6 +122,9 @@ namespace LegionRuntime {
       TASK_INLINE_ALLOC,
       SEMANTIC_INFO_ALLOC,
       DIRECTORY_ALLOC,
+      DENSE_INDEX_ALLOC,
+      LOGICAL_STATE_ALLOC,
+      PHYSICAL_STATE_ALLOC,
       LAST_ALLOC, // must be last
     };
 

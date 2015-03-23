@@ -22,6 +22,6 @@ task top() : bool
 end
 
 task main()
-  legionlib.assert(top())
+  legionlib.assert(top(), "test failed")
 end
 legionlib.start(main)

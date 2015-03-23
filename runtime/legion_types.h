@@ -300,6 +300,7 @@ namespace LegionRuntime {
     template<unsigned int MAX> class AVXTLBitMask;
 #endif
     template<typename T, unsigned LOG2MAX> class BitPermutation;
+    template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
     // legion_logging.h
     class TreeStateLogger;
@@ -439,6 +440,7 @@ namespace LegionRuntime {
     typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
 #endif
 #endif
+    typedef IntegerSet<AddressSpaceID,NodeMask> NodeSet;
 
 #undef NODE_SHIFT
 #undef NODE_MASK

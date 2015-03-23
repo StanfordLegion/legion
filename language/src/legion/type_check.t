@@ -29,7 +29,9 @@ function context:new_local_scope()
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
     constraints = self.constraints,
+    region_universe = self.region_universe,
     expected_return_type = self.expected_return_type,
+    fixup_nodes = self.fixup_nodes,
   }
   setmetatable(cx, context)
   return cx
@@ -40,7 +42,9 @@ function context:new_task_scope(expected_return_type)
     type_env = self.type_env:new_local_scope(),
     privileges = {},
     constraints = {},
-    expected_return_type = { [ 1 ] = expected_return_type },
+    region_universe = {},
+    expected_return_type = {expected_return_type},
+    fixup_nodes = terralib.newlist(),
   }
   setmetatable(cx, context)
   return cx
@@ -52,6 +56,11 @@ function context.new_global_scope(type_env)
   }
   setmetatable(cx, context)
   return cx
+end
+
+function context:intern_region(region_type)
+  assert(self.region_universe)
+  self.region_universe[region_type] = true
 end
 
 function context:get_return_type()
@@ -255,7 +264,9 @@ function type_check.expr_call(cx, node)
       if valid then
         fn_type = result_type
       else
-        log.error("no applicable overloaded function for arguments " .. arg_types:mkstring(", "))
+        local func_name = string.gsub(fn.value.name, "^std[.]", "legionlib.")
+        log.error("no applicable overloaded function " .. tostring(func_name) ..
+                  " for arguments " .. arg_types:mkstring(", "))
       end
     elseif std.is_task(fn.value) then
       fn_type = fn.value:gettype()
@@ -328,11 +339,15 @@ function type_check.expr_call(cx, node)
     end
   end
 
-  return ast.typed.ExprCall {
+  local result = ast.typed.ExprCall {
     fn = fn,
     args = args,
     expr_type = expr_type,
   }
+  if expr_type == untyped then
+    cx.fixup_nodes:insert(result)
+  end
+  return result
 end
 
 function type_check.expr_cast(cx, node)
@@ -420,6 +435,7 @@ function type_check.expr_ctor_field(cx, node)
   elseif node:is(ast.specialized.ExprCtorRecField) then
     return type_check.expr_ctor_rec_field(cx, node)
   else
+    assert(false)
   end
 end
 
@@ -594,6 +610,17 @@ function type_check.expr_region(cx, node)
   local region = node.expr_type
   std.add_privilege(cx, "reads", region, std.newtuple())
   std.add_privilege(cx, "writes", region, std.newtuple())
+  -- Freshly created regions are, by definition, disjoint from all
+  -- other regions.
+  for other_region, _ in pairs(cx.region_universe) do
+    assert(not std.type_eq(region, other_region))
+    -- But still, don't bother litering the constraint space with
+    -- trivial constraints.
+    if std.type_maybe_eq(region.element_type, other_region.element_type) then
+      std.add_constraint(cx, region, other_region, "*", true)
+    end
+  end
+  cx:intern_region(region)
 
   return ast.typed.ExprRegion {
     element_type = node.element_type,
@@ -953,8 +980,14 @@ function type_check.stat_for_list(cx, node)
   local cx = cx:new_local_scope()
   local var_type = node.symbol.type
   if not var_type then
-    local region = value_type
-    var_type = std.ptr(region.element_type, terralib.newsymbol(region))
+    -- Hack: Try to recover the original symbol for this region if possible
+    local region
+    if value:is(ast.typed.ExprID) then
+      region = value.value
+    else
+      region = terralib.newsymbol(value_type)
+    end
+    var_type = std.ptr(value_type.element_type, region)
   end
   if not std.is_ptr(var_type) then
     log.error("iterator for loop expected pointer type, got " .. tostring(var_type))
@@ -971,6 +1004,7 @@ function type_check.stat_for_list(cx, node)
     symbol = node.symbol,
     value = value,
     block = type_check.block(cx, node.block),
+    vectorize = node.vectorize,
   }
 end
 
@@ -1249,6 +1283,7 @@ function type_check.stat_task(cx, node)
       local field_path = privilege.field_path
       assert(std.is_region(region.type))
       std.add_privilege(cx, privilege_type, region.type, field_path)
+      cx:intern_region(region.type)
     end
   end
   prototype:setprivileges(privileges)
@@ -1267,7 +1302,18 @@ function type_check.stat_task(cx, node)
     params:map(function(param) return param.param_type end), return_type, false)
   prototype:settype(task_type)
 
+  for _, fixup_node in ipairs(cx.fixup_nodes) do
+    if fixup_node:is(ast.typed.ExprCall) then
+      local fn_type = fixup_node.fn.value:gettype()
+      assert(fn_type.returntype ~= untyped)
+      fixup_node.expr_type = fn_type.returntype
+    else
+      assert(false)
+    end
+  end
+
   prototype:set_constraints(cx.constraints)
+  prototype:set_region_universe(cx.region_universe)
 
   return ast.typed.StatTask {
     name = node.name,
@@ -1276,6 +1322,11 @@ function type_check.stat_task(cx, node)
     privileges = privileges,
     constraints = constraints,
     body = body,
+    config_options = ast.typed.StatTaskConfigOptions {
+      leaf = false,
+      inner = false,
+      idempotent = false,
+    },
     prototype = prototype,
   }
 end

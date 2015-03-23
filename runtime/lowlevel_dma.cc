@@ -2772,7 +2772,7 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef LEGION_PROF
+#ifdef BUGGY_LEGION_PROF
       register_copy_event(PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));
@@ -3469,7 +3469,7 @@ namespace LegionRuntime {
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionLogger(after_copy));
 #endif
-#ifdef LEGION_PROF
+#ifdef BUGGY_LEGION_PROF
       register_copy_event(PROF_BEGIN_COPY);
       after_copy.impl()->add_waiter(after_copy.gen,
           new CopyCompletionProfiler(after_copy));

@@ -34,17 +34,17 @@ task main()
   var r1 = p[1]
 
   var x0 = dynamic_cast(ptr(int, r0), x)
-  legionlib.assert(not isnull(x0))
+  legionlib.assert(not isnull(x0), "test failed")
 
   @x0 = 123
 
   var x1 = dynamic_cast(ptr(int, r1), x)
-  legionlib.assert(isnull(x1))
+  legionlib.assert(isnull(x1), "test failed")
 
   var x01 = dynamic_cast(ptr(int, r0, r1), x)
-  legionlib.assert(not isnull(x01))
+  legionlib.assert(not isnull(x01), "test failed")
 
-  legionlib.assert(@x01 == 123)
+  legionlib.assert(@x01 == 123, "test failed")
 
   c.legion_coloring_destroy(rc)
 end

@@ -20,7 +20,7 @@ task f(x : bool)
 end
 
 task main()
-legionlib.assert(f(true) == 1)
-legionlib.assert(f(false) == 0)
+legionlib.assert(f(true) == 1, "test failed")
+legionlib.assert(f(false) == 0, "test failed")
 end
 legionlib.start(main)

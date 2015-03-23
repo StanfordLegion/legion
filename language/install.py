@@ -115,7 +115,10 @@ def install_bindings(bindings_dir, terra_dir, debug, general_llr):
     ])
 
     subprocess.check_call(
-        ['make', 'clean'],
+        ['make',
+         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1)] +
+        (['USE_CUDA=0', 'USE_GASNET=0'] if general_llr else []) +
+        ['clean'],
         cwd = bindings_dir,
         env = env)
     subprocess.check_call(

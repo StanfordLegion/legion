@@ -17,6 +17,6 @@ import "legion"
 cmath = terralib.includec("math.h")
 
 task main()
-  legionlib.assert(cmath.fmin(3, 5) == 3)
+  legionlib.assert(cmath.fmin(3, 5) == 3, "test failed")
 end
 legionlib.start(main)

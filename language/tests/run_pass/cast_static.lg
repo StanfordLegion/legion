@@ -47,12 +47,12 @@ task main()
 
   @x = 123
 
-  legionlib.assert(@x0 == 123)
-  legionlib.assert(@x00 == 123)
-  legionlib.assert(@x00_01 == 123)
-  legionlib.assert(@x01_00 == 123)
-  legionlib.assert(@x00_01_10_11 == 123)
-  legionlib.assert(@x01_10_11_00 == 123)
+  legionlib.assert(@x0 == 123, "test failed")
+  legionlib.assert(@x00 == 123, "test failed")
+  legionlib.assert(@x00_01 == 123, "test failed")
+  legionlib.assert(@x01_00 == 123, "test failed")
+  legionlib.assert(@x00_01_10_11 == 123, "test failed")
+  legionlib.assert(@x01_10_11_00 == 123, "test failed")
 
   c.legion_coloring_destroy(rc)
 end

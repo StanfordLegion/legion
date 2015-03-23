@@ -6341,6 +6341,7 @@ namespace LegionRuntime {
       constraints.clear();
       task_sets.clear();
       dependences.clear();
+      mapping_dependences.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
     }
@@ -6390,10 +6391,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!single_tasks.empty());
 #endif 
-
         // Next build the set of single tasks and all their constraints.
         // Iterate over all the recorded dependences
-        for (std::vector<DependenceRecord>::const_iterator it = 
+        constraints.reserve(dependences.size());
+        for (std::deque<DependenceRecord>::const_iterator it = 
               dependences.begin(); it != dependences.end(); it++)
         {
           // Add constraints for all the different elements
@@ -6409,9 +6410,13 @@ namespace LegionRuntime {
                                                        *it1, it->reg1_idx,
                                                        *it2, it->reg2_idx,
                                                        it->dtype));
+              mapping_dependences[*it1].push_back(*it2);
+              mapping_dependences[*it2].push_back(*it1);
             }
           }
         }
+        // Clear this eagerly to save space
+        dependences.clear();
         // Mark that we have finished building all the constraints so
         // we don't have to redo it if we end up failing a mapping.
         triggering_complete = true;
@@ -6448,7 +6453,7 @@ namespace LegionRuntime {
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
-        if (!mapper.map_tasks(single_tasks))
+        if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
       }
 
@@ -6935,7 +6940,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::set<SingleTask*> &single_tasks)
+    bool MustEpochMapper::map_tasks(const std::set<SingleTask*> &single_tasks,
+      const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_dependences)
     //--------------------------------------------------------------------------
     {
       std::set<Event> wait_events;   
@@ -6943,13 +6949,37 @@ namespace LegionRuntime {
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
       Processor util_proc = owner->runtime->find_utility_group();
+      std::map<SingleTask*,Event> mapping_events;
       for (std::set<SingleTask*>::const_iterator it = single_tasks.begin();
             it != single_tasks.end(); it++)
       {
         args.task = *it;
-        Event wait = util_proc.spawn(HLR_TASK_ID, &args, sizeof(args));
+        // Compute the preconditions
+        std::set<Event> preconditions; 
+        std::map<SingleTask*,std::deque<SingleTask*> >::const_iterator 
+          dep_finder = mapping_dependences.find(*it);
+        if (dep_finder != mapping_dependences.end())
+        {
+          const std::deque<SingleTask*> &deps = dep_finder->second;
+          for (std::deque<SingleTask*>::const_iterator dit = 
+                deps.begin(); dit != deps.end(); dit++)
+          {
+            std::map<SingleTask*,Event>::const_iterator finder = 
+              mapping_events.find(*dit);
+            if (finder != mapping_events.end())
+              preconditions.insert(finder->second);
+          }
+        }
+        Event precondition = Event::NO_EVENT;
+        if (!preconditions.empty())
+          precondition = Event::merge_events(preconditions);
+        Event wait = util_proc.spawn(HLR_TASK_ID, &args, 
+                                     sizeof(args), precondition);
         if (wait.exists())
+        {
+          mapping_events[*it] = wait;
           wait_events.insert(wait);
+        }
       }
       
       if (!wait_events.empty())

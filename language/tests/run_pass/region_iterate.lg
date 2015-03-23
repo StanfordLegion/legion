@@ -38,6 +38,6 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 12345)
+  legionlib.assert(f() == 12345, "test failed")
 end
 legionlib.start(main)

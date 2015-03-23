@@ -212,6 +212,8 @@ namespace LegionRuntime {
 	    return RegionAccessor<Generic, void, void>(Untyped(internal, field_offset + _field_offset));
 	  }
 
+	  void *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride);
+
 	  template <int DIM>
 	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets);
 
@@ -240,7 +242,7 @@ namespace LegionRuntime {
         public:
           inline void set_privileges_untyped(AccessorPrivilege p) { priv = p; }
 #endif
-	protected:
+	public:
 	  bool get_aos_parameters(void *& base, size_t& stride) const;
 	  bool get_soa_parameters(void *& base, size_t& stride) const;
 	  bool get_hybrid_soa_parameters(void *& base, size_t& stride,
@@ -291,6 +293,9 @@ namespace LegionRuntime {
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
+
+	  T *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& offset)
+	  { return (T*)(Untyped::raw_span_ptr(ptr, req_count, act_count, offset)); }
 
 	  template <int DIM>
 	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets)

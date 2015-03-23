@@ -21,7 +21,7 @@ task f() : int
 end
 
 task main()
-  legionlib.assert(f() == 4)
+  legionlib.assert(f() == 4, "test failed")
 end
 legionlib.start(main)
 

@@ -15,11 +15,11 @@
 import "legion"
 
 task main()
-  legionlib.assert(max(3, 5) == 5)
-  legionlib.assert(min(3, 5) == 3)
-  legionlib.assert(max(4.5, 5.5) == 5.5)
-  legionlib.assert(min(4.5, 5.5) == 4.5)
-  legionlib.assert(max(4.5, 7) == 7)
-  legionlib.assert(min(4.5, 7) == 4.5)
+  legionlib.assert(max(3, 5) == 5, "test failed")
+  legionlib.assert(min(3, 5) == 3, "test failed")
+  legionlib.assert(max(4.5, 5.5) == 5.5, "test failed")
+  legionlib.assert(min(4.5, 5.5) == 4.5, "test failed")
+  legionlib.assert(max(4.5, 7) == 7, "test failed")
+  legionlib.assert(min(4.5, 7) == 4.5, "test failed")
 end
 legionlib.start(main)

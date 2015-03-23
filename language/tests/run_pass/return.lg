@@ -23,7 +23,7 @@ task f(x : bool)
 end
 
 task main()
-  legionlib.assert(f(true) == 5.0)
-  legionlib.assert(f(false) == 9.75)
+  legionlib.assert(f(true) == 5.0, "test failed")
+  legionlib.assert(f(false) == 9.75, "test failed")
 end
 legionlib.start(main)

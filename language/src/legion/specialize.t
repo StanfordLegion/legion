@@ -508,6 +508,7 @@ function specialize.stat_for_list(cx, node)
     symbol = symbol,
     value = value,
     block = block,
+    vectorize = node.vectorize,
   }
 end
 

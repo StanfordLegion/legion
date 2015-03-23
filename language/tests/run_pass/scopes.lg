@@ -18,44 +18,44 @@ x = 1
 y = 2
 
 task f(y : int)
-  legionlib.assert(x == 1 and y == 20)
+  legionlib.assert(x == 1 and y == 20, "test failed")
   var x = 10
-  legionlib.assert(x == 10)
+  legionlib.assert(x == 10, "test failed")
   do
     x = 100
-    legionlib.assert(x == 100)
+    legionlib.assert(x == 100, "test failed")
 
     var y = 200
-    legionlib.assert(y == 200)
+    legionlib.assert(y == 200, "test failed")
 
     if true then
       var y = 2000
-      legionlib.assert(y == 2000)
+      legionlib.assert(y == 2000, "test failed")
     end
-    legionlib.assert(y == 200)
+    legionlib.assert(y == 200, "test failed")
 
     while true do
       var y = 2000
-      legionlib.assert(y == 2000)
+      legionlib.assert(y == 2000, "test failed")
       break
     end
-    legionlib.assert(y == 200)
+    legionlib.assert(y == 200, "test failed")
 
     for y = 2000, 2001 do
-      legionlib.assert(y == 2000)
+      legionlib.assert(y == 2000, "test failed")
       var y = 20000
-      legionlib.assert(y == 20000)
+      legionlib.assert(y == 20000, "test failed")
     end
-    legionlib.assert(y == 200)
+    legionlib.assert(y == 200, "test failed")
 
     repeat
       var y = 2000
-      legionlib.assert(y == 2000)
+      legionlib.assert(y == 2000, "test failed")
     until true
-    legionlib.assert(y == 200)
+    legionlib.assert(y == 200, "test failed")
 
   end
-  legionlib.assert(x == 100 and y == 20)
+  legionlib.assert(x == 100 and y == 20, "test failed")
 end
 
 task main()

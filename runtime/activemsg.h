@@ -134,6 +134,57 @@ extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer
                                 const void *args, size_t arglen);
 extern void record_message(gasnet_node_t source, bool sent_reply);
 
+#ifdef REALM_PROFILE_AM_HANDLERS
+struct ActiveMsgHandlerStats {
+  size_t count, sum, sum2, minval, maxval;
+
+  ActiveMsgHandlerStats(void)
+  : count(0), sum(0), sum2(0), minval(0), maxval(0) {}
+
+  void record(struct timespec& ts_start, struct timespec& ts_end)
+  {
+    size_t val = 1000000000LL * (ts_end.tv_sec - ts_start.tv_sec) + ts_end.tv_nsec - ts_start.tv_nsec;
+    if(!count || (val < minval)) minval = val;
+    if(!count || (val > maxval)) maxval = val;
+    count++;
+    sum += val;
+    sum2 += val * val;
+  }
+};
+
+extern ActiveMsgHandlerStats handler_stats[256];
+
+// have to define this two different ways because we can't put ifdefs in the macros below
+template <int MSGID>
+class ActiveMsgProfilingHelper {
+ public:
+  ActiveMsgProfilingHelper(void) 
+  {
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  }
+
+  ~ActiveMsgProfilingHelper(void)
+  {
+    struct timespec ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    handler_stats[MSGID].record(ts_start, ts_end);
+  }
+
+ protected:
+  struct timespec ts_start;
+};
+
+#else
+// not measuring AM handler times, so need a dummy class
+template <int MSGID>
+class ActiveMsgProfilingHelper {
+ public:
+  // have to define a constructor or the uses of this below will be 
+  //  reported as unused variables...
+  ActiveMsgProfilingHelper(void) {}
+};
+#endif
+
 template <class T> struct HandlerReplyFuture {
   gasnet_hsl_t mutex;
   gasnett_cond_t condvar;
@@ -275,7 +326,10 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
     } u; \
     HANDLERARG_COPY_ ## n ; \
     record_message(src, false); \
-    (*SHORT_HNDL_PTR)(u.typed); \
+    { \
+      ActiveMsgProfilingHelper<MSGID> amph; \
+      (*SHORT_HNDL_PTR)(u.typed); \
+    } \
   } \
 \
   static void handler_medium(gasnet_token_t token, void *buf, size_t nbytes, \
@@ -292,7 +346,10 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
     record_message(src, true); \
     /*nbytes = adjust_long_msgsize(src, buf, nbytes);*/	\
     bool handle_now = adjust_long_msgsize(src, buf, nbytes, &u, sizeof(u)); \
-    if (handle_now) (*MED_HNDL_PTR)(u.typed, buf, nbytes); \
+    if (handle_now) { \
+      ActiveMsgProfilingHelper<MSGID> amph;				\
+      (*MED_HNDL_PTR)(u.typed, buf, nbytes);				\
+    }									\
     if (handle_now && (nbytes > 0)) {					\
       handle_long_msgptr(src, buf); \
       /* We need to send an reply no matter what since asynchronous active*/ \
@@ -330,7 +387,10 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
       ArgsWithReplyInfo<RPLTYPE,RPLTYPE> typed; \
     } rpl_u; \
 \
-    rpl_u.typed.args = (*SHORT_HNDL_PTR)(u.typed.args); \
+    { \
+      ActiveMsgProfilingHelper<REQID> amph;		\
+      rpl_u.typed.args = (*SHORT_HNDL_PTR)(u.typed.args);	\
+    } \
     rpl_u.typed.fptr = u.typed.fptr; \
     rpl_u.raw.reply_short(token); \
   } \
@@ -354,7 +414,10 @@ struct RequestRawArgs<REQTYPE, REQID, RPLTYPE, RPLID, SHORT_HNDL_PTR, MEDIUM_HND
       ArgsWithReplyInfo<RPLTYPE,RPLTYPE> typed; \
     } rpl_u; \
 \
-    rpl_u.typed.args = (*MEDIUM_HNDL_PTR)(u.typed.args, buf, nbytes);	\
+    { \
+      ActiveMsgProfilingHelper<REQID> amph;				\
+      rpl_u.typed.args = (*MEDIUM_HNDL_PTR)(u.typed.args, buf, nbytes);	\
+    }									\
     if(nbytes > 0/*gasnet_AMMaxMedium()*/) handle_long_msgptr(src, buf); \
     rpl_u.typed.fptr = u.typed.fptr; \
     rpl_u.typed.args.srcptr = u.typed.args.srcptr; \

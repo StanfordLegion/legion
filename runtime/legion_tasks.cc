@@ -1618,6 +1618,7 @@ namespace LegionRuntime {
               // If it is a no-access then we are done
               continue;
             }
+#ifndef S3D_STARTUP_HACK
             else if (IS_WRITE(regions[idx]))
             {
               // Issue an invalidation if this was a write
@@ -1625,6 +1626,7 @@ namespace LegionRuntime {
               directory->issue_invalidations(runtime->address_space,
                                              false/*remote*/, regions[idx]);
             }
+#endif
           }
           else
           {
@@ -2003,6 +2005,7 @@ namespace LegionRuntime {
       executed_children.clear();
       complete_children.clear();
       mapping_paths.clear();
+      safe_cast_domains.clear();
       premapping_events.clear();
       frame_events.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
@@ -2946,6 +2949,52 @@ namespace LegionRuntime {
         util.spawn(HLR_TASK_ID, rez.get_buffer(),
                    rez.get_used_bytes(), info.reclaim_event);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ptr_t SingleTask::perform_safe_cast(IndexSpace handle, ptr_t pointer)
+    //--------------------------------------------------------------------------
+    {
+      DomainPoint point(pointer.value);
+      std::map<IndexSpace,Domain>::const_iterator finder = 
+                                              safe_cast_domains.find(handle);
+      if (finder != safe_cast_domains.end())
+      {
+        if (finder->second.contains(point))
+          return pointer;
+        else
+          return ptr_t::nil();
+      }
+      Domain domain = runtime->get_index_space_domain(this, handle);
+      // Save the result
+      safe_cast_domains[handle] = domain;
+      if (domain.contains(point))
+        return pointer;
+      else
+        return ptr_t::nil();
+    }
+    
+    //--------------------------------------------------------------------------
+    DomainPoint SingleTask::perform_safe_cast(IndexSpace handle, 
+                                              const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      std::map<IndexSpace,Domain>::const_iterator finder = 
+                                              safe_cast_domains.find(handle);
+      if (finder != safe_cast_domains.end())
+      {
+        if (finder->second.contains(point))
+          return point;
+        else
+          return DomainPoint::nil();
+      }
+      Domain domain = runtime->get_index_space_domain(this, handle);
+      // Save the result
+      safe_cast_domains[handle] = domain;
+      if (domain.contains(point))
+        return point;
+      else
+        return DomainPoint::nil();
     }
 
     //--------------------------------------------------------------------------
@@ -4375,7 +4424,9 @@ namespace LegionRuntime {
         if (regions[idx].virtual_map || regions[idx].privilege_fields.empty())
         {
           virtual_mapped[idx] = true;
-          num_virtual_mappings++;
+          // Only count it as virtual mapped if it really was
+          if (regions[idx].virtual_map)
+            num_virtual_mappings++;
           continue;
         }
         // Otherwise we're going to do an actual mapping
@@ -4630,17 +4681,11 @@ namespace LegionRuntime {
           if (!chosen_variant.inner)
             wait_on_events.insert(physical_instances[idx].get_ready_event());
           // See if we need a lock for this region
-          if (physical_instances[idx].has_required_lock())
+          if (physical_instances[idx].has_required_locks())
           {
-            Reservation req_lock = physical_instances[idx].get_required_lock();
             // Check to see if it is needed exclusively or not
             bool exclusive = !IS_READ_ONLY(regions[idx]);
-            std::map<Reservation,bool>::iterator finder = 
-              atomic_locks.find(req_lock);
-            if (finder == atomic_locks.end())
-              atomic_locks[req_lock] = exclusive;
-            else
-              finder->second = finder->second || exclusive;
+            physical_instances[idx].update_atomic_locks(atomic_locks,exclusive);
           }
 #ifdef DEBUG_HIGH_LEVEL
           // We can only do this check if we actually have the reference
@@ -4884,8 +4929,11 @@ namespace LegionRuntime {
           local_instances.resize(regions.size(),InstanceRef());
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
-            physical_regions[idx].impl->reset_reference(
-                physical_instances[idx], unmap_events[idx]);
+            if (!virtual_mapped[idx])
+            {
+              physical_regions[idx].impl->reset_reference(
+                  physical_instances[idx], unmap_events[idx]);
+            }
           }
           // we can also trigger the all children mapped event
           all_children_mapped.trigger();
@@ -6360,10 +6408,8 @@ namespace LegionRuntime {
           pack_remote_mapped(rez);
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
-#ifndef S3D_STARTUP_HACK
         else
           issue_invalidations(runtime->address_space, false/*remote*/);
-#endif
         // Mark that we have completed mapping
         complete_mapping();
       }
@@ -6883,7 +6929,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!is_remote());
 #endif
+#ifndef S3D_STARTUP_HACK
       StateDirectory *directory = parent_ctx->get_directory();
+#endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Skip anything that is not a write
@@ -6899,7 +6947,9 @@ namespace LegionRuntime {
                                 regions[idx].region.get_field_space().get_id(),
                                 regions[idx].region.get_tree_id(), 
                                 variants->name);
+#ifndef S3D_STARTUP_HACK
         directory->issue_invalidations(source, remote, regions[idx]);
+#endif
       }
     }
 
@@ -9001,7 +9051,9 @@ namespace LegionRuntime {
       long long denom;
       derez.deserialize(denom);
       // Send any invalidation messages for things that have now mapped
+#ifndef S3D_STARTUP_HACK
       StateDirectory *directory = parent_ctx->get_directory();
+#endif
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -9011,8 +9063,10 @@ namespace LegionRuntime {
           std::vector<LogicalRegion> handles(points); 
           for (unsigned pidx = 0; pidx < points; pidx++)
             derez.deserialize(handles[pidx]);
+#ifndef S3D_STARTUP_HACK
           directory->issue_invalidations(source, true/*remote*/,
                                          regions[idx], handles);
+#endif
         }
         // otherwise it was locally mapped so we are already done
       }
@@ -9994,7 +10048,9 @@ namespace LegionRuntime {
       else
       {
         // Issue any invalidations that we have
+#ifndef S3D_STARTUP_HACK
         StateDirectory *directory = index_owner->parent_ctx->get_directory();
+#endif
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!IS_WRITE(regions[idx]))
@@ -10005,9 +10061,11 @@ namespace LegionRuntime {
             std::vector<LogicalRegion> handles(points.size());
             for (unsigned pidx = 0; pidx < points.size(); pidx++)
               handles[pidx] = points[pidx]->regions[idx].region;
+#ifndef S3D_STARTUP_HACK
             directory->issue_invalidations(runtime->address_space, 
                                            false/*remote*/,
                                            regions[idx], handles);
+#endif
           }
           // otherwise it was locally mapped so we are already done
         }

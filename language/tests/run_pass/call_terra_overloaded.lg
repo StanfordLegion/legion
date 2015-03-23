@@ -33,7 +33,7 @@ task g(x : bool) : int
 end
 
 task main()
-  legionlib.assert(g(true) == 5)
-  legionlib.assert(g(false) == 6)
+  legionlib.assert(g(true) == 5, "test failed")
+  legionlib.assert(g(false) == 6, "test failed")
 end
 legionlib.start(main)

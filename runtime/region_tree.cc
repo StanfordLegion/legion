@@ -50,7 +50,6 @@ namespace LegionRuntime {
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
-      this->forest_lock = Reservation::create_reservation();
       this->lookup_lock = Reservation::create_reservation();
       this->distributed_lock = Reservation::create_reservation();
 #ifdef DYNAMIC_TESTS
@@ -90,8 +89,6 @@ namespace LegionRuntime {
     RegionTreeForest::~RegionTreeForest(void)
     //--------------------------------------------------------------------------
     {
-      forest_lock.destroy_reservation();
-      forest_lock = Reservation::NO_RESERVATION;
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
       distributed_lock.destroy_reservation();
@@ -584,9 +581,6 @@ namespace LegionRuntime {
     void RegionTreeForest::create_logical_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      // We do need the autolock here since we're going to be making
-      // region tree nodes
-      AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       create_node(handle, NULL/*parent*/);
     }
 
@@ -624,7 +618,6 @@ namespace LegionRuntime {
                                                 LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
-      AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       RegionNode *parent_node = get_node(parent);
       IndexPartNode *index_node = parent_node->row_source->get_child(c);
       LogicalPartition result(parent.tree_id, index_node->handle, 
@@ -655,7 +648,6 @@ namespace LegionRuntime {
                                               LogicalPartition parent, Color c)
     //--------------------------------------------------------------------------
     {
-      AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       PartitionNode *parent_node = get_node(parent);
       IndexSpaceNode *index_node = parent_node->row_source->get_child(c);
       LogicalRegion result(parent.tree_id, index_node->handle,
@@ -676,7 +668,6 @@ namespace LegionRuntime {
     Color RegionTreeForest::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       RegionNode *node = get_node(handle);
       return node->row_source->color;
     }
@@ -685,7 +676,6 @@ namespace LegionRuntime {
     Color RegionTreeForest::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      AutoLock f_lock(forest_lock,1,false/*exclusive*/);
       PartitionNode *node = get_node(handle);
       return node->row_source->color;
     }
@@ -1727,7 +1717,9 @@ namespace LegionRuntime {
       // Now we're ready to send the state
       top_node->visit_node(&sender);
       // Update the directory state
+#ifndef S3D_STARTUP_HACK
       directory->update_remote_state(target, top_node, send_mask);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2218,12 +2210,6 @@ namespace LegionRuntime {
           delete result;
           return it->second;
         }
-        // Now make sure that the node has the right number of contexts
-        // before we put it on the map and release the look-up lock.
-        // Note that this is only safe because the runtime ups the 
-        // total_context count in allocate_context before calling the
-        // resize_node_contexts funciton.
-        result->reserve_contexts(runtime->get_context_count());
         // Now we can add it to the map
         region_nodes[r] = result;
         // If this is a top level region add it to the collection
@@ -2280,12 +2266,6 @@ namespace LegionRuntime {
           delete result;
           return it->second;
         }
-        // Now make sure that the node has the right number of contexts
-        // before we put it on the map and release the look-up lock.
-        // Note that this is only safe because the runtime ups the 
-        // total_context count in allocate_context before calling the
-        // resize_node_contexts funciton.
-        result->reserve_contexts(runtime->get_context_count());
         // Now we can put the node in the map
         part_nodes[p] = result;
       }
@@ -2949,27 +2929,6 @@ namespace LegionRuntime {
       return result;
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::resize_node_contexts(unsigned total_contexts)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, RESIZE_CONTEXTS_CALL);
-#endif
-      // We're only reading the maps of nodes, so we only need read permissions
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      for (std::map<LogicalRegion,RegionNode*>::const_iterator it = 
-            region_nodes.begin(); it != region_nodes.end(); it++)
-      {
-        it->second->reserve_contexts(total_contexts);
-      }
-      for (std::map<LogicalPartition,PartitionNode*>::const_iterator it = 
-            part_nodes.begin(); it != part_nodes.end(); it++)
-      {
-        it->second->reserve_contexts(total_contexts);
-      }
-    }
-
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     void RegionTreeForest::dump_logical_state(LogicalRegion region,
@@ -2997,7 +2956,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
-                                                       const NodeMask &source,
+                                                       const NodeSet &source,
                                                        const void *buffer,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3013,7 +2972,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::attach_semantic_information(IndexPartition handle,
                                                        SemanticTag tag,
-                                                       const NodeMask &source,
+                                                       const NodeSet &source,
                                                        const void *buffer,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3029,7 +2988,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::attach_semantic_information(FieldSpace handle,
                                                        SemanticTag tag,
-                                                       const NodeMask &source,
+                                                       const NodeSet &source,
                                                        const void *buffer,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3046,7 +3005,7 @@ namespace LegionRuntime {
     void RegionTreeForest::attach_semantic_information(FieldSpace handle,
                                                        FieldID fid,
                                                        SemanticTag tag,
-                                                       const NodeMask &src,
+                                                       const NodeSet &src,
                                                        const void *buf,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3062,7 +3021,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::attach_semantic_information(LogicalRegion handle,
                                                        SemanticTag tag,
-                                                       const NodeMask &source,
+                                                       const NodeSet &source,
                                                        const void *buffer,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3079,7 +3038,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeForest::attach_semantic_information(LogicalPartition handle,
                                                        SemanticTag tag,
-                                                       const NodeMask &source,
+                                                       const NodeSet &source,
                                                        const void *buffer,
                                                        size_t size)
     //--------------------------------------------------------------------------
@@ -3502,11 +3461,6 @@ namespace LegionRuntime {
               fprintf(stdout,"  Compute Path Call:\n");
               break;
             }
-          case RESIZE_CONTEXTS_CALL:
-            {
-              fprintf(stdout,"  Resize Contexts Call:\n");
-              break;
-            }
           case CREATE_INSTANCE_CALL:
             {
               fprintf(stdout,"  Create Instance Call:\n");
@@ -3535,11 +3489,6 @@ namespace LegionRuntime {
           case MAP_REDUCTION_REGION_CALL:
             {
               fprintf(stdout,"  Map Reduction Region Call:\n");
-              break;
-            }
-          case RESERVE_CONTEXTS_CALL:
-            {
-              fprintf(stdout,"  Reserve Contexts Call:\n");
               break;
             }
           case ACQUIRE_PHYSICAL_STATE_CALL:
@@ -3851,6 +3800,48 @@ namespace LegionRuntime {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    template<SemanticInfoKind KIND>
+    void SendSemanticInfoFunctor<KIND>::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      switch (KIND)
+      {
+        case INDEX_SPACE_SEMANTIC:
+          {
+            runtime->send_index_space_semantic_info(target, rez);
+            break;
+          }
+        case INDEX_PARTITION_SEMANTIC:
+          {
+            runtime->send_index_partition_semantic_info(target, rez);
+            break;
+          }
+        case FIELD_SPACE_SEMANTIC:
+          {
+            runtime->send_field_space_semantic_info(target, rez);
+            break;
+          }
+        case FIELD_SEMANTIC:
+          {
+            runtime->send_field_semantic_info(target, rez);
+            break;
+          }
+        case LOGICAL_REGION_SEMANTIC:
+          {
+            runtime->send_logical_region_semantic_info(target, rez);
+            break;
+          }
+        case LOGICAL_PARTITION_SEMANTIC:
+          {
+            runtime->send_logical_partition_semantic_info(target, rez);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // State Directory 
     /////////////////////////////////////////////////////////////
@@ -3874,6 +3865,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void StateDirectory::SendRemoteFreeFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_free_remote_context(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
     StateDirectory::~StateDirectory(void)
     //--------------------------------------------------------------------------
     {
@@ -3886,19 +3884,8 @@ namespace LegionRuntime {
           RezCheck z(rez);
           rez.serialize(remote_owner_uid);
         }
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (remote_contexts[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (remote_contexts.is_set(target))
-                context->runtime->send_free_remote_context(target, rez);
-            }
-          }
-        }
+        SendRemoteFreeFunctor functor(context->runtime, rez);
+        remote_contexts.map(functor);
       }
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
@@ -3981,7 +3968,7 @@ namespace LegionRuntime {
       RegionTreeID tid = node->get_tree_id();
       AutoLock s_lock(state_lock);
       // Update our remote contexts and remote fields
-      remote_contexts.set_bit(target);
+      remote_contexts.add(target);
       remote_fields |= mask;
       RemoteForestState &state = remote_forest_states[tid];
       update_remote_state(state, target, node, mask);
@@ -4014,7 +4001,7 @@ namespace LegionRuntime {
             state.node_states.begin(); it !=
             state.node_states.end(); /*nothing*/)
       {
-        if (it->remote_nodes.is_set(target))
+        if (it->remote_nodes.contains(target))
         {
           // Check to see if the field sets are the same
           // If we are then we are done
@@ -4025,7 +4012,7 @@ namespace LegionRuntime {
           }
           // Otherwise remove our bit and update the mask
           new_mask |= it->valid_fields;
-          it->remote_nodes.unset_bit(target);
+          it->remote_nodes.remove(target);
           if (!it->remote_nodes)
             it = state.node_states.erase(it);
           else
@@ -4209,6 +4196,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void StateDirectory::InvalidateRemoteStateFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // Because of potential aliasing, always make sure
+      // we send the remote tree shape first
+      node->get_row_source()->send_node(target, 
+                                        true/*up*/, false/*down*/);
+      node->column_source->send_node(target);
+      node->send_node(target);
+      runtime->send_invalidate_remote_state(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
     bool StateDirectory::issue_invalidations(RemoteTreeState &state,
                                              RegionTreeNode *node,
                                              const FieldMask &mask)
@@ -4271,27 +4272,8 @@ namespace LegionRuntime {
           rez.serialize(overlap);
         }
         // Send the invalidations to anyone that needs them
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (it->remote_nodes[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (it->remote_nodes.is_set(target))
-              {
-                // Because of potential aliasing, always make sure
-                // we send the remote tree shape first
-                node->get_row_source()->send_node(target, 
-                                                  true/*up*/, false/*down*/);
-                node->column_source->send_node(target);
-                node->send_node(target);
-                forest->runtime->send_invalidate_remote_state(target, rez);
-              }
-            }
-          }
-        }
+        InvalidateRemoteStateFunctor functor(context->runtime, node, rez);
+        it->remote_nodes.map(functor);
         it->valid_fields -= overlap;
         if (!it->valid_fields)
           it = remote_node_states.erase(it);
@@ -4343,43 +4325,19 @@ namespace LegionRuntime {
           rez.serialize(mask);
         }
         // Send the invalidations to anyone that needs them
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (it->remote_nodes[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (target == source)
-              {
-                // Need an |= here to keep track of potentially
-                // many fields for which we have remote data
-                source_mask |= it->valid_fields;
-                continue;
-              }
-              if (it->remote_nodes.is_set(target))
-              {
-                // Because of potential aliasing, always make sure
-                // we send the remote tree shape first
-                node->get_row_source()->send_node(target, 
-                                                  true/*up*/, false/*down*/);
-                node->column_source->send_node(target);
-                node->send_node(target);
-                forest->runtime->send_invalidate_remote_state(target, rez);
-              }
-            }
-          }
-        }
+        InvalidateRemoteStateFunctor functor(context->runtime, node, rez);
+        it->remote_nodes.map(functor);
+        if (it->remote_nodes.contains(source))
+          source_mask |= it->valid_fields;
         it->valid_fields -= mask;
         if (!it->valid_fields)
           it = remote_node_states.erase(it);
         else
         {
           // Also unset the source bit if necessary
-          if (it->remote_nodes.is_set(source))
+          if (it->remote_nodes.contains(source))
           {
-            it->remote_nodes.unset_bit(source);
+            it->remote_nodes.remove(source);
             if (!it->remote_nodes)
               it = remote_node_states.erase(it);
             else
@@ -4418,7 +4376,7 @@ namespace LegionRuntime {
         {
           if (remaining * it->valid_fields)
             continue;
-          it->remote_nodes.set_bit(node);
+          it->remote_nodes.add(node);
           remaining -= it->valid_fields;
           if (!remaining)
             break;
@@ -4440,7 +4398,7 @@ namespace LegionRuntime {
           // Then test for equality
           if (it->valid_fields == remaining)
           {
-            it->remote_nodes.set_bit(node);
+            it->remote_nodes.add(node);
             remaining.clear();
             break;
           }
@@ -4449,7 +4407,7 @@ namespace LegionRuntime {
           if (!overlap_left)
           {
             // Remaining dominates
-            it->remote_nodes.set_bit(node);   
+            it->remote_nodes.add(node);   
             remaining -= it->valid_fields;
             continue;
           }
@@ -4532,7 +4490,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,
-                                                    const NodeMask &mask,
+                                                    const NodeSet &mask,
                                                     const void *buffer, 
                                                     size_t size)
     //--------------------------------------------------------------------------
@@ -4540,7 +4498,7 @@ namespace LegionRuntime {
       // Make a copy
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
-      NodeMask diff, current;
+      NodeSet diff, current;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -4993,10 +4951,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_semantic_info(const NodeMask &targets,
+    void IndexSpaceNode::send_semantic_info(const NodeSet &targets,
                                             SemanticTag tag,
                                             const void *buffer, size_t size,
-                                            const NodeMask &current)
+                                            const NodeSet &current)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -5010,20 +4968,9 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-      {
-        if (targets[idx])
-        {
-          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-          {
-            AddressSpaceID target = offset+i;
-            if (!targets.is_set(target))
-              continue;
-            context->runtime->send_index_space_semantic_info(target, rez);
-          }
-        }
-      }
+      SendSemanticInfoFunctor<INDEX_SPACE_SEMANTIC> 
+                                  functor(context->runtime, rez);
+      targets.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -5036,7 +4983,7 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -5171,7 +5118,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      creation_set.set_bit(source);
+      creation_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -5181,7 +5128,7 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->remove_child(color);
       AutoLock n_lock(node_lock);
-      destruction_set.set_bit(source);
+      destruction_set.add(source);
       for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
             it != logical_nodes.end(); it++)
       {
@@ -5511,7 +5458,7 @@ namespace LegionRuntime {
       std::map<Color,IndexPartNode*> valid_copy;
       {
         AutoLock n_lock(node_lock);
-        if (!creation_set.is_set(target))
+        if (!creation_set.contains(target))
         {
           Serializer rez;
           {
@@ -5533,7 +5480,7 @@ namespace LegionRuntime {
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
             {
-              it->second.node_mask.set_bit(target);
+              it->second.node_mask.add(target);
               rez.serialize(it->first);
               rez.serialize(it->second.node_mask);
               rez.serialize(it->second.size);
@@ -5541,13 +5488,13 @@ namespace LegionRuntime {
             }
           }
           context->runtime->send_index_space_node(target, rez); 
-          creation_set.set_bit(target);
+          creation_set.add(target);
         }
-        if (!destruction_set.is_set(target))
+        if (!destruction_set.contains(target))
         {
           // Now we need to send a destruction
           context->runtime->send_index_space_destruction(handle, target);
-          destruction_set.set_bit(target);
+          destruction_set.add(target);
         }
         // If we need to go down, make a copy of the valid children
         if (down)
@@ -5605,7 +5552,7 @@ namespace LegionRuntime {
       {
         SemanticTag tag;
         derez.deserialize(tag);
-        NodeMask source_mask;
+        NodeSet source_mask;
         derez.deserialize(source_mask);
         size_t buffer_size;
         derez.deserialize(buffer_size);
@@ -5693,9 +5640,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::send_semantic_info(const NodeMask &targets, 
+    void IndexPartNode::send_semantic_info(const NodeSet &targets, 
                                            SemanticTag tag, const void *buffer,
-                                           size_t size, const NodeMask &current)
+                                           size_t size, const NodeSet &current)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -5709,20 +5656,9 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-      {
-        if (targets[idx])
-        {
-          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-          {
-            AddressSpaceID target = offset+i;
-            if (!targets.is_set(target))
-              continue;
-            context->runtime->send_index_partition_semantic_info(target, rez);
-          }
-        }
-      }
+      SendSemanticInfoFunctor<INDEX_PARTITION_SEMANTIC>
+                                    functor(context->runtime, rez);
+      targets.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -5735,7 +5671,7 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -5906,7 +5842,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      creation_set.set_bit(source);
+      creation_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -5916,7 +5852,7 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->remove_child(color);
       AutoLock n_lock(node_lock);
-      destruction_set.set_bit(source);
+      destruction_set.add(source);
       for (std::set<PartitionNode*>::const_iterator it = logical_nodes.begin();
              it != logical_nodes.end(); it++)
       {
@@ -6181,7 +6117,7 @@ namespace LegionRuntime {
       std::map<Color,IndexSpaceNode*> valid_copy;
       {
         AutoLock n_lock(node_lock);
-        if (!creation_set.is_set(target))
+        if (!creation_set.contains(target))
         {
           Serializer rez;
           {
@@ -6195,7 +6131,7 @@ namespace LegionRuntime {
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
             {
-              it->second.node_mask.set_bit(target);
+              it->second.node_mask.add(target);
               rez.serialize(it->first);
               rez.serialize(it->second.node_mask);
               rez.serialize(it->second.size);
@@ -6203,13 +6139,13 @@ namespace LegionRuntime {
             }
           }
           context->runtime->send_index_partition_node(target, rez);
-          creation_set.set_bit(target);
+          creation_set.add(target);
         }
-        if (!destruction_set.is_set(target))
+        if (!destruction_set.contains(target))
         {
           // Send the deletion notification
           context->runtime->send_index_partition_destruction(handle, target);
-          destruction_set.set_bit(target);
+          destruction_set.add(target);
         }
         if (down)
           valid_copy = valid_map;
@@ -6256,7 +6192,7 @@ namespace LegionRuntime {
       {
         SemanticTag tag;
         derez.deserialize(tag);
-        NodeMask source_mask;
+        NodeSet source_mask;
         derez.deserialize(source_mask);
         size_t buffer_size;
         derez.deserialize(buffer_size);
@@ -6273,7 +6209,7 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
-      : handle(sp), context(ctx)
+      : handle(sp), context(ctx), next_allocation_index(-1)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -6343,14 +6279,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::attach_semantic_information(SemanticTag tag,
-                                                     const NodeMask &sources,
+                                                     const NodeSet &sources,
                                                      const void *buffer, 
                                                      size_t size)
     //--------------------------------------------------------------------------
     {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
-      NodeMask diff, current;
+      NodeSet diff, current;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -6413,34 +6349,23 @@ namespace LegionRuntime {
           rez.serialize(size);
           rez.serialize(buffer, size);
         }
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (diff[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (!diff.is_set(target))
-                continue;
-              context->runtime->send_field_space_semantic_info(target, rez);
-            }
-          }
-        }
+        SendSemanticInfoFunctor<FIELD_SPACE_SEMANTIC>
+                                    functor(context->runtime, rez);
+        diff.map(functor);
       }
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::attach_semantic_information(FieldID fid,
                                                      SemanticTag tag,
-                                                     const NodeMask &sources,
+                                                     const NodeSet &sources,
                                                      const void *buffer,
                                                      size_t size)
     //--------------------------------------------------------------------------
     {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
-      NodeMask diff, current;
+      NodeSet diff, current;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -6505,20 +6430,8 @@ namespace LegionRuntime {
           rez.serialize(size);
           rez.serialize(buffer, size);
         }
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (diff[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (!diff.is_set(target))
-                continue;
-              context->runtime->send_field_semantic_info(target, rez);
-            }
-          }
-        }
+        SendSemanticInfoFunctor<FIELD_SEMANTIC> functor(context->runtime, rez);
+        diff.map(functor);
       }
     }
 
@@ -6575,7 +6488,7 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -6596,7 +6509,7 @@ namespace LegionRuntime {
       derez.deserialize(fid);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -6604,6 +6517,14 @@ namespace LegionRuntime {
       derez.advance_pointer(size);
       forest->attach_semantic_information(handle, fid, tag, 
                                           sources, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::SendFieldAllocationFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_field_allocation(handle, field, size, index, target); 
     }
 
     //--------------------------------------------------------------------------
@@ -6628,21 +6549,9 @@ namespace LegionRuntime {
       // as long as it is not local.  Local fields get sent by the task contexts
       if (!local && !!creation_set)
       {
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (creation_set[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (!creation_set.is_set(target))
-                continue;
-              context->runtime->send_field_allocation(handle, fid, size,
-                                                      index, target);
-            }
-          }
-        }
+        SendFieldAllocationFunctor functor(handle, fid, size, 
+                                           index, context->runtime);
+        creation_set.map(functor);
       }
     }
 
@@ -6674,21 +6583,9 @@ namespace LegionRuntime {
         // us the allocation in the first place
         if (!!creation_set)
         {
-          for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-          {
-            if (creation_set[idx])
-            {
-              unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-              for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-              {
-                AddressSpaceID target = offset+i;
-                if (!creation_set.is_set(target))
-                  continue;
-                context->runtime->send_field_allocation(handle, fid, size,
-                                                        our_index, target);
-              }
-            }
-          }
+          SendFieldAllocationFunctor functor(handle, fid, size,
+                                             our_index, context->runtime);
+          creation_set.map(functor);
         }
       }
       else
@@ -6713,6 +6610,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::SendFieldDestructionFunctor::apply(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_field_destruction(handle, field, target);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::free_field(FieldID fid, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6727,22 +6632,8 @@ namespace LegionRuntime {
       // Tell all our subscribers that we've destroyed the field
       if (!!creation_set)
       {
-        for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-        {
-          if (creation_set[idx])
-          {
-            unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-            for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-            {
-              AddressSpaceID target = offset+i;
-              if (target == source)
-                continue;
-              if (!creation_set.is_set(target))
-                continue;
-              context->runtime->send_field_destruction(handle, fid, target);
-            }
-          }
-        }
+        SendFieldDestructionFunctor functor(handle, fid, context->runtime);
+        creation_set.map(functor);
       }
       // Free the index
       free_index(finder->second.idx);
@@ -6868,7 +6759,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      creation_set.set_bit(source);
+      creation_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -6876,7 +6767,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      destruction_set.set_bit(source);
+      destruction_set.add(source);
       for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
             it != logical_nodes.end(); it++)
       {
@@ -7293,7 +7184,7 @@ namespace LegionRuntime {
     {
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
-      if (!creation_set.is_set(target))
+      if (!creation_set.contains(target))
       {
         // First send the node info and then send all the fields
         Serializer rez;
@@ -7304,7 +7195,7 @@ namespace LegionRuntime {
           for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
           {
-            it->second.node_mask.set_bit(target);
+            it->second.node_mask.add(target);
             rez.serialize(it->first);
             rez.serialize(it->second.node_mask);
             rez.serialize(it->second.size);
@@ -7316,7 +7207,7 @@ namespace LegionRuntime {
                 it = semantic_field_info.begin(); 
                 it != semantic_field_info.end(); it++)
           {
-            it->second.node_mask.set_bit(target);
+            it->second.node_mask.add(target);
             rez.serialize(it->first.first);
             rez.serialize(it->first.second);
             rez.serialize(it->second.node_mask);
@@ -7337,13 +7228,13 @@ namespace LegionRuntime {
           }
         }
         // Finally add it to the creation set
-        creation_set.set_bit(target);
+        creation_set.add(target);
       }
       // Send any deletions if necessary
-      if (!destruction_set.is_set(target))
+      if (!destruction_set.contains(target))
       {
         context->runtime->send_field_space_destruction(handle, target);
-        destruction_set.set_bit(target);
+        destruction_set.add(target);
       }
     }
 
@@ -7366,7 +7257,7 @@ namespace LegionRuntime {
       {
         SemanticTag tag;
         derez.deserialize(tag);
-        NodeMask source_mask;
+        NodeSet source_mask;
         derez.deserialize(source_mask);
         size_t buffer_size;
         derez.deserialize(buffer_size);
@@ -7383,7 +7274,7 @@ namespace LegionRuntime {
         derez.deserialize(fid);
         SemanticTag tag;
         derez.deserialize(tag);
-        NodeMask source_mask;
+        NodeSet source_mask;
         derez.deserialize(source_mask);
         size_t buffer_size;
         derez.deserialize(buffer_size);
@@ -7466,49 +7357,80 @@ namespace LegionRuntime {
         allocated_indexes.set_bit(result);
         return result;
       }
-      // Otherwise, try picking out an index along the stripe corresponding
-      // to our runtime instance.
-      unsigned tests = 0;
-      unsigned offset = context->runtime->address_space;
-      for (unsigned idx = offset;
-            idx < MAX_FIELDS; idx += context->runtime->runtime_stride)
+      // Two cases here. If we have more fields than nodes try to
+      // evenly distribute allocations, otherwise just give up and
+      // fall back to the random case.
+      if (context->runtime->runtime_stride <= MAX_FIELDS)
       {
-        if (!allocated_indexes.is_set(idx))
+        // Otherwise, try picking out an index along the stripe corresponding
+        // to our runtime instance.
+        unsigned tests = 0;
+        unsigned offset = context->runtime->address_space;
+        for (unsigned idx = offset;
+              idx < MAX_FIELDS; idx += context->runtime->runtime_stride)
         {
-          allocated_indexes.set_bit(idx);
-          return idx;
-        }
-        tests++;
-      }
-      offset++;
-      if (offset == context->runtime->runtime_stride)
-        offset = 0;
-      // If our strip is full, go onto the next runtime from ours
-      // continue doing this until we have tested all the points.
-      // Walk these points backwards to avoid conflicts with remote
-      // nodes doing their own allocation on their stipes.
-      while (tests < MAX_FIELDS)
-      {
-        int target = MAX_FIELDS-1;
-        // Find our stripe
-        while (offset != unsigned(target%context->runtime->runtime_stride))
-          target--;
-        // Now we're on our stripe, so start searching
-        while (target >= 0)
-        {
-          if (!allocated_indexes.is_set(target))
+          if (!allocated_indexes.is_set(idx))
           {
-            unsigned result = target;
-            allocated_indexes.set_bit(result);
-            return result;
+            allocated_indexes.set_bit(idx);
+            return idx;
           }
-          target -= context->runtime->runtime_stride;
           tests++;
         }
-        // Didn't find anything on this stripe, go to the next one
         offset++;
         if (offset == context->runtime->runtime_stride)
           offset = 0;
+        // If our strip is full, go onto the next runtime from ours
+        // continue doing this until we have tested all the points.
+        // Walk these points backwards to avoid conflicts with remote
+        // nodes doing their own allocation on their stipes.
+        while (tests < MAX_FIELDS)
+        {
+          int target = MAX_FIELDS-1;
+          // Find our stripe
+          while (offset != unsigned(target%context->runtime->runtime_stride))
+            target--;
+          // Now we're on our stripe, so start searching
+          while (target >= 0)
+          {
+            if (!allocated_indexes.is_set(target))
+            {
+              unsigned result = target;
+              allocated_indexes.set_bit(result);
+              return result;
+            }
+            target -= context->runtime->runtime_stride;
+            tests++;
+          }
+          // Didn't find anything on this stripe, go to the next one
+          offset++;
+          if (offset == context->runtime->runtime_stride)
+            offset = 0;
+        }
+      }
+      else
+      {
+        // Random case, we have more runtime objects than fields
+        // in our field space, so pick a random location and
+        // allocate sequentially from that point.
+
+        // If we haven't picked a starting point yet, do that now
+        if (next_allocation_index < 0)
+          next_allocation_index = 
+            context->runtime->generate_random_integer() % MAX_FIELDS;
+        for (int tests = 0; tests < MAX_FIELDS; tests++)
+        {
+          // Handle the wrap-around case
+          if (next_allocation_index == MAX_FIELDS)
+            next_allocation_index = 0;
+          // Always increment
+          unsigned target = next_allocation_index++;
+          // Check to see if it has been allocated
+          if (!allocated_indexes.is_set(target))
+          {
+            allocated_indexes.set_bit(target);
+            return target;
+          }
+        }
       }
       // If we make it here, the mask is full and we are out of allocations
       log_field(LEVEL_ERROR,"Exceeded maximum number of allocated fields for "
@@ -8733,7 +8655,8 @@ namespace LegionRuntime {
       {
         PhysicalState *state = 
           node->acquire_physical_state(info.ctx, false/*exclusive*/);
-        node->find_valid_reduction_views(state, user_mask, valid_views);
+        node->find_valid_reduction_views(state, usage.redop,
+                                         user_mask, valid_views);
         node->release_physical_state(state);
       }
 
@@ -10375,9 +10298,6 @@ namespace LegionRuntime {
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
       : context(ctx), column_source(column_src)
-#ifdef DEBUG_HIGH_LEVEL
-        , logical_state_size(0), physical_state_size(0)
-#endif
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation(); 
@@ -10397,50 +10317,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::reserve_contexts(unsigned num_contexts)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this->context, RESERVE_CONTEXTS_CALL);
-#endif
-      // Hold the lock to prevent races on multiple people
-      // trying to update the reserve size.
-      // Also since deques don't copy objects when
-      // appending new ones, we can add states without affecting the
-      // already existing ones.
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(logical_states.size() <= num_contexts);
-      assert(physical_states.size() <= num_contexts);
-      assert(logical_states.size() == physical_states.size());
-      assert(num_contexts >= logical_states.size());
-      assert(num_contexts >= physical_states.size());
-#endif
-      logical_states.append(num_contexts);
-      physical_states.append(num_contexts);
-#ifdef DEBUG_HIGH_LEVEL
-      for (unsigned idx = physical_state_size; 
-            idx < (physical_state_size+num_contexts); idx++)
-        physical_states[idx] = PhysicalState(idx, this);
-#else
-      for (unsigned idx = physical_states.size()-num_contexts; 
-            idx < physical_states.size(); idx++)
-        physical_states[idx] = PhysicalState(idx);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      logical_state_size = logical_states.size();
-      physical_state_size = physical_states.size();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     LogicalState& RegionTreeNode::get_logical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      return logical_states[ctx];
+      return *(logical_states.lookup_entry(ctx));
     }
 
     //--------------------------------------------------------------------------
@@ -10449,9 +10329,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < physical_state_size);
+      PhysicalState *result = physical_states.lookup_entry(ctx, ctx, this);
+#else
+      PhysicalState *result = physical_states.lookup_entry(ctx, ctx);
 #endif
-      PhysicalState *result = &(physical_states[ctx]);
       acquire_physical_state(result, exclusive);
       return result;
     }
@@ -10552,7 +10433,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::attach_semantic_information(SemanticTag tag,
-                                                     const NodeMask &mask,
+                                                     const NodeSet &mask,
                                                      const void *buffer,
                                                      size_t size)
     //--------------------------------------------------------------------------
@@ -10560,7 +10441,7 @@ namespace LegionRuntime {
       // Make a copy
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
-      NodeMask diff, current;
+      NodeSet diff, current;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -10613,7 +10494,6 @@ namespace LegionRuntime {
       }
       if (!!diff)
         send_semantic_info(diff, tag, local, size, current);
-
     }
 
     //--------------------------------------------------------------------------
@@ -10648,10 +10528,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       // First check to see if we need to do any close operations
@@ -10749,10 +10626,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
@@ -10790,10 +10664,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(closer.ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[closer.ctx];
+      LogicalState &state = *(logical_states.lookup_entry(closer.ctx));
 
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
@@ -10898,7 +10769,7 @@ namespace LegionRuntime {
                                          new_states, already_open);
                 // Update the open mask
                 open_mask -= already_open;
-                if (needs_upgrade)
+                if (needs_upgrade && !!already_open)
                   new_states.push_back(
                       FieldState(closer.user, already_open, next_child));
                 // See if there are still any valid open fields
@@ -10968,6 +10839,9 @@ namespace LegionRuntime {
                       new_state.open_children[unsigned(next_child)] = 
                         already_open;
                       new_state.open_state = OPEN_MULTI_REDUCE;
+#ifdef DEBUG_HIGH_LEVEL
+                      assert(!!new_state.valid_fields);
+#endif
                       new_states.push_back(new_state);
                       // Update the current child, mark that we need to
                       // recompute the valid fields for the state
@@ -11268,6 +11142,9 @@ namespace LegionRuntime {
                                                const FieldState &new_state)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!!new_state.valid_fields);
+#endif
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); it++)
       {
@@ -11436,17 +11313,17 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INITIALIZE_LOGICAL_CALL);
 #endif
+      if (logical_states.has_entry(ctx))
+      {
+        LogicalState &state = *(logical_states.lookup_entry(ctx));
 #ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
+        // Technically these should already be empty
+        assert(state.field_states.empty());
+        assert(state.curr_epoch_users.empty());
+        assert(state.prev_epoch_users.empty());
 #endif
-      LogicalState &state = logical_states[ctx];
-#ifdef DEBUG_HIGH_LEVEL
-      // Technically these should already be empty
-      assert(state.field_states.empty());
-      assert(state.curr_epoch_users.empty());
-      assert(state.prev_epoch_users.empty());
-#endif
-      state.reset();
+        state.reset();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11456,23 +11333,23 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INVALIDATE_LOGICAL_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];     
-      for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::
-            const_iterator it = state.curr_epoch_users.begin(); it != 
-            state.curr_epoch_users.end(); it++)
+      if (logical_states.has_entry(ctx))
       {
-        it->op->remove_mapping_reference(it->gen); 
+        LogicalState &state = *(logical_states.lookup_entry(ctx));     
+        for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::
+              const_iterator it = state.curr_epoch_users.begin(); it != 
+              state.curr_epoch_users.end(); it++)
+        {
+          it->op->remove_mapping_reference(it->gen); 
+        }
+        for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::
+              const_iterator it = state.prev_epoch_users.begin(); it != 
+              state.prev_epoch_users.end(); it++)
+        {
+          it->op->remove_mapping_reference(it->gen); 
+        }
+        state.reset();
       }
-      for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::
-            const_iterator it = state.prev_epoch_users.begin(); it != 
-            state.prev_epoch_users.end(); it++)
-      {
-        it->op->remove_mapping_reference(it->gen); 
-      }
-      state.reset();
     }
 
     //--------------------------------------------------------------------------
@@ -11484,10 +11361,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REGISTER_LOGICAL_DEPS_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); /*nothing*/)
@@ -11567,10 +11441,7 @@ namespace LegionRuntime {
                                                FieldMask &coherence_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       coherence_mask |= state.user_level_coherence;
     }
 
@@ -11579,10 +11450,7 @@ namespace LegionRuntime {
                                                 const FieldMask &coherence_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       state.user_level_coherence |= coherence_mask;
     }
 
@@ -11591,10 +11459,7 @@ namespace LegionRuntime {
                                                 const FieldMask &coherence_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < logical_state_size);
-#endif
-      LogicalState &state = logical_states[ctx];
+      LogicalState &state = *(logical_states.lookup_entry(ctx));
       state.user_level_coherence -= coherence_mask;
     }
 
@@ -12386,6 +12251,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::find_valid_reduction_views(PhysicalState *state,
+                                                    ReductionOpID redop,
                                                     const FieldMask &valid_mask,
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
@@ -12405,7 +12271,7 @@ namespace LegionRuntime {
           // Acquire the parent state in non-exclusive mode
           PhysicalState *parent_state = 
             parent->acquire_physical_state(state->ctx, false/*exclusive*/);
-          parent->find_valid_reduction_views(parent_state, 
+          parent->find_valid_reduction_views(parent_state, redop,
                                              valid_mask, valid_views);
           // Release the parent state
           parent->release_physical_state(parent_state);
@@ -12415,6 +12281,8 @@ namespace LegionRuntime {
             state->reduction_views.begin(); it != 
             state->reduction_views.end(); it++)
       {
+        if (it->first->get_redop() != redop)
+          continue;
         FieldMask uncovered = valid_mask - it->second;
         if (!uncovered && (valid_views.find(it->first) == valid_views.end()))
         {
@@ -13456,9 +13324,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INITIALIZE_PHYSICAL_STATE_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < physical_state_size);
-#endif
+      if (!physical_states.has_entry(ctx))
+        return;
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(!state->dirty_mask);
@@ -13487,9 +13354,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < physical_state_size);
-#endif
+      if (!physical_states.has_entry(ctx))
+        return;
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
 
       state->dirty_mask.clear();
@@ -13529,9 +13395,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, INVALIDATE_PHYSICAL_STATE_CALL);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx < physical_state_size);
 #endif
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       invalidate_physical_state(state, invalid_mask, force);
@@ -14105,7 +13968,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      creation_set.set_bit(source);
+      creation_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -14115,7 +13978,7 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->remove_child(row_source->color);
       AutoLock n_lock(node_lock);
-      destruction_set.set_bit(source);
+      destruction_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -14464,15 +14327,15 @@ namespace LegionRuntime {
       bool send_deletion = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!creation_set.is_set(target))
+        if (!creation_set.contains(target))
         {
           continue_up = true;
-          creation_set.set_bit(target);
+          creation_set.add(target);
         }
-        if (!destruction_set.is_set(target))
+        if (!destruction_set.contains(target))
         {
           send_deletion = true;
-          destruction_set.set_bit(target);
+          destruction_set.add(target);
         }
       }
       if (continue_up)
@@ -14485,7 +14348,7 @@ namespace LegionRuntime {
           for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
           {
-            it->second.node_mask.set_bit(target);
+            it->second.node_mask.add(target);
             Serializer rez;
             {
               RezCheck z(rez);
@@ -14512,7 +14375,7 @@ namespace LegionRuntime {
               rez.serialize(it->first);
               rez.serialize(it->second.size);
               rez.serialize(it->second.buffer, it->second.size);
-              it->second.node_mask.set_bit(target);
+              it->second.node_mask.add(target);
             }
           }
           context->runtime->send_logical_region_node(target, rez);
@@ -14542,9 +14405,9 @@ namespace LegionRuntime {
       derez.deserialize(num_semantic);
       if (num_semantic > 0)
       {
-        NodeMask source_mask;
-        source_mask.set_bit(source);
-        source_mask.set_bit(context->runtime->address_space);
+        NodeSet source_mask;
+        source_mask.add(source);
+        source_mask.add(context->runtime->address_space);
         for (unsigned idx = 0; idx < num_semantic; idx++)
         {
           SemanticTag tag;
@@ -14570,7 +14433,6 @@ namespace LegionRuntime {
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
-      assert(ctx < physical_state_size);
 #endif
       PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
       // We've already pre-mapped so we've pulled down
@@ -14792,8 +14654,7 @@ namespace LegionRuntime {
         view->add_user(user, local_proc);
       }
       release_physical_state(state);
-      return InstanceRef(Event::NO_EVENT, 
-                         Reservation::NO_RESERVATION, new_view);
+      return InstanceRef(Event::NO_EVENT, new_view);
     } 
 
     //--------------------------------------------------------------------------
@@ -14819,9 +14680,6 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(info.ctx < physical_state_size);
-#endif
         MaterializedView *target_view = 
                           view->as_instance_view()->as_materialized_view();
         PhysicalState *state = 
@@ -14969,10 +14827,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::send_semantic_info(const NodeMask &targets,
+    void RegionNode::send_semantic_info(const NodeSet &targets,
                                         SemanticTag tag,
                                         const void *buffer, size_t size,
-                                        const NodeMask &current)
+                                        const NodeSet &current)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -14986,20 +14844,9 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-      {
-        if (targets[idx])
-        {
-          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-          {
-            AddressSpaceID target = offset+i;
-            if (!targets.is_set(target))
-              continue;
-            context->runtime->send_logical_region_semantic_info(target, rez);
-          }
-        }
-      }
+      SendSemanticInfoFunctor<LOGICAL_REGION_SEMANTIC>
+                                  functor(context->runtime, rez);
+      targets.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -15012,7 +14859,7 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -15032,13 +14879,9 @@ namespace LegionRuntime {
           row_source->color, logger->get_depth());
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx < logical_state_size)
-#else
-      if (ctx < logical_states.size())
-#endif
+      if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = logical_states[ctx];
+        LogicalState &state = *(logical_states.lookup_entry(ctx));
         print_logical_state(state, capture_mask, to_traverse, logger);  
       }
       else
@@ -15071,11 +14914,7 @@ namespace LegionRuntime {
           row_source->color, logger->get_depth());
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx < physical_state_size)
-#else
-      if (ctx < physical_states.size())
-#endif
+      if (physical_states.has_entry(ctx))
       {
         PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
         print_physical_state(state, capture_mask, to_traverse, logger);
@@ -15241,8 +15080,8 @@ namespace LegionRuntime {
           row_source->color, logger->get_depth(), this);
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-      if (ctx < logical_state_size)
-        print_logical_state(logical_states[ctx], capture_mask,
+      if (logical_states.has_entry(ctx))
+        print_logical_state(*logical_states.lookup_entry(ctx), capture_mask,
                             to_traverse, logger);
       else
         logger->log("No state");
@@ -15272,8 +15111,8 @@ namespace LegionRuntime {
           row_source->color, logger->get_depth(), this);
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-      if (ctx < physical_state_size)
-        print_physical_state(&(physical_states[ctx]), capture_mask,
+      if (physical_states.has_entry(ctx))
+        print_physical_state(physical_states.lookup_entry(ctx), capture_mask,
                              to_traverse, logger);
       else
         logger->log("No state");
@@ -15403,7 +15242,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      creation_set.set_bit(source);
+      creation_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -15413,7 +15252,7 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->remove_child(row_source->color);
       AutoLock n_lock(node_lock);
-      destruction_set.set_bit(source);
+      destruction_set.add(source);
     }
 
     //--------------------------------------------------------------------------
@@ -15777,15 +15616,15 @@ namespace LegionRuntime {
       bool send_deletion = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!creation_set.is_set(target))
+        if (!creation_set.contains(target))
         {
           continue_up = true;
-          creation_set.set_bit(target);
+          creation_set.add(target);
         }
-        if (!destruction_set.is_set(target))
+        if (!destruction_set.contains(target))
         {
           send_deletion = true;
-          destruction_set.set_bit(target);
+          destruction_set.add(target);
         }
       }
       if (continue_up)
@@ -15799,7 +15638,7 @@ namespace LegionRuntime {
         for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
               semantic_info.begin(); it != semantic_info.end(); it++)
         {
-          it->second.node_mask.set_bit(target);
+          it->second.node_mask.add(target);
           Serializer rez;
           {
             RezCheck z(rez);
@@ -15914,10 +15753,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::send_semantic_info(const NodeMask &targets,
+    void PartitionNode::send_semantic_info(const NodeSet &targets,
                                            SemanticTag tag,
                                            const void *buffer, size_t size,
-                                           const NodeMask &current)
+                                           const NodeSet &current)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -15931,20 +15770,9 @@ namespace LegionRuntime {
         rez.serialize(buffer, size);
       }
       // Then send the messages
-      for (unsigned idx = 0; idx < NodeMask::ELEMENTS; idx++)
-      {
-        if (targets[idx])
-        {
-          unsigned offset = idx * NodeMask::ELEMENT_SIZE;
-          for (unsigned i = 0; i < NodeMask::ELEMENT_SIZE; i++)
-          {
-            AddressSpaceID target = offset+i;
-            if (!targets.is_set(target))
-              continue;
-            context->runtime->send_logical_partition_semantic_info(target, rez);
-          }
-        }
-      }
+      SendSemanticInfoFunctor<LOGICAL_PARTITION_SEMANTIC>
+                                            functor(context->runtime, rez);
+      targets.map(functor);
     }
 
     //--------------------------------------------------------------------------
@@ -15957,7 +15785,7 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
-      NodeMask sources;
+      NodeSet sources;
       derez.deserialize(sources);
       size_t size;
       derez.deserialize(size);
@@ -15977,13 +15805,9 @@ namespace LegionRuntime {
           row_source->color, disjoint, logger->get_depth());
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx < logical_state_size)
-#else
-      if (ctx < logical_states.size())
-#endif
+      if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = logical_states[ctx];
+        LogicalState &state = *(logical_states.lookup_entry(ctx));
         print_logical_state(state, capture_mask, to_traverse, logger);    
       }
       else
@@ -16017,11 +15841,7 @@ namespace LegionRuntime {
           row_source->color, disjoint, logger->get_depth());
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx < physical_state_size)
-#else
-      if (ctx < physical_states.size())
-#endif
+      if (physical_states.has_entry(ctx))
       {
         PhysicalState *state = acquire_physical_state(ctx, false/*exclusive*/);
         print_physical_state(state, capture_mask, to_traverse, logger);
@@ -16188,9 +16008,9 @@ namespace LegionRuntime {
           row_source->color, disjoint, logger->get_depth(), this);
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-      if (ctx < logical_state_size)
+      if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = logical_states[ctx];
+        LogicalState &state = *(logical_states.lookup_entry(ctx));
         print_logical_state(state, capture_mask, to_traverse, logger);
       }
       else
@@ -16224,13 +16044,9 @@ namespace LegionRuntime {
           row_source->color, disjoint, logger->get_depth(), this);
       logger->down();
       LegionMap<Color,FieldMask>::aligned to_traverse;
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx < physical_state_size)
-#else
-      if (ctx < physical_states.size())
-#endif
+      if (physical_states.has_entry(ctx))
       {
-        PhysicalState *state = &(physical_states[ctx]);
+        PhysicalState *state = physical_states.lookup_entry(ctx);
         print_physical_state(state, capture_mask, to_traverse, logger);
       }
       else
@@ -16329,7 +16145,7 @@ namespace LegionRuntime {
         volume(compute_layout_volume(d)), owner(own)
     //--------------------------------------------------------------------------
     {
-      offset_lock = Reservation::create_reservation();
+      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -16348,8 +16164,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       memoized_offsets.clear();
-      offset_lock.destroy_reservation();
-      offset_lock = Reservation::NO_RESERVATION;
+      layout_lock.destroy_reservation();
+      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -16387,7 +16203,7 @@ namespace LegionRuntime {
       bool found_in_cache = false;
       // First check to see if we've memoized this result 
       {
-        AutoLock o_lock(offset_lock,1,false/*exclusive*/);
+        AutoLock o_lock(layout_lock,1,false/*exclusive*/);
         std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned >::const_iterator
           finder = memoized_offsets.find(hash_key);
         if (finder != memoized_offsets.end())
@@ -16451,7 +16267,7 @@ namespace LegionRuntime {
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
       // Add this to the results
-      AutoLock o_lock(offset_lock);
+      AutoLock o_lock(layout_lock);
       std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned >::iterator
         finder = memoized_offsets.find(hash_key);
       if (finder == memoized_offsets.end())
@@ -16607,7 +16423,7 @@ namespace LegionRuntime {
       // We don't need to hold a lock here since if we lose the race
       // we will just send the layout twice and everything will be
       // resolved on the far side
-      if (known_nodes.is_set(target))
+      if (known_nodes.contains(target))
       {
         rez.serialize<bool>(true);
         // If it is already on the remote node, then we only
@@ -16667,8 +16483,9 @@ namespace LegionRuntime {
     void LayoutDescription::update_known_nodes(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // No need to hold the lock here since races are alright
-      known_nodes.set_bit(target);
+      // Hold the lock to get serial access to this data structure
+      AutoLock l_lock(layout_lock);
+      known_nodes.add(target);
     }
 
     //--------------------------------------------------------------------------
@@ -18050,11 +17867,6 @@ namespace LegionRuntime {
         manager(man), parent(par), depth(dep)
     //--------------------------------------------------------------------------
     {
-      // If we're the top of the tree and the owner make the instance lock
-      if ((parent == NULL) && (owner_did == did))
-        inst_lock = Reservation::create_reservation();
-      else if (parent != NULL)
-        inst_lock = parent->inst_lock;
       // Otherwise the instance lock will get filled in when we are unpacked
 #ifdef DEBUG_HIGH_LEVEL
       assert(manager != NULL);
@@ -18079,9 +17891,6 @@ namespace LegionRuntime {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL && (owner_did == did))
-        inst_lock.destroy_reservation();
-      inst_lock = Reservation::NO_RESERVATION; 
       // Remove our references to the manager
       if (manager->remove_resource_reference())
         legion_delete(manager);
@@ -18091,6 +17900,20 @@ namespace LegionRuntime {
       {
         if (it->second->remove_resource_reference())
           legion_delete(it->second);
+      }
+      if (!atomic_reservations.empty())
+      {
+        // If this is the owner view, delete any atomic reservations
+        if (owner_did == did)
+        {
+          for (std::map<FieldID,Reservation>::iterator it = 
+                atomic_reservations.begin(); it != 
+                atomic_reservations.end(); it++)
+          {
+            it->second.destroy_reservation();
+          }
+        }
+        atomic_reservations.clear();
       }
     }
 
@@ -18433,9 +18256,10 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
 #endif
-      Reservation needed_lock = 
-        IS_ATOMIC(user.usage) ? inst_lock : Reservation::NO_RESERVATION;
-      return InstanceRef(ready_event, needed_lock, ViewHandle(this));
+      InstanceRef result(ready_event, ViewHandle(this));
+      if (IS_ATOMIC(user.usage))
+        find_atomic_reservations(result, user.field_mask);
+      return result;
     }
  
     //--------------------------------------------------------------------------
@@ -19556,6 +19380,47 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MaterializedView::find_atomic_reservations(InstanceRef &target,
+                                                    const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // Keep going up the tree until we get to the root
+      if (parent == NULL)
+      {
+        // Compute the field set
+        std::set<FieldID> atomic_fields;
+        logical_node->column_source->get_field_set(mask, atomic_fields);
+        std::vector<std::pair<FieldID,Reservation> > to_send_back;
+        // Take our lock and lookup the needed fields in order
+        {
+          AutoLock v_lock(view_lock);
+          for (std::set<FieldID>::const_iterator it = atomic_fields.begin();
+                it != atomic_fields.end(); it++)
+          {
+            std::map<FieldID,Reservation>::const_iterator finder = 
+              atomic_reservations.find(*it);
+            if (finder == atomic_reservations.end())
+            {
+              // Make a new reservation and add it to the set
+              Reservation handle = Reservation::create_reservation();
+              atomic_reservations[*it] = handle;
+              target.add_reservation(handle);
+              if (owner_did != did)
+                to_send_back.push_back(
+                        std::pair<FieldID,Reservation>(*it, handle));
+            }
+            else
+              target.add_reservation(finder->second);
+          }
+        }
+        if (!to_send_back.empty())
+          send_back_atomic_reservations(to_send_back);
+      }
+      else
+        parent->find_atomic_reservations(target, mask);
+    }
+
+    //--------------------------------------------------------------------------
     DistributedID MaterializedView::send_state(AddressSpaceID target,
                                                const FieldMask &send_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
@@ -19767,7 +19632,13 @@ namespace LegionRuntime {
     {
       // view_lock held from callers
       RezCheck z(rez);
-      rez.serialize(inst_lock);
+      rez.serialize<size_t>(atomic_reservations.size());
+      for (std::map<FieldID,Reservation>::const_iterator it = 
+            atomic_reservations.begin(); it != atomic_reservations.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
       rez.serialize(curr_epoch_users.size());
       for (LegionList<PhysicalUser,CURR_PHYSICAL_ALLOC>::track_aligned::
             const_iterator it = curr_epoch_users.begin(); 
@@ -19809,7 +19680,22 @@ namespace LegionRuntime {
         lock_event.wait(true/*block*/);
       }
       DerezCheck z(derez);
-      derez.deserialize(inst_lock);
+      size_t num_atomic;
+      derez.deserialize(num_atomic);
+      for (unsigned idx = 0; idx < num_atomic; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        Reservation handle;
+        derez.deserialize(handle);
+#ifdef DEBUG_HIGH_LEVEL
+        std::map<FieldID,Reservation>::const_iterator finder = 
+          atomic_reservations.find(fid);
+        if (finder != atomic_reservations.end())
+          assert(finder->second == handle);
+#endif
+        atomic_reservations[fid] = handle;
+      }
       FieldSpaceNode *field_node = manager->region_node->column_source;
       LegionMap<Event,FieldMask>::aligned deferred_events;
       size_t num_current;
@@ -20193,6 +20079,78 @@ namespace LegionRuntime {
         else
           it++;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::send_back_atomic_reservations(
+                  const std::vector<std::pair<FieldID,Reservation> > &send_back)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(owner_did);
+        rez.serialize<size_t>(send_back.size());
+        for (std::vector<std::pair<FieldID,Reservation> >::const_iterator it =
+              send_back.begin(); it != send_back.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      context->runtime->send_back_atomic(owner_addr, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_atomic_reservations(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_handles;
+      derez.deserialize(num_handles);
+      std::vector<std::pair<FieldID,Reservation> > to_send_back;
+      {
+        AutoLock v_lock(view_lock);
+        for (unsigned idx = 0; idx < num_handles; idx++)
+        {
+          FieldID fid;
+          derez.deserialize(fid);
+          Reservation handle;
+          derez.deserialize(handle);
+          // TODO: If we ever hit this assertion then we need to serialize
+          // atomic mappings occurring on different nodes at the same time.
+          // This might occur because two tasks with atomic read-only
+          // privileges mapped on different nodes and generated different
+          // reservations for the same instance. We can either serialize
+          // the mapping process or deal with sets of reservations for some
+          // fields. Either way we defer this for later work.
+          assert(atomic_reservations.find(fid) == atomic_reservations.end());
+          atomic_reservations[fid] = handle;
+          if (owner_did != did)
+            to_send_back.push_back(std::pair<FieldID,Reservation>(fid, handle));
+        }
+      }
+      if (!to_send_back.empty())
+        send_back_atomic_reservations(to_send_back);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_send_back_atomic(
+                                                          RegionTreeForest *ctx,
+                                                          Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      LogicalView *target_view = ctx->find_view(did);
+#ifdef DEBUG_HIGH_LEVEL 
+      assert(!target_view->is_reduction_view());
+#endif
+      InstanceView *inst_view = target_view->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!inst_view->is_composite_view()); 
+#endif
+      inst_view->as_materialized_view()->process_atomic_reservations(derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -22714,8 +22672,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
-      return InstanceRef(result, 
-                         Reservation::NO_RESERVATION, ViewHandle(this));
+      return InstanceRef(result, ViewHandle(this));
     }
  
     //--------------------------------------------------------------------------
@@ -23438,17 +23395,41 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(void)
-      : ready_event(Event::NO_EVENT), 
-        needed_lock(Reservation::NO_RESERVATION), handle(ViewHandle())
+      : ready_event(Event::NO_EVENT), handle(ViewHandle())
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(Event ready, Reservation lock, const ViewHandle &h)
-      : ready_event(ready), needed_lock(lock), handle(h)  
+    InstanceRef::InstanceRef(Event ready, const ViewHandle &h)
+      : ready_event(ready), handle(h)  
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef::InstanceRef(Event ready, const ViewHandle &h,
+                             const std::vector<Reservation> &locks)
+      : ready_event(ready), handle(h), needed_locks(locks)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::update_atomic_locks(
+                 std::map<Reservation,bool> &atomic_locks, bool exclusive) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<Reservation>::const_iterator it = needed_locks.begin();
+            it != needed_locks.end(); it++)
+      {
+        std::map<Reservation,bool>::iterator finder = 
+          atomic_locks.find(*it);
+        if (finder == atomic_locks.end())
+          atomic_locks[*it] = exclusive;
+        else
+          finder->second = finder->second || exclusive;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -23504,7 +23485,12 @@ namespace LegionRuntime {
       if (has_reference)
       {
         rez.serialize(ready_event);
-        rez.serialize(needed_lock);
+        rez.serialize<size_t>(needed_locks.size());
+        for (std::vector<Reservation>::const_iterator it = 
+              needed_locks.begin(); it != needed_locks.end(); it++)
+        {
+          rez.serialize(*it);
+        }
         PhysicalManager *manager = handle.get_manager();
         std::set<PhysicalManager*> needed_managers;
         if (manager->is_reduction_manager())
@@ -23552,8 +23538,11 @@ namespace LegionRuntime {
       {
         Event ready;
         derez.deserialize(ready);
-        Reservation lock;
-        derez.deserialize(lock);
+        size_t num_locks;
+        derez.deserialize(num_locks);
+        std::vector<Reservation> needed_locks(num_locks);
+        for (unsigned idx = 0; idx < num_locks; idx++)
+          derez.deserialize(needed_locks[idx]);
         DistributedID did;
         derez.deserialize(did);
         PhysicalManager *manager = context->find_manager(did);
@@ -23564,7 +23553,7 @@ namespace LegionRuntime {
           derez.deserialize(add_remote_reference);
           if (add_remote_reference)
             manager->add_held_remote_reference();
-          return InstanceRef(ready, lock, ViewHandle(view));
+          return InstanceRef(ready, ViewHandle(view), needed_locks);
         }
         else
         {
@@ -23574,106 +23563,13 @@ namespace LegionRuntime {
           derez.deserialize(add_remote_reference);
           if (add_remote_reference)
             manager->add_held_remote_reference();
-          return InstanceRef(ready, lock, ViewHandle(view));
+          return InstanceRef(ready, ViewHandle(view), needed_locks);
         }
         
       }
       else
         return InstanceRef();
     } 
-
-    /////////////////////////////////////////////////////////////
-    // Legion Stack 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    LegionStack<T,MAX_SIZE,INC_SIZE>::LegionStack(void)
-    //--------------------------------------------------------------------------
-    {
-      // Allocate the first entry
-      ptr_buffer[0] = new T[INC_SIZE];
-      buffer_size = 1;
-      remaining = INC_SIZE;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    LegionStack<T,MAX_SIZE,INC_SIZE>::LegionStack(
-                                    const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // Copy constructor should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    LegionStack<T,MAX_SIZE,INC_SIZE>::~LegionStack(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < buffer_size; idx++)
-      {
-        delete [] ptr_buffer[idx];
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    LegionStack<T,MAX_SIZE,INC_SIZE>& LegionStack<T,MAX_SIZE,INC_SIZE>::
-                          operator=(const LegionStack<T,MAX_SIZE,INC_SIZE> &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    T& LegionStack<T,MAX_SIZE,INC_SIZE>::operator[](unsigned int idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(idx < MAX_SIZE);
-#endif
-      return ptr_buffer[idx/INC_SIZE][idx%INC_SIZE];
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    void LegionStack<T,MAX_SIZE,INC_SIZE>::append(unsigned int append_count)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out if we have entires
-      if (remaining >= append_count)
-      {
-        remaining -= append_count;
-        return;
-      }
-      // If we make it here, we can subtract remaining from append count
-      // to get the number we actually need to add
-      append_count -= remaining;
-      const unsigned new_arrays = (append_count+INC_SIZE-1)/INC_SIZE;
-#ifdef DEBUG_HIGH_LEVEL
-      // If we fail this assertion, then we've run out of contexts
-      assert((buffer_size+new_arrays) <= ((MAX_SIZE+INC_SIZE-1)/INC_SIZE));
-#endif
-      // Allocate new arrays
-      for (unsigned idx = 0; idx < new_arrays; idx++)
-        ptr_buffer[buffer_size+idx] = new T[INC_SIZE];
-      remaining = append_count % INC_SIZE;
-      buffer_size += new_arrays;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, int MAX_SIZE, int INC_SIZE>
-    size_t LegionStack<T,MAX_SIZE,INC_SIZE>::size(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ((buffer_size*INC_SIZE) +
-                ((remaining == 0) ? 0 : (INC_SIZE-remaining)));
-    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

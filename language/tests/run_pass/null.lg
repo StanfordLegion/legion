@@ -17,6 +17,6 @@ import "legion"
 task main()
   var r = region(int, 5)
   var x = null(ptr(int, r))
-  legionlib.assert(isnull(x))
+  legionlib.assert(isnull(x), "test failed")
 end
 legionlib.start(main)

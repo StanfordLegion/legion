@@ -602,8 +602,17 @@ namespace LegionRuntime {
     public:
       enum { MAX_POINT_DIM = 3 };
 
-      DomainPoint(void) : dim(0) { point_data[0] = 0; }
-      DomainPoint(int index) : dim(0) { point_data[0] = index; }
+      DomainPoint(void) : dim(0) 
+      { 
+        for (int i = 0; i < MAX_POINT_DIM; i++)
+          point_data[i] = 0; 
+      }
+      DomainPoint(int index) : dim(0) 
+      { 
+        point_data[0] = index; 
+        for (int i = 1; i < MAX_POINT_DIM; i++)
+          point_data[i] = 0;
+      }
 
       DomainPoint(const DomainPoint &rhs) : dim(rhs.dim)
       {

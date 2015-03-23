@@ -818,7 +818,7 @@ namespace LegionRuntime {
     void MetadataBase::mark_valid(void)
     {
       // don't actually need lock for this
-      assert(!remote_copies); // should not have any valid remote copies if we weren't valid
+      assert(remote_copies.empty()); // should not have any valid remote copies if we weren't valid
       state = STATE_VALID;
     }
 
@@ -828,8 +828,8 @@ namespace LegionRuntime {
       AutoHSLLock a(mutex);
 
       assert(is_valid());
-      assert(!remote_copies.is_set(requestor));
-      remote_copies.set_bit(requestor);
+      assert(!remote_copies.contains(requestor));
+      remote_copies.add(requestor);
     }
 
     void MetadataBase::handle_response(void)
@@ -1012,7 +1012,7 @@ namespace LegionRuntime {
     }
 
     class MetadataInvalidateMessage {
-    public:
+    public: 
       struct RequestArgs {
 	int owner;
 	IDType id;
@@ -1089,17 +1089,26 @@ namespace LegionRuntime {
 	args.id = id;
 	ResponseMessage::request(target, args);
       }
+
+      struct Functor {
+      public:
+        IDType id;
+      public:
+        Functor(IDType i) : id(i) { }
+      public:
+        inline void apply(gasnet_node_t target) { request(target, id); }
+      };
     };
 
     bool MetadataBase::initiate_cleanup(IDType id)
     {
-      NodeMask invals_to_send;
+      NodeSet invals_to_send;
       {
 	AutoHSLLock a(mutex);
 
 	assert(state == STATE_VALID);
 
-	if(!remote_copies) {
+	if(remote_copies.empty()) {
 	  state = STATE_INVALID;
 	} else {
 	  state = STATE_CLEANUP;
@@ -1108,15 +1117,17 @@ namespace LegionRuntime {
       }
 
       // send invalidations outside the locked section
-      if(!invals_to_send)
+      if(invals_to_send.empty())
 	return true;
 
-      for(int node = 0; node < MAX_NUM_NODES; node++)
-	if(invals_to_send.is_set(node)) {
-	  MetadataInvalidateMessage::request(node, id);
-	  invals_to_send.unset_bit(node);
-	  if(!invals_to_send) break;
-	}
+      MetadataInvalidateMessage::Functor functor(id);
+      invals_to_send.map(functor);
+      //for(int node = 0; node < MAX_NUM_NODES; node++)
+      //  if(invals_to_send.contains(node)) {
+      //    MetadataInvalidateMessage::request(node, id);
+      //    invals_to_send.remove(node);
+      //    if(invals_to_send.empty()) break;
+      //  }
 
       // can't free object until we receive all the acks
       return false;
@@ -1152,9 +1163,9 @@ namespace LegionRuntime {
       {
 	AutoHSLLock a(mutex);
 
-	assert(remote_copies.is_set(sender));
-	remote_copies.unset_bit(sender);
-	last_copy = !remote_copies;
+	assert(remote_copies.contains(sender));
+	remote_copies.remove(sender);
+	last_copy = remote_copies.empty();
       }
 
       return last_copy;
@@ -1384,8 +1395,11 @@ namespace LegionRuntime {
 				      handle_event_subscribe> EventSubscribeMessage;
 
     struct EventTriggerArgs {
+    public:
       gasnet_node_t node;
       Event event;
+    public:
+      void apply(gasnet_node_t target);
     };
 
     void handle_event_trigger(EventTriggerArgs args);
@@ -1393,6 +1407,11 @@ namespace LegionRuntime {
     typedef ActiveMessageShortNoReply<EVENT_TRIGGER_MSGID,
 				      EventTriggerArgs,
 				      handle_event_trigger> EventTriggerMessage;
+
+    void EventTriggerArgs::apply(gasnet_node_t target)
+    {
+      EventTriggerMessage::request(target, *this);
+    }
 
     static Logger::Category log_event("event");
 
@@ -1447,7 +1466,7 @@ namespace LegionRuntime {
 	  //  that will trigger next
 	  assert(args.event.gen <= (impl->generation + 1));
 
-	  impl->remote_waiters.set_bit(args.node);
+	  impl->remote_waiters.add(args.node);
 	  log_event(LEVEL_DEBUG, "event subscription recorded: node=%d event=" IDFMT "/%d (> %d)",
 		    args.node, args.event.id, args.event.gen, impl->generation);
 	}
@@ -1467,12 +1486,13 @@ namespace LegionRuntime {
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && !e->remote_waiters)
+	  if(e->local_waiters.empty() && e->remote_waiters.empty())
 	    continue;
 
           fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
 		  e->me.id(), e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(), (size_t)(e->remote_waiters.pop_count()));
+		  e->local_waiters.size(),
+                  e->remote_waiters.size());
 	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
 	      it != e->local_waiters.end();
 	      it++) {
@@ -2058,19 +2078,20 @@ namespace LegionRuntime {
 	if(owner == gasnet_mynode()) {
 	  // send notifications to every other node that has subscribed
 	  //  (except the one that triggered)
-	  EventTriggerArgs args;
-	  args.node = trigger_node;
-	  args.event = me.convert<Event>();
-	  args.event.gen = gen_triggered;
-          NodeMask send_mask = remote_waiters;
-	  // no clear method?
-	  remote_waiters = NodeMask();
-	  //for(int node = 0; remote_waiters != 0; node++, remote_waiters >>= 1)
-	  //  if((remote_waiters & 1) && (node != trigger_node))
-	  //    EventTriggerMessage::request(node, args);
-          for(int node = 0; node < MAX_NUM_NODES; node++)
-            if (send_mask.is_set(node) && (node != trigger_node))
-              EventTriggerMessage::request(node, args);
+          if (!remote_waiters.empty())
+          {
+            EventTriggerArgs args;
+            args.node = trigger_node;
+            args.event = me.convert<Event>();
+            args.event.gen = gen_triggered;
+
+            NodeSet send_mask;
+            send_mask.swap(remote_waiters);
+            send_mask.map(args);
+            //for(int node = 0; node < MAX_NUM_NODES; node++)
+            //  if (send_mask.contains(node) && (node != trigger_node))
+            //    EventTriggerMessage::request(node, args);
+          }
 	} else {
 	  if(((unsigned)trigger_node) == gasnet_mynode()) {
 	    // if we're not the owner, we just send to the owner and let him
@@ -2684,6 +2705,9 @@ namespace LegionRuntime {
 	{
 	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_subscribe_gens.find(args.node);
 	  if(it != impl->remote_subscribe_gens.end()) {
+	    // a valid subscription should always be for a generation that hasn't
+	    //  triggered yet
+	    assert(it->second > impl->generation);
 	    if(it->second >= args.subscribe_gen)
 	      already_subscribed = true;
 	    else
@@ -2691,7 +2715,11 @@ namespace LegionRuntime {
 	  } else {
 	    // new subscription - don't reset remote_trigger_gens because the node may have
 	    //  been subscribed in the past
-	    impl->remote_subscribe_gens[args.node] = args.subscribe_gen;
+	    // NOTE: remote_subscribe_gens should only hold subscriptions for
+	    //  generations that haven't triggered, so if we're subscribing to 
+	    //  an old generation, don't add it
+	    if(args.subscribe_gen > impl->generation)
+	      impl->remote_subscribe_gens[args.node] = args.subscribe_gen;
 	  }
 	}
 
@@ -2951,8 +2979,8 @@ namespace LegionRuntime {
       in_use = false;
       mutex = new gasnet_hsl_t;
       gasnet_hsl_init(mutex);
-      remote_waiter_mask = NodeMask(); 
-      remote_sharer_mask = NodeMask();
+      remote_waiter_mask = NodeSet(); 
+      remote_sharer_mask = NodeSet();
       requested = false;
       if(_data_size) {
 	local_data = malloc(_data_size);
@@ -2978,7 +3006,7 @@ namespace LegionRuntime {
       int req_forward_target = -1;
       int grant_target = -1;
       LockGrantArgs g_args;
-      NodeMask copy_waiters;
+      NodeSet copy_waiters;
 
       do {
 	AutoHSLLock a(impl->mutex);
@@ -3002,8 +3030,8 @@ namespace LegionRuntime {
 	// case 2: we're the owner, and nobody is holding the lock, so grant
 	//  it to the (original) requestor
 	if((impl->count == Reservation::Impl::ZERO_COUNT) && 
-           (!impl->remote_sharer_mask)) {
-          assert(!impl->remote_waiter_mask);
+           (impl->remote_sharer_mask.empty())) {
+          assert(impl->remote_waiter_mask.empty());
 
 	  log_reservation(LEVEL_DEBUG, 
               "granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
@@ -3023,7 +3051,7 @@ namespace LegionRuntime {
 	log_reservation(LEVEL_DEBUG, 
             "deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
 		 args.lock.id, args.node, args.mode, impl->count, impl->mode);
-        impl->remote_waiter_mask.set_bit(args.node);
+        impl->remote_waiter_mask.add(args.node);
       } while(0);
 
       if(req_forward_target != -1)
@@ -3042,10 +3070,19 @@ namespace LegionRuntime {
       if(grant_target != -1)
       {
         // Make a buffer for storing our waiter mask and the the local data
-        size_t payload_size = sizeof(copy_waiters) + impl->local_data_size;
-        NodeMask *payload = (NodeMask*)malloc(payload_size);
-        *payload = copy_waiters; 
-        memcpy(payload+1,impl->local_data,impl->local_data_size);
+	size_t waiter_count = copy_waiters.size();
+        size_t payload_size = ((waiter_count+1) * sizeof(int)) + impl->local_data_size;
+        int *payload = (int*)malloc(payload_size);
+	int *pos = payload;
+	*pos++ = waiter_count;
+	// TODO: switch to iterator
+        Reservation::Impl::PackFunctor functor(pos);
+        copy_waiters.map(functor);
+        pos = functor.pos;
+	//for(int i = 0; i < MAX_NUM_NODES; i++)
+	//  if(copy_waiters.contains(i))
+	//    *pos++ = i;
+        memcpy(pos, impl->local_data, impl->local_data_size);
 	LockGrantMessage::request(grant_target, g_args,
                                   payload, payload_size, PAYLOAD_FREE);
 #ifdef LOCK_TRACING
@@ -3083,10 +3120,17 @@ namespace LegionRuntime {
 	assert(impl->requested);
 
 	// first, update our copy of the protected data (if any)
-	assert((impl->local_data_size+sizeof(impl->remote_waiter_mask)) == datalen);
-        impl->remote_waiter_mask = *((const NodeMask*)data);
-        if (datalen > sizeof(impl->remote_waiter_mask))
-          memcpy(impl->local_data, ((const NodeMask*)data)+1, impl->local_data_size);
+	const int *pos = (const int *)data;
+
+	size_t waiter_count = *pos++;
+	assert(datalen == (((waiter_count+1) * sizeof(int)) + impl->local_data_size));
+	impl->remote_waiter_mask.clear();
+	for(size_t i = 0; i < waiter_count; i++)
+	  impl->remote_waiter_mask.add(*pos++);
+
+	// is there local data to grab?
+	if(impl->local_data_size > 0)
+          memcpy(impl->local_data, pos, impl->local_data_size);
 
 	if(args.mode == 0) // take ownership if given exclusive access
 	  impl->owner = gasnet_mynode();
@@ -3294,7 +3338,7 @@ namespace LegionRuntime {
 
       int grant_target = -1;
       LockGrantArgs g_args;
-      NodeMask copy_waiters;
+      NodeSet copy_waiters;
 
       do {
 	log_reservation(LEVEL_DEBUG, 
@@ -3330,10 +3374,12 @@ namespace LegionRuntime {
 	bool any_local = select_local_waiters(to_wake);
 	assert(!any_local || (to_wake.size() > 0));
 
-	if(!any_local && (!!remote_waiter_mask)) {
+	if(!any_local && (!remote_waiter_mask.empty())) {
 	  // nobody local wants it, but another node does
-	  int new_owner = remote_waiter_mask.find_first_set();
-          remote_waiter_mask.unset_bit(new_owner);
+	  //HACK int new_owner = remote_waiter_mask.find_first_set();
+	  // TODO: use iterator - all we need is *begin()
+          int new_owner = 0;  while(!remote_waiter_mask.contains(new_owner)) new_owner++;
+          remote_waiter_mask.remove(new_owner);
 
 	  log_reservation(LEVEL_DEBUG, 
               "reservation going to remote waiter: new=%d", // mask=%lx",
@@ -3345,7 +3391,7 @@ namespace LegionRuntime {
           copy_waiters = remote_waiter_mask;
 
 	  owner = new_owner;
-          remote_waiter_mask = NodeMask();
+          remote_waiter_mask = NodeSet();
 	}
       } while(0);
 
@@ -3366,10 +3412,20 @@ namespace LegionRuntime {
 
       if(grant_target != -1)
       {
-        size_t payload_size = sizeof(copy_waiters) + local_data_size;
-        NodeMask *payload = (NodeMask*)malloc(payload_size);
-        *payload = copy_waiters;
-        memcpy(payload+1,local_data,local_data_size);
+        // Make a buffer for storing our waiter mask and the the local data
+	size_t waiter_count = copy_waiters.size();
+        size_t payload_size = ((waiter_count+1) * sizeof(int)) + local_data_size;
+        int *payload = (int*)malloc(payload_size);
+	int *pos = payload;
+	*pos++ = waiter_count;
+	// TODO: switch to iterator
+        PackFunctor functor(pos);
+        copy_waiters.map(functor);
+        pos = functor.pos;
+	//for(int i = 0; i < MAX_NUM_NODES; i++)
+	//  if(copy_waiters.contains(i))
+	//    *pos++ = i;
+        memcpy(pos, local_data, local_data_size);
 	LockGrantMessage::request(grant_target, g_args,
                                   payload, payload_size, PAYLOAD_FREE);
 #ifdef LOCK_TRACING
@@ -3512,7 +3568,7 @@ namespace LegionRuntime {
 	assert(impl->count == Impl::ZERO_COUNT);
 	assert(impl->mode == Impl::MODE_EXCL);
 	assert(impl->local_waiters.size() == 0);
-        assert(!impl->remote_waiter_mask);
+        assert(impl->remote_waiter_mask.empty());
 	assert(!impl->in_use);
 
 	impl->in_use = true;
@@ -3574,7 +3630,7 @@ namespace LegionRuntime {
 	assert(count == 1 + ZERO_COUNT);
 	assert(mode == MODE_EXCL);
 	assert(local_waiters.size() == 0);
-        assert(!remote_waiter_mask);
+        assert(remote_waiter_mask.empty());
 	assert(in_use);
         // Mark that we no longer own our data
         if (own_local)
@@ -3689,6 +3745,25 @@ namespace LegionRuntime {
     // make bad offsets really obvious (+1 PB)
     static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << 50;
 
+    Memory::Impl::Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind)
+      : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
+#ifdef REALM_PROFILE_MEMORY_USAGE
+      , usage(0), peak_usage(0), peak_footprint(0)
+#endif
+    {
+      gasnet_hsl_init(&mutex);
+    }
+
+    Memory::Impl::~Impl(void)
+    {
+#ifdef REALM_PROFILE_MEMORY_USAGE
+      printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",
+	     me.id, 
+	     peak_usage, peak_usage / 1048576.0,
+	     peak_footprint, peak_footprint / 1048576.0);
+#endif
+    }
+
     off_t Memory::Impl::alloc_bytes_local(size_t size)
     {
       AutoHSLLock al(mutex);
@@ -3710,25 +3785,41 @@ namespace LegionRuntime {
       //  the end of their allocations
       size += 0;
 
-      for(std::map<off_t, off_t>::iterator it = free_blocks.begin();
-	  it != free_blocks.end();
-	  it++) {
-	if(it->second == (off_t)size) {
-	  // perfect match
-	  off_t retval = it->first;
-	  free_blocks.erase(it);
-	  log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
-	  return retval;
-	}
+      // try to minimize footprint by allocating at the highest address possible
+      if(!free_blocks.empty()) {
+	std::map<off_t, off_t>::iterator it = free_blocks.end();
+	do {
+	  --it;  // predecrement since we started at the end
+
+	  if(it->second == (off_t)size) {
+	    // perfect match
+	    off_t retval = it->first;
+	    free_blocks.erase(it);
+	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
+#ifdef REALM_PROFILE_MEMORY_USAGE
+	    usage += size;
+	    if(usage > peak_usage) peak_usage = usage;
+	    size_t footprint = this->size - retval;
+	    if(footprint > peak_footprint) peak_footprint = footprint;
+#endif
+	    return retval;
+	  }
 	
-	if(it->second > (off_t)size) {
-	  // some left over
-	  off_t leftover = it->second - size;
-	  off_t retval = it->first + leftover;
-	  it->second = leftover;
-	  log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
-	  return retval;
-	}
+	  if(it->second > (off_t)size) {
+	    // some left over
+	    off_t leftover = it->second - size;
+	    off_t retval = it->first + leftover;
+	    it->second = leftover;
+	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
+#ifdef REALM_PROFILE_MEMORY_USAGE
+	    usage += size;
+	    if(usage > peak_usage) peak_usage = usage;
+	    size_t footprint = this->size - retval;
+	    if(footprint > peak_footprint) peak_footprint = footprint;
+#endif
+	    return retval;
+	  }
+	} while(it != free_blocks.begin());
       }
 
       // no blocks large enough - boo hoo
@@ -3755,6 +3846,11 @@ namespace LegionRuntime {
 	  size += (alignment - leftover);
 	}
       }
+
+#ifdef REALM_PROFILE_MEMORY_USAGE
+      usage -= size;
+      // only made things smaller, so can't impact the peak usage
+#endif
 
       if(free_blocks.size() > 0) {
 	// find the first existing block that comes _after_ us
@@ -3979,8 +4075,14 @@ namespace LegionRuntime {
 
       virtual void get_bytes(off_t offset, void *dst, size_t size)
       {
-	// can't read/write a remote memory
-	assert(0);
+	// this better be an RDMA-able memory
+#ifdef USE_GASNET
+	assert(kind == Memory::Impl::MKIND_RDMA);
+	void *srcptr = ((char *)regbase) + offset;
+	gasnet_get(dst, ID(me).node(), srcptr, size);
+#else
+	assert(0 && "no remote get_bytes without GASNET");
+#endif
       }
 
       virtual void put_bytes(off_t offset, const void *src, size_t size);
@@ -6182,7 +6284,7 @@ namespace LegionRuntime {
     {
       for(int i = 0; i < num_worker_threads; i++) {
 	UtilityThread *t = new UtilityThread(this);
-        log_util.info("utility thread %p created for proc "IDFMT"(%p)", t, this->me.id, this);
+        log_util.info("utility thread %p created for proc " IDFMT "(%p)", t, this->me.id, this);
 	threads.insert(t);
 	t->start_thread(stack_size, -1, "utility worker");
       }
@@ -8921,6 +9023,11 @@ namespace LegionRuntime {
               gasnet_mynode(), pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
+      // returning would almost certainly cause this signal to be raised again,
+      //  so sleep for a second in case other threads also want to chronicle
+      //  their own deaths, and then exit
+      sleep(1);
+      exit(1);
     }
 #endif
 
@@ -10073,6 +10180,21 @@ namespace LegionRuntime {
         show_event_waiters(log_file);
       }
 #endif
+
+      // delete local processors and memories
+      {
+	Node& n = nodes[gasnet_mynode()];
+
+	for(std::vector<Memory::Impl *>::iterator it = n.memories.begin();
+	    it != n.memories.end();
+	    it++)
+	  delete (*it);
+
+	// node 0 also deletes the gasnet memory
+	if(gasnet_mynode() == 0)
+	  delete global_memory;
+      }
+
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
       stop_dma_worker_threads();
@@ -10165,6 +10287,7 @@ namespace LegionRuntime {
         lock_trace_file = 0;
       }
 #endif
+
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...
       if (exit_process)
@@ -10537,6 +10660,31 @@ namespace LegionRuntime {
       internal->verify_access(ptr);
     }
 #endif
+
+    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride)
+    {
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+
+      // must have valid data by now - block if we have to
+      impl->metadata.await_data();
+
+      void *base;
+      size_t act_stride = 0;
+      bool ok = impl->get_strided_parameters(base, act_stride, field_offset);
+      assert(ok);
+
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
+
+      Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
+      int index = mapping->image(ptr.value);
+
+      void *elem_ptr = ((char *)base) + (index * act_stride);
+      stride.offset = act_stride;
+      act_count = req_count; // TODO: return a larger number if we know how big we are
+      return elem_ptr;
+    }
 
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets)

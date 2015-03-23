@@ -31,7 +31,7 @@ task f()
   end
 
   for i = 0, 10 do
-    legionlib.assert(p.x[i] == i*i)
+    legionlib.assert(p.x[i] == i*i, "test failed")
   end
 end
 legionlib.start(f)

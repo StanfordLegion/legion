@@ -4311,7 +4311,8 @@ namespace LegionRuntime {
 	  field_start = start;
 	  field_size = *it;
 	  within_field = offset;
-	  if((offset + size) <= *it) {
+	  // if size is nonzero, make sure it fits in the field
+	  if(size && ((offset + size) <= *it)) {
 	    return size;
 	  } else {
 	    return (*it - offset);
@@ -6052,6 +6053,32 @@ namespace LegionRuntime {
       assert(bytes == bytes2);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
+    }
+
+    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride)
+    {
+#ifdef BOUNDS_CHECKS
+      check_bounds(region, ptr);
+#endif
+      RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
+      int index = ((impl->get_linearization().get_dim() == 1) ?
+		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
+		     ptr.value);
+      size_t field_start, field_size, within_field;
+      size_t bytes = find_field(impl->get_field_sizes(), field_offset, 0,
+				field_start, field_size, within_field);
+      assert(bytes > 0);
+      char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
+      // actual count and stride depend on whether instance is blocked
+      if(impl->get_block_size() == 1) {
+	// AOS
+	stride.offset = impl->get_elmt_size();
+	act_count = impl->get_num_elmts() - index;
+      } else {
+	stride.offset = field_size;
+	act_count = impl->get_block_size() - (index % impl->get_block_size());
+      }
+      return dst;
     }
 
     template <int DIM>

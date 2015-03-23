@@ -24,6 +24,7 @@
 #include "legion_types.h"
 #include "legion.h"
 #include "legion_profiling.h"
+#include "legion_allocation.h"
 #include "garbage_collection.h"
 
 // Apple can go screw itself
@@ -303,6 +304,8 @@ namespace LegionRuntime {
       template<unsigned int MAX>
       inline void serialize(const AVXTLBitMask<MAX> &mask);
 #endif
+      template<typename IT, typename DT, bool BIDIR>
+      inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -370,6 +373,8 @@ namespace LegionRuntime {
       template<unsigned int MAX>
       inline void deserialize(AVXTLBitMask<MAX> &mask);
 #endif
+      template<typename IT, typename DT, bool BIDIR>
+      inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -936,6 +941,181 @@ namespace LegionRuntime {
       BITMASK comp[LOG2MAX];
     };
 
+    /////////////////////////////////////////////////////////////
+    // Index Set 
+    /////////////////////////////////////////////////////////////
+    template<typename IT/*int type*/, typename DT/*dense type (BitMask)*/,
+             bool BIDIR/* = false (bi-directional)*/>
+    class IntegerSet {
+    public:
+      // Size of an STL Node object in bytes
+      // This value is approximated over different STL
+      // implementations but in general it should be close
+      static const size_t STL_SET_NODE_SIZE = 32;
+    public:
+      struct DenseSet {
+      public:
+        static const AllocationType alloc_type = DENSE_INDEX_ALLOC;
+      public:
+        DT set;
+      };
+      struct UnionFunctor {
+      public:
+        UnionFunctor(IntegerSet &t) : target(t) { }
+      public:
+        inline void apply(IT value) { target.add(value); }
+      private:
+        IntegerSet &target;
+      };
+      struct IntersectFunctor {
+      public:
+        IntersectFunctor(IntegerSet &t, const IntegerSet &r)
+          : target(t), rhs(r) { }
+      public:
+        inline void apply(IT value) 
+          { if (rhs.contains(value)) target.add(value); }
+      private:
+        IntegerSet &target;
+        const IntegerSet &rhs;
+      };
+      struct DifferenceFunctor {
+      public:
+        DifferenceFunctor(IntegerSet &t) : target(t) { }
+      public:
+        inline void apply(IT value) { target.remove(value); }
+      private:
+        IntegerSet &target;
+      };
+    public:
+      IntegerSet(void);
+      IntegerSet(const IntegerSet &rhs);
+      ~IntegerSet(void);
+    public:
+      IntegerSet& operator=(const IntegerSet &rhs);
+    public:
+      inline bool contains(IT index) const;
+      inline void add(IT index);
+      inline void remove(IT index);
+      // The functor class must have an 'apply' method that
+      // take one argument of type IT. This method will map
+      // the functor over all the entries in the set.
+      template<typename FUNCTOR>
+      inline void map(FUNCTOR &functor) const;
+    public:
+      inline void serialize(Serializer &rez) const;
+      inline void deserialize(Deserializer &derez);
+    public:
+      inline IntegerSet operator|(const IntegerSet &rhs) const;
+      inline IntegerSet operator&(const IntegerSet &rhs) const;
+      inline IntegerSet operator-(const IntegerSet &rhs) const;
+    public:
+      inline IntegerSet& operator|=(const IntegerSet &rhs);
+      inline IntegerSet& operator&=(const IntegerSet &rhs);
+      inline IntegerSet& operator-=(const IntegerSet &rhs);
+    public:
+      inline bool operator!(void) const;
+      inline bool empty(void) const { return !*this; }
+      inline size_t size(void) const;
+      inline void clear(void);
+      inline IntegerSet& swap(IntegerSet &rhs);
+    protected:
+      bool sparse;
+      union {
+        std::set<IT>* sparse;
+        DenseSet*      dense;
+      } set_ptr;
+    };
+
+    /////////////////////////////////////////////////////////////
+    // Dynamic Table 
+    /////////////////////////////////////////////////////////////
+    template<typename IT>
+    struct DynamicTableNodeBase {
+    public:
+      DynamicTableNodeBase(int _level, IT _first_index, IT _last_index)
+        : level(_level), first_index(_first_index), 
+          last_index(_last_index), lock(Reservation::create_reservation()) { }
+      virtual ~DynamicTableNodeBase(void) { lock.destroy_reservation(); }
+    public:
+      int level;
+      IT first_index, last_index;
+      Reservation lock;
+    };
+
+    template<typename ET, size_t _SIZE, typename IT>
+    struct DynamicTableNode : public DynamicTableNodeBase<IT> {
+    public:
+      static const size_t SIZE = _SIZE;
+    public:
+      DynamicTableNode(int _level, IT _first_index, IT _last_index)
+        : DynamicTableNodeBase<IT>(_level, _first_index, _last_index) 
+      { 
+        for (size_t i = 0; i < SIZE; i++)
+          elems[i] = 0;
+      }
+      DynamicTableNode(const DynamicTableNode &rhs) { assert(false); }
+      virtual ~DynamicTableNode(void)
+      {
+        for (int i = 0; i < SIZE; i++)
+        {
+          if (elems[i] != 0)
+            legion_delete(elems[i]);
+        }
+      }
+    public:
+      DynamicTableNode& operator=(const DynamicTableNode &rhs)
+        { assert(false); return *this; }
+    public:
+      ET *elems[SIZE];
+    };
+
+    template<typename ALLOCATOR>
+    class DynamicTable {
+    public:
+      typedef typename ALLOCATOR::IT IT;
+      typedef typename ALLOCATOR::ET ET;
+      typedef DynamicTableNodeBase<IT> NodeBase;
+    public:
+      DynamicTable(void);
+      DynamicTable(const DynamicTable &rhs);
+      ~DynamicTable(void);
+    public:
+      DynamicTable& operator=(const DynamicTable &rhs);
+    public:
+      size_t max_entries(void) const;
+      bool has_entry(IT index) const;
+      ET* lookup_entry(IT index);
+      template<typename T>
+      ET* lookup_entry(IT index, const T &arg);
+      template<typename T1, typename T2>
+      ET* lookup_entry(IT index, const T1 &arg1, const T2 &arg2);
+    protected:
+      NodeBase* new_tree_node(int level, IT first_index, IT last_index);
+      NodeBase* lookup_leaf(IT index);
+    protected:
+      NodeBase *volatile root;
+      Reservation lock; 
+    };
+
+    template<typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
+    class DynamicTableAllocator {
+    public:
+      typedef _ET ET;
+      static const size_t INNER_BITS = _INNER_BITS;
+      static const size_t LEAF_BITS = _LEAF_BITS;
+
+      typedef Reservation LT;
+      typedef int IT;
+      typedef DynamicTableNode<DynamicTableNodeBase<IT>,
+                               1 << INNER_BITS, IT> INNER_TYPE;
+      typedef DynamicTableNode<ET, 1 << LEAF_BITS, IT> LEAF_TYPE;
+
+      static LEAF_TYPE* new_leaf_node(IT first_index, IT last_index)
+      {
+        return new LEAF_TYPE(0/*level*/, first_index, last_index);
+      }
+    };
+
     //--------------------------------------------------------------------------
     // Give the implementations here so the templates get instantiated
     //--------------------------------------------------------------------------
@@ -1028,6 +1208,14 @@ namespace LegionRuntime {
       mask.serialize(*this);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void Serializer::serialize(const IntegerSet<IT,DT,BIDIR> &int_set)
+    //--------------------------------------------------------------------------
+    {
+      int_set.serialize(*this);
+    }
 
     //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
@@ -1177,6 +1365,14 @@ namespace LegionRuntime {
       mask.deserialize(*this);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void Deserializer::deserialize(IntegerSet<IT,DT,BIDIR> &int_set)
+    //--------------------------------------------------------------------------
+    {
+      int_set.deserialize(*this);
+    }
       
     //--------------------------------------------------------------------------
     inline void Deserializer::deserialize(void *dst, size_t bytes)
@@ -5636,6 +5832,703 @@ namespace LegionRuntime {
         }
       }
       identity = true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    IntegerSet<IT,DT,BIDIR>::IntegerSet(void)
+      : sparse(true)
+    //-------------------------------------------------------------------------
+    {
+      set_ptr.sparse = new std::set<IT>();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    IntegerSet<IT,DT,BIDIR>::IntegerSet(const IntegerSet &rhs)
+      : sparse(rhs.sparse)
+    //-------------------------------------------------------------------------
+    {
+      if (rhs.sparse)
+      {
+        set_ptr.sparse = new std::set<IT>();
+        *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
+      }
+      else
+      {
+        set_ptr.dense = legion_new<DenseSet>();
+        set_ptr.dense->set = rhs.set_ptr.dense->set;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    IntegerSet<IT,DT,BIDIR>::~IntegerSet(void)
+    //-------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(set_ptr.sparse != NULL);
+#endif
+      if (sparse)
+        delete set_ptr.sparse;
+      else
+        legion_delete(set_ptr.dense);
+    }
+    
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    IntegerSet<IT,DT,BIDIR>& 
+                      IntegerSet<IT,DT,BIDIR>::operator=(const IntegerSet &rhs)
+    //-------------------------------------------------------------------------
+    {
+      if (rhs.sparse)
+      {
+        if (!sparse)
+        {
+          legion_delete(set_ptr.dense);
+          set_ptr.sparse = new std::set<IT>();
+        }
+        else
+          set_ptr.sparse->clear();
+        *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
+      }
+      else
+      {
+        if (sparse)
+        {
+          delete set_ptr.sparse;
+          set_ptr.dense = legion_new<DenseSet>();
+        }
+        else
+          set_ptr.dense->set.clear();
+        set_ptr.dense->set = rhs.set_ptr.dense->set;
+      }
+      sparse = rhs.sparse;
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline bool IntegerSet<IT,DT,BIDIR>::contains(IT index) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+        return (set_ptr.sparse->find(index) != set_ptr.sparse->end());
+      else
+        return set_ptr.dense->set.is_set(index);
+    }
+    
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void IntegerSet<IT,DT,BIDIR>::add(IT index)
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+      {
+        // Add it and see if it is too big
+        set_ptr.sparse->insert(index);
+        if (sizeof(DT) < (set_ptr.sparse->size() * 
+                          (sizeof(IT) + STL_SET_NODE_SIZE)))
+        {
+          DenseSet *dense_set = legion_new<DenseSet>();
+          for (typename std::set<IT>::const_iterator it = 
+                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
+          {
+            dense_set->set.set_bit(*it);
+          }
+          // Delete the sparse set
+          delete set_ptr.sparse;
+          set_ptr.dense = dense_set;
+          sparse = false;
+        }
+      }
+      else
+        set_ptr.dense->set.set_bit(index);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void IntegerSet<IT,DT,BIDIR>::remove(IT index)
+    //-------------------------------------------------------------------------
+    {
+      if (!sparse)
+      {
+        set_ptr.dense->set.unset_bit(index); 
+        // Only check for flip back if we are bi-directional
+        if (BIDIR)
+        {
+          IT count = DT::pop_count(set_ptr.dense->set);
+          if ((count * (sizeof(IT) + STL_SET_NODE_SIZE)) < sizeof(DT))
+          {
+            std::set<IT> *sparse_set = new std::set<IT>();
+            for (IT idx = 0; idx < DT::ELEMENTS; idx++)
+            {
+              if (set_ptr.dense->set[idx])
+              {
+                for (IT i = 0; i < DT::ELEMENT_SIZE; i++)
+                {
+                  IT value = idx * DT::ELEMENT_SIZE + i;
+                  if (set_ptr.dense->set.is_set(value))
+                    sparse_set->insert(value);
+                }
+              }
+            }
+            // Delete the dense set
+            legion_delete(set_ptr.dense);
+            set_ptr.sparse = sparse_set;
+            sparse = true;
+          }
+        }
+      }
+      else
+        set_ptr.sparse->erase(index);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR> template<typename FUNCTOR>
+    inline void IntegerSet<IT,DT,BIDIR>::map(FUNCTOR &functor) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+      {
+        for (typename std::set<IT>::const_iterator it = 
+              set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
+        {
+          functor.apply(*it);
+        }
+      }
+      else
+      {
+        for (IT idx = 0; idx < DT::ELEMENTS; idx++)
+        {
+          if (set_ptr.dense->set[idx])
+          {
+            IT value = idx * DT::ELEMENT_SIZE;
+            for (IT i = 0; i < DT::ELEMENT_SIZE; i++, value++)
+            {
+              if (set_ptr.dense->set.is_set(value))
+                functor.apply(value);
+            }
+          }
+        }
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void IntegerSet<IT,DT,BIDIR>::serialize(Serializer &rez) const
+    //-------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(sparse);
+      if (sparse)
+      {
+        rez.serialize<size_t>(set_ptr.sparse->size());
+        for (typename std::set<IT>::const_iterator it = 
+              set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      else
+        rez.serialize(set_ptr.dense->set);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void IntegerSet<IT,DT,BIDIR>::deserialize(Deserializer &derez)
+    //-------------------------------------------------------------------------
+    {
+      bool is_sparse;
+      derez.deserialize<bool>(is_sparse);
+      if (is_sparse)
+      {
+        // If it doesn't match then replace the old one
+        if (!sparse)
+        {
+          legion_delete(set_ptr.dense);
+          set_ptr.sparse = new std::set<IT>();
+        }
+        else
+          set_ptr.sparse->clear();
+        size_t num_elements;
+        derez.deserialize<size_t>(num_elements);
+        for (unsigned idx = 0; idx < num_elements; idx++)
+        {
+          IT element;
+          derez.deserialize(element);
+          set_ptr.sparse->insert(element);
+        }
+      }
+      else
+      {
+        // If it doesn't match then replace the old one
+        if (sparse)
+        {
+          delete set_ptr.sparse;
+          set_ptr.dense = legion_new<DenseSet>();
+        }
+        else
+          set_ptr.dense->set.clear();
+        derez.deserialize(set_ptr.dense->set);
+      }
+      sparse = is_sparse;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>
+                IntegerSet<IT,DT,BIDIR>::operator|(const IntegerSet &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case here
+      if (!sparse)
+      {
+        IntegerSet<IT,DT,BIDIR> result(*this);
+        if (rhs.sparse)
+        {
+          UnionFunctor functor(result);
+          rhs.map(functor);
+        }
+        else
+          result.set_ptr.dense->set |= rhs.set_ptr.dense->set;
+        return result;
+      }
+      IntegerSet<IT,DT,BIDIR> result(rhs); 
+      UnionFunctor functor(result);
+      this->map(functor);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>
+                IntegerSet<IT,DT,BIDIR>::operator&(const IntegerSet &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case here
+      if (!sparse && !rhs.sparse)
+      {
+        IntegerSet<IT,DT,BIDIR> result(*this);
+        result.set_ptr.dense->set &= rhs.set_ptr.dense->set;
+        return result;
+      }
+      IntegerSet<IT,DT,BIDIR> result;
+      IntersectFunctor functor(result, *this);
+      rhs.map(functor);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>
+                IntegerSet<IT,DT,BIDIR>::operator-(const IntegerSet &rhs) const
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case here
+      if (!sparse && !rhs.sparse)
+      {
+        IntegerSet<IT,DT,BIDIR> result(*this); 
+        result.set_ptr.dense->set -= rhs.set_ptr.dense->set;
+        return result;
+      }
+      IntegerSet<IT,DT,BIDIR> result(*this);
+      DifferenceFunctor functor(result);
+      rhs.map(functor);
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>&
+                     IntegerSet<IT,DT,BIDIR>::operator|=(const IntegerSet &rhs)
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case here
+      if (!sparse && !rhs.sparse)
+      {
+        set_ptr.dense->set |= rhs.set_ptr.dense->set;
+        return *this;
+      }
+      UnionFunctor functor(*this);
+      rhs.map(functor);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>&
+                     IntegerSet<IT,DT,BIDIR>::operator&=(const IntegerSet &rhs)
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case
+      if (!sparse && !rhs.sparse)
+      {
+        set_ptr.dense->set &= rhs.set_ptr.dense->set;
+        return *this;
+      }
+      // Can't overwrite ourselves
+      IntegerSet<IT,DT,BIDIR> temp;
+      IntersectFunctor functor(temp, *this);
+      rhs.map(functor);
+      (*this) = temp;
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>&
+                     IntegerSet<IT,DT,BIDIR>::operator-=(const IntegerSet &rhs)
+    //-------------------------------------------------------------------------
+    {
+      // Do the fast case
+      if (!sparse && !rhs.sparse)
+      {
+        set_ptr.dense->set -= rhs.set_ptr.dense->set;
+        return *this;
+      }
+      DifferenceFunctor functor(*this);
+      rhs.map(functor);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline bool IntegerSet<IT,DT,BIDIR>::operator!(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+        return set_ptr.sparse->empty();
+      else
+        return !(set_ptr.dense->set);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline size_t IntegerSet<IT,DT,BIDIR>::size(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (sparse)
+        return set_ptr.sparse->size();
+      else
+        return set_ptr.dense->set.pop_count(set_ptr.dense->set);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline void IntegerSet<IT,DT,BIDIR>::clear(void)
+    //-------------------------------------------------------------------------
+    {
+      // always switch back to set on a clear
+      if (!sparse)
+      {
+	legion_delete(set_ptr.dense);
+	set_ptr.sparse = new std::set<IT>();
+	sparse = true;
+      } else
+	set_ptr.sparse->clear();
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename IT, typename DT, bool BIDIR>
+    inline IntegerSet<IT,DT,BIDIR>& 
+                                 IntegerSet<IT,DT,BIDIR>::swap(IntegerSet &rhs)
+    //-------------------------------------------------------------------------
+    {
+      std::swap(sparse, rhs.sparse);
+      std::swap(set_ptr.sparse, rhs.set_ptr.sparse);
+      // don't do dense because it's a union and that'd just swap things back
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    DynamicTable<ALLOCATOR>::DynamicTable(void)
+      : root(0), lock(Reservation::create_reservation())
+    //-------------------------------------------------------------------------
+    {
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    DynamicTable<ALLOCATOR>::DynamicTable(const DynamicTable &rhs)
+    //-------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    DynamicTable<ALLOCATOR>::~DynamicTable(void)
+    //-------------------------------------------------------------------------
+    {
+      lock.destroy_reservation();
+      lock = Reservation::NO_RESERVATION;
+      if (root != 0)
+      {
+        delete root;
+        root = NULL;
+      }
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    DynamicTable<ALLOCATOR>& 
+                    DynamicTable<ALLOCATOR>::operator=(const DynamicTable &rhs)
+    //-------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    typename DynamicTable<ALLOCATOR>::NodeBase* 
+              DynamicTable<ALLOCATOR>::new_tree_node(int level, IT first_index,
+                                                     IT last_index)
+    //-------------------------------------------------------------------------
+    {
+      if (level > 0)
+      {
+        // we know how to create inner nodes
+        typename ALLOCATOR::INNER_TYPE *inner = 
+          new typename ALLOCATOR::INNER_TYPE(level, first_index, last_index);
+        return inner;
+      }
+      return ALLOCATOR::new_leaf_node(first_index, last_index);
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    size_t DynamicTable<ALLOCATOR>::max_entries(void) const
+    //-------------------------------------------------------------------------
+    {
+      if (!root)
+        return 0;
+      size_t elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+      for (int i = 0; i < root->level; i++)
+        elems_addressable <<= ALLOCATOR::INNER_BITS;
+      return elems_addressable;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    bool DynamicTable<ALLOCATOR>::has_entry(IT index) const
+    //-------------------------------------------------------------------------
+    {
+      // first, figure out how many levels the tree must have to find our index
+      int level_needed = 0;
+      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+      while(index >= elems_addressable) {
+	level_needed++;
+	elems_addressable <<= ALLOCATOR::INNER_BITS;
+      }
+
+      NodeBase *n = root;
+      if (!n || (n->level < level_needed))
+        return false;
+
+#ifdef DEBUG_HIGH_LEVEL
+      // when we get here, root is high enough
+      assert((level_needed <= n->level) &&
+	     (index >= n->first_index) &&
+	     (index <= n->last_index));
+#endif
+      // now walk tree, populating the path we need
+      while (n->level > 0)
+      {
+        // intermediate nodes
+        typename ALLOCATOR::INNER_TYPE *inner = 
+          static_cast<typename ALLOCATOR::INNER_TYPE*>(n);
+        IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
+            ALLOCATOR::INNER_BITS)) & ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_HIGH_LEVEL
+        assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
+        NodeBase *child = inner->elems[i];
+        if (child == 0)
+          return false;
+#ifdef DEBUG_HIGH_LEVEL
+        assert((child != 0) && 
+               (child->level == (n->level -1)) &&
+               (index >= child->first_index) &&
+               (index <= child->last_index));
+#endif
+        n = child;
+      }
+      return true;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    typename DynamicTable<ALLOCATOR>::ET* 
+                                DynamicTable<ALLOCATOR>::lookup_entry(IT index)
+    //-------------------------------------------------------------------------
+    {
+      NodeBase *n = lookup_leaf(index); 
+      // Now we've made it to the leaf node
+      typename ALLOCATOR::LEAF_TYPE *leaf = 
+        static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
+      int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
+      ET *result = leaf->elems[offset];
+      if (result == 0)
+      {
+        AutoLock l(leaf->lock);
+        // Now that we have the lock, check to see if we lost the race
+        if (leaf->elems[offset] == 0)
+          leaf->elems[offset] = legion_new<ET>();
+        result = leaf->elems[offset];
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != 0);
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR> template<typename T>
+    typename DynamicTable<ALLOCATOR>::ET*
+                  DynamicTable<ALLOCATOR>::lookup_entry(IT index, const T &arg)
+    //-------------------------------------------------------------------------
+    {
+      NodeBase *n = lookup_leaf(index); 
+      // Now we've made it to the leaf node
+      typename ALLOCATOR::LEAF_TYPE *leaf = 
+        static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
+      int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
+      ET *result = leaf->elems[offset];
+      if (result == 0)
+      {
+        AutoLock l(leaf->lock);
+        // Now that we have the lock, check to see if we lost the race
+        if (leaf->elems[offset] == 0)
+          leaf->elems[offset] = legion_new<ET>(arg);
+        result = leaf->elems[offset];
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != 0);
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR> template<typename T1, typename T2>
+    typename DynamicTable<ALLOCATOR>::ET*
+          DynamicTable<ALLOCATOR>::lookup_entry(IT index, 
+                                                const T1 &arg1, const T2 &arg2)
+    //-------------------------------------------------------------------------
+    {
+      NodeBase *n = lookup_leaf(index); 
+      // Now we've made it to the leaf node
+      typename ALLOCATOR::LEAF_TYPE *leaf = 
+        static_cast<typename ALLOCATOR::LEAF_TYPE*>(n);
+      int offset = (index & ((((IT)1) << ALLOCATOR::LEAF_BITS) - 1));
+      ET *result = leaf->elems[offset];
+      if (result == 0)
+      {
+        AutoLock l(leaf->lock);
+        // Now that we have the lock, check to see if we lost the race
+        if (leaf->elems[offset] == 0)
+          leaf->elems[offset] = legion_new<ET>(arg1, arg2);
+        result = leaf->elems[offset];
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != 0);
+#endif
+      return result;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename ALLOCATOR>
+    typename DynamicTable<ALLOCATOR>::NodeBase* 
+                                 DynamicTable<ALLOCATOR>::lookup_leaf(IT index)
+    //-------------------------------------------------------------------------
+    {
+      // Figure out how many levels need to be in the tree
+      int level_needed = 0;  
+      int elems_addressable = 1 << ALLOCATOR::LEAF_BITS;
+      while (index >= elems_addressable)
+      {
+        level_needed++;
+        elems_addressable <<= ALLOCATOR::INNER_BITS;
+      }
+
+      // In most cases we won't need to add levels to the tree, but
+      // if we do, then do it now
+      NodeBase *n = root;
+      if (!n || (n->level < level_needed)) 
+      {
+        AutoLock l(lock); 
+        if (root)
+        {
+          // some of the tree exists - add new layers on top
+          while (root->level < level_needed)
+          {
+            int parent_level = root->level + 1;
+            IT parent_first = 0;
+            IT parent_last = 
+              (((root->last_index + 1) << ALLOCATOR::INNER_BITS) - 1);
+            NodeBase *parent = new_tree_node(parent_level, 
+                                             parent_first, parent_last);
+            typename ALLOCATOR::INNER_TYPE *inner = 
+              static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
+            inner->elems[0] = parent;
+            root = parent;
+          }
+        }
+        else
+          root = new_tree_node(level_needed, 0, elems_addressable - 1);
+        n = root;
+      }
+      // root should be high-enough now
+#ifdef DEBUG_HIGH_LEVEL
+      assert((level_needed <= n->level) &&
+             (index >= n->first_index) &&
+             (index <= n->last_index));
+#endif
+      // now walk the path, instantiating the path we need
+      while (n->level > 0)
+      {
+        typename ALLOCATOR::INNER_TYPE *inner = 
+          static_cast<typename ALLOCATOR::INNER_TYPE*>(n);
+
+        IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
+                ALLOCATOR::INNER_BITS)) & 
+                ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
+#ifdef DEBUG_HIGH_LEVEL
+        assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
+#endif
+        NodeBase *child = inner->elems[i];
+        if (child == 0)
+        {
+          AutoLock l(inner->lock);
+          // Now that the lock is held, check to see if we lost the race
+          if (inner->elems[i] == 0)
+          {
+            int child_level = inner->level - 1;
+            int child_shift = 
+              (ALLOCATOR::LEAF_BITS + child_level * ALLOCATOR::INNER_BITS);
+            IT child_first = inner->first_index + (i << child_shift);
+            IT child_last = inner->first_index + ((i + 1) << child_shift) - 1;
+
+            inner->elems[i] = new_tree_node(child_level, 
+                                            child_first, child_last);
+          }
+          child = inner->elems[i];
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert((child != 0) &&
+               (child->level == (n->level - 1)) &&
+               (index >= child->first_index) &&
+               (index <= child->last_index));
+#endif
+        n = child;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(n->level == 0);
+#endif
+      return n;
     }
 
   }; // namespace HighLevel

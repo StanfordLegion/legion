@@ -399,7 +399,6 @@ static void generate_mesh(config &conf,
                           std::vector<double> &pointpos_y,
                           std::vector<int64_t> &pointcolors,
                           std::map<int64_t, std::vector<int64_t> > &pointmcolors,
-                          // std::vector<std::vector<int64_t> > &mapzp,
                           std::vector<int64_t> &zonestart,
                           std::vector<int64_t> &zonesize,
                           std::vector<int64_t> &zonepoints,
@@ -419,9 +418,6 @@ static void generate_mesh(config &conf,
   zybounds.push_back(0x7FFFFFFF);
 
   // Mesh type-specific calculations:
-  // std::vector<int64_t> zonestart;
-  // std::vector<int64_t> zonesize;
-  // std::vector<int64_t> zonepoints;
   if (conf.meshtype == MESH_PIE) {
     generate_mesh_pie(conf, pointpos_x, pointpos_y, pointcolors, pointmcolors,
                       zonestart, zonesize, zonepoints, zonecolors,
@@ -435,16 +431,137 @@ static void generate_mesh(config &conf,
                       zonestart, zonesize, zonepoints, zonecolors,
                       zxbounds, zybounds);
   }
+}
 
-  // Convert zone ajancency lists to mapzp format.
-  // mapzp.resize(conf.nz);
+static void compact_mesh(config &conf,
+                         std::vector<double> &pointpos_x,
+                         std::vector<double> &pointpos_y,
+                         std::vector<int64_t> &pointcolors,
+                         std::map<int64_t, std::vector<int64_t> > &pointmcolors,
+                         std::vector<int64_t> &zonestart,
+                         std::vector<int64_t> &zonesize,
+                         std::vector<int64_t> &zonepoints,
+                         std::vector<int64_t> &zonecolors)
+{
+  // This stage is responsible for compacting the mesh so that each of
+  // the pieces is dense (in the global coordinate space). This
+  // involves sorting the various elements by color and then rewriting
+  // the various pointers to be internally consistent again.
+
+  // Sort zones by color.
+  std::vector<int64_t> zones_inverse_map;
+  std::vector<int64_t> zones_map(conf.nz, -1ll);
+  assert(int64_t(zonecolors.size()) == conf.nz);
+  for (int64_t c = 0; c < conf.npieces; c++) {
+    for (int64_t z = 0; z < conf.nz; z++) {
+      if (zonecolors[z] == c) {
+        zones_map[z] = zones_inverse_map.size();
+        zones_inverse_map.push_back(z);
+      }
+    }
+  }
+  assert(int64_t(zones_inverse_map.size()) == conf.nz);
+
+  // Sort points by color.
+  std::vector<int64_t> points_inverse_map;
+  std::vector<int64_t> points_map(conf.np, -1ll);
+  assert(int64_t(pointcolors.size()) == conf.np);
+  for (int64_t c = -1; c < conf.npieces; c++) {
+    for (int64_t p = 0; p < conf.np; p++) {
+      if (pointcolors[p] == c) {
+        points_map[p] = points_inverse_map.size();
+        points_inverse_map.push_back(p);
+      }
+    }
+  }
+  assert(int64_t(points_inverse_map.size()) == conf.np);
+
+  // Various sanity checks.
+
   // for (int64_t z = 0; z < conf.nz; z++) {
-  //   int64_t p0 = zonestart[z];
-  //   int64_t znump = zonesize[z];
-  //   for (int64_t p = p0; p < p0 + znump; p++) {
-  //     mapzp[z].push_back(zonepoints[p]);
-  //   }
+  //   printf("zone old %ld new %ld color %ld\n", z, zones_map[z], zonecolors[z]);
   // }
+
+  // printf("\n");
+
+  // for (int64_t newz = 0; newz < conf.nz; newz++) {
+  //   int64_t oldz = zones_inverse_map[newz];
+  //   printf("zone new %ld old %ld color %ld\n", newz, oldz, zonecolors[oldz]);
+  // }
+
+  // printf("\n");
+
+  // for (int64_t p = 0; p < conf.np; p++) {
+  //   printf("point old %ld new %ld color %ld\n", p, points_map[p], pointcolors[p]);
+  // }
+
+  // printf("\n");
+
+  // for (int64_t newp = 0; newp < conf.np; newp++) {
+  //   int64_t oldp = points_inverse_map[newp];
+  //   printf("point new %ld old %ld color %ld\n", newp, oldp, pointcolors[oldp]);
+  // }
+
+  // Project zones through the zones map.
+  {
+    std::vector<int64_t> old_zonestart = zonestart;
+    for (int64_t newz = 0; newz < conf.nz; newz++) {
+      int64_t oldz = zones_inverse_map[newz];
+      zonestart[newz] = old_zonestart[oldz];
+    }
+  }
+  {
+    std::vector<int64_t> old_zonesize = zonesize;
+    for (int64_t newz = 0; newz < conf.nz; newz++) {
+      int64_t oldz = zones_inverse_map[newz];
+      zonesize[newz] = old_zonesize[oldz];
+    }
+  }
+  {
+    std::vector<int64_t> old_zonepoints = zonepoints;
+    int64_t nzp = zonepoints.size();
+    for (int64_t zp = 0; zp < nzp; zp++) {
+      zonepoints[zp] = points_map[old_zonepoints[zp]];
+    }
+  }
+  {
+    std::vector<int64_t> old_zonecolors = zonecolors;
+    for (int64_t newz = 0; newz < conf.nz; newz++) {
+      int64_t oldz = zones_inverse_map[newz];
+      zonecolors[newz] = old_zonecolors[oldz];
+    }
+  }
+
+  // Project points through the points map.
+  {
+    std::vector<double> old_pointpos_x = pointpos_x;
+    for (int64_t newp = 0; newp < conf.np; newp++) {
+      int64_t oldp = points_inverse_map[newp];
+      pointpos_x[newp] = old_pointpos_x[oldp];
+    }
+  }
+  {
+    std::vector<double> old_pointpos_y = pointpos_y;
+    for (int64_t newp = 0; newp < conf.np; newp++) {
+      int64_t oldp = points_inverse_map[newp];
+      pointpos_y[newp] = old_pointpos_y[oldp];
+    }
+  }
+  {
+    std::vector<int64_t> old_pointcolors = pointcolors;
+    for (int64_t newp = 0; newp < conf.np; newp++) {
+      int64_t oldp = points_inverse_map[newp];
+      pointcolors[newp] = old_pointcolors[oldp];
+    }
+  }
+  {
+    std::map<int64_t, std::vector<int64_t> > old_pointmcolors = pointmcolors;
+    for (int64_t newp = 0; newp < conf.np; newp++) {
+      int64_t oldp = points_inverse_map[newp];
+      pointmcolors[newp] = old_pointmcolors[oldp];
+    }
+  }
+
 }
 
 void generate_mesh_raw(
@@ -498,6 +615,16 @@ void generate_mesh_raw(
                 zonepoints_vec,
                 zonecolors_vec);
 
+  compact_mesh(conf,
+               pointpos_x_vec,
+               pointpos_y_vec,
+               pointcolors_vec,
+               pointmcolors_map,
+               zonestart_vec,
+               zonesize_vec,
+               zonepoints_vec,
+               zonecolors_vec);
+
   int64_t color_words = int64_t(ceil(conf_npieces/64.0));
 
   assert(pointpos_x_vec.size() <= *pointpos_x_size);
@@ -517,7 +644,7 @@ void generate_mesh_raw(
   memcpy(zonepoints, zonepoints_vec.data(), zonepoints_vec.size()*sizeof(int64_t));
   memcpy(zonecolors, zonecolors_vec.data(), zonecolors_vec.size()*sizeof(int64_t));
 
-  memset(pointmcolors, (*pointmcolors_size)*sizeof(uint64_t), 0);
+  memset(pointmcolors, 0, (*pointmcolors_size)*sizeof(uint64_t));
   for (std::map<int64_t, std::vector<int64_t> >::iterator it = pointmcolors_map.begin(),
          ie = pointmcolors_map.end(); it != ie; ++it) {
     int64_t p = it->first;

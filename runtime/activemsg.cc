@@ -22,6 +22,9 @@
 
 #include <queue>
 #include <cassert>
+#ifdef REALM_PROFILE_AM_HANDLERS
+#include <math.h>
+#endif
 
 #include "lowlevel_impl.h"
 
@@ -43,6 +46,10 @@ void record_am_handler(int handler_id, const char *description, bool reply)
   log_active_message.info("AM Handler: %d %s %s\n", handler_id, description,
                           (reply ? "Reply" : "Request"));
 }
+#endif
+
+#ifdef REALM_PROFILE_AM_HANDLERS
+/*extern*/ ActiveMsgHandlerStats handler_stats[256];
 #endif
 
 static const int DEFERRED_FREE_COUNT = 128;
@@ -1664,6 +1671,18 @@ void stop_activemsg_threads(void)
     num_sending_threads = 0;
     delete[] sending_threads;
   }
+
+#ifdef REALM_PROFILE_AM_HANDLERS
+  for(int i = 0; i < 256; i++) {
+    if(!handler_stats[i].count) continue;
+    double avg = ((double)handler_stats[i].sum) / ((double)handler_stats[i].count);
+    double stddev = sqrt((((double)handler_stats[i].sum2) / ((double)handler_stats[i].count)) -
+                         avg * avg);
+    printf("AM profiling: node %d, msg %d: count = %10zd, avg = %8.2f, dev = %8.2f, min = %8zd, max = %8zd\n",
+           gasnet_mynode(), i,
+           handler_stats[i].count, avg, stddev, handler_stats[i].minval, handler_stats[i].maxval);
+  }
+#endif
 
   thread_shutdown_flag = false;
 }

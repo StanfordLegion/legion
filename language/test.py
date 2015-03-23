@@ -26,7 +26,8 @@ class TestFailure(Exception):
         self.output = output
 
 def run(filename, verbose, flags):
-    args = [os.path.basename(filename)] + flags
+    args = [os.path.basename(filename)] + flags + (
+        [] if verbose else ['-level', '5'])
     proc = legion.legion(
         args,
         stdout = None if verbose else subprocess.PIPE,

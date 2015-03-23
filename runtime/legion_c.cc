@@ -998,14 +998,28 @@ legion_future_from_buffer(legion_runtime_t runtime_,
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
 
-  // It turns out that you can't just call Future::from_buffer here,
-  // because then the deserializer wouldn't be speaking the same
-  // language. So instead, create a TaskResult, and use
-  // Future::from_value to serialize in properly, so it will
-  // deserialize properly on the other side as well.
-
   TaskResult task_result(buffer, size);
   Future *result = new Future(Future::from_value(runtime, task_result));
+  return CObjectWrapper::wrap(result);
+}
+
+legion_future_t
+legion_future_from_uint32(legion_runtime_t runtime_,
+                          uint32_t value)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  Future *result = new Future(Future::from_value(runtime, value));
+  return CObjectWrapper::wrap(result);
+}
+
+legion_future_t
+legion_future_from_uint64(legion_runtime_t runtime_,
+                          uint64_t value)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  Future *result = new Future(Future::from_value(runtime, value));
   return CObjectWrapper::wrap(result);
 }
 
@@ -1377,6 +1391,20 @@ legion_index_launcher_add_field(legion_index_launcher_t launcher_,
   launcher->add_field(idx, fid, inst);
 }
 
+void
+legion_index_launcher_add_future(legion_index_launcher_t launcher_,
+                                 legion_future_t future_)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  Future *future = CObjectWrapper::unwrap(future_);
+
+  launcher->add_future(*future);
+}
+
+// -----------------------------------------------------------------------
+// Inline Mapping Operations
+// -----------------------------------------------------------------------
+
 legion_inline_launcher_t
 legion_inline_launcher_create_logical_region(
   legion_logical_region_t handle_,
@@ -1461,6 +1489,32 @@ legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->unmap_all_regions(ctx);
+}
+
+// -----------------------------------------------------------------------
+// Tracing Operations
+// -----------------------------------------------------------------------
+
+void
+legion_runtime_begin_trace(legion_runtime_t runtime_,
+                           legion_context_t ctx_,
+                           legion_trace_id_t tid)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->begin_trace(ctx, tid);
+}
+
+void
+legion_runtime_end_trace(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         legion_trace_id_t tid)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->end_trace(ctx, tid);
 }
 
 // -----------------------------------------------------------------------
@@ -1612,6 +1666,22 @@ legion_accessor_generic_write_domain_point(legion_accessor_generic_t handle_,
 }
 
 void *
+legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle_,
+                                     legion_ptr_t ptr_,
+                                     size_t req_count,
+                                     size_t *act_count,
+                                     legion_byte_offset_t *stride_)
+{
+  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
+  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+
+  Accessor::ByteOffset stride;
+  void *data = handle->raw_span_ptr(ptr, req_count, *act_count, stride);
+  *stride_ = CObjectWrapper::wrap(stride);
+  return data;
+}
+
+void *
 legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle_,
                                         legion_rect_1d_t rect_,
                                         legion_rect_1d_t *subrect_,
@@ -1663,6 +1733,16 @@ legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle_,
   offsets_[1] = CObjectWrapper::wrap(offsets[1]);
   offsets_[2] = CObjectWrapper::wrap(offsets[2]);
   return data;
+}
+
+bool
+legion_accessor_generic_get_soa_parameters(legion_accessor_generic_t handle_,
+                                           void **base,
+                                           size_t *stride)
+{
+  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->get_soa_parameters(*base, *stride);
 }
 
 void
@@ -1743,6 +1823,16 @@ legion_index_iterator_next(legion_index_iterator_t handle_)
   IndexIterator *handle = CObjectWrapper::unwrap(handle_);
 
   return CObjectWrapper::wrap(handle->next());
+}
+
+legion_ptr_t
+legion_index_iterator_next_span(legion_index_iterator_t handle_,
+                                size_t *act_count,
+                                size_t req_count)
+{
+  IndexIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(handle->next_span(*act_count, req_count));
 }
 
 //------------------------------------------------------------------------

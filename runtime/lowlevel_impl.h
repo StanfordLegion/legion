@@ -30,6 +30,11 @@
 
 #include "lowlevel.h"
 
+#define NO_USE_REALMS_NODESET
+#ifdef USE_REALMS_NODESET
+#include "realm/dynamic_set.h"
+#endif
+
 #include <assert.h>
 
 #ifndef NO_INCLUDE_GASNET
@@ -51,6 +56,10 @@ GASNETT_THREADKEY_DECLARE(cur_thread);
 #include <list>
 #include <map>
 #include <aio.h>
+
+#if __cplusplus >= 201103L
+#define typeof decltype
+#endif
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
@@ -199,6 +208,17 @@ namespace LegionRuntime {
 
     typedef LegionRuntime::HighLevel::BitMask<NODE_MASK_TYPE,MAX_NUM_NODES,
                                               NODE_MASK_SHIFT,NODE_MASK_MASK> NodeMask;
+
+#ifdef USE_REALMS_NODESET
+#if MAX_NUM_NODES <= 65536
+    typedef DynamicSet<unsigned short> NodeSet;
+#else
+    // possibly unnecessary future-proofing...
+    typedef DynamicSet<unsigned int> NodeSet;
+#endif
+#else
+    typedef LegionRuntime::HighLevel::NodeSet NodeSet;
+#endif
 
     // we have a base type that's element-type agnostic
     template <typename LT, typename IT>
@@ -680,7 +700,7 @@ namespace LegionRuntime {
 
       GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
-      NodeMask remote_waiters;
+      NodeSet remote_waiters;
       std::vector<EventWaiter *> local_waiters; // set of local threads that are waiting on event
     };
 
@@ -781,7 +801,7 @@ namespace LegionRuntime {
       gasnet_hsl_t *mutex; // controls which local thread has access to internal data (not runtime-visible lock)
 
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
-      NodeMask remote_waiter_mask, remote_sharer_mask;
+      NodeSet remote_waiter_mask, remote_sharer_mask;
       //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
       std::map<unsigned, std::deque<GenEventImpl *> > local_waiters;
       bool requested; // do we have a request for the lock in flight?
@@ -806,6 +826,15 @@ namespace LegionRuntime {
       bool is_locked(unsigned check_mode, bool excl_ok);
 
       void release_reservation(void);
+
+      struct PackFunctor {
+      public:
+        PackFunctor(int *p) : pos(p) { }
+      public:
+        inline void apply(int target) { *pos++ = target; }
+      public:
+        int *pos;
+      };
     };
 
     template <typename T>
@@ -1138,11 +1167,9 @@ namespace LegionRuntime {
         MKIND_DISK,    // disk memory accessible by owner node
       };
 
-    Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind)
-      : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
-      {
-	gasnet_hsl_init(&mutex);
-      }
+      Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind);
+
+      virtual ~Impl(void);
 
       unsigned add_instance(RegionInstance::Impl *i);
 
@@ -1216,6 +1243,9 @@ namespace LegionRuntime {
       gasnet_hsl_t mutex; // protection for resizing vectors
       std::vector<RegionInstance::Impl *> instances;
       std::map<off_t, off_t> free_blocks;
+#ifdef REALM_PROFILE_MEMORY_USAGE
+      size_t usage, peak_usage, peak_footprint;
+#endif
     };
 
     class GASNetMemory : public Memory::Impl {
@@ -1272,7 +1302,7 @@ namespace LegionRuntime {
     public:
       static const size_t ALIGNMENT = 256;
 
-      DiskMemory(Memory _me, size_t _size, std::string file);
+      DiskMemory(Memory _me, size_t _size, std::string _file);
 
       virtual ~DiskMemory(void);
 
@@ -1305,6 +1335,7 @@ namespace LegionRuntime {
 
     public:
       int fd; // file descriptor
+      std::string file;  // file name
     };
 
     class MetadataBase {
@@ -1337,7 +1368,7 @@ namespace LegionRuntime {
       GASNetHSL mutex;
       State state;  // current state
       GenEventImpl *valid_event; // event to track receipt of in-flight request (if any)
-      NodeMask remote_copies;    // bitmask to track which nodes have remote copies of metdata
+      NodeSet remote_copies;
     };
 
     class RegionInstance::Impl {

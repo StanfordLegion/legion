@@ -19,6 +19,6 @@ task f(x : double, y : double) : double
 end
 
 task main()
-  legionlib.assert(f(1.2, 3.4) == 1.2)
+  legionlib.assert(f(1.2, 3.4) == 1.2, "test failed")
 end
 legionlib.start(main)
