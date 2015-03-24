@@ -34,7 +34,16 @@ function top_level_task(task, regions, ctx, runtime)
   -- use this to get the number of Fibonacci numbers to compute.
   local command_args = legion:get_input_args()
   if #command_args >= 1 then
-    num_fibonacci = tonumber(command_args[1])
+    local i = 1
+    while i <= #command_args do
+      local arg = command_args[i]
+      if string.sub(arg, 1, 1) == "-" then
+        i = i + 2
+      else
+        num_fibonacci = tonumber(arg)
+        break
+      end
+    end
     assert(num_fibonacci >= 0)
   end
   print("Computing the first " .. num_fibonacci .. " Fibonacci numbers...")

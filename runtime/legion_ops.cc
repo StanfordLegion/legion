@@ -1901,6 +1901,36 @@ namespace LegionRuntime {
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       complete_mapping();
+      
+      Event map_complete_event = result.get_ready_event(); 
+      if (!map_complete_event.has_triggered())
+      {
+        // Issue a deferred trigger on our completion event
+        // and mark that we are no longer responsible for 
+        // triggering our completion event
+        completion_event.trigger(map_complete_event);
+        need_completion_trigger = false;
+#ifdef SPECIALIZED_UTIL_PROCS
+        Processor util = runtime->get_cleanup_proc(local_proc);
+#else
+        Processor util = runtime->find_utility_group();
+#endif
+        DeferredCompleteArgs deferred_complete_args;
+        deferred_complete_args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        deferred_complete_args.proxy_this = this;
+        util.spawn(HLR_TASK_ID, &deferred_complete_args,
+                   sizeof(deferred_complete_args), map_complete_event);
+      }
+      else
+        deferred_complete();
+      // return true since we succeeded
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::deferred_complete(void)
+    //--------------------------------------------------------------------------
+    {
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -1912,9 +1942,8 @@ namespace LegionRuntime {
       // This means that any attempts to restart an inline mapping
       // will result in the entire task needing to be restarted.
       request_early_commit();
+      // Mark that we are done executing
       complete_execution();
-      // return true since we succeeded
-      return true;
     }
 
     //--------------------------------------------------------------------------

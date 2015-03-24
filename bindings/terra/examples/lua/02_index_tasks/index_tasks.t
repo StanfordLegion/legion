@@ -28,7 +28,16 @@ function top_level_task(task, reigons, ctx, runtime)
   -- See how many points to run
   local command_args = legion:get_input_args()
   if #command_args >= 1 then
-    num_points = tonumber(command_args[1])
+    local i = 1
+    while i <= #command_args do
+      local arg = command_args[i]
+      if string.sub(arg, 1, 1) == "-" then
+        i = i + 2
+      else
+        num_points = tonumber(arg)
+        break
+      end
+    end
     assert(num_points > 0)
   end
   print("Running hello world redux for " .. num_points .. " points...")

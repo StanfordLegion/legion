@@ -821,11 +821,24 @@ public:
 protected:
   pthread_key_t key;
 };
+#if 0
 #define GASNETT_THREADKEY_DECLARE(keyname) extern ThreadKey keyname
 #define GASNETT_THREADKEY_DEFINE(keyname) ThreadKey keyname
 
 inline void *gasnett_threadkey_get(ThreadKey& key) { return key.get(); }
 inline void gasnett_threadkey_set(ThreadKey& key, void *newval) { key.set(newval); }
+#else
+#define GASNETT_THREADKEY_DECLARE(keyname) extern ThreadKey& get_key_##keyname(void)
+#define GASNETT_THREADKEY_DEFINE(keyname) \
+  ThreadKey& get_key_##keyname(void) { \
+    static ThreadKey key;         \
+    return key;                   \
+  }
+
+#define gasnett_threadkey_set(keyname, value)  get_key_##keyname().set(value)
+#define gasnett_threadkey_get(keyname) get_key_##keyname().get()
+
+#endif
 
 // active message placeholders
 
