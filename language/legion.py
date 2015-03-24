@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
 import os, platform, subprocess, sys
 
 os_name = platform.system()
@@ -57,7 +58,16 @@ terra_env = dict(os.environ.items() + [
 ])
 
 def legion(args, **kwargs):
-    return subprocess.Popen([terra_exe] + args, env = terra_env, **kwargs)
+    cmd = []
+    if 'USE_MPIRUN' in os.environ and int(os.environ['USE_MPIRUN']) == 1:
+        mpirun_flags = (
+            (os.environ['MPIRUN_FLAGS'].split()
+             if 'MPIRUN_FLAGS' in os.environ else []) +
+            ['-x', 'TERRA_PATH', '-x', LD_LIBRARY_PATH, '-x', 'INCLUDE_PATH'])
+        cmd = cmd + ['mpirun'] + mpirun_flags
+    cmd = cmd + [terra_exe] + args
+    return subprocess.Popen(
+        cmd, env = terra_env, **kwargs)
 
 if __name__ == '__main__':
     sys.exit(legion(sys.argv[1:]).wait())

@@ -107,26 +107,30 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir, debug, general_llr):
+def install_bindings(bindings_dir, terra_dir, debug, general_llr, gasnet):
     luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
         ('LUAJIT_DIR', luajit_dir),                         # for bindings
         ('TERRA_DIR', terra_dir),                           # for bindings
     ])
 
+    flags = (
+        ['DEBUG=%s' % (1 if debug else 0),
+         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
+         'USE_CUDA=0',
+         'USE_GASNET=%s' % (1 if gasnet else 0),
+         ] +
+        (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
+
     subprocess.check_call(
-        ['make',
-         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1)] +
-        (['USE_CUDA=0', 'USE_GASNET=0'] if general_llr else []) +
+        ['make'] +
+        flags +
         ['clean'],
         cwd = bindings_dir,
         env = env)
     subprocess.check_call(
-        ['make',
-         'DEBUG=%s' % (1 if debug else 0),
-         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1)] +
-        (['USE_CUDA=0', 'USE_GASNET=0'] if general_llr else []) +
-        (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []) +
+        ['make'] +
+        flags +
         ['-j', str(multiprocessing.cpu_count())],
         cwd = bindings_dir,
         env = env)
@@ -163,7 +167,13 @@ def install():
     parser.add_argument(
         '--general', dest = 'general_llr', action = 'store_true', required = False,
         help = 'Build Legion with the general low-level runtime.')
+    parser.add_argument(
+        '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
+        help = 'Build Legion with GASNet.')
     args = parser.parse_args()
+
+    if args.gasnet and not args.general_llr:
+        raise Exception('General LLR is required for GASNet.')
 
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
@@ -175,7 +185,8 @@ def install():
     install_terra(terra_dir, args.terra)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, terra_dir, args.debug, args.general_llr)
+    install_bindings(bindings_dir, terra_dir, args.debug,
+                     args.general_llr, args.gasnet)
 
 if __name__ == '__main__':
     install()

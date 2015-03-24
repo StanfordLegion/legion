@@ -122,7 +122,10 @@ end
 
 terra std.assert(x : bool, message : rawstring)
   if not x then
-    c.printf("assertion failed: %s\n", message)
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, "assertion failed: %s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    c.fflush(stderr)
     c.abort()
   end
 end
