@@ -24,6 +24,15 @@
 
 #include "default_mapper.h"
 
+#include <sys/time.h>
+#include <sys/resource.h>
+void print_rusage(const char *message)
+{
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) return;
+  printf("%s: %ld MB\n", message, usage.ru_maxrss / 1024);
+}
+
 using namespace LegionRuntime::HighLevel;
 
 struct config {
@@ -37,6 +46,9 @@ struct config {
   int64_t numpcy;
   int64_t npieces;
   int64_t meshtype;
+  bool compact;
+  int64_t stripsize;
+  int64_t spansize;
 };
 
 enum {
@@ -433,7 +445,151 @@ static void generate_mesh(config &conf,
   }
 }
 
-static void compact_mesh(config &conf,
+static void sort_zones_by_color(const config &conf,
+                                const std::vector<int64_t> &zonecolors,
+                                std::vector<int64_t> &zones_inverse_map,
+                                std::vector<int64_t> &zones_map)
+{
+  // Sort zones by color.
+  assert(int64_t(zonecolors.size()) == conf.nz);
+  std::map<int64_t, std::vector<int64_t> > zones_by_color;
+  for (int64_t z = 0; z < conf.nz; z++) {
+    zones_by_color[zonecolors[z]].push_back(z);
+  }
+  for (int64_t c = 0; c < conf.npieces; c++) {
+    std::vector<int64_t> &zones = zones_by_color[c];
+    for (std::vector<int64_t>::iterator zt = zones.begin(), ze = zones.end();
+         zt != ze; ++zt) {
+      int64_t z = *zt;
+      assert(zones_map[z] == -1ll);
+      zones_map[z] = zones_inverse_map.size();
+      zones_inverse_map.push_back(z);
+    }
+  }
+}
+
+static std::set<int64_t> zone_point_set(
+  int64_t z,
+  const std::vector<int64_t> &zonestart,
+  const std::vector<int64_t> &zonesize,
+  const std::vector<int64_t> &zonepoints)
+{
+  std::set<int64_t> points;
+  for (int64_t z_start = zonestart[z], z_size = zonesize[z],
+         z_point = z_start; z_point < z_start + z_size; z_point++) {
+    points.insert(zonepoints[z_point]);
+  }
+  return points;
+}
+
+static void sort_zones_by_color_strip(const config &conf,
+                                      const std::vector<double> &pointpos_x,
+                                      const std::vector<double> &pointpos_y,
+                                      const std::vector<int64_t> &zonestart,
+                                      const std::vector<int64_t> &zonesize,
+                                      const std::vector<int64_t> &zonepoints,
+                                      const std::vector<int64_t> &zonecolors,
+                                      std::vector<int64_t> &zones_inverse_map,
+                                      std::vector<int64_t> &zones_map)
+{
+  int64_t stripsize = conf.stripsize;
+
+  // Sort zones by color. Within each color, make strips of zones of
+  // size stripsize.
+
+  std::vector<std::vector<int64_t> > strips;
+  assert(int64_t(zonecolors.size()) == conf.nz);
+  for (int64_t c = 0; c < conf.npieces; c++) {
+    strips.assign(strips.size(), std::vector<int64_t>());
+
+    int64_t z_start = -1ll;
+    std::set<int64_t> z_start_points;
+    for (int64_t z = 0; z < conf.nz; z++) {
+      if (zonecolors[z] == c) {
+        if (z_start >= 0) {
+          if (z > z_start + 1) {
+            bool intersect = false;
+            for (int64_t z_start = zonestart[z], z_size = zonesize[z],
+                   z_point = z_start; z_point < z_start + z_size; z_point++) {
+              if (z_start_points.count(zonepoints[z_point])) {
+                intersect = true;
+                break;
+              }
+            }
+            if (intersect) {
+              z_start = z;
+              z_start_points =
+                zone_point_set(z_start, zonestart, zonesize, zonepoints);
+            }
+          }
+        } else {
+          z_start = z;
+          z_start_points =
+            zone_point_set(z_start, zonestart, zonesize, zonepoints);
+        }
+
+        int64_t strip = (z - z_start)/stripsize;
+        if (strip + 1 > int64_t(strips.size())) {
+          strips.resize(strip+1);
+        }
+        strips[strip].push_back(z);
+      }
+    }
+
+    for (std::vector<std::vector<int64_t> >::iterator st = strips.begin(),
+           se = strips.end(); st != se; ++st) {
+      for (std::vector<int64_t>::iterator zt = st->begin(), ze = st->end();
+           zt != ze; ++zt) {
+        int64_t z = *zt;
+        assert(zones_map[z] == -1ll);
+        zones_map[z] = zones_inverse_map.size();
+        zones_inverse_map.push_back(z);
+      }
+    }
+  }
+}
+
+static void sort_points_by_color(
+  const config &conf,
+  const std::vector<int64_t> &pointcolors,
+  std::map<int64_t, std::vector<int64_t> > &pointmcolors,
+  std::vector<int64_t> &points_inverse_map,
+  std::vector<int64_t> &points_map)
+{
+  // Sort points by color; sort multi-color points by first color.
+  assert(int64_t(pointcolors.size()) == conf.np);
+  std::map<int64_t, std::vector<int64_t> > points_by_color;
+  std::map<int64_t, std::vector<int64_t> > points_by_multicolor;
+  for (int64_t p = 0; p < conf.np; p++) {
+    if (pointcolors[p] == MULTICOLOR) {
+      points_by_multicolor[pointmcolors[p][0]].push_back(p);
+    } else {
+      points_by_color[pointcolors[p]].push_back(p);
+    }
+  }
+  for (int64_t c = 0; c < conf.npieces; c++) {
+    std::vector<int64_t> &points = points_by_multicolor[c];
+    for (std::vector<int64_t>::iterator pt = points.begin(), pe = points.end();
+         pt != pe; ++pt) {
+      int64_t p = *pt;
+      assert(points_map[p] == -1ll);
+      points_map[p] = points_inverse_map.size();
+      points_inverse_map.push_back(p);
+    }
+  }
+  for (int64_t c = 0; c < conf.npieces; c++) {
+    std::vector<int64_t> &points = points_by_color[c];
+    for (std::vector<int64_t>::iterator pt = points.begin(), pe = points.end();
+         pt != pe; ++pt) {
+      int64_t p = *pt;
+      assert(points_map[p] == -1ll);
+      points_map[p] = points_inverse_map.size();
+      points_inverse_map.push_back(p);
+    }
+  }
+}
+
+static void compact_mesh(const config &conf,
                          std::vector<double> &pointpos_x,
                          std::vector<double> &pointpos_y,
                          std::vector<int64_t> &pointcolors,
@@ -451,56 +607,48 @@ static void compact_mesh(config &conf,
   // Sort zones by color.
   std::vector<int64_t> zones_inverse_map;
   std::vector<int64_t> zones_map(conf.nz, -1ll);
-  assert(int64_t(zonecolors.size()) == conf.nz);
-  for (int64_t c = 0; c < conf.npieces; c++) {
-    for (int64_t z = 0; z < conf.nz; z++) {
-      if (zonecolors[z] == c) {
-        zones_map[z] = zones_inverse_map.size();
-        zones_inverse_map.push_back(z);
-      }
-    }
+  if (conf.stripsize > 0) {
+    sort_zones_by_color_strip(conf, pointpos_x, pointpos_y,
+                              zonestart, zonesize, zonepoints, zonecolors,
+                              zones_inverse_map, zones_map);
+  } else {
+    sort_zones_by_color(conf, zonecolors, zones_inverse_map, zones_map);
   }
   assert(int64_t(zones_inverse_map.size()) == conf.nz);
 
-  // Sort points by color.
+  // Sort points by color; sort multi-color points by first color.
   std::vector<int64_t> points_inverse_map;
   std::vector<int64_t> points_map(conf.np, -1ll);
-  assert(int64_t(pointcolors.size()) == conf.np);
-  for (int64_t c = -1; c < conf.npieces; c++) {
-    for (int64_t p = 0; p < conf.np; p++) {
-      if (pointcolors[p] == c) {
-        points_map[p] = points_inverse_map.size();
-        points_inverse_map.push_back(p);
-      }
-    }
-  }
+  sort_points_by_color(conf, pointcolors, pointmcolors,
+                       points_inverse_map, points_map);
   assert(int64_t(points_inverse_map.size()) == conf.np);
 
   // Various sanity checks.
+#if 0
+  for (int64_t z = 0; z < conf.nz; z++) {
+    printf("zone old %ld new %ld color %ld\n", z, zones_map[z], zonecolors[z]);
+  }
 
-  // for (int64_t z = 0; z < conf.nz; z++) {
-  //   printf("zone old %ld new %ld color %ld\n", z, zones_map[z], zonecolors[z]);
-  // }
+  printf("\n");
 
-  // printf("\n");
+  for (int64_t newz = 0; newz < conf.nz; newz++) {
+    int64_t oldz = zones_inverse_map[newz];
+    printf("zone new %ld old %ld color %ld\n", newz, oldz, zonecolors[oldz]);
+  }
 
-  // for (int64_t newz = 0; newz < conf.nz; newz++) {
-  //   int64_t oldz = zones_inverse_map[newz];
-  //   printf("zone new %ld old %ld color %ld\n", newz, oldz, zonecolors[oldz]);
-  // }
+  printf("\n");
 
-  // printf("\n");
+  for (int64_t p = 0; p < conf.np; p++) {
+    printf("point old %ld new %ld color %ld\n", p, points_map[p], pointcolors[p]);
+  }
 
-  // for (int64_t p = 0; p < conf.np; p++) {
-  //   printf("point old %ld new %ld color %ld\n", p, points_map[p], pointcolors[p]);
-  // }
+  printf("\n");
 
-  // printf("\n");
-
-  // for (int64_t newp = 0; newp < conf.np; newp++) {
-  //   int64_t oldp = points_inverse_map[newp];
-  //   printf("point new %ld old %ld color %ld\n", newp, oldp, pointcolors[oldp]);
-  // }
+  for (int64_t newp = 0; newp < conf.np; newp++) {
+    int64_t oldp = points_inverse_map[newp];
+    printf("point new %ld old %ld color %ld\n", newp, oldp, pointcolors[oldp]);
+  }
+#endif
 
   // Project zones through the zones map.
   {
@@ -564,6 +712,117 @@ static void compact_mesh(config &conf,
 
 }
 
+static void
+color_spans(const config &conf,
+            const std::vector<double> &pointpos_x,
+            const std::vector<double> &pointpos_y,
+            const std::vector<int64_t> &pointcolors,
+            std::map<int64_t, std::vector<int64_t> > &pointmcolors,
+            const std::vector<int64_t> &zonestart,
+            const std::vector<int64_t> &zonesize,
+            const std::vector<int64_t> &zonepoints,
+            const std::vector<int64_t> &zonecolors,
+            std::vector<int64_t> &zonespancolors_vec,
+            std::vector<int64_t> &pointspancolors_vec,
+            int64_t &nspans_zones,
+            int64_t &nspans_points)
+{
+  {
+    // Compute zone spans.
+    std::vector<std::vector<std::vector<int64_t> > > spans(conf.npieces);
+    std::vector<int64_t> span_size(conf.npieces, conf.spansize);
+    for (int64_t z = 0; z < conf.nz; z++) {
+      int64_t c = zonecolors[z];
+      if (span_size[c] + zonesize[c] > conf.spansize) {
+        spans[c].resize(spans[c].size() + 1);
+        span_size[c] = 0;
+      }
+      spans[c][spans[c].size() - 1].push_back(z);
+      span_size[c] += zonesize[z];
+    }
+
+    // Color zones by span.
+    nspans_zones = 0;
+    zonespancolors_vec.assign(conf.nz, -1ll);
+    for (int64_t c = 0; c < conf.npieces; c++) {
+      std::vector<std::vector<int64_t> > &color_spans = spans[c];
+      int64_t nspans = color_spans.size();
+      nspans_zones = std::max(nspans_zones, nspans);
+      for (int64_t ispan = 0; ispan < nspans; ispan++) {
+        std::vector<int64_t> &span = color_spans[ispan];
+        for (std::vector<int64_t>::iterator zt = span.begin(), ze = span.end();
+             zt != ze; ++zt) {
+          int64_t z = *zt;
+          zonespancolors_vec[z] = ispan;
+        }
+      }
+    }
+    for (int64_t z = 0; z < conf.nz; z++) {
+      assert(zonespancolors_vec[z] != -1ll);
+    }
+  }
+
+  {
+    // Compute point spans.
+    std::vector<std::vector<std::vector<int64_t> > > spans(conf.npieces);
+    std::vector<std::vector<std::vector<int64_t> > > mspans(conf.npieces);
+    std::vector<int64_t> span_size(conf.npieces, conf.spansize);
+    std::vector<int64_t> mspan_size(conf.npieces, conf.spansize);
+    for (int64_t p = 0; p < conf.np; p++) {
+      int64_t c = pointcolors[p];
+      if (c != MULTICOLOR) {
+        if (span_size[c] >= conf.spansize) {
+          spans[c].resize(spans[c].size() + 1);
+          span_size[c] = 0;
+        }
+        spans[c][spans[c].size() - 1].push_back(p);
+        span_size[c]++;
+      } else {
+        c = pointmcolors[p][0];
+        if (mspan_size[c] >= conf.spansize) {
+          mspans[c].resize(mspans[c].size() + 1);
+          mspan_size[c] = 0;
+        }
+        mspans[c][mspans[c].size() - 1].push_back(p);
+        mspan_size[c]++;
+      }
+    }
+
+    // Color points by span.
+    nspans_points = 0;
+    pointspancolors_vec.assign(conf.np, -1ll);
+    for (int64_t c = 0; c < conf.npieces; c++) {
+      std::vector<std::vector<int64_t> > &color_spans = spans[c];
+      int64_t nspans = color_spans.size();
+      nspans_points = std::max(nspans_points, nspans);
+      for (int64_t ispan = 0; ispan < nspans; ispan++) {
+        std::vector<int64_t> &span = color_spans[ispan];
+        for (std::vector<int64_t>::iterator pt = span.begin(), pe = span.end();
+             pt != pe; ++pt) {
+          int64_t p = *pt;
+          pointspancolors_vec[p] = ispan;
+        }
+      }
+    }
+    for (int64_t c = 0; c < conf.npieces; c++) {
+      std::vector<std::vector<int64_t> > &color_spans = mspans[c];
+      int64_t nspans = color_spans.size();
+      nspans_points = std::max(nspans_points, nspans);
+      for (int64_t ispan = 0; ispan < nspans; ispan++) {
+        std::vector<int64_t> &span = color_spans[ispan];
+        for (std::vector<int64_t>::iterator pt = span.begin(), pe = span.end();
+             pt != pe; ++pt) {
+          int64_t p = *pt;
+          pointspancolors_vec[p] = ispan;
+        }
+      }
+    }
+    for (int64_t p = 0; p < conf.np; p++) {
+      assert(pointspancolors_vec[p] != -1ll);
+    }
+  }
+}
+
 void generate_mesh_raw(
   int64_t conf_np,
   int64_t conf_nz,
@@ -575,14 +834,21 @@ void generate_mesh_raw(
   int64_t conf_numpcy,
   int64_t conf_npieces,
   int64_t conf_meshtype,
+  bool conf_compact,
+  int64_t conf_stripsize,
+  int64_t conf_spansize,
   double *pointpos_x, size_t *pointpos_x_size,
   double *pointpos_y, size_t *pointpos_y_size,
   int64_t *pointcolors, size_t *pointcolors_size,
   uint64_t *pointmcolors, size_t *pointmcolors_size,
+  int64_t *pointspancolors, size_t *pointspancolors_size,
   int64_t *zonestart, size_t *zonestart_size,
   int64_t *zonesize, size_t *zonesize_size,
   int64_t *zonepoints, size_t *zonepoints_size,
-  int64_t *zonecolors, size_t *zonecolors_size)
+  int64_t *zonecolors, size_t *zonecolors_size,
+  int64_t *zonespancolors, size_t *zonespancolors_size,
+  int64_t *nspans_zones,
+  int64_t *nspans_points)
 {
   config conf;
   conf.np = conf_np;
@@ -595,6 +861,9 @@ void generate_mesh_raw(
   conf.numpcy = conf_numpcy;
   conf.npieces = conf_npieces;
   conf.meshtype = conf_meshtype;
+  conf.compact = conf_compact;
+  conf.stripsize = conf_stripsize;
+  conf.spansize = conf_spansize;
 
   std::vector<double> pointpos_x_vec;
   std::vector<double> pointpos_y_vec;
@@ -615,15 +884,34 @@ void generate_mesh_raw(
                 zonepoints_vec,
                 zonecolors_vec);
 
-  compact_mesh(conf,
-               pointpos_x_vec,
-               pointpos_y_vec,
-               pointcolors_vec,
-               pointmcolors_map,
-               zonestart_vec,
-               zonesize_vec,
-               zonepoints_vec,
-               zonecolors_vec);
+  if (conf.compact) {
+    compact_mesh(conf,
+                 pointpos_x_vec,
+                 pointpos_y_vec,
+                 pointcolors_vec,
+                 pointmcolors_map,
+                 zonestart_vec,
+                 zonesize_vec,
+                 zonepoints_vec,
+                 zonecolors_vec);
+  }
+
+  std::vector<int64_t> zonespancolors_vec;
+  std::vector<int64_t> pointspancolors_vec;
+
+  color_spans(conf,
+              pointpos_x_vec,
+              pointpos_y_vec,
+              pointcolors_vec,
+              pointmcolors_map,
+              zonestart_vec,
+              zonesize_vec,
+              zonepoints_vec,
+              zonecolors_vec,
+              zonespancolors_vec,
+              pointspancolors_vec,
+              *nspans_zones,
+              *nspans_points);
 
   int64_t color_words = int64_t(ceil(conf_npieces/64.0));
 
@@ -631,18 +919,22 @@ void generate_mesh_raw(
   assert(pointpos_y_vec.size() <= *pointpos_y_size);
   assert(pointcolors_vec.size() <= *pointcolors_size);
   assert(pointcolors_vec.size()*color_words <= *pointmcolors_size);
+  assert(pointspancolors_vec.size() <= *pointspancolors_size);
   assert(zonestart_vec.size() <= *zonestart_size);
   assert(zonesize_vec.size() <= *zonesize_size);
   assert(zonepoints_vec.size() <= *zonepoints_size);
   assert(zonecolors_vec.size() <= *zonecolors_size);
+  assert(zonespancolors_vec.size() <= *zonespancolors_size);
 
   memcpy(pointpos_x, pointpos_x_vec.data(), pointpos_x_vec.size()*sizeof(double));
   memcpy(pointpos_y, pointpos_y_vec.data(), pointpos_y_vec.size()*sizeof(double));
   memcpy(pointcolors, pointcolors_vec.data(), pointcolors_vec.size()*sizeof(int64_t));
+  memcpy(pointspancolors, pointspancolors_vec.data(), pointspancolors_vec.size()*sizeof(int64_t));
   memcpy(zonestart, zonestart_vec.data(), zonestart_vec.size()*sizeof(int64_t));
   memcpy(zonesize, zonesize_vec.data(), zonesize_vec.size()*sizeof(int64_t));
   memcpy(zonepoints, zonepoints_vec.data(), zonepoints_vec.size()*sizeof(int64_t));
   memcpy(zonecolors, zonecolors_vec.data(), zonecolors_vec.size()*sizeof(int64_t));
+  memcpy(zonespancolors, zonespancolors_vec.data(), zonespancolors_vec.size()*sizeof(int64_t));
 
   memset(pointmcolors, 0, (*pointmcolors_size)*sizeof(uint64_t));
   for (std::map<int64_t, std::vector<int64_t> >::iterator it = pointmcolors_map.begin(),
@@ -660,10 +952,12 @@ void generate_mesh_raw(
   *pointpos_y_size = pointpos_y_vec.size();
   *pointcolors_size = pointcolors_vec.size();
   *pointmcolors_size = pointcolors_vec.size()*color_words;
+  *pointspancolors_size = pointspancolors_vec.size();
   *zonestart_size = zonestart_vec.size();
   *zonesize_size = zonesize_vec.size();
   *zonepoints_size = zonepoints_vec.size();
   *zonecolors_size = zonecolors_vec.size();
+  *zonespancolors_size = zonespancolors_vec.size();
 }
 
 ///
@@ -690,12 +984,22 @@ public:
                                  std::vector<Memory> &to_create,
                                  bool &create_one,
                                  size_t &blocking_factor);
+  virtual void rank_copy_sources(const Mappable *mappable,
+                                 const std::set<Memory> &current_instances,
+                                 Memory dst_mem,
+                                 std::vector<Memory> &chosen_order);
 private:
   Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
+  LogicalRegion get_root_region(LogicalRegion handle);
+  LogicalRegion get_root_region(LogicalPartition handle);
 private:
   Memory local_sysmem;
   Memory local_regmem;
   std::set<Processor> local_procs;
+  std::map<std::string, TaskPriority> task_priorities;
+  std::set<Processor> all_procs;
+  std::map<Processor, Memory> all_sysmem;
+  std::map<Processor, Memory> all_regmem;
 };
 
 PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
@@ -713,6 +1017,28 @@ PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor lo
   if (!local_procs.empty()) {
     machine_interface.filter_processors(machine, Processor::LOC_PROC, local_procs);
   }
+
+  machine.get_all_processors(all_procs);
+  for (std::set<Processor>::iterator it = all_procs.begin(), ie = all_procs.end();
+       it != ie; ++it) {
+    all_sysmem[*it] =
+      machine_interface.find_memory_kind(*it, Memory::SYSTEM_MEM);
+    all_regmem[*it] =
+      machine_interface.find_memory_kind(*it, Memory::REGDMA_MEM);
+    if(!all_regmem[*it].exists()) {
+      all_regmem[*it] = all_sysmem[*it];
+    }
+  }
+
+  // task_priorities["adv_pos_half"] = 1;
+  // task_priorities["calc_centers"] = 1;
+  // task_priorities["calc_volumes"] = 1;
+  // task_priorities["calc_force_pgas_tts"] = 1;
+  // task_priorities["qcs_zone_center_velocity"] = 1;
+  // task_priorities["qcs_corner_divergence"] = 1;
+  // task_priorities["qcs_qcn_force"] = 1;
+  // task_priorities["qcs_force"] = 1;
+  // task_priorities["sum_point_force"] = 1;
 }
 
 void PennantMapper::select_task_options(Task *task)
@@ -720,10 +1046,15 @@ void PennantMapper::select_task_options(Task *task)
   // Task options:
   task->inline_task = false;
   task->spawn_task = false;
-  task->map_locally = false;
+  task->map_locally = true;
   task->profile_task = false;
 
-  task->additional_procs = local_procs;
+  std::string name(task->variants->name);
+  if (task_priorities.count(name)) {
+    task->task_priority = task_priorities[name];
+  } else {
+    task->task_priority = 0;
+  }
 }
 
 void PennantMapper::select_task_variant(Task *task)
@@ -744,7 +1075,8 @@ void PennantMapper::select_task_variant(Task *task)
 
 bool PennantMapper::map_task(Task *task)
 {
-  assert(task->target_proc == local_proc);
+  // assert(task->target_proc == local_proc);
+  // task->additional_procs = local_procs;
 
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
@@ -756,8 +1088,45 @@ bool PennantMapper::map_task(Task *task)
     req.enable_WAR_optimization = false;
     req.reduction_list = false;
 
-    // Place all regions in local system memory.
-    req.target_ranking.push_back(local_sysmem);
+    // Place all regions in local memory.
+    assert(all_sysmem.count(task->target_proc));
+    req.target_ranking.push_back(all_sysmem[task->target_proc]);
+    // assert(all_regmem.count(task->target_proc));
+    // req.target_ranking.push_back(all_regmem[task->target_proc]);
+
+    // Request additional fields.
+    if (!req.redop) {
+      LogicalRegion root;
+      if (req.handle_type == SINGULAR || req.handle_type == REG_PROJECTION) {
+        root = get_root_region(req.region);
+      } else {
+        assert(req.handle_type == PART_PROJECTION);
+        root = get_root_region(req.partition);
+      }
+
+      const char *name_;
+      runtime->retrieve_name(root, name_);
+      assert(name_);
+      std::string name(name_);
+
+      int num_fields = 0;
+      if (name == "rz_all") {
+        num_fields = 24;
+      } else if (name == "rp_all") {
+        num_fields = 17;
+      } else if (name == "rs_all") {
+        num_fields = 34;
+      } else if (name == "rm_all") {
+        num_fields = 20;
+      } else {
+        assert(false);
+      }
+
+      const int base = 101;
+      for (int i = base; i < base + num_fields; i++) {
+        req.additional_fields.insert(i);
+      }
+    }
   }
 
   return false;
@@ -775,6 +1144,7 @@ bool PennantMapper::map_inline(Inline *inline_operation)
 
   // Place all regions in global memory.
   req.target_ranking.push_back(local_sysmem);
+  // req.target_ranking.push_back(local_regmem);
 
   log_mapper.debug(
     "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
@@ -847,12 +1217,57 @@ bool PennantMapper::rank_copy_targets(const Mappable *mappable,
   return true;
 }
 
+void PennantMapper::rank_copy_sources(const Mappable *mappable,
+                                      const std::set<Memory> &current_instances,
+                                      Memory dst_mem,
+                                      std::vector<Memory> &chosen_order)
+{
+  // Elliott: This is to fix a bug in the default mapper which throws
+  // an error with composite instances.
+
+  // Handle the simple case of having the destination
+  // memory in the set of instances
+  if (current_instances.find(dst_mem) != current_instances.end())
+  {
+    chosen_order.push_back(dst_mem);
+    return;
+  }
+
+  machine_interface.find_memory_stack(dst_mem,
+                                      chosen_order, true/*latency*/);
+  if (chosen_order.empty())
+  {
+    // This is the multi-hop copy because none
+    // of the memories had an affinity
+    // SJT: just send the first one
+    if(current_instances.size() > 0) {
+      chosen_order.push_back(*(current_instances.begin()));
+    } else {
+      // Elliott: This is a composite instance.
+      //assert(false);
+    }
+  }
+}
+
 Color PennantMapper::get_task_color_by_region(Task *task, const RegionRequirement &requirement)
 {
   if (requirement.handle_type == SINGULAR) {
     return get_logical_region_color(requirement.region);
   }
   return 0;
+}
+
+LogicalRegion PennantMapper::get_root_region(LogicalRegion handle)
+{
+  if (has_parent_logical_partition(handle)) {
+    return get_root_region(get_parent_logical_partition(handle));
+  }
+  return handle;
+}
+
+LogicalRegion PennantMapper::get_root_region(LogicalPartition handle)
+{
+  return get_root_region(get_parent_logical_region(handle));
 }
 
 void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)

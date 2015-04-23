@@ -34,7 +34,11 @@ endif
 # Put the binary file name here
 OUTFILE		:= liblegion_terra.so
 # List all the application source files here
-GEN_SRC		:= legion_terra.cc lua_mapper_wrapper.cc legion_terra_partitions.cc # .cc files
+GEN_SRC		:= \
+  legion_terra.cc lua_mapper_wrapper.cc \
+  legion_terra_partitions.cc \
+  liszt_gpu_mapper.cc \
+  # .cc files
 GEN_GPU_SRC	:=		# .cu files
 
 CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY

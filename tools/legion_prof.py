@@ -17,6 +17,7 @@
 
 import sys, os, shutil
 import string, re
+from math import sqrt
 from getopt import getopt
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
@@ -527,9 +528,9 @@ class BaseRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_svg(printer, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for r in self.subranges:
-            r.update_task_stats(stat)
+            r.update_task_stats(stat, proc)
 
     def active_time(self):
         total = 0
@@ -595,43 +596,43 @@ class EventRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_svg(printer, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         if self.range_kind == SCHEDULE_RANGE:
-            stat.update_scheduler(self.cummulative_time(), self.non_cummulative_time())
+            stat.update_scheduler(self.cummulative_time(), self.non_cummulative_time(), proc)
         elif self.range_kind == GC_RANGE:
-            stat.update_gc(self.cummulative_time(), self.non_cummulative_time())
+            stat.update_gc(self.cummulative_time(), self.non_cummulative_time(), proc)
         elif self.range_kind <> WAIT_RANGE:
             variant = self.op.get_variant()
             cum_time = self.cummulative_time()
             non_cum_time = self.non_cummulative_time()
             if self.range_kind == DEPENDENCE_RANGE:
                 if self.op.is_mapping():
-                    stat.update_inline_dep_analysis(variant, cum_time, non_cum_time)
+                    stat.update_inline_dep_analysis(variant, cum_time, non_cum_time, proc)
                 elif self.op.is_close():
-                    stat.update_close_dep_analysis(variant, cum_time, non_cum_time)
+                    stat.update_close_dep_analysis(variant, cum_time, non_cum_time, proc)
                 elif self.op.is_copy():
-                    stat.update_copy_dep_analysis(variant, cum_time, non_cum_time)
+                    stat.update_copy_dep_analysis(variant, cum_time, non_cum_time, proc)
                 else:
-                    stat.update_dependence_analysis(variant, cum_time, non_cum_time)
+                    stat.update_dependence_analysis(variant, cum_time, non_cum_time, proc)
             elif self.range_kind == PREMAP_RANGE:
-                stat.update_premappings(variant, cum_time, non_cum_time)
+                stat.update_premappings(variant, cum_time, non_cum_time, proc)
             elif self.range_kind == MAPPING_RANGE:
                 if self.op.is_mapping():
-                    stat.update_inline_mappings(variant, cum_time, non_cum_time)
+                    stat.update_inline_mappings(variant, cum_time, non_cum_time, proc)
                 elif self.op.is_close():
-                    stat.update_close_operations(variant, cum_time, non_cum_time)
+                    stat.update_close_operations(variant, cum_time, non_cum_time, proc)
                 elif self.op.is_copy():
-                    stat.update_copy_operations(variant, cum_time, non_cum_time)
+                    stat.update_copy_operations(variant, cum_time, non_cum_time, proc)
                 else:
-                    stat.update_mapping_analysis(variant, cum_time, non_cum_time)
+                    stat.update_mapping_analysis(variant, cum_time, non_cum_time, proc)
             elif self.range_kind == EXECUTION_RANGE:
-                stat.update_invocations(variant, cum_time, non_cum_time)
+                stat.update_invocations(variant, cum_time, non_cum_time, proc)
             elif self.range_kind == POST_RANGE:
-                stat.update_post(variant, cum_time, non_cum_time)
+                stat.update_post(variant, cum_time, non_cum_time, proc)
             elif self.range_kind == TRIGGER_RANGE:
-                stat.update_trigger(variant, cum_time, non_cum_time)
+                stat.update_trigger(variant, cum_time, non_cum_time, proc)
         for r in self.subranges:
-            r.update_task_stats(stat)
+            r.update_task_stats(stat, proc)
 
     def active_time(self):
         if self.range_kind == EXECUTION_RANGE:
@@ -734,7 +735,7 @@ class Processor(object):
             self.full_range.emit_svg_range(printer)
 
     def update_task_stats(self, stat):
-        self.full_range.update_task_stats(stat)
+        self.full_range.update_task_stats(stat, self.proc_id)
 
     def __repr__(self):
         if self.kind != 'COPY':
@@ -890,6 +891,8 @@ class Instance(object):
             self.create_time = create_time
 
     def set_destroy(self, time):
+        if not (self.destroy_time is None):
+            print(self.destroy_time)
         assert self.destroy_time is None
         self.destroy_time = time
 
@@ -1001,11 +1004,29 @@ class CallTracker(object):
         self.invocations = 0
         self.cum_time = 0
         self.non_cum_time = 0
+        self.min_time = 0
+        self.max_time = 0
+        self.min_proc = None
+        self.max_proc = None
+        self.all_vals = list()
 
-    def increment(self, cum, non_cum):
+    def increment(self, cum, non_cum, proc):
+        if self.invocations == 0:
+            self.min_time = cum
+            self.max_time = cum
+            self.min_proc = proc
+            self.max_proc = proc
+        else:
+            if cum < self.min_time:
+                self.min_time = cum
+                self.min_proc = proc
+            if cum > self.max_time:
+                self.max_time = cum
+                self.max_proc = proc
         self.invocations = self.invocations + 1
         self.cum_time = self.cum_time + cum
         self.non_cum_time = self.non_cum_time + non_cum
+        self.all_vals.append(cum)
 
     def is_empty(self):
         return self.invocations == 0
@@ -1013,10 +1034,25 @@ class CallTracker(object):
     def print_stats(self, total_time):
         print "                Total Invocations: "+str(self.invocations)
         if self.invocations > 0:
+            stddev = 0
+            assert self.invocations == len(self.all_vals)
+            avg = float(self.cum_time)/float(self.invocations)
+            max_dev = 0.0
+            min_dev = 0.0
+            if self.invocations > 1:
+                for val in self.all_vals:
+                    diff = float(val) - avg
+                    stddev = stddev + sqrt(diff * diff)
+                stddev = stddev / float(self.invocations)
+                stddev = sqrt(stddev)
+                max_dev = (float(self.max_time) - avg) / stddev if stddev != 0 else 0.0
+                min_dev = (float(self.min_time) - avg) / stddev if stddev != 0 else 0.0
             print "                Cummulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
             print "                Non-Cummulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
             print "                Average Cum Time: %.3f us" % (float(self.cum_time)/float(self.invocations))
             print "                Average Non-Cum Time: %.3f us" % (float(self.non_cum_time)/float(self.invocations))
+            print "                Maximum Cum Time: %.3f us (%.3f sig) on processor %s" % (float(self.max_time),max_dev,hex(self.max_proc))
+            print "                Minimum Cum Time: %.3f us (%.3f sig) on processor %s" % (float(self.min_time),min_dev,hex(self.min_proc))
 
 class StatVariant(object):
     def __init__(self, var):
@@ -1034,41 +1070,41 @@ class StatVariant(object):
         self.post_operations = CallTracker()
         self.triggers = CallTracker()
 
-    def update_invocations(self, cum, non_cum):
-        self.invocations.increment(cum, non_cum)
+    def update_invocations(self, cum, non_cum, proc):
+        self.invocations.increment(cum, non_cum, proc)
 
-    def update_inline_dep_analysis(self, cum, non_cum):
-        self.inline_dep_analysis.increment(cum, non_cum)
+    def update_inline_dep_analysis(self, cum, non_cum, proc):
+        self.inline_dep_analysis.increment(cum, non_cum, proc)
 
-    def update_inline_mappings(self, cum, non_cum):
-        self.inline_mappings.increment(cum, non_cum)
+    def update_inline_mappings(self, cum, non_cum, proc):
+        self.inline_mappings.increment(cum, non_cum, proc)
 
-    def update_close_dep_analysis(self, cum, non_cum):
-        self.close_dep_analysis.increment(cum, non_cum)
+    def update_close_dep_analysis(self, cum, non_cum, proc):
+        self.close_dep_analysis.increment(cum, non_cum, proc)
 
-    def update_close_operations(self, cum, non_cum):
-        self.close_operations.increment(cum, non_cum)
+    def update_close_operations(self, cum, non_cum, proc):
+        self.close_operations.increment(cum, non_cum, proc)
 
-    def update_copy_dep_analysis(self, cum, non_cum):
-        self.copy_dep_analysis.increment(cum, num_cum)
+    def update_copy_dep_analysis(self, cum, non_cum, proc):
+        self.copy_dep_analysis.increment(cum, num_cum, proc)
 
-    def update_copy_operations(self, cum, non_cum):
-        self.copy_operations.increment(cum, non_cum)
+    def update_copy_operations(self, cum, non_cum, proc):
+        self.copy_operations.increment(cum, non_cum, proc)
 
-    def update_dependence_analysis(self, cum, non_cum):
-        self.dependence_analysis.increment(cum, non_cum)
+    def update_dependence_analysis(self, cum, non_cum, proc):
+        self.dependence_analysis.increment(cum, non_cum, proc)
 
-    def update_premappings(self, cum, non_cum):
-        self.premappings.increment(cum, non_cum)
+    def update_premappings(self, cum, non_cum, proc):
+        self.premappings.increment(cum, non_cum, proc)
 
-    def update_mapping_analysis(self, cum, non_cum):
-        self.mapping_analysis.increment(cum, non_cum)
+    def update_mapping_analysis(self, cum, non_cum, proc):
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_post_operations(self, cum, non_cum):
-        self.post_operations.increment(cum, non_cum)
+    def update_post_operations(self, cum, non_cum, proc):
+        self.post_operations.increment(cum, non_cum, proc)
 
-    def update_trigger(self, cum, non_cum):
-        self.triggers.increment(cum, non_cum)
+    def update_trigger(self, cum, non_cum, proc):
+        self.triggers.increment(cum, non_cum, proc)
 
     def cummulative_time(self):
         time = 0
@@ -1162,68 +1198,68 @@ class StatGatherer(object):
         assert var not in self.variants
         self.variants[var] = StatVariant(var)
 
-    def update_invocations(self, var, cum, non_cum):
+    def update_invocations(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_invocations(cum, non_cum)
+        self.variants[var].update_invocations(cum, non_cum, proc)
 
-    def update_inline_dep_analysis(self, var, cum, non_cum):
+    def update_inline_dep_analysis(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_inline_dep_analysis(cum, non_cum)
-        self.dependence_analysis.increment(cum, non_cum)
+        self.variants[var].update_inline_dep_analysis(cum, non_cum, proc)
+        self.dependence_analysis.increment(cum, non_cum, proc)
 
-    def update_inline_mappings(self, var, cum, non_cum):
+    def update_inline_mappings(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_inline_mappings(cum, non_cum)
-        self.mapping_analysis.increment(cum, non_cum)
+        self.variants[var].update_inline_mappings(cum, non_cum, proc)
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_close_dep_analysis(self, var, cum, non_cum):
+    def update_close_dep_analysis(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_close_dep_analysis(cum, non_cum)
-        self.dependence_analysis.increment(cum, non_cum)
+        self.variants[var].update_close_dep_analysis(cum, non_cum, proc)
+        self.dependence_analysis.increment(cum, non_cum, proc)
 
-    def update_close_operations(self, var, cum, non_cum):
+    def update_close_operations(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_close_operations(cum, non_cum)
-        self.mapping_analysis.increment(cum, non_cum)
+        self.variants[var].update_close_operations(cum, non_cum, proc)
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_copy_dep_analysis(self, var, cum_non_cum):
+    def update_copy_dep_analysis(self, var, cum_non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_copy_dep_analysis(cum, non_cum)
-        self.dependence_analysis.increment(cum, non_cum)
+        self.variants[var].update_copy_dep_analysis(cum, non_cum, proc)
+        self.dependence_analysis.increment(cum, non_cum, proc)
 
-    def update_copy_operations(self, var, cum, non_cum):
+    def update_copy_operations(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_copy_operations(cum, non_cum)
-        self.mapping_analysis.increment(cum, non_cum)
+        self.variants[var].update_copy_operations(cum, non_cum, proc)
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_dependence_analysis(self, var, cum, non_cum):
+    def update_dependence_analysis(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_dependence_analysis(cum, non_cum)
-        self.dependence_analysis.increment(cum, non_cum)
+        self.variants[var].update_dependence_analysis(cum, non_cum, proc)
+        self.dependence_analysis.increment(cum, non_cum, proc)
 
-    def update_premappings(self, var, cum, non_cum):
+    def update_premappings(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_premappings(cum, non_cum)
-        self.mapping_analysis.increment(cum, non_cum)
+        self.variants[var].update_premappings(cum, non_cum, proc)
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_mapping_analysis(self, var, cum, non_cum):
+    def update_mapping_analysis(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_mapping_analysis(cum, non_cum)
-        self.mapping_analysis.increment(cum, non_cum)
+        self.variants[var].update_mapping_analysis(cum, non_cum, proc)
+        self.mapping_analysis.increment(cum, non_cum, proc)
 
-    def update_post(self, var, cum, non_cum):
+    def update_post(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_post_operations(cum, non_cum)
+        self.variants[var].update_post_operations(cum, non_cum, proc)
 
-    def update_trigger(self, var, cum, non_cum):
+    def update_trigger(self, var, cum, non_cum, proc):
         assert var in self.variants
-        self.variants[var].update_trigger(cum, non_cum)
+        self.variants[var].update_trigger(cum, non_cum, proc)
 
-    def update_scheduler(self, cum, non_cum):
-        self.scheduler.increment(cum, non_cum)
+    def update_scheduler(self, cum, non_cum, proc):
+        self.scheduler.increment(cum, non_cum, proc)
 
-    def update_gc(self, cum, non_cum):
-        self.gcs.increment(cum, non_cum)
+    def update_gc(self, cum, non_cum, proc):
+        self.gcs.increment(cum, non_cum, proc)
 
     def print_stats(self, total_time, cummulative, verbose):
         print "  -------------------------"
@@ -1291,7 +1327,7 @@ class State(object):
             variant = self.task_variants[task_id],
             uid = uid,
             point = Point(dim, p0, p1, p2),
-            color_string = color_helper(task_id, task_id if task_id > len(self.task_variants) else len(self.task_variants)))
+            color_string = color_helper(task_id % len(self.task_variants), len(self.task_variants)))
 
     def create_unique_map(self, proc_id, uid, parent_uid):
         assert uid not in self.unique_ops
@@ -1345,23 +1381,26 @@ class State(object):
         return unique_op.add_event(event, self.processors[proc_id])
 
     def create_instance(self, iid, mem, redop, bf, time):
-        if iid not in self.instances:
-            self.instances[iid] = [Instance(iid)]
-        else:
-            self.instances[iid].append(Instance(iid))
-        self.instances[iid][-1].set_create(self.memories[mem],
-                                       redop, bf, time)
-        assert mem in self.memories
-        self.memories[mem].add_instance(self.instances[iid][-1])
+        pass
+        #if iid not in self.instances:
+        #    self.instances[iid] = [Instance(iid)]
+        #else:
+        #    self.instances[iid].append(Instance(iid))
+        #self.instances[iid][-1].set_create(self.memories[mem],
+        #                               redop, bf, time)
+        #assert mem in self.memories
+        #self.memories[mem].add_instance(self.instances[iid][-1])
 
     def add_instance_field(self, iid, fid, size):
-        assert iid in self.instances
-        self.instances[iid][-1].add_field(fid, size)
+        pass
+        #assert iid in self.instances
+        #self.instances[iid][-1].add_field(fid, size)
 
     def destroy_instance(self, iid, time):
-        if iid not in self.instances:
-            self.instances[iid] = [Instance(iid)]
-        self.instances[iid][-1].set_destroy(time)
+        pass
+        #if iid not in self.instances:
+        #    self.instances[iid] = [Instance(iid)]
+        #self.instances[iid][-1].set_destroy(time)
 
     def build_time_ranges(self):
         assert self.last_time is not None
@@ -1535,7 +1574,10 @@ def parse_log_file(file_name, state):
             # If we made it here, then we failed to match.
             matches -= 1
             print 'Skipping line: %s' % line.strip()
-    state.last_time = last_time
+    if state.last_time == None:
+        state.last_time = last_time
+    elif state.last_time < last_time:
+        state.last_time = last_time
     while len(replay_lines) > 0:
         to_delete = set()
         for line in replay_lines:
@@ -1590,11 +1632,11 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'cpvim:')
+    opts, args = getopt(sys.argv[1:],'cpvim:d:')
     opts = dict(opts)
-    if len(args) != 1:
+    if len(args) == 0:
         usage()
-    file_name = args[0]
+    file_names = args
     cummulative = False
     generate_pictures = False
     generate_instance = False
@@ -1615,11 +1657,15 @@ def main():
     mem_file_name = 'legion_prof_mem.svg'
     html_mem_file_name = 'legion_prof_mem.html'
 
-    print 'Loading log file %s...' % file_name
     state = State()
-    total_matches = parse_log_file(file_name, state)
-    print 'Matched %s lines' % total_matches
-    if total_matches == 0:
+    has_matches = False
+    for file_name in file_names:
+        print 'Loading log file %s...' % file_name
+        total_matches = parse_log_file(file_name, state)
+        print 'Matched %s lines' % total_matches
+        if total_matches > 0:
+            has_matches = True
+    if not has_matches:
         print 'No matches. Exiting...'
         return
     # Now have the state build the time ranges for each processor

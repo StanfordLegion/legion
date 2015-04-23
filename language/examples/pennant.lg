@@ -14,14 +14,17 @@
 
 -- runs-with:
 -- [
---   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "1"],
---   ["pennant.tests/sedovsmall/sedovsmall.pnt", "-npieces", "2"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-17"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-17"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "3"]
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt",
+--    "-npieces", "1", "-compact", "0"],
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt",
+--    "-npieces", "2", "-compact", "0",
+--    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
+--   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-compact", "0",
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
+--   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3", "-compact", "0",
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1", "-compact", "0"],
+--   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2", "-compact", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -38,7 +41,7 @@ do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime"
   local pennant_cc = root_dir .. "pennant.cc"
-  local pennant_so = root_dir .. "pennant.so"
+  local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
@@ -181,6 +184,11 @@ local config_fields_cmd = terralib.newlist({
   -- Command-line parameters.
   {field = "npieces", type = int64, default_value = 1},
   {field = "use_foreign", type = bool, default_value = false},
+  {field = "enable", type = bool, default_value = true},
+  {field = "warmup", type = bool, default_value = true},
+  {field = "compact", type = bool, default_value = true},
+  {field = "stripsize", type = int64, default_value = 128},
+  {field = "spansize", type = int64, default_value = 512},
 })
 
 local config_fields_all = terralib.newlist()
@@ -197,7 +205,6 @@ local MESH_RECT = 1
 local MESH_HEX = 2
 
 fspace zone {
-  znump :  int64,        -- number of points in zone
   zxp :    vec2,         -- zone center coordinates, middle of cycle
   zx :     vec2,         -- zone center coordinates, end of cycle
   zareap : double,       -- zone area, middle of cycle
@@ -220,6 +227,9 @@ fspace zone {
   -- Temporaries for QCS
   zuc :    vec2,         -- zone center velocity
   z0tmp :  double,       -- temporary for qcs_vel_diff
+
+  -- Placed at end to avoid messing up alignment
+  znump :  uint8,        -- number of points in zone
 }
 
 fspace point {
@@ -228,15 +238,13 @@ fspace point {
   px :  vec2,            -- point coordinates, end of cycle
   pu0 : vec2,            -- point velocity, start of cycle
   pu :  vec2,            -- point velocity, end of cycle
-  pap : vec2,            -- point acceleration, middle of cycle
+  pap : vec2,            -- point acceleration, middle of cycle -- FIXME: dead
   pf :  vec2,            -- point force
   pmaswt : double,       -- point mass
 
   -- Used for computing boundary conditions
-  has_bcx_0 : bool,
-  has_bcx_1 : bool,
-  has_bcy_0 : bool,
-  has_bcy_1 : bool,
+  has_bcx : bool,
+  has_bcy : bool,
 }
 
 fspace side(rz : region(zone),
@@ -251,9 +259,9 @@ fspace side(rz : region(zone),
 
   sareap : double,       -- side area, middle of cycle
   sarea :  double,       -- side area, end of cycle
-  svolp :  double,       -- side volume, middle of cycle
-  svol :   double,       -- side volume, end of cycle
-  ssurfp : vec2,         -- side surface vector, middle of cycle
+  svolp :  double,       -- side volume, middle of cycle -- FIXME: dead field
+  svol :   double,       -- side volume, end of cycle    -- FIXME: dead field
+  ssurfp : vec2,         -- side surface vector, middle of cycle -- FIXME: dead
   smf :    double,       -- side mass fraction
   sfp :    vec2,         -- side force, pgas
   sft :    vec2,         -- side force, tts
@@ -324,7 +332,9 @@ where
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)
+    legionlib.assert(not isnull(s.mapsp1), "dynamic_cast failed on mapsp1")
     s.mapsp2 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp2)
+    legionlib.assert(not isnull(s.mapsp2), "dynamic_cast failed on mapsp2")
   end
 end
 
@@ -407,85 +417,76 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
-task init_step_points(rp : region(point))
+task init_step_points(rp : region(point),
+                      enable : bool)
 where
-  reads(rp.{px, pu}),
-  writes(rp.{px0, pu0, pmaswt, pf})
+  writes(rp.{pmaswt, pf})
 do
-  -- Copy state variables from previous time step.
-  for p in rp do
-    p.px0 = p.px
-  end
-  for p in rp do
-    p.pu0 = p.pu
-  end
+  if not enable then return end
 
   -- Initialize fields used in reductions.
+  __demand(__vectorize)
   for p in rp do
     p.pmaswt = 0.0
   end
+  __demand(__vectorize)
   for p in rp do
-    p.pf = {x = 0.0, y = 0.0}
+    p.pf.x = 0.0
+  end
+  __demand(__vectorize)
+  for p in rp do
+    p.pf.y = 0.0
   end
 end
 
 --
 -- 1. Advance mesh to center of time step.
 --
-task adv_pos_half(rp : region(point), dt : double)
+task adv_pos_half(rp : region(point), dt : double,
+                  enable : bool)
 where
-  reads(rp.{px0, pu0}),
-  writes(rp.pxp)
+  reads(rp.{px, pu}),
+  writes(rp.{px0, pxp, pu0})
 do
+  if not enable then return end
+
   var dth = 0.5 * dt
 
+  -- Copy state variables from previous time step and update position.
+  __demand(__vectorize)
   for p in rp do
-    p.pxp = p.px0 + dth*p.pu0
+    var px0_x = p.px.x
+    var pu0_x = p.pu.x
+    p.px0.x = px0_x
+    p.pu0.x = pu0_x
+    p.pxp.x = px0_x + dth*pu0_x
+  end
+  __demand(__vectorize)
+  for p in rp do
+    var px0_y = p.px.y
+    var pu0_y = p.pu.y
+    p.px0.y = px0_y
+    p.pu0.y = pu0_y
+    p.pxp.y = px0_y + dth*pu0_y
   end
 end
 
 -- Save off zone variable value from previous cycle.
 task init_step_zones(rz : region(zone),
-                     use_foreign : bool)
+                     use_foreign : bool, enable : bool)
 where
   reads(rz.zvol),
-  writes(rz.{zxp, zx, zareap, zarea, zvol0, zvolp, zvol, zdl, zw, zuc})
+  writes(rz.zvol0)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_init_step_zones(zstart, zend, rz)
   else
     -- Copy state variables from previous time step.
+    __demand(__vectorize)
     for z in rz do
       z.zvol0 = z.zvol
-    end
-
-    -- Initialize fields used in reductions.
-    for z in rz do
-      z.zxp = vec2 {x = 0.0, y = 0.0}
-    end
-    for z in rz do
-      z.zx = vec2 {x = 0.0, y = 0.0}
-    end
-    for z in rz do
-      z.zareap = 0.0
-    end
-    for z in rz do
-      z.zarea = 0.0
-    end
-    for z in rz do
-      z.zvolp = 0.0
-    end
-    for z in rz do
-      z.zvol = 0.0
-    end
-    for z in rz do
-      z.zdl = 1e99
-    end
-    for z in rz do
-      z.zw = 0.0
-    end
-    for z in rz do
-      z.zuc = vec2 {x = 0.0, y = 0.0}
     end
   end
 end
@@ -497,14 +498,18 @@ end
 -- Compute centers of zones and edges.
 task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  use_foreign : bool)
+                  use_foreign : bool, enable : bool)
 where
-  reads(rz.{znump, zxp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
+  reads(rz.znump, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zxp, rs.exp)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_centers(sstart, send, rz, rpp, rpg, rs)
   else
+    var zxp = vec2 { x = 0.0, y = 0.0 }
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
@@ -514,22 +519,35 @@ do
       var p1_pxp = p1.pxp
       e.exp = 0.5*(p1_pxp + p2.pxp)
 
-      z.zxp += (1/double(z.znump)) * p1_pxp
+      zxp += p1_pxp
+
+      if nside == z.znump then
+        z.zxp = (1/double(z.znump)) * zxp
+        zxp = vec2 { x = 0.0, y = 0.0 }
+        nside = 0
+      end
+      nside += 1
     end
   end
 end
 
 -- Compute volumes of zones and sides.
+-- Compute edge lengths.
 task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  use_foreign : bool)
+                  use_foreign : bool, enable : bool)
 where
-  reads(rz.{zxp, zareap, zvolp}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zareap, zvolp}, rs.{sareap, svolp})
+  reads(rz.{zxp, znump}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
+  writes(rz.{zareap, zvolp}, rs.{sareap, elen})
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_volumes(sstart, send, rz, rpp, rpg, rs)
   else
+    var zareap = 0.0
+    var zvolp = 0.0
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
@@ -538,55 +556,24 @@ do
       var p1_pxp = p1.pxp
       var p2_pxp = p2.pxp
       var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
-      var sv = (1.0 / 3.0) * sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
+      var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
       s.sareap = sa
-      s.svolp = sv
+      -- s.svolp = sv
+      s.elen = length(p2_pxp - p1_pxp)
 
-      z.zareap += sa
-      z.zvolp += sv
+      zareap += sa
+      zvolp += sv
+
+      if nside == z.znump then
+        z.zareap = zareap
+        z.zvolp = (1.0 / 3.0) * zvolp
+        zareap = 0.0
+        zvolp = 0.0
+        nside = 0
+      end
+      nside += 1
 
       legionlib.assert(sv > 0.0, "sv negative")
-    end
-  end
-end
-
--- Compute surface vectors of sides.
-task calc_surface_vecs(rz : region(zone), rpp : region(point), rpg : region(point),
-                       rs : region(side(rz, rpp, rpg, rs)),
-                       use_foreign : bool)
-where
-  reads(rz.zxp, rs.{mapsz, exp}),
-  writes(rs.ssurfp)
-do
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_surface_vecs(sstart, send, rz, rs)
-  else
-    for s in rs do
-      var z = s.mapsz
-      var e = s
-
-      s.ssurfp = rotateCCW(e.exp - z.zxp)
-    end
-  end
-end
-
--- Compute edge lengths.
-task calc_edge_len(rz : region(zone), rpp : region(point), rpg : region(point),
-                   rs : region(side(rz, rpp, rpg, rs)),
-                   use_foreign : bool)
-where
-  reads(rpp.pxp, rpg.pxp, rs.{mapsp1, mapsp2}),
-  writes(rs.elen)
-do
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_edge_len(sstart, send, rpp, rpg, rs)
-  else
-    for s in rs do
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
-      var e = s
-
-      e.elen = length(p2.pxp - p1.pxp)
     end
   end
 end
@@ -594,14 +581,18 @@ end
 -- Compute zone characteristic lengths.
 task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
-                   use_foreign : bool)
+                   use_foreign : bool, enable : bool)
 where
-  reads(rz.{znump, zdl}, rs.{mapsz, sareap, elen}),
+  reads(rz.znump, rs.{mapsz, sareap, elen}),
   writes(rz.zdl)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_char_len(sstart, send, rz, rs)
   else
+    var zdl = 1e99
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var e = s
@@ -615,7 +606,14 @@ do
         fac = 4.0
       end
       var sdl = fac * area / base
-      z.zdl = min(z.zdl, sdl)
+      zdl = min(zdl, sdl)
+
+      if nside == z.znump then
+        z.zdl = zdl
+        zdl = 1e99
+        nside = 0
+      end
+      nside += 1
     end
   end
 end
@@ -626,14 +624,17 @@ end
 
 -- Compute zone densities.
 task calc_rho_half(rz : region(zone),
-                   use_foreign : bool)
+                   use_foreign : bool, enable : bool)
 where
   reads(rz.{zvolp, zm}),
   writes(rz.zrp)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_rho_half(zstart, zend, rz)
   else
+    __demand(__vectorize)
     for z in rz do
       z.zrp = z.zm / z.zvolp
     end
@@ -643,12 +644,14 @@ end
 -- Reduce masses into points.
 task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
-                    use_foreign : bool)
+                    use_foreign : bool, enable : bool)
 where
   reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
   writes(rpp.pmaswt),
   reduces+(rpg.pmaswt)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_sum_point_mass(sstart, send, rz, rpp, rpg, rs)
   else
@@ -669,11 +672,13 @@ end
 
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
-                        use_foreign : bool)
+                        use_foreign : bool, enable : bool)
 where
   reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate}),
   writes(rz.{zp, zss})
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_state_at_half(gamma, ssmin, dt, zstart, zend, rz)
   else
@@ -706,68 +711,69 @@ end
 -- 4. Compute forces.
 --
 
--- Compute PolyGas forces.
-task calc_force_pgas(rz : region(zone), rpp : region(point), rpg : region(point),
-                     rs : region(side(rz, rpp, rpg, rs)),
-                     use_foreign : bool)
+-- Compute PolyGas and TTS forces.
+task calc_force_pgas_tts(rz : region(zone), rpp : region(point),
+                         rpg : region(point),
+                         rs : region(side(rz, rpp, rpg, rs)),
+                         alfa : double, ssmin : double,
+                         use_foreign : bool, enable : bool)
 where
-  reads(rz.zp, rs.{mapsz, ssurfp}),
-  writes(rs.sfp)
+  reads(rz.{zxp, zareap, zrp, zss, zp}, rs.{mapsz, sareap, smf, exp}),
+  writes(rs.{sfp, sft})
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_force_pgas(sstart, send, rz, rs)
   else
     for s in rs do
       var z = s.mapsz
-      var sfx = (-z.zp)*s.ssurfp
+
+      -- Compute surface vectors of sides.
+      var ssurfp = rotateCCW(s.exp - z.zxp)
+
+      -- Compute PolyGas forces.
+      var sfx = (-z.zp)*ssurfp
       s.sfp = sfx
-    end
-  end
-end
 
--- Compute TTS forces.
-task calc_force_tts(rz : region(zone), rpp : region(point), rpg : region(point),
-                    rs : region(side(rz, rpp, rpg, rs)),
-                    alfa : double, ssmin : double,
-                    use_foreign : bool)
-where
-  reads(rz.{zareap, zrp, zss}, rs.{mapsz, sareap, smf, ssurfp}),
-  writes(rs.sft)
-do
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_force_tts(alfa, ssmin, sstart, send, rz, rs)
-  else
-    for s in rs do
-      var z = s.mapsz
-
+      -- Compute TTS forces.
       var svfacinv = z.zareap / s.sareap
       var srho = z.zrp * s.smf * svfacinv
       var sstmp = max(z.zss, ssmin)
       sstmp = alfa * sstmp * sstmp
       var sdp = sstmp * (srho - z.zrp)
-      var sqq = (-sdp)*s.ssurfp
-      s.sft = sqq
+      var sqq = (-sdp)*ssurfp
+      s.sft = sfx + sqq
     end
   end
 end
 
 task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : region(point),
                               rs : region(side(rz, rpp, rpg, rs)),
-                              use_foreign : bool)
+                              use_foreign : bool, enable : bool)
 where
-  reads(rz.{znump, zuc}, rpp.pu, rpg.pu, rs.{mapsz, mapsp1}),
+  reads(rz.znump, rpp.pu, rpg.pu, rs.{mapsz, mapsp1}),
   writes(rz.zuc)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_qcs_zone_center_velocity(sstart, send, rz, rpp, rpg, rs)
   else
+    var zuc = vec2 { x = 0.0, y = 0.0 }
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
 
-      var zuc = (1.0 / double(z.znump))*p1.pu
-      z.zuc.x += zuc.x
-      z.zuc.y += zuc.y
+      zuc += (1.0 / double(z.znump))*p1.pu
+
+      if nside == z.znump then
+        z.zuc = zuc
+        zuc = vec2 { x = 0.0, y = 0.0 }
+        nside = 0
+      end
+      nside += 1
     end
   end
 end
@@ -785,13 +791,15 @@ end
 
 task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(point),
                            rs : region(side(rz, rpp, rpg, rs)),
-                           use_foreign : bool)
+                           use_foreign : bool, enable : bool)
 where
   reads(rz.{zxp, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
         rs.{mapsz, mapsp1, mapsp2, mapss3, exp, elen}),
   writes(rs.{carea, ccos, cdiv, cevol, cdu})
 do
-  if use_foreign then
+  if not enable then return end
+
+  if false --[[ use_foreign ]] then
     foreign_qcs_corner_divergence(
       __physical(rz), __fields(rz),
       __physical(rpp), __fields(rpp),
@@ -896,13 +904,15 @@ end
 task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    gamma : double, q1 : double, q2 : double,
-                   use_foreign : bool)
+                   use_foreign : bool, enable : bool)
 where
   reads(rz.{zrp, zss}, rpp.pu, rpg.pu,
         rs.{mapsz, mapsp1, mapsp2, mapss3, elen, cdiv, cdu, cevol}),
   writes(rs.{cqe1, cqe2})
 do
-  if use_foreign then
+  if not enable then return end
+
+  if false --[[ use_foreign ]] then
     foreign_qcs_qcn_force(
       __physical(rz), __fields(rz),
       __physical(rpp), __fields(rpp),
@@ -943,12 +953,14 @@ end
 
 task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
-               use_foreign : bool)
+               use_foreign : bool, enable : bool)
 where
   reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2}),
   writes(rs.sfq)
 do
-  if use_foreign then
+  if not enable then return end
+
+  if false --[[ use_foreign ]] then
     foreign_qcs_force(
       __physical(rs), __fields(rs))
   else
@@ -983,12 +995,14 @@ end
 task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   q1 : double, q2 : double,
-                  use_foreign : bool)
+                  use_foreign : bool, enable : bool)
 where
   reads(rz.{zss, z0tmp}, rpp.{pxp, pu}, rpg.{pxp, pu},
         rs.{mapsp1, mapsp2, mapsz, elen}),
   writes(rz.{zdu, z0tmp})
 do
+  if not enable then return end
+
   for z in rz do
     z.z0tmp = 0.0
   end
@@ -1016,24 +1030,121 @@ do
   end
 end
 
+local function accessor_generic_get_base_pointer(field_type)
+  return terra(accessor : c.legion_accessor_generic_t)
+
+    var base_pointer : &opaque = nil
+    var stride : c.size_t = terralib.sizeof(field_type)
+    var ok = c.legion_accessor_generic_get_soa_parameters(
+      accessor, &base_pointer, &stride)
+
+    legionlib.assert(ok, "failed to get base pointer")
+    legionlib.assert(stride == terralib.sizeof(field_type),
+                     "stride does not match expected value")
+
+    return [&field_type](base_pointer)
+  end
+end
+
+terra foreign_sum_point_force(
+  rz_physical : c.legion_physical_region_t[1],
+  rz_fields : c.legion_field_id_t[1],
+  rpp_physical : c.legion_physical_region_t[2],
+  rpp_fields : c.legion_field_id_t[2],
+  rpg_physical : c.legion_physical_region_t[2],
+  rpg_fields : c.legion_field_id_t[2],
+  rs_physical : c.legion_physical_region_t[8],
+  rs_fields : c.legion_field_id_t[8])
+
+  var accessor_znump = c.legion_physical_region_get_field_accessor_generic(
+    rz_physical[0], rz_fields[0])
+  var znump = [accessor_generic_get_base_pointer(uint8)](accessor_znump)
+
+  var accessor_pf_x = c.legion_physical_region_get_field_accessor_generic(
+    rpp_physical[0], rpp_fields[0])
+  var pf_x = [accessor_generic_get_base_pointer(double)](accessor_pf_x)
+  var accessor_pf_y = c.legion_physical_region_get_field_accessor_generic(
+    rpp_physical[1], rpp_fields[1])
+  var pf_y = [accessor_generic_get_base_pointer(double)](accessor_pf_y)
+
+  do
+    var accessor_rpg_pf_x = c.legion_physical_region_get_accessor_generic(
+      rpg_physical[0])
+    var rpg_pf_x = [accessor_generic_get_base_pointer(double)](accessor_pf_x)
+    var accessor_rpg_pf_y = c.legion_physical_region_get_accessor_generic(
+      rpg_physical[1])
+    var rpg_pf_y = [accessor_generic_get_base_pointer(double)](accessor_pf_y)
+
+    legionlib.assert(pf_x == rpg_pf_x, "base pointers don't match")
+    legionlib.assert(pf_y == rpg_pf_y, "base pointers don't match")
+  end
+
+  var accessor_mapsz = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[0], rs_fields[0])
+  var mapsz = [accessor_generic_get_base_pointer(uint32)](accessor_mapsz)
+  var accessor_mapsp1 = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[1], rs_fields[1])
+  var mapsp1 = [accessor_generic_get_base_pointer(uint32)](accessor_mapsp1)
+  var accessor_mapss3 = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[3], rs_fields[3])
+  var mapss3 = [accessor_generic_get_base_pointer(uint32)](accessor_mapss3)
+
+  var accessor_sft_x = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[4], rs_fields[4])
+  var sft_x = [accessor_generic_get_base_pointer(double)](accessor_sft_x)
+  var accessor_sft_y = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[5], rs_fields[5])
+  var sft_y = [accessor_generic_get_base_pointer(double)](accessor_sft_y)
+  var accessor_sfq_x = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[6], rs_fields[6])
+  var sfq_x = [accessor_generic_get_base_pointer(double)](accessor_sfq_x)
+  var accessor_sfq_y = c.legion_physical_region_get_field_accessor_generic(
+    rs_physical[7], rs_fields[7])
+  var sfq_y = [accessor_generic_get_base_pointer(double)](accessor_sfq_y)
+
+  var rs_iterator = c.legion_index_iterator_create(
+    c.legion_physical_region_get_logical_region(rs_physical[0]).index_space)
+  while c.legion_index_iterator_has_next(rs_iterator) do
+    var span_size : c.size_t = 0
+    var span_start = c.legion_index_iterator_next_span(rs_iterator, &span_size, -1).value
+
+    for span_i = 0, span_size do
+      var s = span_start + span_i
+      var p1 = mapsp1[s]
+      var s3 = mapss3[s]
+
+      var f_x = (sfq_x[s] + sft_x[s]) - (sfq_x[s3] + sft_x[s3])
+      var f_y = (sfq_y[s] + sft_y[s]) - (sfq_y[s3] + sft_y[s3])
+
+      pf_x[p1] = pf_x[p1] + f_x
+      pf_y[p1] = pf_x[p1] + f_y
+    end
+  end
+end
+
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
-                     use_foreign : bool)
+                     use_foreign : bool, enable : bool)
 where
-  reads(rpp.pf, rs.{mapsz, mapsp1, mapss3, sfp, sfq, sft}),
+  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
   writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
-  if false --[[ use_foreign ]] then
-    -- foreign_sum_point_force(sstart, send, rpp, rpg, rs)
+  if not enable then return end
+
+  if use_foreign then
+    foreign_sum_point_force(
+      __physical(rz), __fields(rz),
+      __physical(rpp), __fields(rpp),
+      __physical(rpg), __fields(rpg),
+      __physical(rs), __fields(rs))
   else
     for s in rs do
-      var z = s.mapsz
       var p1 = s.mapsp1
       var s3 = s.mapss3
 
-      var f = (s.sfp + (s.sfq + s.sft)) - (s3.sfp + (s3.sfq + s3.sft))
+      var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
       p1.pf.x += f.x
       p1.pf.y += f.y
     end
@@ -1044,19 +1155,22 @@ end
 -- 4a. Apply boundary conditions.
 --
 
-task apply_boundary_conditions(rp : region(point))
+task apply_boundary_conditions(rp : region(point),
+                               enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx_0, has_bcx_1, has_bcy_0, has_bcy_1}),
+  reads(rp.{pu0, pf, has_bcx, has_bcy}),
   writes(rp.{pu0, pf})
 do
+  if not enable then return end
+
   var vfixx = {x = 1.0, y = 0.0}
   var vfixy = {x = 0.0, y = 1.0}
   for p in rp do
-    if p.has_bcx_0 or p.has_bcx_1 then
+    if p.has_bcx then
       p.pu0 = project(p.pu0, vfixx)
       p.pf = project(p.pf, vfixx)
     end
-    if p.has_bcy_0 or p.has_bcy_1 then
+    if p.has_bcy then
       p.pu0 = project(p.pu0, vfixy)
       p.pf = project(p.pf, vfixy)
     end
@@ -1067,30 +1181,35 @@ end
 -- 5. Compute accelerations.
 --
 
-task calc_accel(rp : region(point))
-where
-  reads(rp.{pf, pmaswt}),
-  writes(rp.pap)
-do
-  var fuzz = 1e-99
-  for p in rp do
-    p.pap = (1.0 / max(p.pmaswt, fuzz))*(p.pf)
-  end
-end
+-- Fused into adv_pos_full.
 
 --
 -- 6. Advance mesh to end of time step.
 --
 
-task adv_pos_full(rp : region(point), dt : double)
+task adv_pos_full(rp : region(point), dt : double,
+                  enable : bool)
 where
-  reads(rp.{px0, pu0, pap}),
+  reads(rp.{px0, pu0, pf, pmaswt}),
   writes(rp.{px, pu})
 do
+  if not enable then return end
+
+  var fuzz = 1e-99
+  var dth = 0.5 * dt
+  __demand(__vectorize)
   for p in rp do
-    var pu = p.pu0 + dt*(p.pap)
-    p.pu = pu
-    p.px = p.px0 + (0.5 * dt)*(pu + p.pu0)
+    var fac = 1.0 / max(p.pmaswt, fuzz)
+    var pap_x = fac*p.pf.x
+    var pap_y = fac*p.pf.y
+
+    var pu_x = p.pu0.x + dt*(pap_x)
+    p.pu.x = pu_x
+    p.px.x = p.px0.x + dth*(pu_x + p.pu0.x)
+
+    var pu_y = p.pu0.y + dt*(pap_y)
+    p.pu.y = pu_y
+    p.px.y = p.px0.y + dth*(pu_y + p.pu0.y)
   end
 end
 
@@ -1103,14 +1222,18 @@ end
 -- in both cases.
 task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       use_foreign : bool)
+                       use_foreign : bool, enable : bool)
 where
-  reads(rz.{znump, zx}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
+  reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zx, rs.ex)
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_centers_full(sstart, send, rz, rpp, rpg, rs)
   else
+    var zx = vec2 { x = 0.0, y = 0.0 }
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
@@ -1120,7 +1243,14 @@ do
       var p1_px = p1.px
       e.ex = 0.5*(p1_px + p2.px)
 
-      z.zx += (1.0 / double(z.znump))*p1_px
+      zx += p1_px
+
+      if nside == z.znump then
+        z.zx = (1/double(z.znump)) * zx
+        zx = vec2 { x = 0.0, y = 0.0 }
+        nside = 0
+      end
+      nside += 1
     end
   end
 end
@@ -1130,14 +1260,19 @@ end
 -- in both cases.
 task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       use_foreign : bool)
+                       use_foreign : bool, enable : bool)
 where
-  reads(rz.{zx, zarea, zvol}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zarea, zvol}, rs.{sarea, svol})
+  reads(rz.{zx, znump}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
+  writes(rz.{zarea, zvol}, rs.{sarea})
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_volumes_full(sstart, send, rz, rpp, rpg, rs)
   else
+    var zarea = 0.0
+    var zvol = 0.0
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
@@ -1146,12 +1281,21 @@ do
       var p1_px = p1.px
       var p2_px = p2.px
       var sa = 0.5 * cross(p2_px - p1_px, z.zx - p1_px)
-      var sv = (1.0 / 3.0) * sa * (p1_px.x + p2_px.x + z.zx.x)
+      var sv = sa * (p1_px.x + p2_px.x + z.zx.x)
       s.sarea = sa
-      s.svol = sv
+      -- s.svol = sv
 
-      z.zarea += sa
-      z.zvol += sv
+      zarea += sa
+      zvol += sv
+
+      if nside == z.znump then
+        z.zarea = zarea
+        z.zvol = (1.0 / 3.0) * zvol
+        zarea = 0.0
+        zvol = 0.0
+        nside = 0
+      end
+      nside += 1
 
       legionlib.assert(sv > 0.0, "sv negative")
     end
@@ -1165,15 +1309,19 @@ end
 task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                dt : double,
-               use_foreign : bool)
+               use_foreign : bool, enable : bool)
 where
-  reads(rz.{zw, zetot}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
+  reads(rz.{zetot, znump}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
         rs.{mapsz, mapsp1, mapsp2, sfp, sfq}),
   writes(rz.{zw, zetot})
 do
+  if not enable then return end
+
   if false --[[ use_foreign ]] then
     -- foreign_calc_work(dt, sstart, send, rz, rpp, rpg, rs)
   else
+    var zdwork = 0.0
+    var nside = 1
     for s in rs do
       var z = s.mapsz
       var p1 = s.mapsp1
@@ -1184,51 +1332,42 @@ do
       var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
       var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-      z.zetot += dwork
-      z.zw += dwork
+      zdwork += dwork
+
+      if nside == z.znump then
+        z.zetot += zdwork
+        z.zw = zdwork
+        zdwork = 0.0
+        nside = 0
+      end
+      nside += 1
     end
   end
 end
 
 --
 -- 7a. Compute work rate.
---
-
-task calc_work_rate(rz : region(zone), dt : double)
-where
-  reads(rz.{zvol0, zvol, zw, zp}),
-  writes(rz.zwrate)
-do
-  var dtiny = 1.0 / dt
-
-  for z in rz do
-    var dvol = z.zvol - z.zvol0
-    z.zwrate = (z.zw + z.zp * dvol) * dtiny
-  end
-end
-
---
 -- 8. Update state variables.
 --
 
-task calc_energy(rz : region(zone))
+task calc_work_rate_energy_rho_full(rz : region(zone), dt : double,
+                                    enable : bool)
 where
-  reads(rz.{zm, zetot}),
-  writes(rz.ze)
+  reads(rz.{zvol0, zvol, zm, zw, zp, zetot}),
+  writes(rz.{zwrate, ze, zr})
 do
+  if not enable then return end
+
+  var dtiny = 1.0 / dt
   var fuzz = 1e-99
 
+  __demand(__vectorize)
   for z in rz do
-    z.ze = z.zetot / (z.zm + fuzz)
-  end
-end
+    var dvol = z.zvol - z.zvol0
+    z.zwrate = (z.zw + z.zp * dvol) * dtiny
 
-task calc_rho_full(rz : region(zone))
-where
-  reads(rz.{zvol, zm}),
-  writes(rz.zr)
-do
-  for z in rz do
+    z.ze = z.zetot / (z.zm + fuzz)
+
     z.zr = z.zm / z.zvol
   end
 end
@@ -1268,11 +1407,13 @@ end
 ]]
 
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
-                   cfl : double, cflv : double) : double
+                   cfl : double, cflv : double, enable : bool) : double
 where
   reads(rz.{zdl, zvol0, zvol, zss, zdu})
 do
   var dthydro = dtmax
+
+  if not enable then return dthydro end
 
   -- dthydro min= min(calc_dt_courant(rz, dtmax, cfl),
   --                  calc_dt_volume(rz, dtlast, cflv))
@@ -1327,77 +1468,6 @@ end
 function _t2() end -- seems like I need this to break up the statements
 (terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
-task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
-                rp_all : region(point),
-                rp_all_private : region(point),
-                rp_all_private_p : partition(disjoint, rp_all_private),
-                rp_all_ghost : region(point),
-                rp_all_ghost_p : partition(aliased, rp_all_ghost),
-                rp_all_shared_p : partition(disjoint, rp_all_ghost),
-                rs_all : region(side(wild, wild, wild, wild)),
-                rs_all_p : partition(disjoint, rs_all),
-                rm_all : region(mesh(rz_all, rp_all, rs_all)),
-                conf : config)
-where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all, rm_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  rp_all_private * rp_all_ghost
-do
-  var einit = conf.einit
-  var einitsub = conf.einitsub
-  var rinit = conf.rinit
-  var rinitsub = conf.rinitsub
-  var subregion = conf.subregion
-  var uinitradial = conf.uinitradial
-
-  var use_foreign = conf.use_foreign
-
-  for i = 0, conf.npieces do
-    init_pointers(rz_all_p[i],
-                  rp_all_private_p[i],
-                  rp_all_ghost_p[i],
-                  rs_all_p[i])
-  end
-
-  for i = 0, conf.npieces do
-    init_mesh_zones(rz_all_p[i])
-  end
-
-  for i = 0, conf.npieces do
-    calc_centers_full(rz_all_p[i],
-                      rp_all_private_p[i],
-                      rp_all_ghost_p[i],
-                      rs_all_p[i],
-                      use_foreign)
-  end
-
-  for i = 0, conf.npieces do
-    calc_volumes_full(rz_all_p[i],
-                      rp_all_private_p[i],
-                      rp_all_ghost_p[i],
-                      rs_all_p[i],
-                      use_foreign)
-  end
-
-  for i = 0, conf.npieces do
-    init_side_fracs(rz_all_p[i],
-                    rp_all_private_p[i],
-                    rp_all_ghost_p[i],
-                    rs_all_p[i])
-  end
-
-  for i = 0, conf.npieces do
-    init_hydro(rz_all_p[i],
-               rinit, einit, rinitsub, einitsub,
-               subregion[0], subregion[1], subregion[2], subregion[3])
-  end
-
-  for i = 0, conf.npieces do
-    init_radial_velocity(rp_all_private_p[i], uinitradial)
-    init_radial_velocity(rp_all_shared_p[i], uinitradial)
-  end
-end
-
 task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all : region(point),
               rp_all_private : region(point),
@@ -1431,6 +1501,7 @@ do
   var vfix = {x = 0.0, y = 0.0}
 
   var use_foreign = conf.use_foreign
+  var enable = conf.enable
 
   var interval = 10
   var start_time = c.legion_get_current_time_in_micros()/1.e6
@@ -1445,16 +1516,16 @@ do
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      init_step_points(rp_all_private_p[i])
+      init_step_points(rp_all_private_p[i], enable)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
-      init_step_points(rp_all_shared_p[i])
+      init_step_points(rp_all_shared_p[i], enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      init_step_zones(rz_all_p[i], use_foreign)
+      init_step_zones(rz_all_p[i], use_foreign, enable)
     end
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
@@ -1468,11 +1539,11 @@ do
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      adv_pos_half(rp_all_private_p[i], dt)
+      adv_pos_half(rp_all_private_p[i], dt, enable)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
-      adv_pos_half(rp_all_shared_p[i], dt)
+      adv_pos_half(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__parallel)
@@ -1481,7 +1552,7 @@ do
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
                    rs_all_p[i],
-                   use_foreign)
+                   use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1490,25 +1561,7 @@ do
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
                    rs_all_p[i],
-                   use_foreign)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_surface_vecs(rz_all_p[i],
-                        rp_all_private_p[i],
-                        rp_all_ghost_p[i],
-                        rs_all_p[i],
-                        use_foreign)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_edge_len(rz_all_p[i],
-                    rp_all_private_p[i],
-                    rp_all_ghost_p[i],
-                    rs_all_p[i],
-                    use_foreign)
+                   use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1517,12 +1570,12 @@ do
                     rp_all_private_p[i],
                     rp_all_ghost_p[i],
                     rs_all_p[i],
-                    use_foreign)
+                    use_foreign, enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_rho_half(rz_all_p[i], use_foreign)
+      calc_rho_half(rz_all_p[i], use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1531,30 +1584,22 @@ do
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
                      rs_all_p[i],
-                     use_foreign)
+                     use_foreign, enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, use_foreign)
+      calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, use_foreign, enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_force_pgas(rz_all_p[i],
-                      rp_all_private_p[i],
-                      rp_all_ghost_p[i],
-                      rs_all_p[i],
-                      use_foreign)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_force_tts(rz_all_p[i],
-                     rp_all_private_p[i],
-                     rp_all_ghost_p[i],
-                     rs_all_p[i],
-                     alfa, ssmin, use_foreign)
+      calc_force_pgas_tts(rz_all_p[i],
+                          rp_all_private_p[i],
+                          rp_all_ghost_p[i],
+                          rs_all_p[i],
+                          alfa, ssmin,
+                          use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1564,7 +1609,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign)
+        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1574,7 +1619,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign)
+        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1585,7 +1630,7 @@ do
         rp_all_ghost_p[i],
         rs_all_p[i],
         gamma, q1, q2,
-        use_foreign)
+        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1595,7 +1640,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign)
+        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1606,7 +1651,7 @@ do
         rp_all_ghost_p[i],
         rs_all_p[i],
         q1, q2,
-        use_foreign)
+        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1615,34 +1660,25 @@ do
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
                       rs_all_p[i],
-                      use_foreign)
+                      use_foreign, enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      apply_boundary_conditions(rp_all_private_p[i])
+      apply_boundary_conditions(rp_all_private_p[i], enable)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
-      apply_boundary_conditions(rp_all_shared_p[i])
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_accel(rp_all_private_p[i])
-    end
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_accel(rp_all_shared_p[i])
+      apply_boundary_conditions(rp_all_shared_p[i], enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      adv_pos_full(rp_all_private_p[i], dt)
+      adv_pos_full(rp_all_private_p[i], dt, enable)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
-      adv_pos_full(rp_all_shared_p[i], dt)
+      adv_pos_full(rp_all_shared_p[i], dt, enable)
     end
 
     __demand(__parallel)
@@ -1651,7 +1687,7 @@ do
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
                         rs_all_p[i],
-                        use_foreign)
+                        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1660,7 +1696,7 @@ do
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
                         rs_all_p[i],
-                        use_foreign)
+                        use_foreign, enable)
     end
 
     __demand(__parallel)
@@ -1669,34 +1705,109 @@ do
                 rp_all_private_p[i],
                 rp_all_ghost_p[i],
                 rs_all_p[i],
-                dt, use_foreign)
+                dt, use_foreign, enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_work_rate(rz_all_p[i], dt)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_energy(rz_all_p[i])
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_rho_full(rz_all_p[i])
+      calc_work_rate_energy_rho_full(rz_all_p[i], dt, enable)
     end
 
     dthydro = dtmax
     __demand(__parallel)
     for i = 0, conf.npieces do
-      dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv)
+      dthydro min= calc_dt_hydro(rz_all_p[i], dt, dtmax, cfl, cflv, enable)
     end
 
     cycle += 1
     time += dt
 
     c.legion_runtime_end_trace(__runtime(), __context(), 0)
+  end
+end
+
+task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
+                rp_all : region(point),
+                rp_all_private : region(point),
+                rp_all_private_p : partition(disjoint, rp_all_private),
+                rp_all_ghost : region(point),
+                rp_all_ghost_p : partition(aliased, rp_all_ghost),
+                rp_all_shared_p : partition(disjoint, rp_all_ghost),
+                rs_all : region(side(wild, wild, wild, wild)),
+                rs_all_p : partition(disjoint, rs_all),
+                rm_all : region(mesh(rz_all, rp_all, rs_all)),
+                conf : config)
+where
+  reads(rz_all, rp_all_private, rp_all_ghost, rs_all, rm_all),
+  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  rp_all_private * rp_all_ghost
+do
+  var einit = conf.einit
+  var einitsub = conf.einitsub
+  var rinit = conf.rinit
+  var rinitsub = conf.rinitsub
+  var subregion = conf.subregion
+  var uinitradial = conf.uinitradial
+
+  var use_foreign = conf.use_foreign
+  var enable = true
+
+  for i = 0, conf.npieces do
+    init_pointers(rz_all_p[i],
+                  rp_all_private_p[i],
+                  rp_all_ghost_p[i],
+                  rs_all_p[i])
+  end
+
+  for i = 0, conf.npieces do
+    init_mesh_zones(rz_all_p[i])
+  end
+
+  for i = 0, conf.npieces do
+    calc_centers_full(rz_all_p[i],
+                      rp_all_private_p[i],
+                      rp_all_ghost_p[i],
+                      rs_all_p[i],
+                      use_foreign, enable)
+  end
+
+  for i = 0, conf.npieces do
+    calc_volumes_full(rz_all_p[i],
+                      rp_all_private_p[i],
+                      rp_all_ghost_p[i],
+                      rs_all_p[i],
+                      use_foreign, enable)
+  end
+
+  for i = 0, conf.npieces do
+    init_side_fracs(rz_all_p[i],
+                    rp_all_private_p[i],
+                    rp_all_ghost_p[i],
+                    rs_all_p[i])
+  end
+
+  for i = 0, conf.npieces do
+    init_hydro(rz_all_p[i],
+               rinit, einit, rinitsub, einitsub,
+               subregion[0], subregion[1], subregion[2], subregion[3])
+  end
+
+  for i = 0, conf.npieces do
+    init_radial_velocity(rp_all_private_p[i], uinitradial)
+    init_radial_velocity(rp_all_shared_p[i], uinitradial)
+  end
+
+  if conf.warmup then
+    -- Do one iteration to warm up the runtime.
+    var conf_warmup = conf
+    conf_warmup.cstop = 1
+    conf_warmup.enable = false
+    simulate(rz_all, rz_all_p,
+             rp_all,
+             rp_all_private, rp_all_private_p,
+             rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
+             rs_all, rs_all_p,
+             rm_all, conf_warmup)
   end
 end
 
@@ -1921,6 +2032,26 @@ terra read_config()
     conf.use_foreign = [bool](c.atoll(use_foreign))
   end
 
+  var warmup = get_optional_arg("-warmup")
+  if warmup ~= nil then
+    conf.warmup = [bool](c.atoll(warmup))
+  end
+
+  var compact = get_optional_arg("-compact")
+  if compact ~= nil then
+    conf.compact = [bool](c.atoll(compact))
+  end
+
+  var stripsize = get_optional_arg("-stripsize")
+  if stripsize ~= nil then
+    conf.stripsize = c.atoll(stripsize)
+  end
+
+  var spansize = get_optional_arg("-spansize")
+  if spansize ~= nil then
+    conf.spansize = c.atoll(spansize)
+  end
+
   -- Read parameters from input file.
   [config_fields_input:map(function(field)
        if field.is_linked_field then
@@ -1979,19 +2110,23 @@ end
 
 struct mesh_colorings {
   rz_all_c : c.legion_coloring_t,
+  rz_spans_c : c.legion_coloring_t,
   rp_all_c : c.legion_coloring_t,
   rp_all_private_c : c.legion_coloring_t,
   rp_all_ghost_c : c.legion_coloring_t,
   rp_all_shared_c : c.legion_coloring_t,
+  rp_spans_c : c.legion_coloring_t,
   rs_all_c : c.legion_coloring_t,
+  nspans_zones : int64,
+  nspans_points : int64,
 }
 
 terra read_input(runtime : c.legion_runtime_t,
                  ctx : c.legion_context_t,
                  rz_physical : c.legion_physical_region_t[24],
                  rz_fields : c.legion_field_id_t[24],
-                 rp_physical : c.legion_physical_region_t[19],
-                 rp_fields : c.legion_field_id_t[19],
+                 rp_physical : c.legion_physical_region_t[17],
+                 rp_fields : c.legion_field_id_t[17],
                  rs_physical : c.legion_physical_region_t[34],
                  rs_fields : c.legion_field_id_t[34],
                  rm_physical : c.legion_physical_region_t[20],
@@ -2005,28 +2140,37 @@ terra read_input(runtime : c.legion_runtime_t,
   var pointpos_y_size : c.size_t = conf.np
   var pointcolors_size : c.size_t = conf.np
   var pointmcolors_size : c.size_t = conf.np * color_words
+  var pointspancolors_size : c.size_t = conf.np
   var zonestart_size : c.size_t = conf.nz
   var zonesize_size : c.size_t = conf.nz
   var zonepoints_size : c.size_t = conf.nz * conf.maxznump
   var zonecolors_size : c.size_t = conf.nz
+  var zonespancolors_size : c.size_t = conf.nz
 
   var pointpos_x : &double = [&double](c.malloc(pointpos_x_size*sizeof(double)))
   var pointpos_y : &double = [&double](c.malloc(pointpos_y_size*sizeof(double)))
   var pointcolors : &int64 = [&int64](c.malloc(pointcolors_size*sizeof(int64)))
   var pointmcolors : &uint64 = [&uint64](c.malloc(pointmcolors_size*sizeof(uint64)))
+  var pointspancolors : &int64 = [&int64](c.malloc(pointspancolors_size*sizeof(int64)))
   var zonestart : &int64 = [&int64](c.malloc(zonestart_size*sizeof(int64)))
   var zonesize : &int64 = [&int64](c.malloc(zonesize_size*sizeof(int64)))
   var zonepoints : &int64 = [&int64](c.malloc(zonepoints_size*sizeof(int64)))
   var zonecolors : &int64 = [&int64](c.malloc(zonecolors_size*sizeof(int64)))
+  var zonespancolors : &int64 = [&int64](c.malloc(zonespancolors_size*sizeof(int64)))
 
   legionlib.assert(pointpos_x ~= nil, "pointpos_x nil")
   legionlib.assert(pointpos_y ~= nil, "pointpos_y nil")
   legionlib.assert(pointcolors ~= nil, "pointcolors nil")
   legionlib.assert(pointmcolors ~= nil, "pointmcolors nil")
+  legionlib.assert(pointspancolors ~= nil, "pointspancolors nil")
   legionlib.assert(zonestart ~= nil, "zonestart nil")
   legionlib.assert(zonesize ~= nil, "zonesize nil")
   legionlib.assert(zonepoints ~= nil, "zonepoints nil")
   legionlib.assert(zonecolors ~= nil, "zonecolors nil")
+  legionlib.assert(zonespancolors ~= nil, "zonespancolors nil")
+
+  var nspans_zones : int64 = 0
+  var nspans_points : int64 = 0
 
   -- Call the mesh generator
   cpennant.generate_mesh_raw(
@@ -2040,14 +2184,21 @@ terra read_input(runtime : c.legion_runtime_t,
     conf.numpcy,
     conf.npieces,
     conf.meshtype,
+    conf.compact,
+    conf.stripsize,
+    conf.spansize,
     pointpos_x, &pointpos_x_size,
     pointpos_y, &pointpos_y_size,
     pointcolors, &pointcolors_size,
     pointmcolors, &pointmcolors_size,
+    pointspancolors, &pointspancolors_size,
     zonestart, &zonestart_size,
     zonesize, &zonesize_size,
     zonepoints, &zonepoints_size,
-    zonecolors, &zonecolors_size)
+    zonecolors, &zonecolors_size,
+    zonespancolors, &zonespancolors_size,
+    &nspans_zones,
+    &nspans_points)
 
   -- Allocate all the mesh data in regions
   do
@@ -2081,11 +2232,12 @@ terra read_input(runtime : c.legion_runtime_t,
   -- Write mesh data into regions
   do
     var rz_znump = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[0], rz_fields[0])
+      rz_physical[23], rz_fields[23])
 
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      @[&int64](c.legion_accessor_array_ref(rz_znump, p)) = zonesize[i]
+      legionlib.assert(zonesize[i] < 255, "zone has more than 255 sides")
+      @[&uint8](c.legion_accessor_array_ref(rz_znump, p)) = uint8(zonesize[i])
     end
 
     c.legion_accessor_array_destroy(rz_znump)
@@ -2096,14 +2248,10 @@ terra read_input(runtime : c.legion_runtime_t,
       rp_physical[4], rp_fields[4])
     var rp_px_y = c.legion_physical_region_get_field_accessor_array(
       rp_physical[5], rp_fields[5])
-    var rp_has_bcx_0 = c.legion_physical_region_get_field_accessor_array(
+    var rp_has_bcx = c.legion_physical_region_get_field_accessor_array(
       rp_physical[15], rp_fields[15])
-    var rp_has_bcx_1 = c.legion_physical_region_get_field_accessor_array(
+    var rp_has_bcy = c.legion_physical_region_get_field_accessor_array(
       rp_physical[16], rp_fields[16])
-    var rp_has_bcy_0 = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[17], rp_fields[17])
-    var rp_has_bcy_1 = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[18], rp_fields[18])
 
     var eps : double = 1e-12
     for i = 0, conf.np do
@@ -2111,18 +2259,18 @@ terra read_input(runtime : c.legion_runtime_t,
       @[&double](c.legion_accessor_array_ref(rp_px_x, p)) = pointpos_x[i]
       @[&double](c.legion_accessor_array_ref(rp_px_y, p)) = pointpos_y[i]
 
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcx_0, p)) = conf.bcx_n > 0 and cmath.fabs(pointpos_x[i] - conf.bcx[0]) < eps
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcx_1, p)) = conf.bcx_n > 1 and cmath.fabs(pointpos_x[i] - conf.bcx[1]) < eps
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcy_0, p)) = conf.bcy_n > 0 and cmath.fabs(pointpos_y[i] - conf.bcy[0]) < eps
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcy_1, p)) = conf.bcy_n > 1 and cmath.fabs(pointpos_y[i] - conf.bcy[1]) < eps
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcx, p)) = (
+        (conf.bcx_n > 0 and cmath.fabs(pointpos_x[i] - conf.bcx[0]) < eps) or
+        (conf.bcx_n > 1 and cmath.fabs(pointpos_x[i] - conf.bcx[1]) < eps))
+      @[&bool](c.legion_accessor_array_ref(rp_has_bcy, p)) = (
+        (conf.bcy_n > 0 and cmath.fabs(pointpos_y[i] - conf.bcy[0]) < eps) or
+        (conf.bcy_n > 1 and cmath.fabs(pointpos_y[i] - conf.bcy[1]) < eps))
     end
 
     c.legion_accessor_array_destroy(rp_px_x)
     c.legion_accessor_array_destroy(rp_px_y)
-    c.legion_accessor_array_destroy(rp_has_bcx_0)
-    c.legion_accessor_array_destroy(rp_has_bcx_1)
-    c.legion_accessor_array_destroy(rp_has_bcy_0)
-    c.legion_accessor_array_destroy(rp_has_bcy_1)
+    c.legion_accessor_array_destroy(rp_has_bcx)
+    c.legion_accessor_array_destroy(rp_has_bcy)
   end
 
   do
@@ -2185,11 +2333,15 @@ terra read_input(runtime : c.legion_runtime_t,
   -- Create colorings
   var result : mesh_colorings
   result.rz_all_c = c.legion_coloring_create()
+  result.rz_spans_c = c.legion_coloring_create()
   result.rp_all_c = c.legion_coloring_create()
   result.rp_all_private_c = c.legion_coloring_create()
   result.rp_all_ghost_c = c.legion_coloring_create()
   result.rp_all_shared_c = c.legion_coloring_create()
+  result.rp_spans_c = c.legion_coloring_create()
   result.rs_all_c = c.legion_coloring_create()
+  result.nspans_zones = nspans_zones
+  result.nspans_points = nspans_points
 
   for i = 0, conf.npieces do
     c.legion_coloring_ensure_color(result.rz_all_c, i)
@@ -2197,6 +2349,14 @@ terra read_input(runtime : c.legion_runtime_t,
   for i = 0, conf.nz do
     c.legion_coloring_add_point(
       result.rz_all_c, zonecolors[i], c.legion_ptr_t { value = i })
+  end
+
+  for i = 0, nspans_zones do
+    c.legion_coloring_ensure_color(result.rz_spans_c, i)
+  end
+  for i = 0, conf.nz do
+    c.legion_coloring_add_point(
+      result.rz_spans_c, zonespancolors[i], c.legion_ptr_t { value = i })
   end
 
   c.legion_coloring_ensure_color(result.rp_all_c, 0)
@@ -2256,6 +2416,14 @@ terra read_input(runtime : c.legion_runtime_t,
     end
   end
 
+  for i = 0, nspans_points do
+    c.legion_coloring_ensure_color(result.rp_spans_c, i)
+  end
+  for i = 0, conf.np do
+    c.legion_coloring_add_point(
+      result.rp_spans_c, pointspancolors[i], c.legion_ptr_t { value = i })
+  end
+
   for i = 0, conf.npieces do
     c.legion_coloring_ensure_color(result.rs_all_c, i)
   end
@@ -2279,10 +2447,12 @@ terra read_input(runtime : c.legion_runtime_t,
   c.free(pointpos_y)
   c.free(pointcolors)
   c.free(pointmcolors)
+  c.free(pointspancolors)
   c.free(zonestart)
   c.free(zonesize)
   c.free(zonepoints)
   c.free(zonecolors)
+  c.free(zonespancolors)
 
   return result
 end
@@ -2294,8 +2464,8 @@ terra validate_output(runtime : c.legion_runtime_t,
                       ctx : c.legion_context_t,
                       rz_physical : c.legion_physical_region_t[24],
                       rz_fields : c.legion_field_id_t[24],
-                      rp_physical : c.legion_physical_region_t[19],
-                      rp_fields : c.legion_field_id_t[19],
+                      rp_physical : c.legion_physical_region_t[17],
+                      rp_fields : c.legion_field_id_t[17],
                       rs_physical : c.legion_physical_region_t[34],
                       rs_fields : c.legion_field_id_t[34],
                       conf : config)
@@ -2402,7 +2572,7 @@ terra validate_output(runtime : c.legion_runtime_t,
 
   do
     var rz_zr = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[13], rz_fields[13])
+      rz_physical[12], rz_fields[12])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
       var ck = @[&double](c.legion_accessor_array_ref(rz_zr, p))
@@ -2424,7 +2594,7 @@ terra validate_output(runtime : c.legion_runtime_t,
 
   do
     var rz_ze = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[14], rz_fields[14])
+      rz_physical[13], rz_fields[13])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
       var ck = @[&double](c.legion_accessor_array_ref(rz_ze, p))
@@ -2446,7 +2616,7 @@ terra validate_output(runtime : c.legion_runtime_t,
 
   do
     var rz_zp = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[18], rz_fields[18])
+      rz_physical[17], rz_fields[17])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
       var ck = @[&double](c.legion_accessor_array_ref(rz_zp, p))

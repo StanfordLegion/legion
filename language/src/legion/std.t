@@ -14,9 +14,12 @@
 
 -- Legion Standard Library
 
+local config = require("legion/config")
 local log = require("legion/log")
 
 local std = {}
+
+std.config, std.args = config.parse_args()
 
 -- #####################################
 -- ## Legion Bindings
@@ -520,8 +523,16 @@ function std.is_ref(t)
   return terralib.types.istype(t) and rawget(t, "is_ref")
 end
 
+function std.is_rawref(t)
+  return terralib.types.istype(t) and rawget(t, "is_rawref")
+end
+
 function std.is_future(t)
   return terralib.types.istype(t) and rawget(t, "is_future")
+end
+
+function std.is_unpack_result(t)
+  return terralib.types.istype(t) and rawget(t, "is_unpack_result")
 end
 
 struct std.untyped {}
@@ -718,6 +729,9 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
     local param_type = param.type
     local arg_type = arg.type
 
+    -- Sanity check that we're not getting references here.
+    assert(not (std.is_ref(arg_type) or std.is_rawref(arg_type)))
+
     if param_type == std.untyped or
       param_type == arg_type or
       mapping[param_type] == arg_type
@@ -780,6 +794,46 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
         end
         local param_as_arg_type = std.partition(
           param_type.disjointness, param_parent_region_as_arg_type)
+        log.error("type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg_type))
+      end
+    elseif std.is_cross_product(param_type) and std.is_cross_product(arg_type) then
+      -- Check for previous mappings. This can happen if two
+      -- parameters are aliased to the same partition.
+      if (mapping[param] or mapping[param_type]) and
+        not (mapping[param] == arg or mapping[param_type] == arg_type)
+      then
+        local param_as_arg_type = mapping[param_type]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_type] then
+            param_as_arg_type = v
+          end
+        end
+        log.error("type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg))
+      end
+
+      mapping[param] = arg
+      mapping[param_type] = arg_type
+      if (not check(param_type:partition(), arg_type:partition(), mapping)) or
+        (not check(param_type:cross_partition(), arg_type:cross_partition(), mapping))
+      then
+        local param_partition = param_type:partition()
+        local param_cross_partition = param_type:cross_partition()
+        local param_partition_as_arg_type = mapping[param_partition]
+        local param_cross_partition_as_arg_type = mapping[param_cross_partition]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_partition] then
+            param_partition_as_arg_type = v
+          end
+          if terralib.issymbol(v) and v.type == mapping[param_cross_partition] then
+            param_cross_partition_as_arg_type = v
+          end
+        end
+        local param_as_arg_type = std.cross_product(
+          param_partition_as_arg_type, param_cross_partition_as_arg_type)
         log.error("type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
@@ -922,6 +976,7 @@ function std.unpack_fields(fs, symbols)
   end
 
   local result_type = terralib.types.newstruct()
+  result_type.is_unpack_result = true
   result_type.entries = new_fields
 
   return result_type, new_constraints
@@ -939,6 +994,8 @@ function std.as_read(t)
     end
     assert(not std.is_ref(field_type))
     return field_type
+  elseif std.is_rawref(t) then
+    return t.refers_to_type
   else
     return t
   end
@@ -974,8 +1031,12 @@ function std.check_write(cx, t)
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
+    return std.as_read(t)
+  elseif std.is_rawref(t) then
+    return std.as_read(t)
+  else
+    log.error("type mismatch: write expected an lvalue but got " .. tostring(t))
   end
-  return std.as_read(t)
 end
 
 function std.check_reduce(cx, op, t)
@@ -991,8 +1052,12 @@ function std.check_reduce(cx, op, t)
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
     end
+    return std.as_read(t)
+  elseif std.is_rawref(t) then
+    return std.as_read(t)
+  else
+    log.error("type mismatch: reduce expected an lvalue but got " .. tostring(t))
   end
-  return std.as_read(t)
 end
 
 function std.get_field(t, f)
@@ -1014,6 +1079,15 @@ function std.get_field(t, f)
       return nil
     end
     return field_type
+  elseif std.is_rawref(t) then
+    local field_type = std.get_field(std.as_read(t), f)
+    if std.is_ref(field_type) then
+      return field_type
+    elseif field_type then
+      return std.rawref(&field_type)
+    else
+      return nil
+    end
   else
     -- Ask the Terra compiler to kindly tell us the type of the requested field.
     local function test()
@@ -1039,7 +1113,8 @@ function std.get_field_path(value_type, field_path)
 end
 
 function std.implicit_cast(from, to, expr)
-  if std.is_region(to) or std.is_partition(to) or std.is_ptr(to) or
+  assert(not (std.is_ref(from) or std.is_rawref(from)))
+  if std.is_region(to) or std.is_partition(to) or std.is_cross_product(to) or std.is_ptr(to) or
     std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
@@ -1329,8 +1404,9 @@ function std.cross_product(lhs, rhs)
   end
 
   function st:force_cast(from, to, expr)
-    assert(std.is_partition(from) and std.is_partition(to))
-    return `([to] { impl = [expr].impl })
+    assert(std.is_cross_product(from) and std.is_cross_product(to))
+    -- FIXME: Potential for double evaluation here.
+    return `([to] { impl = [expr].impl, product = [expr].product })
   end
 
   function st.metamethods.__typename(st)
@@ -1391,11 +1467,16 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
     local regions = terralib.newlist()
     for i, region_symbol in ipairs(self.points_to_region_symbols) do
       local region = region_symbol.type
+      if terralib.types.istype(region) then
+        region = std.as_read(region)
+      end
       if not (terralib.types.istype(region) and std.is_region(region)) then
         log.error("ptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region.type))
+                    ", got " .. tostring(region))
       end
-      if not std.type_eq(region.element_type, points_to_type) then
+      if not (std.type_eq(region.element_type, points_to_type) or
+                std.is_unpack_result(points_to_type))
+      then
         log.error("ptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
@@ -1499,20 +1580,28 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
 end)
 
 std.sov = terralib.memoize(function(struct_type, width)
-  for _, entry in pairs(struct_type.entries) do
-    local entry_type = entry[2] or entry.type
-    if not entry_type:isprimitive() then
-      error("sov expected a struct type of primitive types, got a field " ..
-        entry.field .. " of type " ..  tostring(entry.type))
-    end
-  end
+  -- Sanity check that referee type is not a ref.
+  assert(not std.is_ref(struct_type))
+  assert(not std.is_rawref(struct_type))
+
+  --for _, entry in pairs(struct_type.entries) do
+  --  local entry_type = entry[2] or entry.type
+  --  if not entry_type:isprimitive() then
+  --    error("sov expected a struct type of primitive types, got a field " ..
+  --      entry.field .. " of type " ..  tostring(entry.type))
+  --  end
+  --end
 
   local st = terralib.types.newstruct("sov")
   st.entries = terralib.newlist()
   for _, entry in pairs(struct_type.entries) do
     local entry_field = entry[1] or entry.field
     local entry_type = entry[2] or entry.type
-    st.entries:insert{entry_field, vector(entry_type, width)}
+    if entry_type:isprimitive() then
+      st.entries:insert{entry_field, vector(entry_type, width)}
+    else
+      st.entries:insert{entry_field, std.sov(entry_type, width)}
+    end
   end
   st.is_struct_of_vectors = true
   st.type = struct_type
@@ -1561,10 +1650,34 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   return st
 end)
 
+std.rawref = terralib.memoize(function(pointer_type)
+  if not terralib.types.istype(pointer_type) then
+    error("rawref expected a type as argument 1, got " .. tostring(pointer_type))
+  end
+  if not pointer_type:ispointer() then
+    error("rawref expected a pointer type as argument 1, got " .. tostring(pointer_type))
+  end
+  -- Sanity check that referee type is not a ref.
+  assert(not std.is_ref(pointer_type.type))
+
+  local st = terralib.types.newstruct("rawref")
+
+  st.is_rawref = true
+  st.pointer_type = pointer_type
+  st.refers_to_type = pointer_type.type
+
+  function st.metamethods.__typename(st)
+    return "rawref(" .. tostring(st.refers_to_type) .. ")"
+  end
+
+  return st
+end)
+
 std.future = terralib.memoize(function(result_type)
   if not terralib.types.istype(result_type) then
     error("future expected a type as argument 1, got " .. tostring(result_type))
   end
+  assert(not std.is_rawref(result_type))
 
   local st = terralib.types.newstruct("future")
   st.entries = terralib.newlist({
@@ -2081,7 +2194,7 @@ end
 
 function std.start(main_task)
   assert(std.is_task(main_task))
-  local next_task_id = 100
+  local next_task_id = 0
   local task_registrations = tasks:map(
     function(task)
       next_task_id = next_task_id + 1
@@ -2122,15 +2235,9 @@ function std.start(main_task)
     end
   end
 
-  local args = terralib.newlist()
-  for k, v in pairs(rawget(_G, "arg")) do
-    if k >= 0 then
-      args[k + 1] = v
-    end
-  end
-
+  local args = std.args
   local argc = #args
-  local argv = terralib.newsymbol((&int8)[#args], "argv")
+  local argv = terralib.newsymbol((&int8)[argc], "argv")
   local argv_setup = terralib.newlist({quote var [argv] end})
   for i, arg in ipairs(args) do
     argv_setup:insert(quote
@@ -2222,6 +2329,7 @@ do
   end
 
   function std.is_minmax_supported(arg_type)
+    assert(not (std.is_ref(arg_type) or std.is_rawref(arg_type)))
     if not arg_type:isvector() then return false end
     if not ((arg_type.type == float and
              4 <= arg_type.N and arg_type.N <= 8) or

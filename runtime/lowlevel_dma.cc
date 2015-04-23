@@ -18,6 +18,7 @@
 #include "lowlevel_gpu.h"
 #endif
 #include "accessor.h"
+#include <errno.h>
 
 #include <queue>
 
@@ -308,7 +309,7 @@ namespace LegionRuntime {
 		   oas_by_inst->begin()->first.second.id, 
 		   oas_by_inst->begin()->second[0].dst_offset,
 		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->size() - 1,
+		   oas_by_inst->begin()->second.size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
@@ -379,7 +380,7 @@ namespace LegionRuntime {
 		   oas_by_inst->begin()->first.second.id, 
 		   oas_by_inst->begin()->second[0].dst_offset,
 		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->size() - 1,
+		   oas_by_inst->begin()->second.size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
@@ -2809,7 +2810,7 @@ namespace LegionRuntime {
 		   oas_by_inst->begin()->first.second.id, 
 		   oas_by_inst->begin()->second[0].dst_offset,
 		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->size() - 1,
+		   oas_by_inst->begin()->second.size() - 1,
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   after_copy.id, after_copy.gen);
@@ -3508,7 +3509,6 @@ namespace LegionRuntime {
 	  switch(dst_kind) {
 	  case Memory::Impl::MKIND_SYSMEM:
 	  case Memory::Impl::MKIND_ZEROCOPY:
-	  case Memory::Impl::MKIND_RDMA:
 	    {
 	      void *dst_base = 0;
 	      size_t dst_stride = 0;
@@ -3539,6 +3539,7 @@ namespace LegionRuntime {
 	    }
 
 	  case Memory::Impl::MKIND_REMOTE:
+	  case Memory::Impl::MKIND_RDMA:
             {
 	      // we need to figure out how to calculate offsets in the destination memory
 	      RegionInstance::Impl *dst_impl = dst.inst.impl();

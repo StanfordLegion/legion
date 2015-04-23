@@ -194,14 +194,12 @@ class Memory(object):
         self.mem_latency[mem] = latency
 
     def add_physical_instance(self, inst):
-        #assert inst.iid not in self.physical_instances
         if inst.iid not in self.physical_instances:
             self.physical_instances[inst.iid] = [inst]
         else:
             self.physical_instances[inst.iid].append(inst)
 
     def add_reduction_instance(self, inst):
-        #assert inst.iid not in self.reduction_instances
         if inst.iid not in self.reduction_instances:
             self.reduction_instances[inst.iid] = [inst]
         else:
@@ -598,12 +596,16 @@ class SingleTask(object):
         self.reqs[idx] = req
 
     def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
+        if idx in self.reqs:
+            return self.reqs[idx]
+        else:
+            return None
 
     def add_req_field(self, idx, fid):
-        assert idx in self.reqs
+        if not idx in self.reqs:
+            return False
         self.reqs[idx].add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         if op <> self:
@@ -642,8 +644,11 @@ class SingleTask(object):
         if idx in self.reqs:
             assert self.enclosing == None
             assert self.reqs[idx].ispace == index
-            return 
+            return True
+        if self.enclosing == None:
+            return False
         self.reqs[idx] = self.enclosing.get_child_req(idx, index)
+        return True
 
     def add_events(self, start, term):
         assert self.start_event == None
@@ -779,7 +784,14 @@ class SingleTask(object):
         errors = 0
         for adep in self.adeps:
             sys.stdout.write("    Checking dependence: %d \r" % (count))
-            if not adep.op2.has_logical_path(adep.op1):
+            check = adep.op2.has_logical_path(adep.op1)
+            if not check and isinstance(adep.op2, Close) and \
+                   adep.op2.is_inter_close_op:
+                check = adep.op1.has_logical_path(adep.op2)
+                if check:
+                    adep.is_reversed = True
+
+            if not check:
                 print "    ERROR: Failed to compute mapping dependence between "+\
                       "index "+str(adep.idx1)+" of "+adep.op1.get_name()+\
                       " (ID "+str(adep.op1.uid)+") and index "+str(adep.idx2)+ \
@@ -806,7 +818,13 @@ class SingleTask(object):
         for mdep in self.mdeps:
             found = False
             for adep in self.adeps:
-                if adep == mdep:
+                adep_ = adep
+                if adep.is_reversed:
+                    req1 = adep.op2.get_requirement(adep.idx2)
+                    req2 = adep.op1.get_requirement(adep.idx1)
+                    dtype = self.state.compute_dependence(req1, req2)
+                    adep_ = MappingDependence(adep.ctx, adep.op2, adep.op1, adep.idx2, adep.idx1, dtype)
+                if adep_ == mdep:
                     found = True
                     break
             if not found:
@@ -1040,8 +1058,10 @@ class IndexTask(object):
         return self.reqs[idx]
 
     def add_req_field(self, idx, fid):
-        assert idx in self.reqs
+        if not idx in self.reqs:
+            return False
         self.reqs[idx].add_field(fid)
+        return True
 
     def get_child_req(self, idx, index):
         assert idx in self.reqs
@@ -1136,6 +1156,7 @@ class Mapping(object):
         assert idx == 0
         assert self.requirement <> None
         self.requirement.add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         assert self <> op
@@ -1338,8 +1359,10 @@ class CopyOp(object):
         return self.reqs[idx]
 
     def add_req_field(self, idx, fid):
-        assert idx in self.reqs
+        if not idx in self.reqs:
+            return False
         self.reqs[idx].add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         assert self <> op
@@ -1487,8 +1510,10 @@ class AcquireOp(object):
         return self.reqs[idx]
 
     def add_req_field(self, idx, fid):
-        assert idx in self.reqs
+        if not idx in self.reqs:
+            return False
         self.reqs[idx].add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         assert op <> self
@@ -1619,8 +1644,10 @@ class ReleaseOp(object):
         return self.reqs[idx]
 
     def add_req_field(self, idx, fid):
-        assert idx in self.reqs
+        if not idx in self.reqs:
+            return False
         self.reqs[idx].add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         assert op <> self
@@ -1714,7 +1741,7 @@ class ReleaseOp(object):
         self.start_event.print_prev_event_dependences(printer, later_name)
 
 class Close(object):
-    def __init__(self, state, uid, ctx):
+    def __init__(self, state, uid, ctx, is_inter_close_op):
         assert ctx is not None
         self.state = state
         self.uid = uid
@@ -1732,6 +1759,7 @@ class Close(object):
         self.node_name = 'close_op_'+str(self.uid)
         self.prev_event_deps = set()
         self.generation = 0
+        self.is_inter_close_op = is_inter_close_op
 
     def get_name(self):
         return "Close "+str(self.uid)
@@ -1756,6 +1784,7 @@ class Close(object):
         assert idx == 0
         assert self.requirement <> None
         self.requirement.add_field(fid)
+        return True
 
     def add_logical_incoming(self, op):
         assert self <> op
@@ -1781,22 +1810,22 @@ class Close(object):
         self.logical_marked = False
 
     def print_physical_node(self, printer):
-        # Let's not print these for right now
-        #printer.println(self.node_name+' [style=filled,label="'+\
-        #    'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+'",'+\
-        #    'fillcolor=orangered,fontsize=14,fontcolor=black,'+\
-        #    'shape=record,penwidth=2];')
-        pass
+        color = 'orangered'
+        if self.is_inter_close_op:
+            color = 'red'
+        printer.println(self.node_name+' [style=filled,label="'+\
+            'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+'",'+\
+            'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
+            'shape=record,penwidth=2];')
 
     def print_event_dependences(self, printer):
-        #self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
+        self.start_event.print_prev_event_dependences(printer, self.node_name)
 
     def print_prev_event_dependences(self, printer, later_name):
-        #if later_name not in self.prev_event_deps:
-        #    printer.println(self.node_name+' -> '+later_name+
-        #        ' [style=solid,color=black,penwidth=2];')
-        #    self.prev_event_deps.add(later_name)
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+
+                ' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
     def add_events(self, start, term):
@@ -1834,7 +1863,7 @@ class Close(object):
         pass
 
     def find_dependences(self, op):
-        op.find_individual_dependences(self, self.requirement) 
+        op.find_individual_dependences(self, self.requirement)
 
     def find_individual_dependences(self, other_op, other_req):
         dtype = self.state.compute_dependence(other_req, self.requirement)
@@ -2010,12 +2039,15 @@ class PhysicalInstance(object):
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
+        if req == None:
+            return False
         for field in req.fields:
             if field not in self.op_users:
                 self.op_users[field] = dict()
             if op not in self.op_users[field]:
                 self.op_users[field][op] = list()
             self.op_users[field][op].append(req)
+        return True
 
     def print_igraph_node(self, printer):
         if self.region.name <> None:
@@ -2055,12 +2087,15 @@ class ReductionInstance(object):
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
+        if req == None:
+            return False
         for field in req.fields:
             if field not in self.op_users:
                 self.op_users[field] = dict()
             if op not in self.op_users[field]:
                 self.op_users[field][op] = list()
             self.op_users[field][op].append(req)
+        return True
 
     def print_igraph_node(self, printer):
         if self.region.name <> None:
@@ -2282,6 +2317,7 @@ class MappingDependence(object):
         self.idx1 = idx1
         self.idx2 = idx2
         self.dtype = dtype
+        self.is_reversed = False
 
     def __eq__(self,other):
         return (self.ctx == other.ctx) and (self.op1 is other.op1) and (self.op2 is other.op2) and (self.idx1 == other.idx1) and (self.idx2 == other.idx2) and (self.dtype == other.dtype)
@@ -2976,11 +3012,11 @@ class State(object):
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
-    def add_close(self, ctx, uid):
+    def add_close(self, ctx, uid, is_inter_close_op):
         assert uid not in self.ops
         if ctx not in self.ops:
             return False
-        self.ops[uid] = Close(self, uid, self.ops[ctx])
+        self.ops[uid] = Close(self, uid, self.ops[ctx], is_inter_close_op)
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
@@ -3072,6 +3108,8 @@ class State(object):
     def add_requirement(self, uid, index, is_reg, ispace, fspace, tid, priv, coher, redop):
         if uid not in self.ops:
             return False
+        if tid not in self.region_trees:
+            return False
         if is_reg:
             node = self.region_trees[tid].find_node(
                     self.index_space_nodes[ispace],
@@ -3088,7 +3126,8 @@ class State(object):
     def add_req_field(self, uid, idx, fid):
         if uid not in self.ops:
             return False
-        self.ops[uid].add_req_field(idx, fid)
+        if not self.ops[uid].add_req_field(idx, fid):
+            return False
         return True
 
     def add_mapping_dependence(self, ctx, prev_id, pidx, next_id, nidx, dtype):
@@ -3109,7 +3148,8 @@ class State(object):
     def add_instance_requirement(self, uid, idx, index):
         if uid not in self.ops:
             return False
-        self.ops[uid].add_instance_requirement(idx, index)
+        if not self.ops[uid].add_instance_requirement(idx, index):
+            return False
         return True
 
     def add_op_events(self, uid, startid, startgen, termid, termgen):
@@ -3175,7 +3215,6 @@ class State(object):
         return True
 
     def add_reduction_instance(self, iid, mem, index, field, tree, fold, indirect):
-        #assert iid not in self.instances
         if mem not in self.memories:
             return False
         if index not in self.index_space_nodes:
@@ -3199,7 +3238,8 @@ class State(object):
             return False
         if iid not in self.instances:
             return False
-        self.instances[iid][-1].add_op_user(self.ops[uid], idx)
+        if not self.instances[iid][-1].add_op_user(self.ops[uid], idx):
+            return False
         self.ops[uid].add_instance(idx, self.instances[iid][-1])
         return True
 

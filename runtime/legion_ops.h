@@ -130,6 +130,10 @@ namespace LegionRuntime {
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_aliased_requirements(unsigned idx1, unsigned idx2);
+      // A method for finding the parent index of a region
+      // requirement for an operation which is necessary for
+      // issuing close operation on behalf of the operation.
+      virtual unsigned find_parent_index(unsigned idx);
       // This is a special helper method for tracing which
       // needs to know explicitly about close operations
       virtual bool is_close_op(void) const { return false; }
@@ -208,6 +212,13 @@ namespace LegionRuntime {
       // additional dependences can be registered.
       void add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
+    public:
+      // Some extra support for tracking dependences that we've 
+      // registered as part of our logical traversal
+      void record_logical_dependence(const LogicalUser &user);
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned& 
+                                    get_logical_records(void);
+      void clear_logical_records(void);
     public:
       // Notify when a mapping dependence is met (flows down edges)
       void notify_mapping_dependence(GenerationID gen);
@@ -295,6 +306,8 @@ namespace LegionRuntime {
       GenerationID must_epoch_gen;
       // The index in the must epoch
       unsigned must_epoch_index;
+      // A set list or recorded dependences during logical traversal
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
     };
 
     /**
@@ -436,6 +449,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual void deferred_complete(void);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -446,12 +460,14 @@ namespace LegionRuntime {
       virtual UniqueID get_unique_mappable_id(void) const;
     protected:
       void check_privilege(void);
+      void compute_parent_index(void);
     protected:
       bool remap_region;
       UserEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
       RegionTreePath mapping_path;
+      unsigned parent_req_index;
     };
 
     /**
@@ -486,6 +502,7 @@ namespace LegionRuntime {
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual MappableKind get_mappable_kind(void) const;
       virtual Task* as_mappable_task(void) const;
@@ -497,11 +514,14 @@ namespace LegionRuntime {
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
+      void compute_parent_indexes(void);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
       std::vector<RegionTreePath> src_mapping_paths; 
       std::vector<RegionTreePath> dst_mapping_paths;
+      std::vector<unsigned>       src_parent_indexes;
+      std::vector<unsigned>       dst_parent_indexes;
     };
 
     /**
@@ -650,7 +670,7 @@ namespace LegionRuntime {
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void perform_logging(void);
+      void perform_logging(unsigned is_inter_close_op = 0);
     public:
       // For recording trace dependences
     public:
@@ -659,7 +679,6 @@ namespace LegionRuntime {
       virtual const char* get_logging_name(void) = 0;
       virtual bool is_close_op(void) const { return true; }
     public:
-      virtual void trigger_dependence_analysis(void);
       virtual void deferred_complete(void);
     protected:
       RegionRequirement requirement;
@@ -703,6 +722,7 @@ namespace LegionRuntime {
       std::set<Color> target_children;
       bool leave_open;
       int next_child;
+      unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing
       // The source index from the original 
@@ -738,9 +758,11 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
     protected:
       InstanceRef reference;
+      unsigned parent_idx;
     };
 
     /**
@@ -784,9 +806,11 @@ namespace LegionRuntime {
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_acquire_privilege(void);
+      void compute_parent_index(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      unsigned          parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreePath    mapping_path;
 #endif
@@ -833,9 +857,11 @@ namespace LegionRuntime {
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_release_privilege(void);
+      void compute_parent_index(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      unsigned parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreePath    mapping_path;
 #endif

@@ -75,7 +75,6 @@ namespace LegionRuntime {
       void initialize_base_task(SingleTask *ctx, bool track, 
                                 const Predicate &p, 
                                 Processor::TaskFuncID tid);
-      void initialize_physical_contexts(void);
       void check_empty_field_requirements(void);
       size_t check_future_size(Future::Impl *impl);
     public:
@@ -89,6 +88,7 @@ namespace LegionRuntime {
       virtual void resolve_true(void);
       virtual void resolve_false(void) = 0;
       virtual bool speculate(bool &value);
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual bool premap_task(void) = 0;
       virtual bool prepare_steal(void) = 0;
@@ -151,13 +151,14 @@ namespace LegionRuntime {
       void perform_privilege_checks(void);
     public:
       InstanceRef find_premapped_region(unsigned idx);
-      RegionTreeContext get_enclosing_physical_context(unsigned idx);
       void clone_task_op_from(TaskOp *rhs, Processor p, 
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       void compute_point_region_requirements(void);
       bool early_map_regions(void);
+    protected:
+      void compute_parent_indexes(void);
     protected:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -178,6 +179,7 @@ namespace LegionRuntime {
       std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
     protected:
       std::deque<RegionTreeContext> enclosing_physical_contexts;
+      std::vector<unsigned> parent_req_indexes;
     protected:
       std::set<LogicalRegion>                   created_regions;
       std::set<std::pair<FieldSpace,FieldID> >  created_fields;
@@ -288,6 +290,7 @@ namespace LegionRuntime {
       void destroy_user_barrier(Barrier b);
     public:
       PhysicalRegion get_physical_region(unsigned idx);
+      InstanceRef get_local_reference(unsigned idx);
       void add_inline_task(InlineTask *inline_task);
     public:
       // The following set of operations correspond directly
@@ -366,6 +369,7 @@ namespace LegionRuntime {
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
       bool is_region_mapped(unsigned idx);
+      int find_parent_region_req(const RegionRequirement &req);
       unsigned find_parent_region(unsigned idx, TaskOp *task);
       unsigned find_parent_index_region(unsigned idx, TaskOp *task);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
@@ -373,10 +377,7 @@ namespace LegionRuntime {
                                       FieldID &bad_field, 
                                       bool skip_privileges = false) const; 
       bool has_simultaneous_coherence(void);
-      void check_simultaneous_restricted(
-          RegionRequirement &child_requirement) const;
-      void check_simultaneous_restricted(
-          std::vector<RegionRequirement> &child_requirements) const;
+      bool is_simultaneous_restricted(unsigned index);
       bool has_created_region(LogicalRegion handle) const;
       bool has_created_field(FieldSpace handle, FieldID fid) const;
     public:
@@ -388,6 +389,7 @@ namespace LegionRuntime {
                                       const char *caller);
     public:
       void unmap_all_regions(void);
+      void clear_physical_instances(void);
     protected:
       bool map_all_regions(Processor target, Event user_event, 
                            bool mapper_invoked); 
@@ -438,8 +440,7 @@ namespace LegionRuntime {
       virtual RemoteTask* find_outermost_physical_context(void) = 0;
     public:
       // Has a base implementation but can override
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent);
+      virtual RegionTreeContext find_enclosing_physical_context(unsigned idx);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void);
@@ -866,8 +867,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent);
+      virtual RegionTreeContext find_enclosing_physical_context(unsigned idx);
       virtual RemoteTask* find_outermost_physical_context(void);
     public:
       virtual Event get_task_completion(void) const;
@@ -908,8 +908,6 @@ namespace LegionRuntime {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
     public:
-      virtual RegionTreeContext find_enclosing_physical_context(
-                                                LogicalRegion parent);
       virtual RemoteTask* find_outermost_physical_context(void);
     public:
       virtual Event get_task_completion(void) const;

@@ -188,10 +188,11 @@ namespace LegionRuntime {
       }
 
       static inline void log_close_operation(UniqueID context,
-                                             UniqueID unique_id)
+                                             UniqueID unique_id,
+                                             unsigned is_inter_close_op)
       {
-        log_spy(LEVEL_INFO,"Close Operation %llu %llu",
-            context, unique_id);
+        log_spy(LEVEL_INFO,"Close Operation %llu %llu %u",
+            context, unique_id, is_inter_close_op);
       }
 
       static inline void log_fence_operation(UniqueID context,

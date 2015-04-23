@@ -36,13 +36,9 @@ using namespace LegionRuntime::Accessor;
 #include <fcntl.h>
 #include <dirent.h>
 
-#ifdef DEADLOCK_TRACE
-#include <signal.h>
-#include <execinfo.h>
-#endif
 #include <signal.h>
 #include <unistd.h>
-#ifdef LEGION_BACKTRACE
+#if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE) || defined(DEADLOCK_TRACE)
 #include <execinfo.h>
 #endif
 
@@ -173,6 +169,7 @@ namespace LegionRuntime {
 
     struct ClearTimerRequestArgs {
       int sender;
+      int dummy; // needed to get sizeof() >= 8
     };
 
     void handle_clear_timer_request(ClearTimerRequestArgs args)
@@ -596,7 +593,8 @@ namespace LegionRuntime {
       lock.set_local_data(&locked_data);
       valid_mask = 0;
       valid_mask_complete = false;
-      valid_mask_event = 0;
+      valid_mask_event = Event::NO_EVENT;
+      valid_mask_event_impl = 0;
       gasnet_hsl_init(&valid_mask_mutex);
     }
 
@@ -615,7 +613,8 @@ namespace LegionRuntime {
 		    new ElementMask(*_initial_valid_mask) :
 		    new ElementMask(_num_elmts));
       valid_mask_complete = true;
-      valid_mask_event = 0;
+      valid_mask_event = Event::NO_EVENT;
+      valid_mask_event_impl = 0;
       gasnet_hsl_init(&valid_mask_mutex);
       if(_frozen) {
 	avail_mask = 0;
@@ -703,15 +702,16 @@ namespace LegionRuntime {
 	if(valid_mask != 0) {
 	  // if the mask exists, we've already requested it, so just provide
 	  //  the event that we have
-	  return (valid_mask_event ? valid_mask_event->current_event() : Event::NO_EVENT);
+          return valid_mask_event;
 	}
 	
 	valid_mask = new ElementMask(num_elmts);
 	valid_mask_owner = ID(me).node(); // a good guess?
 	valid_mask_count = (valid_mask->raw_size() + 2047) >> 11;
 	valid_mask_complete = false;
-	valid_mask_event = GenEventImpl::create_genevent();
-	e = valid_mask_event->current_event();
+	valid_mask_event_impl = GenEventImpl::create_genevent();
+        valid_mask_event = valid_mask_event_impl->current_event();
+        e = valid_mask_event;
       }
       
       ValidMaskRequestArgs args;
@@ -768,7 +768,7 @@ namespace LegionRuntime {
 
       memcpy(mask_data + (args.block_id << 11), data, datalen);
 
-      bool trigger = false;
+      GenEventImpl *to_trigger = 0;
       {
 	AutoHSLLock a(r_impl->valid_mask_mutex);
 	//printf("got piece of valid mask data for region " IDFMT " (%d expected)\n",
@@ -776,14 +776,15 @@ namespace LegionRuntime {
 	r_impl->valid_mask_count--;
         if(r_impl->valid_mask_count == 0) {
 	  r_impl->valid_mask_complete = true;
-	  trigger = true;
+	  to_trigger = r_impl->valid_mask_event_impl;
+	  r_impl->valid_mask_event_impl = 0;
 	}
       }
 
-      if(trigger) {
+      if(to_trigger) {
 	//printf("triggering " IDFMT "/%d\n",
 	//       r_impl->valid_mask_event.id, r_impl->valid_mask_event.gen);
-	r_impl->valid_mask_event->trigger_current();
+	to_trigger->trigger_current();
       }
     }
     
@@ -809,7 +810,7 @@ namespace LegionRuntime {
     Logger::Category log_metadata("metadata");
 
     MetadataBase::MetadataBase(void)
-      : state(STATE_INVALID), valid_event(0)
+      : state(STATE_INVALID), valid_event_impl(0)
     {}
 
     MetadataBase::~MetadataBase(void)
@@ -843,8 +844,8 @@ namespace LegionRuntime {
 	switch(state) {
 	case STATE_REQUESTED:
 	  {
-	    to_trigger = valid_event;
-	    valid_event = 0;
+	    to_trigger = valid_event_impl;
+	    valid_event_impl = 0;
 	    state = STATE_VALID;
 	    break;
 	  }
@@ -963,8 +964,8 @@ namespace LegionRuntime {
 	  {
 	    // if the current state is invalid, we'll need to issue a request
 	    state = STATE_REQUESTED;
-	    valid_event = GenEventImpl::create_genevent();
-	    e = valid_event->current_event();
+	    valid_event_impl = GenEventImpl::create_genevent();
+            e = valid_event_impl->current_event();
 	    issue_request = true;
 	    break;
 	  }
@@ -972,8 +973,8 @@ namespace LegionRuntime {
 	case STATE_REQUESTED:
 	  {
 	    // request has already been issued, but return the event again
-	    assert(valid_event);
-	    e = valid_event->current_event();
+	    assert(valid_event_impl);
+            e = valid_event_impl->current_event();
 	    break;
 	  }
 
@@ -1003,12 +1004,12 @@ namespace LegionRuntime {
 	AutoHSLLock a(mutex);
 
 	assert(state != STATE_INVALID);
-	if(valid_event)
-	  e = valid_event->current_event();
+	if(valid_event_impl)
+          e = valid_event_impl->current_event();
       }
 
       if(!e.has_triggered())
-	e.impl()->external_wait(e.gen); // FIXME
+        e.wait(true/*block*/); // FIXME
     }
 
     class MetadataInvalidateMessage {
@@ -1471,92 +1472,7 @@ namespace LegionRuntime {
 		    args.node, args.event.id, args.event.gen, impl->generation);
 	}
       }
-    }
-
-    void show_event_waiters(FILE *f = stdout)
-    {
-      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
-      for(unsigned i = 0; i < gasnet_nodes(); i++) {
-	Node *n = &get_runtime()->nodes[i];
-        // Iterate over all the events and get their implementations
-        for (unsigned long j = 0; j < n->events.max_entries(); j++) {
-          if (!n->events.has_entry(j))
-            continue;
-	  GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
-	  AutoHSLLock a2(e->mutex);
-
-	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && e->remote_waiters.empty())
-	    continue;
-
-          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-		  e->me.id(), e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(),
-                  e->remote_waiters.size());
-	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
-	      it != e->local_waiters.end();
-	      it++) {
-	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
-	      (*it)->print_info(f);
-	  }
-	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
-	  //     it != e->remote_waiters.end();
-	  //     it++) {
-	  //   fprintf(f, "  [%d] R:", it->first);
-	  //   for(int k = 0; k < MAX_NUM_NODES; k++)
-	  //     if(it->second.is_set(k))
-	  // 	fprintf(f, " %d", k);
-	  //   fprintf(f, "\n");
-	  // }
-	}
-      }
-
-      // TODO - pending barriers
-#if 0
-      // // convert from events to barriers
-      // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
-      // for(int i = 0; i < gasnet_nodes(); i++) {
-      // 	Node *n = &get_runtime()->nodes[i];
-      //   // Iterate over all the events and get their implementations
-      //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
-      //     if (!n->events.has_entry(j))
-      //       continue;
-      // 	  Event::Impl *e = n->events.lookup_entry(j, i/*node*/);
-      // 	  AutoHSLLock a2(e->mutex);
-
-      // 	  // print anything with either local or remote waiters
-      // 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
-      // 	    continue;
-
-      //     fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-      // 		  e->me.id, e->generation, e->gen_subscribed, 
-      // 		  e->local_waiters.size(), e->remote_waiters.size());
-      // 	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = e->local_waiters.begin();
-      // 	      it != e->local_waiters.end();
-      // 	      it++) {
-      // 	    for(std::vector<EventWaiter *>::iterator it2 = it->second.begin();
-      // 		it2 != it->second.end();
-      // 		it2++) {
-      // 	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
-      // 	      (*it2)->print_info(f);
-      // 	    }
-      // 	  }
-      // 	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
-      // 	      it != e->remote_waiters.end();
-      // 	      it++) {
-      // 	    fprintf(f, "  [%d] R:", it->first);
-      // 	    for(int k = 0; k < MAX_NUM_NODES; k++)
-      // 	      if(it->second.is_set(k))
-      // 		fprintf(f, " %d", k);
-      // 	    fprintf(f, "\n");
-      // 	  }
-      // 	}
-      // }
-#endif
-
-      fprintf(f,"DONE\n");
-      fflush(f);
-    }
+    } 
 
     void handle_event_trigger(EventTriggerArgs args)
     {
@@ -1642,7 +1558,7 @@ namespace LegionRuntime {
 
       virtual void print_info(FILE *f)
       {
-	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event->me.id(), finish_event->generation);
+	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event->me.id(), finish_event->generation+1);
       }
 
     protected:
@@ -2843,6 +2759,114 @@ namespace LegionRuntime {
       }
     }
 
+    void show_event_waiters(FILE *f = stdout)
+    {
+      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      for(unsigned i = 0; i < gasnet_nodes(); i++) {
+	Node *n = &get_runtime()->nodes[i];
+        // Iterate over all the events and get their implementations
+        for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+          if (!n->events.has_entry(j))
+            continue;
+	  GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
+	  AutoHSLLock a2(e->mutex);
+
+	  // print anything with either local or remote waiters
+	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	    continue;
+
+          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
+		  e->me.id(), e->generation, e->gen_subscribed, 
+		  e->local_waiters.size(),
+                  e->remote_waiters.size());
+	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
+	      it != e->local_waiters.end();
+	      it++) {
+	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
+	      (*it)->print_info(f);
+	  }
+	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+	  //     it != e->remote_waiters.end();
+	  //     it++) {
+	  //   fprintf(f, "  [%d] R:", it->first);
+	  //   for(int k = 0; k < MAX_NUM_NODES; k++)
+	  //     if(it->second.is_set(k))
+	  // 	fprintf(f, " %d", k);
+	  //   fprintf(f, "\n");
+	  // }
+	}
+        for (unsigned long j = 0; j < n->barriers.max_entries(); j++) {
+          if (!n->barriers.has_entry(j))
+            continue;
+          BarrierImpl *b = n->barriers.lookup_entry(j, i/*node*/); 
+          AutoHSLLock a2(b->mutex);
+          // skip any barriers with no waiters
+          if (b->generations.empty())
+            continue;
+
+          fprintf(f,"Barrier " IDFMT ": gen=%d subscr=%d\n",
+                  b->me.id(), b->generation, b->gen_subscribed);
+          for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
+                b->generations.begin(); git != b->generations.end(); git++)
+          {
+            const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
+            for (std::vector<EventWaiter*>::const_iterator it = 
+                  waiters.begin(); it != waiters.end(); it++)
+            {
+              fprintf(f, "  [%d] L:%p ", git->first, *it);
+              (*it)->print_info(f);
+            }
+          }
+        }
+      }
+
+      // TODO - pending barriers
+#if 0
+      // // convert from events to barriers
+      // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      // for(int i = 0; i < gasnet_nodes(); i++) {
+      // 	Node *n = &get_runtime()->nodes[i];
+      //   // Iterate over all the events and get their implementations
+      //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+      //     if (!n->events.has_entry(j))
+      //       continue;
+      // 	  Event::Impl *e = n->events.lookup_entry(j, i/*node*/);
+      // 	  AutoHSLLock a2(e->mutex);
+
+      // 	  // print anything with either local or remote waiters
+      // 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+      // 	    continue;
+
+      //     fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
+      // 		  e->me.id, e->generation, e->gen_subscribed, 
+      // 		  e->local_waiters.size(), e->remote_waiters.size());
+      // 	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = e->local_waiters.begin();
+      // 	      it != e->local_waiters.end();
+      // 	      it++) {
+      // 	    for(std::vector<EventWaiter *>::iterator it2 = it->second.begin();
+      // 		it2 != it->second.end();
+      // 		it2++) {
+      // 	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
+      // 	      (*it2)->print_info(f);
+      // 	    }
+      // 	  }
+      // 	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+      // 	      it != e->remote_waiters.end();
+      // 	      it++) {
+      // 	    fprintf(f, "  [%d] R:", it->first);
+      // 	    for(int k = 0; k < MAX_NUM_NODES; k++)
+      // 	      if(it->second.is_set(k))
+      // 		fprintf(f, " %d", k);
+      // 	    fprintf(f, "\n");
+      // 	  }
+      // 	}
+      // }
+#endif
+
+      fprintf(f,"DONE\n");
+      fflush(f);
+    }
+
     ///////////////////////////////////////////////////
     // Barrier 
 
@@ -3667,19 +3691,26 @@ namespace LegionRuntime {
       Reservation lock;
     };
 
-    void handle_destroy_lock(Reservation lock)
+    struct DestroyReservationArgs {
+      Reservation actual;
+      Reservation dummy;
+    };
+
+    void handle_destroy_lock(DestroyReservationArgs args)
     {
-      lock.destroy_reservation();
+      args.actual.destroy_reservation();
     }
 
-    typedef ActiveMessageShortNoReply<DESTROY_LOCK_MSGID, Reservation,
+    typedef ActiveMessageShortNoReply<DESTROY_LOCK_MSGID, DestroyReservationArgs,
 				      handle_destroy_lock> DestroyLockMessage;
 
     void Reservation::destroy_reservation()
     {
       // a lock has to be destroyed on the node that created it
       if(ID(*this).node() != gasnet_mynode()) {
-	DestroyLockMessage::request(ID(*this).node(), *this);
+        DestroyReservationArgs args;
+        args.actual = *this;
+	DestroyLockMessage::request(ID(*this).node(), args);
 	return;
       }
 
@@ -3724,23 +3755,48 @@ namespace LegionRuntime {
 
     /*static*/ const Memory Memory::NO_MEMORY = { 0 };
 
-    struct RemoteMemAllocArgs {
+    struct RemoteMemAllocReqArgs {
+      int sender;
+      void *resp_ptr;
       Memory memory;
       size_t size;
     };
 
-    off_t handle_remote_mem_alloc(RemoteMemAllocArgs args)
+    void handle_remote_mem_alloc_req(RemoteMemAllocReqArgs args);
+
+    typedef ActiveMessageShortNoReply<REMOTE_MALLOC_MSGID,
+				      RemoteMemAllocReqArgs,
+				      handle_remote_mem_alloc_req> RemoteMemAllocRequest;
+
+    struct RemoteMemAllocRespArgs {
+      void *resp_ptr;
+      off_t offset;
+    };
+
+    void handle_remote_mem_alloc_resp(RemoteMemAllocRespArgs args);
+
+    typedef ActiveMessageShortNoReply<REMOTE_MALLOC_RPLID,
+				      RemoteMemAllocRespArgs,
+				      handle_remote_mem_alloc_resp> RemoteMemAllocResponse;
+
+    void handle_remote_mem_alloc_req(RemoteMemAllocReqArgs args)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       //printf("[%d] handling remote alloc of size %zd\n", gasnet_mynode(), args.size);
-      off_t result = args.memory.impl()->alloc_bytes(args.size);
+      off_t offset = args.memory.impl()->alloc_bytes(args.size);
       //printf("[%d] remote alloc will return %d\n", gasnet_mynode(), result);
-      return result;
+
+      RemoteMemAllocRespArgs r_args;
+      r_args.resp_ptr = args.resp_ptr;
+      r_args.offset = offset;
+      RemoteMemAllocResponse::request(args.sender, r_args);
     }
 
-    typedef ActiveMessageShortReply<REMOTE_MALLOC_MSGID, REMOTE_MALLOC_RPLID,
-				    RemoteMemAllocArgs, off_t,
-				    handle_remote_mem_alloc> RemoteMemAllocMessage;
+    void handle_remote_mem_alloc_resp(RemoteMemAllocRespArgs args)
+    {
+      HandlerReplyFuture<off_t> *f = static_cast<HandlerReplyFuture<off_t> *>(args.resp_ptr);
+      f->set(args.offset);
+    }
 
     // make bad offsets really obvious (+1 PB)
     static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << 50;
@@ -3912,12 +3968,19 @@ namespace LegionRuntime {
     {
       // RPC over to owner's node for allocation
 
-      RemoteMemAllocArgs args;
+      HandlerReplyFuture<off_t> result;
+
+      RemoteMemAllocReqArgs args;
       args.memory = me;
       args.size = size;
-      off_t retval = RemoteMemAllocMessage::request(ID(me).node(), args);
-      //printf("got: %d\n", retval);
-      return retval;
+      args.sender = gasnet_mynode();
+      args.resp_ptr = &result;
+
+      RemoteMemAllocRequest::request(ID(me).node(), args);
+
+      // wait for result to come back
+      result.wait();
+      return result.get();
     }
 
     void Memory::Impl::free_bytes_remote(off_t offset, size_t size)
@@ -5083,10 +5146,12 @@ namespace LegionRuntime {
       return i;
     }
 
-    struct CreateInstanceArgs : public BaseMedium {
+    struct CreateInstanceReqArgs : public BaseMedium {
       Memory m;
       IndexSpace r;
       RegionInstance parent_inst;
+      int sender;
+      void *resp_ptr;
     };
 
     struct CreateInstancePayload {
@@ -5102,16 +5167,32 @@ namespace LegionRuntime {
       size_t &field_size(int idx) { return *((&num_fields)+idx+1); }
     };
 
-    struct CreateInstanceResp : public BaseReply {
+    struct CreateInstanceRespArgs {
+      void *resp_ptr;
       RegionInstance i;
       off_t inst_offset;
       off_t count_offset;
     };
 
-    CreateInstanceResp handle_create_instance(CreateInstanceArgs args, const void *msgdata, size_t msglen)
+    void handle_create_instance_req(CreateInstanceReqArgs args, 
+				    const void *msgdata, size_t msglen);
+
+    typedef ActiveMessageMediumNoReply<CREATE_INST_MSGID,
+				       CreateInstanceReqArgs,
+				       handle_create_instance_req> CreateInstanceRequest;
+
+    void handle_create_instance_resp(CreateInstanceRespArgs args);
+
+    typedef ActiveMessageShortNoReply<CREATE_INST_RPLID,
+				      CreateInstanceRespArgs,
+				      handle_create_instance_resp> CreateInstanceResponse;
+				   
+    void handle_create_instance_req(CreateInstanceReqArgs args, const void *msgdata, size_t msglen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      CreateInstanceResp resp;
+      CreateInstanceRespArgs resp;
+
+      resp.resp_ptr = args.resp_ptr;
 
       const CreateInstancePayload *payload = (const CreateInstancePayload *)msgdata;
       assert(msglen == (sizeof(CreateInstancePayload) + sizeof(size_t) * payload->num_fields));
@@ -5131,17 +5212,23 @@ namespace LegionRuntime {
 					      args.parent_inst);
 
       //resp.inst_offset = resp.i.impl()->locked_data.offset; // TODO: Static
-      RegionInstance::Impl *i_impl = resp.i.impl();
+      // Its' actually only safe to do this if we got an instance
+      if (resp.i.exists()) {
+        RegionInstance::Impl *i_impl = resp.i.impl();
 
-      resp.inst_offset = i_impl->metadata.alloc_offset;
-      resp.count_offset = i_impl->metadata.count_offset;
+        resp.inst_offset = i_impl->metadata.alloc_offset;
+        resp.count_offset = i_impl->metadata.count_offset;
+      }
 
-      return resp;
+      CreateInstanceResponse::request(args.sender, resp);
     }
 
-    typedef ActiveMessageMediumReply<CREATE_INST_MSGID, CREATE_INST_RPLID,
-				     CreateInstanceArgs, CreateInstanceResp,
-				     handle_create_instance> CreateInstanceMessage;
+    void handle_create_instance_resp(CreateInstanceRespArgs args)
+    {
+      HandlerReplyFuture<CreateInstanceRespArgs> *f = static_cast<HandlerReplyFuture<CreateInstanceRespArgs> *>(args.resp_ptr);
+
+      f->set(args);
+    }
 
     RegionInstance Memory::Impl::create_instance_remote(IndexSpace r,
 							const int *linearization_bits,
@@ -5154,7 +5241,7 @@ namespace LegionRuntime {
 							RegionInstance parent_inst)
     {
       size_t payload_size = sizeof(CreateInstancePayload) + sizeof(size_t) * field_sizes.size();
-      CreateInstancePayload *payload = (CreateInstancePayload *)alloca(payload_size);
+      CreateInstancePayload *payload = (CreateInstancePayload *)malloc(payload_size);
 
       payload->bytes_needed = bytes_needed;
       payload->block_size = block_size;
@@ -5170,35 +5257,46 @@ namespace LegionRuntime {
       for(unsigned i = 0; i < field_sizes.size(); i++)
 	payload->field_size(i) = field_sizes[i];
 
-      CreateInstanceArgs args;
+      CreateInstanceReqArgs args;
       args.srcptr = 0; // gcc 4.4.7 wants this!?
       args.m = me;
       args.r = r;
       args.parent_inst = parent_inst;
       log_inst(LEVEL_DEBUG, "creating remote instance: node=%d", ID(me).node());
-      CreateInstanceResp resp = CreateInstanceMessage::request(ID(me).node(), args,
-							       payload, payload_size, PAYLOAD_COPY);
-      log_inst(LEVEL_DEBUG, "created remote instance: inst=" IDFMT " offset=%zd", resp.i.id, resp.inst_offset);
 
-      DomainLinearization linear;
-      linear.deserialize(linearization_bits);
+      HandlerReplyFuture<CreateInstanceRespArgs> result;
+      args.resp_ptr = &result;
+      args.sender = gasnet_mynode();
+      CreateInstanceRequest::request(ID(me).node(), args,
+				     payload, payload_size, PAYLOAD_FREE);
 
-      RegionInstance::Impl *i_impl = new RegionInstance::Impl(resp.i, r, me, resp.inst_offset, bytes_needed, redopid,
-							      linear, block_size, element_size, field_sizes,
-							      resp.count_offset, list_size, parent_inst);
+      result.wait();
+      CreateInstanceRespArgs resp = result.get();
 
-      unsigned index = ID(resp.i).index_l();
-      // resize array if needed
-      if(index >= instances.size()) {
-	AutoHSLLock a(mutex);
-	if(index >= instances.size()) {
-	  log_inst(LEVEL_DEBUG, "resizing instance array: mem=" IDFMT " old=%zd new=%d",
-		   me.id, instances.size(), index+1);
-	  for(unsigned i = instances.size(); i <= index; i++)
-	    instances.push_back(0);
-	}
+      // Only do this if the response succeeds
+      if (resp.i.exists()) {
+        log_inst(LEVEL_DEBUG, "created remote instance: inst=" IDFMT " offset=%zd", resp.i.id, resp.inst_offset);
+
+        DomainLinearization linear;
+        linear.deserialize(linearization_bits);
+
+        RegionInstance::Impl *i_impl = new RegionInstance::Impl(resp.i, r, me, resp.inst_offset, bytes_needed, redopid,
+                                                                linear, block_size, element_size, field_sizes,
+                                                                resp.count_offset, list_size, parent_inst);
+
+        unsigned index = ID(resp.i).index_l();
+        // resize array if needed
+        if(index >= instances.size()) {
+          AutoHSLLock a(mutex);
+          if(index >= instances.size()) {
+            log_inst(LEVEL_DEBUG, "resizing instance array: mem=" IDFMT " old=%zd new=%d",
+                     me.id, instances.size(), index+1);
+            for(unsigned i = instances.size(); i <= index; i++)
+              instances.push_back(0);
+          }
+        }
+        instances[index] = i_impl;
       }
-      instances[index] = i_impl;
       return resp.i;
     }
 
@@ -6937,6 +7035,12 @@ namespace LegionRuntime {
 	dl.serialize(linearization_bits);
 #else
 	num_elements = data->last_elmt - data->first_elmt + 1;
+        // round num_elements up to a multiple of 4 to line things up better with vectors, cache lines, etc.
+        if(num_elements & 3) {
+          if (block_size == num_elements)
+            block_size = (block_size + 3) & ~(size_t)3;
+          num_elements = (num_elements + 3) & ~(size_t)3;
+        }
 	if(block_size > num_elements)
 	  block_size = num_elements;
 
@@ -7582,6 +7686,10 @@ namespace LegionRuntime {
 	if(pos >= mask.num_elements)
 	  return false;
 
+        // if our current pos is below the first known-set element, skip to there
+        if((mask.first_enabled_elmt > 0) && (pos < mask.first_enabled_elmt))
+          pos = mask.first_enabled_elmt;
+
 	// fetch first value and see if we have any bits set
 	int idx = pos >> 6;
 	uint64_t bits = impl->bits[idx];
@@ -7591,10 +7699,13 @@ namespace LegionRuntime {
 	if(pos & 0x3f)
 	  bits &= ~((1ULL << (pos & 0x3f)) - 1);
 
-	// skip over words that are all zeros
+	// skip over words that are all zeros, and try to ignore trailing zeros completely
+        int stop_at = mask.num_elements;
+        if(mask.last_enabled_elmt >= 0)
+          stop_at = mask.last_enabled_elmt+1;
 	while(!bits) {
 	  idx++;
-	  if((idx << 6) >= mask.num_elements) {
+	  if((idx << 6) >= stop_at) {
 	    pos = mask.num_elements; // so we don't scan again
 	    return false;
 	  }
@@ -8687,6 +8798,7 @@ namespace LegionRuntime {
 
     struct MachineShutdownRequestArgs {
       int initiating_node;
+      int dummy; // needed to get sizeof() >= 8
     };
 
     void handle_machine_shutdown_request(MachineShutdownRequestArgs args)
@@ -8949,42 +9061,9 @@ namespace LegionRuntime {
     }
 
 #ifdef DEADLOCK_TRACE
-    void sigterm_catch(int signal) {
+    void deadlock_catch(int signal) {
       assert((signal == SIGTERM) || (signal == SIGINT));
-#ifdef NODE_LOGGING
-      static int call_count = 0;
-      int count = __sync_fetch_and_add(&call_count, 1);
-      if (count == 0) {
-        FILE *log_file = Logger::get_log_file();
-        show_event_waiters(log_file);
-        Logger::finalize();
-      }
-#endif
-      Runtime *rt = get_runtime();
-      // Send sig aborts to all the threads
-      for (unsigned idx = 0; idx < rt->next_thread; idx++)
-        pthread_kill(rt->all_threads[idx], SIGABRT);
-    }
-
-    void sigabrt_catch(int signal) {
-      assert(signal == SIGABRT);
-      // Figure out which index we are, then see if this is
-      // the first time we should dumb ourselves
-      pthread_t self = pthread_self();
-      Runtime *rt = get_runtime();
-      int index = -1;
-      for (int i = 0; i < rt->next_thread; i++)
-      {
-        if (rt->all_threads[i] == self)
-        {
-          index = i;
-          break;
-        }
-      }
-      int count = -1;
-      if (index >= 0)
-        count = __sync_fetch_and_add(&rt->thread_counts[index],1);
-      if (count == 0)
+      // First thing we do is dump our state
       {
         void *bt[256];
         int bt_size = backtrace(bt, 256);
@@ -8996,19 +9075,66 @@ namespace LegionRuntime {
         int offset = 0;
         for (int i = 0; i < bt_size; i++)
           offset += sprintf(buffer+offset,"%s\n",bt_syms[i]);
-        fprintf(stderr,"BACKTRACE on node %d\n----------\n%s\n----------\n", 
-                gasnet_mynode(), buffer);
+#ifdef NODE_LOGGING
+        char file_name[256];
+        sprintf(file_name,"%s/backtrace_%d_thread_%ld.txt",
+                          Runtime::Impl::prefix, gasnet_mynode(), pthread_self());
+        FILE *fbt = fopen(file_name,"w");
+        fprintf(fbt,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
+                gasnet_mynode(), pthread_self(), buffer);
+        fflush(fbt);
+        fclose(fbt);
+#else
+        fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
+                gasnet_mynode(), pthread_self(), buffer);
+        fflush(stderr);
+#endif
         free(buffer);
+      }
+      // Check to see if we are the first ones to catch the signal
+      Runtime::Impl *rt = get_runtime();
+      unsigned prev_count = __sync_fetch_and_add(&(rt->signaled_threads),1);
+      // If we're the first do special stuff
+      if (prev_count == 0) {
+        unsigned expected = 1;
+        // we are special, tell any other threads to handle a signal
+        for (unsigned idx = 0; idx < rt->next_thread; idx++)
+          if (rt->all_threads[idx] != pthread_self()) {
+            pthread_kill(rt->all_threads[idx], SIGTERM);
+            expected++;
+          }
+        // dump our waiters
+#ifdef NODE_LOGGING
+        char file_name[256];
+        sprintf(file_name,"%s/waiters_%d.txt",
+                          Runtime::Impl::prefix, gasnet_mynode());
+        FILE *fw = fopen(file_name,"w");
+        show_event_waiters(fw);
+        fflush(fw);
+        fclose(fw);
+#else
+        show_event_waiters(stderr);
+#endif
+        // the wait for everyone else to be done
+        while (__sync_fetch_and_add(&(rt->signaled_threads),0) < expected) {
+#ifdef __SSE2__
+          _mm_pause();
+#else
+          usleep(1000);
+#endif
+        }
+        // Now that everyone is done we can exit the process
+        exit(1);
       }
     }
 #endif
 
-#ifdef LEGION_BACKTRACE
-    static void legion_backtrace(int signal)
+#if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE)
+    static void realm_backtrace(int signal)
     {
-      assert((signal == SIGTERM) || (signal == SIGINT) || 
+      assert((signal == SIGILL) || (signal == SIGFPE) || 
              (signal == SIGABRT) || (signal == SIGSEGV) ||
-             (signal == SIGFPE));
+             (signal == SIGBUS));
       void *bt[256];
       int bt_size = backtrace(bt, 256);
       char **bt_syms = backtrace_symbols(bt, bt_size);
@@ -9031,10 +9157,11 @@ namespace LegionRuntime {
     }
 #endif
 
-    static void legion_freeze(int signal)
+    static void realm_freeze(int signal)
     {
       assert((signal == SIGINT) || (signal == SIGABRT) ||
-             (signal == SIGSEGV) || (signal == SIGFPE));
+             (signal == SIGSEGV) || (signal == SIGFPE) ||
+             (signal == SIGBUS));
       int process_id = getpid();
       char hostname[128];
       gethostname(hostname, 127);
@@ -9311,6 +9438,7 @@ namespace LegionRuntime {
       unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
+      unsigned active_msg_handler_threads = 1;
       bool     active_msg_sender_threads = false;
 #ifdef USE_CUDA
       size_t zc_mem_size_in_mb = 64;
@@ -9354,6 +9482,7 @@ namespace LegionRuntime {
 	INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
+	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
         BOOL_ARG("-ll:senders", active_msg_sender_threads);
 	INT_ARG("-ll:bind", bind_localproc_threads);
 #ifdef USE_CUDA
@@ -9430,7 +9559,25 @@ namespace LegionRuntime {
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
 	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+#ifdef DEBUG_REALM_STARTUP
+      { // we don't have rank IDs yet, so everybody gets to spew
+        char s[80];
+        gethostname(s, 79);
+        strcat(s, " enter gasnet_init");
+        LegionRuntime::TimeStamp ts(s, false);
+        fflush(stdout);
+      }
+#endif
       CHECK_GASNET( gasnet_init(argc, argv) );
+#ifdef DEBUG_REALM_STARTUP
+      { // once we're convinced there isn't skew here, reduce this to rank 0
+        char s[80];
+        gethostname(s, 79);
+        strcat(s, " exit gasnet_init");
+        LegionRuntime::TimeStamp ts(s, false);
+        fflush(stdout);
+      }
+#endif
 
       // Check that we have enough resources for the number of nodes we are using
       if (gasnet_nodes() > MAX_NUM_NODES)
@@ -9470,8 +9617,10 @@ namespace LegionRuntime {
       hcount += LockGrantMessage::add_handler_entries(&handlers[hcount], "Lock Grant AM");
       hcount += EventSubscribeMessage::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
       hcount += EventTriggerMessage::add_handler_entries(&handlers[hcount], "Event Trigger AM");
-      hcount += RemoteMemAllocMessage::add_handler_entries(&handlers[hcount], "Remote Memory Allocation AM");
-      hcount += CreateInstanceMessage::add_handler_entries(&handlers[hcount], "Create Instance AM");
+      hcount += RemoteMemAllocRequest::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
+      hcount += RemoteMemAllocResponse::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
+      hcount += CreateInstanceRequest::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
+      hcount += CreateInstanceResponse::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
       hcount += ValidMaskRequestMessage::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
       hcount += ValidMaskDataMessage::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
@@ -9517,26 +9666,30 @@ namespace LegionRuntime {
 
 #ifdef DEADLOCK_TRACE
       next_thread = 0;
-      signal(SIGTERM, sigterm_catch);
-      signal(SIGINT, sigterm_catch);
-      signal(SIGABRT, sigabrt_catch);
+      signaled_threads = 0;
+      signal(SIGTERM, deadlock_catch);
+      signal(SIGINT, deadlock_catch);
 #endif
-#ifdef LEGION_BACKTRACE
-      signal(SIGSEGV, legion_backtrace);
-      signal(SIGTERM, legion_backtrace);
-      signal(SIGINT, legion_backtrace);
-      signal(SIGABRT, legion_backtrace);
-      signal(SIGFPE, legion_backtrace);
+#if defined(REALM_BACKTRACE) || defined(LEGION_BACKTRACE)
+      signal(SIGSEGV, realm_backtrace);
+      signal(SIGABRT, realm_backtrace);
+      signal(SIGFPE,  realm_backtrace);
+      signal(SIGILL,  realm_backtrace);
+      signal(SIGBUS,  realm_backtrace);
 #endif
-      if (getenv("LEGION_FREEZE_ON_ERROR") != NULL)
+      if ((getenv("LEGION_FREEZE_ON_ERROR") != NULL) ||
+          (getenv("REALM_FREEZE_ON_ERROR") != NULL))
       {
-        signal(SIGSEGV, legion_freeze);
-        signal(SIGINT,  legion_freeze);
-        signal(SIGABRT, legion_freeze);
-        signal(SIGFPE,  legion_freeze);
+        signal(SIGSEGV, realm_freeze);
+        signal(SIGABRT, realm_freeze);
+        signal(SIGFPE,  realm_freeze);
+        signal(SIGILL,  realm_freeze);
+        signal(SIGBUS,  realm_freeze);
       }
       
       start_polling_threads(active_msg_worker_threads);
+
+      start_handler_threads(active_msg_handler_threads, stack_size_in_mb << 20);
 
       start_dma_worker_threads(dma_worker_threads);
 
@@ -9932,6 +10085,13 @@ namespace LegionRuntime {
 					  announce_data, false);
       }
 
+#ifdef DEBUG_REALM_STARTUP
+      if(gasnet_mynode() == 0) {
+        LegionRuntime::TimeStamp ts("sending announcements", false);
+        fflush(stdout);
+      }
+#endif
+
       // now announce ourselves to everyone else
       for(unsigned i = 0; i < gasnet_nodes(); i++)
 	if(i != gasnet_mynode())
@@ -9944,6 +10104,13 @@ namespace LegionRuntime {
 	do_some_polling();
 
       log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
+
+#ifdef DEBUG_REALM_STARTUP
+      if(gasnet_mynode() == 0) {
+        LegionRuntime::TimeStamp ts("received all announcements", false);
+        fflush(stdout);
+      }
+#endif
 
       return true;
     }
@@ -10105,8 +10272,7 @@ namespace LegionRuntime {
 	CHECK_PTHREAD( pthread_attr_destroy(&attr) );
         background_pthread = threadp;
 #ifdef DEADLOCK_TRACE
-        Runtime *rt = get_runtime();
-        rt->add_thread(threadp); 
+        this->add_thread(threadp); 
 #endif
 	return;
       }
@@ -10154,7 +10320,7 @@ namespace LegionRuntime {
       // wait for idle-ness somehow?
       int timeout = -1;
 #ifdef TRACE_RESOURCES
-      Runtime *rt = get_runtime();
+      Runtime::Impl *rt = get_runtime();
 #endif
       while(running_proc_count.get() > 0) {
 	if(timeout >= 0) {
@@ -10174,6 +10340,17 @@ namespace LegionRuntime {
 #endif
       }
       log_machine.info("running proc count is now zero - terminating\n");
+#ifdef REPORT_REALM_RESOURCE_USAGE
+      {
+        Runtime::Impl *rt = LegionRuntime::LowLevel::get_runtime();
+        printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
+               gasnet_mynode(),
+               rt->local_event_free_list->next_alloc,
+               rt->local_reservation_free_list->next_alloc,
+               rt->local_index_space_free_list->next_alloc,
+               rt->local_proc_group_free_list->next_alloc);
+      }
+#endif
 #ifdef EVENT_GRAPH_TRACE
       {
         FILE *log_file = Logger::get_log_file();
@@ -10826,7 +11003,8 @@ namespace LegionRuntime {
 
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
-      int index = mapping->image_dense_subrect(r, subrect);
+      Rect<1> ir = mapping->image_dense_subrect(r, subrect);
+      int index = ir.lo;
 
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
@@ -10942,6 +11120,9 @@ namespace LegionRuntime {
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset);
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset);
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride);
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride);
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride);
   };
 
   namespace Arrays {

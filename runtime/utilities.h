@@ -229,7 +229,9 @@ namespace LegionRuntime {
       {
         if(level >= COMPILE_TIME_MIN_LEVEL) {  // static opt-out
           if(level >= Logger::get_log_level()) {             // dynamic opt-out
-            if(Logger::get_log_cats_enabled()[index]) {      // category filter
+            // Don't do the category filter for errors
+            if((level == LEVEL_ERROR) ||
+                Logger::get_log_cats_enabled()[index]) {      // category filter
               va_list args;
               va_start(args, fmt);
               Logger::logvprintf((LogLevel)level, index, fmt, args);
@@ -313,7 +315,9 @@ namespace LegionRuntime {
       {
         if(LEVEL_ERROR >= COMPILE_TIME_MIN_LEVEL) {  // static opt-out
           if(LEVEL_ERROR >= Logger::get_log_level()) {             // dynamic opt-out
-            if(Logger::get_log_cats_enabled()[index]) {      // category filter
+            // Skip the category filter for errors for now
+            //if(Logger::get_log_cats_enabled()[index]) {      // category filter
+            {
               va_list args;
               va_start(args, fmt);
               Logger::logvprintf(LEVEL_ERROR, index, fmt, args);
@@ -344,8 +348,8 @@ namespace LegionRuntime {
     // Use static methods with static variables to avoid initialization ordering problem
     static LogLevel& get_log_level(void)
     {
-      // default level for now is INFO
-      static LogLevel log_level = LEVEL_INFO;
+      // default level for now is WARNING 
+      static LogLevel log_level = LEVEL_WARNING;
       return log_level;
     }
     static std::vector<bool>& get_log_cats_enabled(void)

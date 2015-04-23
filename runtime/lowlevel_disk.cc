@@ -19,6 +19,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 namespace LegionRuntime {
   namespace LowLevel {

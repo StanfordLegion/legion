@@ -31,6 +31,20 @@
   } \
 } while(0)
 
+// Need CUDA 6.5 or later for good error reporting
+#if __CUDA_API_VERSION >= 6050
+#define CHECK_CU(cmd) do { \
+  CUresult ret = (cmd); \
+  if(ret != CUDA_SUCCESS) { \
+    const char *name, *str; \
+    cuGetErrorName(ret, &name); \
+    cuGetErrorString(ret, &str); \
+    fprintf(stderr, "CU: %s = %d (%s): %s\n", #cmd, ret, name, str); \
+    assert(0); \
+    exit(1); \
+  } \
+} while(0)
+#else
 #define CHECK_CU(cmd) do { \
   CUresult ret = (cmd); \
   if(ret != CUDA_SUCCESS) { \
@@ -39,6 +53,7 @@
     exit(1); \
   } \
 } while(0)
+#endif
 
 namespace LegionRuntime {
   namespace LowLevel {

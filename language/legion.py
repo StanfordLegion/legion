@@ -41,14 +41,16 @@ include_path = [
     runtime_dir,
 ]
 
-lib_path = [
-    os.path.join(terra_dir, 'build'),
-    bindings_dir,
-]
-
 LD_LIBRARY_PATH = 'LD_LIBRARY_PATH'
 if os_name == 'Darwin':
     LD_LIBRARY_PATH = 'DYLD_LIBRARY_PATH'
+
+lib_path = (
+    (os.environ[LD_LIBRARY_PATH].split(':')
+     if LD_LIBRARY_PATH in os.environ else []) +
+    [os.path.join(terra_dir, 'build'),
+     bindings_dir,
+ ])
 
 terra_exe = os.path.join(terra_dir, 'terra')
 terra_env = dict(os.environ.items() + [

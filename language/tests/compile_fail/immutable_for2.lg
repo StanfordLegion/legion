@@ -13,25 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid constraint in static_cast: region $t has no parent in $t0
+-- type mismatch: write expected an lvalue but got ptr(int32, $r)
 
 import "legion"
 
-local c = legionlib.c
-
 task f()
-  var t = region(int, 5)
-  var colors = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(colors, 0)
-  c.legion_coloring_ensure_color(colors, 1)
-
-  var tp = partition(disjoint, t, colors)
-  var t0 = tp[0]
-  var t1 = tp[1]
-
-  var x = new(ptr(int, t))
-  var x0 = static_cast(ptr(int, t0), x)
-
-  c.legion_coloring_destroy(colors)  
+  var r = region(int, 5)
+  for x in r do
+    var y = x
+    x = y
+  end
 end
 f:compile()

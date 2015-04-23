@@ -22,6 +22,7 @@ import sys, re
 # All of these calls are based on the print statements in legion_logging.h
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
+prefix_pat              = re.compile(prefix)
 # Logger calls for the shape of the machine
 utility_pat             = re.compile(prefix+"Utility (?P<pid>[0-9a-f]+)")
 processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -48,7 +49,7 @@ top_task_pat            = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0
 single_task_pat         = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
 index_task_pat          = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
 mapping_pat             = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-close_pat               = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+close_pat               = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 fence_pat               = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat             = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 acquire_op_pat          = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
@@ -173,7 +174,7 @@ def parse_log_line(line, state):
             return True
     m = close_pat.match(line)
     if m <> None:
-        if state.add_close(int(m.group('ctx')), int(m.group('uid'))):
+        if state.add_close(int(m.group('ctx')), int(m.group('uid')), True if int(m.group('is_inter')) == 1 else False):
             return True
     m = fence_pat.match(line)
     if m <> None:
@@ -281,6 +282,11 @@ def parse_log_file(file_name, state):
     # printed to the log file in weird orders, try reparsing lines
     replay_lines = list()
     for line in log:
+        # Do a quick check to see if we match the prefix
+        # If not then we can skip the line entirely
+        m = prefix_pat.match(line)
+        if m == None:
+            continue
         # If we made it here then we failed to match
         if parse_log_line(line, state):
             matches += 1

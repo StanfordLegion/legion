@@ -263,8 +263,12 @@ function analyze_leaf.stat_var_unpack(cx, node)
   return analyze_leaf.expr(cx, node.value)
 end
 
-function analyze_leaf.stat_return(cx, node) 
-  return analyze_leaf.expr(cx, node.value)
+function analyze_leaf.stat_return(cx, node)
+  if node.value then
+    return analyze_leaf.expr(cx, node.value)
+  else
+    return true
+  end
 end
 
 function analyze_leaf.stat_break(cx, node)
@@ -589,7 +593,11 @@ function analyze_inner.stat_var_unpack(cx, node)
 end
 
 function analyze_inner.stat_return(cx, node) 
-  return analyze_inner.expr(cx, node.value)
+  if node.value then
+    return analyze_inner.expr(cx, node.value)
+  else
+    return true
+  end
 end
 
 function analyze_inner.stat_break(cx, node)
@@ -688,7 +696,9 @@ function optimize_config_options.stat_task(cx, node)
       inner = inner,
       idempotent = false,
     },
+    region_divergence = node.region_divergence,
     prototype = node.prototype,
+    span = node.span,
   }
 end
 
@@ -702,7 +712,7 @@ function optimize_config_options.stat_top(cx, node)
 end
 
 function optimize_config_options.entry(node)
-  local cx = context.new_global_scope({})
+  local cx = context.new_global_scope()
   return optimize_config_options.stat_top(cx, node)
 end
 

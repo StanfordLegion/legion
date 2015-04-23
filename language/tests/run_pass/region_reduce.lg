@@ -14,40 +14,61 @@
 
 import "legion"
 
+-- Do each of these reductions multiple times so we know they're
+-- folding properly.
 task g_plus(r : region(int), p : ptr(int, r))
 where reduces+(r) do
-  @p += 20
+  @p += 2
+  @p += 13
+  @p += 5
 end
 
 task g_times(r : region(int), p : ptr(int, r))
 where reduces*(r) do
-  @p *= 4
+  @p *= 2
+  @p *= 1
+  @p *= 2
 end
 
 task g_minus(r : region(int), p : ptr(int, r))
 where reduces-(r) do
-  @p -= 20
+  @p -= 3
+  @p -= 10
+  @p -= 7
 end
 
 task g_divide(r : region(int), p : ptr(int, r))
 where reduces/(r) do
   @p /= 2
+  @p /= 1
 end
 
 task g_max(r : region(int), p : ptr(int, r))
 where reduces max(r) do
   @p max= 1
+  @p max= 0
 end
 
 task g_min(r : region(int), p : ptr(int, r))
 where reduces min(r) do
   @p min= 10000
+  @p min= 100000
+  @p min= 1000000
 end
 
 -- You can also do reductions with read-write privileges.
 task h_plus(r : region(int), p : ptr(int, r))
 where reads(r), writes(r) do
-  @p += 300
+  @p += 100
+  @p += 100
+  @p += 100
+end
+
+task h_minus(r : region(int), p : ptr(int, r))
+where reads(r), writes(r) do
+  @p -= 500
+  @p -= 1200
+  @p -= 1300
 end
 
 task f() : int
@@ -61,10 +82,11 @@ task f() : int
   g_max(r, p)
   g_min(r, p)
   h_plus(r, p)
+  h_minus(r, p)
   return @p
 end
 
 task main()
-  legionlib.assert(f() == 332, "test failed")
+  legionlib.assert(f() == -2668, "test failed")
 end
 legionlib.start(main)

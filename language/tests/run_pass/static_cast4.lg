@@ -12,9 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- invalid constraint in static_cast: region $t1 has no parent in $t0
-
 import "legion"
 
 local c = legionlib.c
@@ -29,9 +26,10 @@ task f()
   var t0 = tp[0]
   var t1 = tp[1]
 
-  var x1 = new(ptr(int, t1))
-  var x0 = static_cast(ptr(int, t0), x1)
+  var x = new(ptr(int, t))
+  var x0 = static_cast(ptr(int, t0), x)
+  legionlib.assert(isnull(x0), "test failed")
 
-  c.legion_coloring_destroy(colors)  
+  c.legion_coloring_destroy(colors)
 end
 f:compile()

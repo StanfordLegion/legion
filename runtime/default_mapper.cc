@@ -385,9 +385,20 @@ namespace LegionRuntime {
           // Elliott needs SOA for the compiler.
           task->regions[idx].blocking_factor = // 1;
             task->regions[idx].max_blocking_factor;
-          Memory global = machine_interface.find_global_memory();
-          assert(global.exists());
-          task->regions[idx].target_ranking.push_back(global);
+
+	  // respect restricted regions' current placement
+	  if (task->regions[idx].restricted)
+	  {
+	    assert(task->regions[idx].current_instances.size() == 1);
+	    task->regions[idx].target_ranking.push_back(
+	      (task->regions[idx].current_instances.begin())->first);
+	  }
+	  else
+	  {
+	    Memory global = machine_interface.find_global_memory();
+	    assert(global.exists());
+	    task->regions[idx].target_ranking.push_back(global);
+	  }
         }
         else
           task->regions[idx].early_map = false;

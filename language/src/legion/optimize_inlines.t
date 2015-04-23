@@ -385,13 +385,14 @@ function map_regions(diff)
 end
 
 function fixup_block(annotated_block, in_usage, out_usage)
-  local block, block_in_usage, block_out_usage = unpack(annotated_block)
+  local node, node_in_usage, node_out_usage = unpack(annotated_block)
   local stats = terralib.newlist()
-  stats:insertall(map_regions(usage_diff(in_usage, block_in_usage)))
-  stats:insertall(block.stats)
-  stats:insertall(map_regions(usage_diff(block_out_usage, out_usage)))
+  stats:insertall(map_regions(usage_diff(in_usage, node_in_usage)))
+  stats:insertall(node.stats)
+  stats:insertall(map_regions(usage_diff(node_out_usage, out_usage)))
   return ast.typed.Block {
     stats = stats,
+    span = node.span,
   }
 end
 
@@ -402,6 +403,7 @@ function fixup_elseif(annotated_node, in_usage, out_usage)
   return ast.typed.StatElseif {
     cond = node.cond,
     block = block,
+    span = node.span,
   }
 end
 
@@ -429,6 +431,7 @@ function optimize_inlines.block(cx, node)
   return annotate(
     ast.typed.Block {
       stats = result_stats,
+      span = node.span,
     },
     in_usage, out_usage)
 end
@@ -461,6 +464,7 @@ function optimize_inlines.stat_if(cx, node)
       then_block = then_block,
       elseif_blocks = elseif_blocks,
       else_block = else_block,
+      span = node.span,
     },
     initial_usage, final_usage)
 end
@@ -471,6 +475,7 @@ function optimize_inlines.stat_elseif(cx, node)
     ast.typed.StatElseif {
       cond = node.cond,
       block = block,
+      span = node.span,
     },
     in_usage, out_usage)
 end
@@ -484,6 +489,7 @@ function optimize_inlines.stat_while(cx, node)
     ast.typed.StatWhile {
       cond = node.cond,
       block = block,
+      span = node.span,
     },
     loop_usage, loop_usage)
 end
@@ -501,6 +507,7 @@ function optimize_inlines.stat_for_num(cx, node)
       values = node.values,
       block = block,
       parallel = node.parallel,
+      span = node.span,
     },
     loop_usage, loop_usage)
 end
@@ -516,6 +523,7 @@ function optimize_inlines.stat_for_list(cx, node)
       value = node.value,
       block = block,
       vectorize = node.vectorize,
+      span = node.span,
     },
     loop_usage, loop_usage)
 end
@@ -530,6 +538,7 @@ function optimize_inlines.stat_repeat(cx, node)
     ast.typed.StatRepeat {
       block = block,
       until_cond = node.until_cond,
+      span = node.span,
     },
     loop_usage, loop_usage)
 end
@@ -539,7 +548,8 @@ function optimize_inlines.stat_block(cx, node)
     optimize_inlines.block(cx, node.block))
   return annotate(
     ast.typed.StatBlock {
-      block = block
+      block = block,
+      span = node.span,
     },
     block_in_usage, block_out_usage)
 end
@@ -569,7 +579,7 @@ function optimize_inlines.stat_var_unpack(cx, node)
 end
 
 function optimize_inlines.stat_return(cx, node)
-  local usage = analyze_usage.expr(cx, node.value)
+  local usage = node.value and analyze_usage.expr(cx, node.value)
   return annotate(node, usage, usage)
 end
 
@@ -680,7 +690,9 @@ function optimize_inlines.stat_task(cx, node)
     constraints = node.constraints,
     body = body,
     config_options = node.config_options,
+    region_divergence = node.region_divergence,
     prototype = node.prototype,
+    span = node.span,
   }
 end
 

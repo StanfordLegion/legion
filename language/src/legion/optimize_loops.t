@@ -117,6 +117,18 @@ end
 
 local analyze_is_side_effect_free = {}
 
+function analyze_is_side_effect_free.expr_field_access(cx, node)
+  if not analyze_is_side_effect_free.expr(cx, node.value) then
+    return false
+  end
+  if std.is_ptr(std.as_read(node.value.expr_type)) or
+    std.is_ref(node.value.expr_type)
+  then
+    return false
+  end
+  return true
+end
+
 function analyze_is_side_effect_free.expr_index_access(cx, node)
   if not analyze_is_side_effect_free.expr(cx, node.value) then
     return false
@@ -199,7 +211,7 @@ function analyze_is_side_effect_free.expr(cx, node)
     return true
 
   elseif node:is(ast.typed.ExprFieldAccess) then
-    return false -- could be a ExprDeref
+    return analyze_is_side_effect_free.expr_field_access(cx, node)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
     return analyze_is_side_effect_free.expr_index_access(cx, node)
@@ -588,6 +600,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
+    span = node.span,
   }
 end
 
@@ -597,6 +610,7 @@ function optimize_loops.block(cx, node)
   return ast.typed.Block {
     stats = node.stats:map(
       function(stat) return optimize_loops.stat(cx, stat) end),
+    span = node.span,
   }
 end
 
@@ -607,6 +621,7 @@ function optimize_loops.stat_if(cx, node)
     elseif_blocks = node.elseif_blocks:map(
       function(block) return optimize_loops.stat_elseif(cx, block) end),
     else_block = optimize_loops.block(cx, node.else_block),
+    span = node.span,
   }
 end
 
@@ -614,6 +629,7 @@ function optimize_loops.stat_elseif(cx, node)
   return ast.typed.StatElseif {
     cond = node.cond,
     block = optimize_loops.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -621,6 +637,7 @@ function optimize_loops.stat_while(cx, node)
   return ast.typed.StatWhile {
     cond = node.cond,
     block = optimize_loops.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -630,6 +647,7 @@ function optimize_loops.stat_for_num(cx, node)
     values = node.values,
     block = optimize_loops.block(cx, node.block),
     parallel = node.parallel,
+    span = node.span,
   }
   return optimize_index_launch_loops.stat_for_num(cx, node)
 end
@@ -640,6 +658,7 @@ function optimize_loops.stat_for_list(cx, node)
     value = node.value,
     block = optimize_loops.block(cx, node.block),
     vectorize = node.vectorize,
+    span = node.span,
   }
 end
 
@@ -650,6 +669,7 @@ function optimize_loops.stat_for_list_vectorized(cx, node)
     block = optimize_loops.block(cx, node.block),
     orig_block = optimize_loops.block(cx, node.orig_block),
     decls = node.decls,
+    span = node.span,
   }
 end
 
@@ -657,12 +677,14 @@ function optimize_loops.stat_repeat(cx, node)
   return ast.typed.StatRepeat {
     block = optimize_loops.block(cx, node.block),
     until_cond = node.until_cond,
+    span = node.span,
   }
 end
 
 function optimize_loops.stat_block(cx, node)
   return ast.typed.StatBlock {
-    block = optimize_loops.block(cx, node.block)
+    block = optimize_loops.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -726,7 +748,9 @@ function optimize_loops.stat_task(cx, node)
     constraints = node.constraints,
     body = body,
     config_options = node.config_options,
+    region_divergence = node.region_divergence,
     prototype = node.prototype,
+    span = node.span,
   }
 end
 

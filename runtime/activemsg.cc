@@ -67,6 +67,30 @@ static bool is_registered(void *ptr)
   return false;
 }
 
+typedef LegionRuntime::LowLevel::HandlerThread HandlerThread;
+
+class IncomingMessageManager {
+public:
+  IncomingMessageManager(int _nodes);
+  ~IncomingMessageManager(void);
+
+  void add_incoming_message(int sender, IncomingMessage *msg);
+
+  void shutdown(void);
+
+  IncomingMessage *get_messages(int &sender, bool wait = true);
+
+protected:
+  int nodes;
+  int shutdown_flag;
+  IncomingMessage **heads;
+  IncomingMessage ***tails;
+  int *todo_list; // list of nodes with non-empty message lists
+  int todo_oldest, todo_newest;
+  gasnet_hsl_t mutex;
+  gasnett_cond_t condvar;
+};
+
 void init_deferred_frees(void)
 {
   gasnet_hsl_init(&deferred_free_mutex);
@@ -256,7 +280,7 @@ void *SrcDataPool::alloc_srcptr(size_t size_needed, Lock& held_lock)
 {
   // sanity check - if the requested size is larger than will ever fit, fail
   if(size_needed > total_size)
-    return 0;
+    assert(0);
 
   // early out - if our pending allocation queue is non-empty, they're
   //  first in line, so fail this allocation
@@ -464,6 +488,7 @@ OutgoingMessage::~OutgoingMessage(void)
 static int num_lmbs = 2;
 static size_t lmb_size = 1 << 20; // 1 MB
 static bool force_long_messages = true;
+static int max_msgs_to_send = 8;
 
 // returns the largest payload that can be sent to a node (to a non-pinned
 //   address)
@@ -471,6 +496,292 @@ size_t get_lmb_size(int target_node)
 {
   // not node specific right yet
   return lmb_size;
+}
+
+#ifdef DETAILED_MESSAGE_TIMING
+static const size_t DEFAULT_MESSAGE_MAX_COUNT = 4 << 20;  // 4 million messages should be plenty
+
+// some helper state to make sure we don't repeatedly log stall conditions
+enum {
+  MSGLOGSTATE_NORMAL,
+  MSGLOGSTATE_SRCDATAWAIT,
+  MSGLOGSTATE_LMBWAIT,
+};
+
+// little helper that automatically gets the current time
+struct CurrentTime {
+public:
+  CurrentTime(void)
+  {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    sec = ts.tv_sec;
+    nsec = ts.tv_nsec;
+  }
+
+  unsigned sec, nsec;
+};
+
+struct MessageTimingData {
+public:
+  unsigned char msg_id;
+  char write_lmb;
+  unsigned short target;
+  unsigned msg_size, start_sec, start_nsec, dur_nsec;
+  unsigned queue_depth;
+};
+
+class DetailedMessageTiming {
+public:
+  DetailedMessageTiming(void)
+  {
+    path = getenv("LEGION_MESSAGE_TIMING_PATH");
+    message_count = 0;
+    if(path) {
+      char *e = getenv("LEGION_MESSAGE_TIMING_MAX");
+      if(e)
+	message_max_count = atoi(e);
+      else
+	message_max_count = DEFAULT_MESSAGE_MAX_COUNT;
+
+      message_timing = new MessageTimingData[message_max_count];
+    } else {
+      message_max_count = 0;
+      message_timing = 0;
+    }
+  }
+
+  ~DetailedMessageTiming(void)
+  {
+    delete[] message_timing;
+  }
+
+  int get_next_index(void)
+  {
+    if(message_max_count)
+      return __sync_fetch_and_add(&message_count, 1);
+    else
+      return -1;
+  }
+
+  void record(int index, int peer, unsigned char msg_id, char write_lmb, unsigned msg_size, unsigned queue_depth,
+	      const CurrentTime& t_start, const CurrentTime& t_end)
+  {
+    if((index >= 0) && (index < message_max_count)) {
+      MessageTimingData &mtd(message_timing[index]);
+      mtd.msg_id = msg_id;
+      mtd.write_lmb = write_lmb;
+      mtd.target = peer;
+      mtd.msg_size = msg_size;
+      mtd.start_sec = t_start.sec;
+      mtd.start_nsec = t_start.nsec;
+      unsigned long long delta = (t_end.sec - t_start.sec) * 1000000000ULL + t_end.nsec - t_start.nsec;
+      mtd.dur_nsec = (delta > (unsigned)-1) ? ((unsigned)-1) : delta;
+      mtd.queue_depth = queue_depth;
+    }
+  }
+
+  // dump timing data from all the endpoints to a file
+  void dump_detailed_timing_data(void)
+  {
+    if(!path) return;
+
+    char filename[256];
+    strcpy(filename, path);
+    int l = strlen(filename);
+    if(l && (filename[l-1] != '/'))
+      filename[l++] = '/';
+    sprintf(filename+l, "msgtiming_%d.dat", gasnet_mynode());
+    int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    assert(fd >= 0);
+
+    int count = message_count;
+    if(count > message_max_count)
+      count = message_max_count;
+    ssize_t to_write = count * sizeof(MessageTimingData);
+    if(to_write) {
+      ssize_t amt = write(fd, message_timing, to_write);
+      assert(amt == to_write);
+    }
+
+    close(fd);
+  }
+
+protected:
+  const char *path;
+  int message_count, message_max_count;
+  MessageTimingData *message_timing;
+};
+
+static DetailedMessageTiming detailed_message_timing;
+#endif
+
+IncomingMessageManager::IncomingMessageManager(int _nodes)
+  : nodes(_nodes), shutdown_flag(0)
+{
+  heads = new IncomingMessage *[nodes];
+  tails = new IncomingMessage **[nodes];
+  for(int i = 0; i < nodes; i++) {
+    heads[i] = 0;
+    tails[i] = 0;
+  }
+  todo_list = new int[nodes + 1];  // an extra entry to distinguish full from empty
+  todo_oldest = todo_newest = 0;
+  gasnet_hsl_init(&mutex);
+  gasnett_cond_init(&condvar);
+}
+
+IncomingMessageManager::~IncomingMessageManager(void)
+{
+  delete[] heads;
+  delete[] tails;
+  delete[] todo_list;
+}
+
+void IncomingMessageManager::add_incoming_message(int sender, IncomingMessage *msg)
+{
+#ifdef DEBUG_INCOMING
+  printf("adding incoming message from %d\n", sender);
+#endif
+  gasnet_hsl_lock(&mutex);
+  if(heads[sender]) {
+    // tack this on to the existing list
+    assert(tails[sender]);
+    *(tails[sender]) = msg;
+    tails[sender] = &(msg->next_msg);
+  } else {
+    // this starts a list, and the node needs to be added to the todo list
+    heads[sender] = msg;
+    tails[sender] = &(msg->next_msg);
+    todo_list[todo_newest] = sender;
+    todo_newest++;
+    if(todo_newest > nodes)
+      todo_newest = 0;
+    assert(todo_newest != todo_oldest);  // should never wrap around
+    gasnett_cond_broadcast(&condvar);  // wake up any sleepers
+  }
+  gasnet_hsl_unlock(&mutex);
+}
+
+void IncomingMessageManager::shutdown(void)
+{
+  gasnet_hsl_lock(&mutex);
+  if(!shutdown_flag) {
+    shutdown_flag = true;
+    gasnett_cond_broadcast(&condvar);  // wake up any sleepers
+  }
+  gasnet_hsl_unlock(&mutex);
+}
+
+IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
+{
+  gasnet_hsl_lock(&mutex);
+  while(todo_oldest == todo_newest) {
+    // todo list is empty
+    if(shutdown_flag || !wait)
+      break;
+#ifdef DEBUG_INCOMING
+    printf("incoming message list is empty - sleeping\n");
+#endif
+    gasnett_cond_wait(&condvar, &mutex.lock);
+  }
+  IncomingMessage *retval;
+  if(todo_oldest == todo_newest) {
+    // still empty
+    sender = -1;
+    retval = 0;
+#ifdef DEBUG_INCOMING
+    printf("incoming message list is still empty!\n");
+#endif
+  } else {
+    // pop the oldest entry off the todo list
+    sender = todo_list[todo_oldest];
+    todo_oldest++;
+    if(todo_oldest > nodes)
+      todo_oldest = 0;
+    retval = heads[sender];
+    heads[sender] = 0;
+    tails[sender] = 0;
+#ifdef DEBUG_INCOMING
+    printf("handling incoming messages from %d\n", sender);
+#endif
+  }
+  gasnet_hsl_unlock(&mutex);
+  return retval;
+}    
+
+static IncomingMessageManager *incoming_message_manager = 0;
+
+extern void enqueue_incoming(gasnet_node_t sender, IncomingMessage *msg)
+{
+  assert(incoming_message_manager != 0);
+  incoming_message_manager->add_incoming_message(sender, msg);
+}
+
+void HandlerThread::thread_main(void)
+{
+  while (true) {
+    int sender = -1;
+    current_msg = manager->get_messages(sender);
+    if(!current_msg) {
+#ifdef DEBUG_INCOMING
+      printf("received empty list - assuming shutdown!\n");
+#endif
+      break;
+    }
+#ifdef DETAILED_MESSAGE_TIMING
+    int count = 0;
+#endif
+    while(current_msg) {
+      next_msg = current_msg->next_msg;
+#ifdef DETAILED_MESSAGE_TIMING
+      int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+      CurrentTime start_time;
+#endif
+      current_msg->run_handler();
+#ifdef DETAILED_MESSAGE_TIMING
+      detailed_message_timing.record(timing_idx, 
+				     current_msg->get_peer(),
+				     current_msg->get_msgid(),
+				     -18, // 0xee - flagged as an incoming message,
+				     current_msg->get_msgsize(),
+				     count++, // how many messages we handle in a batch
+				     start_time, CurrentTime());
+#endif
+      delete current_msg;
+      current_msg = next_msg;
+    }
+  }
+}
+
+void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for,
+                                   bool block/* = false*/)
+{
+  while (!wait_for.has_triggered()) {
+    // Try handling the next message
+    if (next_msg) {
+      // Save the old current message
+      IncomingMessage *old_current = current_msg;
+      current_msg = next_msg;
+      next_msg = current_msg->next_msg;
+      // Run the handler
+      current_msg->run_handler();
+      delete current_msg;
+      // Now reset the current msg in case we return
+      current_msg = old_current;
+    } else {
+      // We didn't have anymore messages to handle, so try
+      // and get some more to handle
+      int sender = -1;
+      next_msg = manager->get_messages(sender, false/*wait*/);
+    }
+  }
+}
+
+void HandlerThread::join(void)
+{
+  void *dummy;
+  CHECK_PTHREAD( pthread_join(thread, &dummy) );
 }
 
 class ActiveMessageEndpoint {
@@ -516,6 +827,9 @@ public:
     sent_messages = 0;
     received_messages = 0;
 #endif
+#ifdef DETAILED_MESSAGE_TIMING
+    message_log_state = MSGLOGSTATE_NORMAL;
+#endif
   }
 
   ~ActiveMessageEndpoint(void)
@@ -535,27 +849,70 @@ public:
 #endif
   }
 
-  int push_messages(int max_to_send = 0, bool wait = false)
+  // returns true if the limit was reached before all messages could
+  //  be sent (i.e. there's still more to send)
+  bool push_messages(int max_to_send = 0, bool wait = false)
   {
     int count = 0;
 
-    while((max_to_send == 0) || (count < max_to_send)) {
+    bool still_more = true;
+    while(still_more && ((max_to_send == 0) || (count < max_to_send))) {
       // attempt to get the mutex that covers the outbound queues - do not
       //  block
       int ret = gasnet_hsl_trylock(&mutex);
       if(ret == GASNET_ERR_NOT_READY) break;
 
+      // short messages are used primarily for flow control, so always try to send those first
+      // (if a short message needs to be ordered with long messages, it goes in the long message
+      // queue)
+      if(out_short_hdrs.size() > 0) {
+	OutgoingMessage *hdr = out_short_hdrs.front();
+	out_short_hdrs.pop();
+	still_more = !(out_short_hdrs.empty() && out_long_hdrs.empty());
+
+#ifdef DETAILED_MESSAGE_TIMING
+	int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+	unsigned qdepth = out_long_hdrs.size(); // sic - we assume the short queue is always near-empty
+	message_log_state = MSGLOGSTATE_NORMAL;
+#endif
+	// now let go of lock and send message
+	gasnet_hsl_unlock(&mutex);
+
+#ifdef DETAILED_MESSAGE_TIMING
+	CurrentTime start_time;
+#endif
+	send_short(hdr);
+#ifdef DETAILED_MESSAGE_TIMING
+	detailed_message_timing.record(timing_idx, peer, hdr->msgid, -1, hdr->num_args*4, qdepth, start_time, CurrentTime());
+#endif
+	delete hdr;
+	count++;
+	continue;
+      }
+
       // try to send a long message, but only if we have an LMB available
       //  on the receiving end
-      if((out_long_hdrs.size() > 0) && lmb_w_avail[cur_write_lmb]) {
+      if(out_long_hdrs.size() > 0) {
 	OutgoingMessage *hdr;
 	hdr = out_long_hdrs.front();
 
 	// no payload?  this happens when a short/medium message needs to be ordered with long messages
 	if(hdr->payload_size == 0) {
 	  out_long_hdrs.pop();
+	  still_more = !(out_short_hdrs.empty() && out_long_hdrs.empty());
+#ifdef DETAILED_MESSAGE_TIMING
+	  int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+	  unsigned qdepth = out_long_hdrs.size();
+	  message_log_state = MSGLOGSTATE_NORMAL;
+#endif
 	  gasnet_hsl_unlock(&mutex);
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime start_time;
+#endif
 	  send_short(hdr);
+#ifdef DETAILED_MESSAGE_TIMING
+	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -1, hdr->num_args*4, qdepth, start_time, CurrentTime());
+#endif
 	  delete hdr;
 	  count++;
 	  continue;
@@ -563,7 +920,20 @@ public:
 
 	// is the message still waiting on space in the srcdatapool?
 	if(hdr->payload_mode == PAYLOAD_PENDING) {
+#ifdef DETAILED_MESSAGE_TIMING
+	  // log this if we haven't already
+	  int timing_idx = -1;
+	  unsigned qdepth = out_long_hdrs.size();
+	  if(message_log_state != MSGLOGSTATE_SRCDATAWAIT) {
+	    timing_idx = detailed_message_timing.get_next_index();
+	    message_log_state = MSGLOGSTATE_SRCDATAWAIT;
+	  }
+#endif
 	  gasnet_hsl_unlock(&mutex);
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime now;
+	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -2, hdr->num_args*4 + hdr->payload_size, qdepth, now, now);
+#endif
 	  break;
 	}
 
@@ -571,11 +941,42 @@ public:
 	if(hdr->dstptr != 0) {
 	  //printf("sending long message directly to %p (%zd bytes)\n", hdr->dstptr, hdr->payload_size);
 	  out_long_hdrs.pop();
+	  still_more = !(out_short_hdrs.empty() && out_long_hdrs.empty());
+#ifdef DETAILED_MESSAGE_TIMING
+	  int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+	  unsigned qdepth = out_long_hdrs.size();
+	  message_log_state = MSGLOGSTATE_NORMAL;
+#endif
 	  gasnet_hsl_unlock(&mutex);
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime start_time;
+#endif
 	  send_long(hdr, hdr->dstptr);
+#ifdef DETAILED_MESSAGE_TIMING
+	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -1, hdr->num_args*4 + hdr->payload_size, qdepth, start_time, CurrentTime());
+#endif
 	  delete hdr;
 	  count++;
 	  continue;
+	}
+
+	// are we waiting for the next LMB to become available?
+	if(!lmb_w_avail[cur_write_lmb]) {
+#ifdef DETAILED_MESSAGE_TIMING
+	  // log this if we haven't already
+	  int timing_idx = -1;
+	  unsigned qdepth = out_long_hdrs.size();
+	  if(message_log_state != MSGLOGSTATE_LMBWAIT) {
+	    timing_idx = detailed_message_timing.get_next_index();
+	    message_log_state = MSGLOGSTATE_LMBWAIT;
+	  }
+#endif
+	  gasnet_hsl_unlock(&mutex);
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime now;
+	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, -3, hdr->num_args*4 + hdr->payload_size, qdepth, now, now);
+#endif
+	  break;
 	}
 
 	// do we have enough room in the current LMB?
@@ -591,14 +992,26 @@ public:
             cur_write_offset = ((cur_write_offset >> 7) + 1) << 7;
 	  cur_write_count++;
 	  out_long_hdrs.pop();
+	  still_more = !(out_short_hdrs.empty() && out_long_hdrs.empty());
 
+#ifdef DETAILED_MESSAGE_TIMING
+	  int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+	  unsigned qdepth = out_long_hdrs.size();
+	  message_log_state = MSGLOGSTATE_NORMAL;
+#endif
 	  gasnet_hsl_unlock(&mutex);
 #ifdef DEBUG_LMB
 	  printf("LMB: sending %zd bytes %d->%d, [%p,%p)\n",
 		 hdr->payload_size, gasnet_mynode(), peer,
 		 dest_ptr, dest_ptr + hdr->payload_size);
 #endif
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime start_time;
+#endif
 	  send_long(hdr, dest_ptr);
+#ifdef DETAILED_MESSAGE_TIMING
+	  detailed_message_timing.record(timing_idx, peer, hdr->msgid, cur_write_lmb, hdr->num_args*4 + hdr->payload_size, qdepth, start_time, CurrentTime());
+#endif
 	  delete hdr;
 	  count++;
 	  continue;
@@ -611,6 +1024,11 @@ public:
 	  cur_write_offset = 0;
 	  cur_write_count = 0;
 
+#ifdef DETAILED_MESSAGE_TIMING
+	  int timing_idx = detailed_message_timing.get_next_index(); // grab this while we still hold the lock
+	  unsigned qdepth = out_long_hdrs.size();
+	  message_log_state = MSGLOGSTATE_NORMAL;
+#endif
 	  // now let go of the lock and send the flip request
 	  gasnet_hsl_unlock(&mutex);
 
@@ -623,28 +1041,20 @@ public:
           log_active_message.info("Active Message Request: %d %d 2 0",
                                   MSGID_FLIP_REQ, peer);
 #endif
+#ifdef DETAILED_MESSAGE_TIMING
+	  CurrentTime start_time;
+#endif
 	  CHECK_GASNET( gasnet_AMRequestShort2(peer, MSGID_FLIP_REQ,
                                                flip_buffer, flip_count) );
+#ifdef DETAILED_MESSAGE_TIMING
+	  detailed_message_timing.record(timing_idx, peer, MSGID_FLIP_REQ, flip_buffer, 8, qdepth, start_time, CurrentTime());
+#endif
 #ifdef TRACE_MESSAGES
           __sync_fetch_and_add(&sent_messages, 1);
 #endif
 
 	  continue;
 	}
-      }
-
-      // couldn't send a long message, try a short message
-      if(out_short_hdrs.size() > 0) {
-	OutgoingMessage *hdr = out_short_hdrs.front();
-	out_short_hdrs.pop();
-
-	// now let go of lock and send message
-	gasnet_hsl_unlock(&mutex);
-
-	send_short(hdr);
-	delete hdr;
-	count++;
-	continue;
       }
 
       // Couldn't do anything so if we were told to wait, goto sleep
@@ -658,10 +1068,10 @@ public:
       break;
     }
 
-    return count;
+    return still_more;
   }
 
-  void enqueue_message(OutgoingMessage *hdr, bool in_order)
+  bool enqueue_message(OutgoingMessage *hdr, bool in_order)
   {
     // need to hold the mutex in order to push onto one of the queues
     gasnet_hsl_lock(&mutex);
@@ -669,6 +1079,9 @@ public:
     // once we have the lock, we can safely move the message's payload to
     //  srcdatapool
     hdr->reserve_srcdata();
+
+    // tell caller if we were empty before for managing todo lists
+    bool was_empty = out_short_hdrs.empty() && out_long_hdrs.empty();
 
     // messages that don't need space in the LMB can progress when the LMB is full
     //  (unless they need to maintain ordering with long packets)
@@ -680,9 +1093,12 @@ public:
     gasnett_cond_signal(&cond);
 
     gasnet_hsl_unlock(&mutex);
+
+    return was_empty;
   }
 
-  bool handle_long_msgptr(void *ptr)
+  // returns true if a message is enqueue AND we were empty before
+  bool handle_long_msgptr(const void *ptr)
   {
     // can figure out which buffer it is without holding lock
     int r_buffer = -1;
@@ -705,7 +1121,7 @@ public:
 
     // now take the lock to increment the r_count and decide if we need
     //  to ack (can't actually send it here, so queue it up)
-    bool message_added = false;
+    bool message_added_to_empty_queue = false;
     gasnet_hsl_lock(&mutex);
     lmb_r_counts[r_buffer]++;
     if(lmb_r_counts[r_buffer] == 0) {
@@ -715,14 +1131,14 @@ public:
 	     lmb_r_bases[r_buffer]+lmb_size);
 #endif
 
+      message_added_to_empty_queue = out_short_hdrs.empty() && out_long_hdrs.empty();
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &r_buffer);
       out_short_hdrs.push(hdr);
-      message_added = true;
       // wake up a sender
       gasnett_cond_signal(&cond);
     }
     gasnet_hsl_unlock(&mutex);
-    return message_added;
+    return message_added_to_empty_queue;
   }
 
   bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, 
@@ -780,7 +1196,7 @@ public:
 #ifdef TRACE_MESSAGES
     __sync_fetch_and_add(&received_messages, 1);
 #endif
-    bool message_added = false;
+    bool message_added_to_empty_queue = false;
     gasnet_hsl_lock(&mutex);
     lmb_r_counts[buffer] -= count;
     if(lmb_r_counts[buffer] == 0) {
@@ -790,14 +1206,14 @@ public:
 	     lmb_r_bases[buffer]+lmb_size);
 #endif
 
+      message_added_to_empty_queue = out_short_hdrs.empty() && out_long_hdrs.empty();
       OutgoingMessage *hdr = new OutgoingMessage(MSGID_FLIP_ACK, 1, &buffer);
       out_short_hdrs.push(hdr);
-      message_added = true;
       // Wake up a sender
       gasnett_cond_signal(&cond);
     }
     gasnet_hsl_unlock(&mutex);
-    return message_added;
+    return message_added_to_empty_queue;
   }
 
   // called when the remote side says it has received all the messages in a
@@ -1214,6 +1630,9 @@ public:
   int sent_messages;
   int received_messages;
 #endif
+#ifdef DETAILED_MESSAGE_TIMING
+  int message_log_state;
+#endif
 };
 
 void OutgoingMessage::set_payload(PayloadSource *_payload_src,
@@ -1338,28 +1757,46 @@ public:
     : total_endpoints(num_endpoints)
   {
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
-    outstanding_messages = (int*)malloc(num_endpoints*sizeof(int));
     for (int i = 0; i < num_endpoints; i++)
     {
       if (((unsigned)i) == gasnet_mynode())
         endpoints[i] = 0;
       else
         endpoints[i] = new ActiveMessageEndpoint(i);
-      outstanding_messages[i] = 0;
     }
+
+    // keep a todo list of endpoints with non-empty queues
+    gasnet_hsl_init(&mutex);
+    gasnett_cond_init(&condvar);
+    todo_list = new int[total_endpoints + 1];  // one extra to distinguish full/empty
+    todo_oldest = todo_newest = 0;
   }
+
+  ~EndpointManager(void)
+  {
+    delete[] todo_list;
+  }
+
 public:
+  void add_todo_entry(int target)
+  {
+    //printf("%d: adding target %d to list\n", gasnet_mynode(), target);
+    gasnet_hsl_lock(&mutex);
+    todo_list[todo_newest] = target;
+    todo_newest++;
+    if(todo_newest > total_endpoints)
+      todo_newest = 0;
+    assert(todo_newest != todo_oldest); // should never wrap around
+    // wake up any sleepers
+    gasnett_cond_broadcast(&condvar);
+    gasnet_hsl_unlock(&mutex);
+  }
+
   void handle_flip_request(gasnet_node_t src, int flip_buffer, int flip_count)
   {
-#define TRACK_MESSAGES
-#ifdef TRACK_MESSAGES
-    bool added_message = 
-#endif
-      endpoints[src]->handle_flip_request(flip_buffer, flip_count);
-#ifdef TRACK_MESSAGES
-    if (added_message)
-      __sync_fetch_and_add(outstanding_messages+src,1);
-#endif
+    bool was_empty = endpoints[src]->handle_flip_request(flip_buffer, flip_count);
+    if(was_empty)
+      add_todo_entry(src);
   }
   void handle_flip_ack(gasnet_node_t src, int ack_buffer)
   {
@@ -1367,52 +1804,61 @@ public:
   }
   void push_messages(int max_to_send = 0, bool wait = false)
   {
-#ifdef TRACK_MESSAGES
-    if (wait)
-    {
-      // If we have to wait, do the normal thing and iterate
-      // over all the end points, and update message counts
-      for (int i = 0; i < total_endpoints; i++)
-      {
-        int pushed = endpoints[i]->push_messages(max_to_send, true); 
-        __sync_fetch_and_add(outstanding_messages+i, -pushed);
+    while(true) {
+      // get the next entry from the todo list, waiting if requested
+      if(wait) {
+	gasnet_hsl_lock(&mutex);
+	while(todo_oldest == todo_newest) {
+	  //printf("outgoing todo list is empty - sleeping\n");
+	  gasnett_cond_wait(&condvar, &mutex.lock);
+	}
+      } else {
+	// try to take our lock so we can pop an endpoint from the todo list
+	int ret = gasnet_hsl_trylock(&mutex);
+	if(ret == GASNET_ERR_NOT_READY) return;
+
+	// give up if list is empty too
+	if(todo_oldest == todo_newest) {
+	  // it would be nice to sanity-check here that all endpoints have 
+	  //  empty queues, but there's a race condition here with endpoints
+	  //  that have added messages but not been able to put themselves on
+	  //  the todo list yet
+	  gasnet_hsl_unlock(&mutex);
+	  return;
+	}
       }
+
+      // have the lock here, and list is non-empty - pop the front one
+      int target = todo_list[todo_oldest];
+      todo_oldest++;
+      if(todo_oldest > total_endpoints)
+	todo_oldest = 0;
+      gasnet_hsl_unlock(&mutex);
+
+      //printf("sending messages to %d\n", target);
+      bool still_more = endpoints[target]->push_messages(max_to_send, wait);
+      //printf("done sending to %d - still more = %d\n", target, still_more);
+
+      // if we didn't send them all, put this target back on the list
+      if(still_more)
+	add_todo_entry(target);
+
+      // we get stuck in this loop if a sender is waiting on an LMB flip, so make
+      //  sure we do some polling inside the loop
+      CHECK_GASNET( gasnet_AMPoll() );
     }
-    else
-    {
-      for (int i = 0; i < total_endpoints; i++)
-      {
-        int messages = *((volatile int*)outstanding_messages+i);
-        if (messages == 0) continue;
-        int pushed = endpoints[i]->push_messages(max_to_send, false);
-        __sync_fetch_and_add(outstanding_messages+i, -pushed);
-      }
-    }
-#else
-    for (int i = 0; i < total_endpoints; i++)
-    {
-      if (endpoints[i] == 0) continue;
-      endpoints[i]->push_messages(max_to_send, wait);
-    }
-#endif
   }
   void enqueue_message(gasnet_node_t target, OutgoingMessage *hdr, bool in_order)
   {
-#ifdef TRACK_MESSAGES
-    __sync_fetch_and_add(outstanding_messages+target,1);
-#endif
-    endpoints[target]->enqueue_message(hdr, in_order);
+    bool was_empty = endpoints[target]->enqueue_message(hdr, in_order);
+    if(was_empty)
+      add_todo_entry(target);
   }
-  void handle_long_msgptr(gasnet_node_t source, void *ptr)
+  void handle_long_msgptr(gasnet_node_t source, const void *ptr)
   {
-#ifdef TRACK_MESSAGES
-    bool message_added =
-#endif
-      endpoints[source]->handle_long_msgptr(ptr);
-#ifdef TRACK_MESSAGES
-    if (message_added)
-      __sync_fetch_and_add(outstanding_messages+source,1);
-#endif
+    bool was_empty = endpoints[source]->handle_long_msgptr(ptr);
+    if(was_empty)
+      add_todo_entry(source);
   }
   bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
                            int message_id, int chunks)
@@ -1455,12 +1901,14 @@ public:
   {
     endpoints[source]->record_message(sent_reply);
   }
+
 private:
   const int total_endpoints;
   ActiveMessageEndpoint **endpoints;
-  // This vector of outstanding message counts is accessed
-  // by atomic intrinsics and is not protected by the lock
-  int *outstanding_messages;
+  gasnet_hsl_t mutex;
+  gasnett_cond_t condvar;
+  int *todo_list;
+  int todo_oldest, todo_newest;
 };
 
 static EndpointManager *endpoint_manager;
@@ -1508,6 +1956,11 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
       srcdatapool_size = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
       continue;
     }
+
+    if(!strcmp(argv[1], "-ll:maxsend")) {
+      max_msgs_to_send = atoi(argv[++i]);
+      continue;
+    }
   }
 
   size_t total_lmb_size = (gasnet_nodes() * 
@@ -1520,11 +1973,16 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			srcdatapool_size +
 			total_lmb_size);
 
-  if(gasnet_mynode() == 0)
+  if(gasnet_mynode() == 0) {
     printf("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
 	   gasnet_mem_size_in_mb, registered_mem_size_in_mb,
 	   total_lmb_size >> 20, srcdatapool_size >> 20,
 	   attach_size >> 20);
+#ifdef DEBUG_REALM_STARTUP
+    LegionRuntime::TimeStamp ts("entering gasnet_attach", false);
+    fflush(stdout);
+#endif
+  }
 
   // Don't bother checking this here.  Some GASNet conduits lie if 
   // the GASNET_PHYSMEM_MAX variable is not set.
@@ -1557,6 +2015,13 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );
 
+#ifdef DEBUG_REALM_STARTUP
+  if(gasnet_mynode() == 0) {
+    LegionRuntime::TimeStamp ts("exited gasnet_attach", false);
+    fflush(stdout);
+  }
+#endif
+
   segment_info = new gasnet_seginfo_t[gasnet_nodes()];
   CHECK_GASNET( gasnet_getSegmentInfo(segment_info, gasnet_nodes()) );
 
@@ -1580,25 +2045,46 @@ static int num_polling_threads = 0;
 static pthread_t *polling_threads = 0;
 static int num_sending_threads = 0;
 static pthread_t *sending_threads = 0;
+static int num_handler_threads = 0;
+static HandlerThread **handler_threads = 0;
 static volatile bool thread_shutdown_flag = false;
 
 // do a little bit of polling to try to move messages along, but return
 //  to the caller rather than spinning
 void do_some_polling(void)
 {
-  endpoint_manager->push_messages(0);
+  endpoint_manager->push_messages(max_msgs_to_send);
 
   CHECK_GASNET( gasnet_AMPoll() );
 }
 
 static void *gasnet_poll_thread_loop(void *data)
 {
+#ifdef TRACE_MESSAGES
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  int prev_report = ts.tv_sec;
+  char filename[80];
+  sprintf(filename, "ams_%d.log", gasnet_mynode());
+  FILE *f = fopen(filename, "w");
+#endif
   // each polling thread basically does an endless loop of trying to send
   //  outgoing messages and then polling
   while(!thread_shutdown_flag) {
     do_some_polling();
+#ifdef TRACE_MESSAGES
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    if(ts.tv_sec > (prev_report + 29)) {
+      prev_report = ts.tv_sec;
+      report_activemsg_status(f);
+    }
+#endif
     //usleep(10000);
   }
+#ifdef TRACE_MESSAGES
+  report_activemsg_status(f);
+  fclose(f);
+#endif
   return 0;
 }
 
@@ -1616,7 +2102,7 @@ void start_polling_threads(int count)
 				  gasnet_poll_thread_loop, 0) );
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 #ifdef DEADLOCK_TRACE
-    LegionRuntime::LowLevel::Runtime::get_runtime()->add_thread(&polling_threads[i]);
+    LegionRuntime::LowLevel::get_runtime()->add_thread(&polling_threads[i]);
 #endif
   }
 }
@@ -1645,8 +2131,22 @@ void start_sending_threads(void)
                                   sender_thread_loop, (void*)long(i)));
     CHECK_PTHREAD( pthread_attr_destroy(&attr) );
 #ifdef DEADLOCK_TRACE
-    LegionRuntime::LowLevel::Runtime::get_runtime()->add_thread(&sending_threads[i]);
+    LegionRuntime::LowLevel::get_runtime()->add_thread(&sending_threads[i]);
 #endif
+  }
+}
+
+void start_handler_threads(int count, size_t stack_size)
+{
+  num_handler_threads = count;
+  handler_threads = new HandlerThread*[num_handler_threads];
+
+  incoming_message_manager = new IncomingMessageManager(gasnet_nodes());
+
+  for (int i = 0; i < num_handler_threads; i++)
+  {
+    handler_threads[i] = new HandlerThread(incoming_message_manager);
+    handler_threads[i]->start_thread(stack_size, -1, "AM handler thread");
   }
 }
 
@@ -1672,6 +2172,14 @@ void stop_activemsg_threads(void)
     delete[] sending_threads;
   }
 
+  incoming_message_manager->shutdown();
+  for(int i = 0; i < num_handler_threads; i++) {
+    handler_threads[i]->join();
+  }
+  num_handler_threads = 0;
+  delete[] handler_threads;
+  delete incoming_message_manager;
+
 #ifdef REALM_PROFILE_AM_HANDLERS
   for(int i = 0; i < 256; i++) {
     if(!handler_stats[i].count) continue;
@@ -1682,6 +2190,11 @@ void stop_activemsg_threads(void)
            gasnet_mynode(), i,
            handler_stats[i].count, avg, stddev, handler_stats[i].minval, handler_stats[i].maxval);
   }
+#endif
+
+#ifdef DETAILED_MESSAGE_TIMING
+  // dump timing data from all the endpoints to a file
+  detailed_message_timing.dump_detailed_timing_data();
 #endif
 
   thread_shutdown_flag = false;
@@ -1767,7 +2280,7 @@ void enqueue_message(gasnet_node_t target, int msgid,
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
-void handle_long_msgptr(gasnet_node_t source, void *ptr)
+void handle_long_msgptr(gasnet_node_t source, const void *ptr)
 {
   assert(source != gasnet_mynode());
 
@@ -1840,7 +2353,7 @@ void SpanPayload::copy_data(void *dest)
 }
 
 extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
-                                const void *args, size_t arglen)
+				int message_id, int chunks)
 {
   // special case: if the buffer size is zero, it's an empty message and no adjustment
   //   is needed
@@ -1848,11 +2361,9 @@ extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer
     return true;
 
   assert(source != gasnet_mynode());
-  assert(arglen >= 2*sizeof(int));
-  const int *arg_ptr = (const int*)args;
 
   return endpoint_manager->adjust_long_msgsize(source, ptr, buffer_size,
-                                               arg_ptr[0], arg_ptr[1]);
+					       message_id, chunks);
 }
 
 extern void report_activemsg_status(FILE *f)

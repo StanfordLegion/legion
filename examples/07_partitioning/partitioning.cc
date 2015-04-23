@@ -403,15 +403,19 @@ int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+      Processor::LOC_PROC, true/*single*/, false/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
   // Note we mark that all of these tasks are capable of being
   // run both as single tasks and as index space tasks
   HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+      Processor::LOC_PROC, true/*single*/, true/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "init_field");
   HighLevelRuntime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+      Processor::LOC_PROC, true/*single*/, true/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "daxpy");
   HighLevelRuntime::register_legion_task<check_task>(CHECK_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+      Processor::LOC_PROC, true/*single*/, true/*index*/,
+      AUTO_GENERATE_ID, TaskConfigOptions(true), "check");
 
   return HighLevelRuntime::start(argc, argv);
 }

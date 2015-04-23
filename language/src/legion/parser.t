@@ -21,6 +21,7 @@ local std = require("legion/std")
 local parser = {}
 
 function parser.expr_prefix(p)
+  local start = ast.save(p)
   if p:nextif("(") then
     local expr = p:expr()
     p:expect(")")
@@ -31,6 +32,7 @@ function parser.expr_prefix(p)
     p:expect("]")
     return ast.unspecialized.ExprEscape {
       expr = expr,
+      span = ast.span(start, p),
     }
 
   elseif p:matches(p.name) then
@@ -38,6 +40,7 @@ function parser.expr_prefix(p)
     p:ref(name)
     return ast.unspecialized.ExprID {
       name = name,
+      span = ast.span(start, p),
     }
 
   else
@@ -46,6 +49,7 @@ function parser.expr_prefix(p)
 end
 
 function parser.field(p)
+  local start = ast.save(p)
   if p:matches(p.name) and p:lookahead("=") then
     local name = p:next(p.name).value
     p:expect("=")
@@ -53,6 +57,7 @@ function parser.field(p)
     return ast.unspecialized.ExprCtorRecField {
       name_expr = function(env) return name end,
       value = value,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("[") then
@@ -63,12 +68,14 @@ function parser.field(p)
     return ast.unspecialized.ExprCtorRecField {
       name_expr = name_expr,
       value = value,
+      span = ast.span(start, p),
     }
 
   else
     local value = p:expr()
     return ast.unspecialized.ExprCtorListField {
       value = value,
+      span = ast.span(start, p),
     }
   end
 end
@@ -78,6 +85,7 @@ function parser.sep(p)
 end
 
 function parser.expr_ctor(p)
+  local start = ast.save(p)
   local fields = terralib.newlist()
   p:expect("{")
   repeat
@@ -89,6 +97,7 @@ function parser.expr_ctor(p)
 
   return ast.unspecialized.ExprCtor {
     fields = fields,
+    span = ast.span(start, p),
   }
 end
 
@@ -117,14 +126,21 @@ function parser.fnargs(p)
 end
 
 function parser.expr_primary(p)
+  local start = ast.save(p)
   local expr = p:expr_prefix()
 
   while true do
     if p:nextif(".") then
-      local field_name = p:next(p.name).value
+      local field_name
+      if p:nextif("partition") then
+        field_name = "partition"
+      else
+        field_name = p:next(p.name).value
+      end
       expr = ast.unspecialized.ExprFieldAccess {
         value = expr,
         field_name = field_name,
+        span = ast.span(start, p),
       }
 
     elseif p:nextif("[") then
@@ -133,6 +149,7 @@ function parser.expr_primary(p)
       expr = ast.unspecialized.ExprIndexAccess {
         value = expr,
         index = index,
+        span = ast.span(start, p),
       }
 
     elseif p:nextif(":") then
@@ -142,6 +159,7 @@ function parser.expr_primary(p)
         value = expr,
         method_name = method_name,
         args = args,
+        span = ast.span(start, p),
       }
 
     elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
@@ -149,6 +167,7 @@ function parser.expr_primary(p)
       expr = ast.unspecialized.ExprCall {
         fn = expr,
         args = args,
+        span = ast.span(start, p),
       }
 
     else
@@ -160,11 +179,13 @@ function parser.expr_primary(p)
 end
 
 function parser.expr_simple(p)
+  local start = ast.save(p)
   if p:matches(p.number) then
     local token = p:next(p.number)
     return ast.unspecialized.ExprConstant {
       value = token.value,
       expr_type = token.valuetype,
+      span = ast.span(start, p),
     }
 
   elseif p:matches(p.string) then
@@ -172,18 +193,21 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprConstant {
       value = token.value,
       expr_type = rawstring,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("true") then
     return ast.unspecialized.ExprConstant {
       value = true,
       expr_type = bool,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("false") then
     return ast.unspecialized.ExprConstant {
       value = false,
       expr_type = bool,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("max") then
@@ -196,6 +220,7 @@ function parser.expr_simple(p)
       op = "max",
       lhs = lhs,
       rhs = rhs,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("min") then
@@ -208,12 +233,14 @@ function parser.expr_simple(p)
       op = "min",
       lhs = lhs,
       rhs = rhs,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("__context") then
     p:expect("(")
     p:expect(")")
     return ast.unspecialized.ExprRawContext {
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("__fields") then
@@ -222,6 +249,7 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.ExprRawFields {
       region = region,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("__physical") then
@@ -230,12 +258,14 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.ExprRawPhysical {
       region = region,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("__runtime") then
     p:expect("(")
     p:expect(")")
     return ast.unspecialized.ExprRawRuntime {
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("isnull") then
@@ -244,6 +274,7 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.ExprIsnull {
       pointer = pointer,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("new") then
@@ -252,6 +283,7 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.ExprNew {
       pointer_type_expr = pointer_type_expr,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("null") then
@@ -260,6 +292,7 @@ function parser.expr_simple(p)
     p:expect(")")
     return ast.unspecialized.ExprNull {
       pointer_type_expr = pointer_type_expr,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("dynamic_cast") then
@@ -271,6 +304,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprDynamicCast {
       type_expr = type_expr,
       value = value,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("static_cast") then
@@ -282,6 +316,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprStaticCast {
       type_expr = type_expr,
       value = value,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("region") then
@@ -293,6 +328,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprRegion {
       element_type_expr = element_type_expr,
       size = size,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("partition") then
@@ -307,6 +343,7 @@ function parser.expr_simple(p)
       disjointness_expr = disjointness_expr,
       region_type_expr = region_type_expr,
       coloring = coloring,
+      span = ast.span(start, p),
     }
 
   elseif p:nextif("cross_product") then
@@ -318,6 +355,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.ExprCrossProduct {
       lhs_type_expr = lhs_type_expr,
       rhs_type_expr = rhs_type_expr,
+      span = ast.span(start, p),
     }
 
   elseif p:matches("{") then
@@ -330,27 +368,32 @@ end
 
 parser.expr_unary = function(precedence)
   return function(p)
+    local start = ast.save(p)
     local op = p:next().type
     local rhs = p:expr(precedence)
     if op == "@" then
       return ast.unspecialized.ExprDeref {
         value = rhs,
+        span = ast.span(start, p),
       }
     end
     return ast.unspecialized.ExprUnary {
       op = op,
       rhs = rhs,
+      span = ast.span(start, p),
     }
   end
 end
 
 parser.expr_binary_left = function(p, lhs)
+  local start = lhs.span.start
   local op = p:next().type
   local rhs = p:expr(op)
   return ast.unspecialized.ExprBinary {
     op = op,
     lhs = lhs,
     rhs = rhs,
+    span = ast.span(start, p),
   }
 end
 
@@ -374,10 +417,12 @@ parser.expr = parsing.Pratt()
   :prefix(parsing.default, parser.expr_simple)
 
 function parser.expr_lhs(p)
+  local start = ast.save(p)
   if p:nextif("@") then
     local value = p:expr(50) -- Precedence for unary @
     return ast.unspecialized.ExprDeref {
       value = value,
+      span = ast.span(start, p),
     }
   else
     return p:expr_primary()
@@ -393,6 +438,7 @@ function parser.expr_list(p)
 end
 
 function parser.block(p)
+  local start = ast.save(p)
   local block = terralib.newlist()
   while not (p:matches("end") or p:matches("elseif") or
              p:matches("else") or p:matches("until")) do
@@ -401,16 +447,19 @@ function parser.block(p)
     p:nextif(";")
   end
   return ast.unspecialized.Block {
-    stats = block
+    stats = block,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_if(p)
+  local start = ast.save(p)
   p:expect("if")
   local cond = p:expr()
   p:expect("then")
   local then_block = p:block()
   local elseif_blocks = terralib.newlist()
+  local elseif_start = ast.save(p)
   while p:nextif("elseif") do
     local elseif_cond = p:expr()
     p:expect("then")
@@ -418,9 +467,14 @@ function parser.stat_if(p)
     elseif_blocks:insert(ast.unspecialized.StatElseif {
         cond = elseif_cond,
         block = elseif_block,
+        span = ast.span(elseif_start, p),
     })
+    elseif_start = ast.save(p)
   end
-  local else_block = ast.unspecialized.Block { stats = terralib.newlist() }
+  local else_block = ast.unspecialized.Block {
+    stats = terralib.newlist(),
+    span = ast.empty_span(p),
+  }
   if p:nextif("else") then
     else_block = p:block()
   end
@@ -430,10 +484,12 @@ function parser.stat_if(p)
     then_block = then_block,
     elseif_blocks = elseif_blocks,
     else_block = else_block,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_while(p)
+  local start = ast.save(p)
   p:expect("while")
   local cond = p:expr()
   p:expect("do")
@@ -442,10 +498,11 @@ function parser.stat_while(p)
   return ast.unspecialized.StatWhile {
     cond = cond,
     block = block,
+    span = ast.span(start, p),
   }
 end
 
-function parser.stat_for_num(p, name, type_expr, parallel)
+function parser.stat_for_num(p, start, name, type_expr, parallel)
   local values = p:expr_list()
 
   if #values < 2 or #values > 3 then
@@ -461,10 +518,11 @@ function parser.stat_for_num(p, name, type_expr, parallel)
     values = values,
     block = block,
     parallel = parallel,
+    span = ast.span(start, p),
   }
 end
 
-function parser.stat_for_list(p, name, type_expr, vectorize)
+function parser.stat_for_list(p, start, name, type_expr, vectorize)
   local value = p:expr()
 
   p:expect("do")
@@ -475,7 +533,8 @@ function parser.stat_for_list(p, name, type_expr, vectorize)
     type_expr = type_expr,
     value = value,
     block = block,
-    vectorize = vectorize
+    vectorize = vectorize,
+    span = ast.span(start, p),
   }
 end
 
@@ -497,6 +556,7 @@ function parser.stat_for(p)
     end
   end
 
+  local start = ast.save(p)
   p:expect("for")
 
   local name = p:expect(p.name).value
@@ -508,15 +568,16 @@ function parser.stat_for(p)
   end
 
   if p:nextif("=") then
-    return p:stat_for_num(name, type_expr, parallel)
+    return p:stat_for_num(start, name, type_expr, parallel)
   elseif p:nextif("in") then
-    return p:stat_for_list(name, type_expr, vectorize)
+    return p:stat_for_list(start, name, type_expr, vectorize)
   else
     p:error("expected = or in")
   end
 end
 
 function parser.stat_repeat(p)
+  local start = ast.save(p)
   p:expect("repeat")
   local block = p:block()
   p:expect("until")
@@ -524,19 +585,22 @@ function parser.stat_repeat(p)
   return ast.unspecialized.StatRepeat {
     block = block,
     until_cond = until_cond,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_block(p)
+  local start = ast.save(p)
   p:expect("do")
   local block = p:block()
   p:expect("end")
   return ast.unspecialized.StatBlock {
     block = block,
+    span = ast.span(start, p),
   }
 end
 
-function parser.stat_var_unpack(p)
+function parser.stat_var_unpack(p, start)
   p:expect("{")
   local names = terralib.newlist()
   local fields = terralib.newlist()
@@ -556,13 +620,15 @@ function parser.stat_var_unpack(p)
     var_names = names,
     fields = fields,
     value = value,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_var(p)
+  local start = ast.save(p)
   p:expect("var")
   if p:matches("{") then
-    return p:stat_var_unpack()
+    return p:stat_var_unpack(start)
   end
 
   local names = terralib.newlist()
@@ -583,23 +649,34 @@ function parser.stat_var(p)
     var_names = names,
     type_exprs = type_exprs,
     values = values,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_return(p)
+  local start = ast.save(p)
   p:expect("return")
-  local value = p:expr()
+  local value = false
+  if not (p:matches("end") or p:matches("elseif") or
+          p:matches("else") or p:matches("until"))
+  then
+    value = p:expr()
+  end
   return ast.unspecialized.StatReturn {
     value = value,
+    span = ast.span(start, p),
   }
 end
 
 function parser.stat_break(p)
+  local start = ast.save(p)
   p:expect("break")
-  return ast.unspecialized.StatBreak {}
+  return ast.unspecialized.StatBreak {
+    span = ast.span(start, p),
+  }
 end
 
-parser.stat_expr_assignment = function(p, first_lhs)
+parser.stat_expr_assignment = function(p, start, first_lhs)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
   while p:nextif(",") do
@@ -636,16 +713,19 @@ parser.stat_expr_assignment = function(p, first_lhs)
       op = op,
       lhs = lhs,
       rhs = rhs,
+      span = ast.span(start, p),
     }
   else
     return ast.unspecialized.StatAssignment {
       lhs = lhs,
       rhs = rhs,
+      span = ast.span(start, p),
     }
   end
 end
 
 function parser.stat_expr(p)
+  local start = ast.save(p)
   local first_lhs = p:expr_lhs()
   if p:matches(",") or
     p:matches("=") or
@@ -656,10 +736,11 @@ function parser.stat_expr(p)
     (p:matches("max") and p:lookahead("=")) or
     (p:matches("min") and p:lookahead("="))
   then
-    return p:stat_expr_assignment(first_lhs)
+    return p:stat_expr_assignment(start, first_lhs)
   else
     return ast.unspecialized.StatExpr {
       expr = first_lhs,
+      span = ast.span(start, p),
     }
   end
 end
@@ -704,12 +785,14 @@ function parser.stat_task_params(p)
   local params = terralib.newlist()
   if not p:matches(")") then
     repeat
+      local start = ast.save(p)
       local param_name = p:expect(p.name).value
       p:expect(":")
       local param_type = p:luaexpr()
       params:insert(ast.unspecialized.StatTaskParam {
           param_name = param_name,
           type_expr = param_type,
+          span = ast.span(start, p),
       })
     until not p:nextif(",")
   end
@@ -725,6 +808,7 @@ function parser.stat_task_return(p)
 end
 
 function parser.privilege_region_field(p)
+  local start = ast.save(p)
   local field_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
@@ -733,6 +817,7 @@ function parser.privilege_region_field(p)
   return ast.unspecialized.PrivilegeRegionField {
     field_name = field_name,
     fields = fields,
+    span = ast.span(start, p),
   }
 end
 
@@ -751,6 +836,7 @@ function parser.privilege_region_fields(p)
 end
 
 function parser.privilege_region(p)
+  local start = ast.save(p)
   local region_name = p:expect(p.name).value
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
@@ -759,10 +845,12 @@ function parser.privilege_region(p)
   return ast.unspecialized.PrivilegeRegion {
     region_name = region_name,
     fields = fields,
+    span = ast.span(start, p),
   }
 end
 
 function parser.privilege(p)
+  local start = ast.save(p)
   local privilege
   local op = false
   if p:nextif("reads") then
@@ -802,10 +890,12 @@ function parser.privilege(p)
     privilege = privilege,
     op = op,
     regions = regions,
+    span = ast.span(start, p),
   }
 end
 
 function parser.constraint(p)
+  local start = ast.save(p)
   local lhs = p:expect(p.name).value
   local op
   if p:nextif("<=") then
@@ -820,6 +910,7 @@ function parser.constraint(p)
     lhs = lhs,
     op = op,
     rhs = rhs,
+    span = ast.span(start, p),
   }
 end
 
@@ -840,6 +931,7 @@ function parser.stat_task_privileges_and_constraints(p)
 end
 
 function parser.stat_task(p)
+  local start = ast.save(p)
   p:expect("task")
   local name = p:expect(p.name).value
   local params = p:stat_task_params()
@@ -855,6 +947,7 @@ function parser.stat_task(p)
     privileges = privileges,
     constraints = constraints,
     body = body,
+    span = ast.span(start, p),
   }
 end
 
@@ -863,12 +956,14 @@ function parser.stat_fspace_params(p)
   if p:nextif("(") then
     if not p:matches(")") then
       repeat
+        local start = ast.save(p)
         local param_name = p:expect(p.name).value
         p:expect(":")
         local param_type = p:luaexpr()
         params:insert(ast.unspecialized.StatFspaceParam {
           param_name = param_name,
           type_expr = param_type,
+          span = ast.span(start, p),
         })
       until not p:nextif(",")
     end
@@ -883,12 +978,14 @@ function parser.stat_fspace_fields(p)
   repeat
     if p:matches("}") then break end
 
+    local start = ast.save(p)
     local field_name = p:expect(p.name).value
     p:expect(":")
     local field_type = p:luaexpr()
     fields:insert(ast.unspecialized.StatFspaceField {
       field_name = field_name,
       type_expr = field_type,
+      span = ast.span(start, p),
     })
   until not p:sep()
   p:expect("}")
@@ -907,6 +1004,7 @@ function parser.stat_fspace_constraints(p)
 end
 
 function parser.stat_fspace(p)
+  local start = ast.save(p)
   p:expect("fspace")
   local name = p:expect(p.name).value
   local params = p:stat_fspace_params()
@@ -918,6 +1016,7 @@ function parser.stat_fspace(p)
     params = params,
     fields = fields,
     constraints = constraints,
+    span = ast.span(start, p),
   }
 end
 

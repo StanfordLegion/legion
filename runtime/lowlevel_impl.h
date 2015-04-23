@@ -37,9 +37,7 @@
 
 #include <assert.h>
 
-#ifndef NO_INCLUDE_GASNET
 #include "activemsg.h"
-#endif
 
 #ifdef CHECK_REENTRANT_MESSAGES
 GASNETT_THREADKEY_DEFINE(in_handler);
@@ -114,7 +112,12 @@ namespace LegionRuntime {
     class GASNetHSL {
     public:
       GASNetHSL(void) { gasnet_hsl_init(&mutex); }
+      // Should never be copied
+      GASNetHSL(const GASNetHSL &rhs) { assert(false); }
       ~GASNetHSL(void) { gasnet_hsl_destroy(&mutex); }
+
+      // Should never be copied
+      GASNetHSL& operator=(const GASNetHSL &rhs) { assert(false); return *this; }
 
       void lock(void) { gasnet_hsl_lock(&mutex); }
       void unlock(void) { gasnet_hsl_unlock(&mutex); }
@@ -1109,6 +1112,25 @@ namespace LegionRuntime {
 #endif
     };
 
+#ifdef USE_GASNET 
+    class HandlerThread : public PreemptableThread {
+    public:
+      HandlerThread(IncomingMessageManager *m) : manager(m) { }
+      virtual ~HandlerThread(void) { }
+    public:
+      virtual Processor get_processor(void) const 
+        { assert(false); return Processor::NO_PROC; }
+    public:
+      virtual void thread_main(void);
+      virtual void sleep_on_event(Event wait_for, bool block = false);
+    public:
+      void join(void);
+    private:
+      IncomingMessage *current_msg, *next_msg;
+      IncomingMessageManager *const manager;
+    };
+#endif
+
     class UtilityProcessor : public Processor::Impl {
     public:
       UtilityProcessor(Processor _me, 
@@ -1367,7 +1389,7 @@ namespace LegionRuntime {
     protected:
       GASNetHSL mutex;
       State state;  // current state
-      GenEventImpl *valid_event; // event to track receipt of in-flight request (if any)
+      GenEventImpl *valid_event_impl; // event to track receipt of in-flight request (if any)
       NodeSet remote_copies;
     };
 
@@ -1478,7 +1500,8 @@ namespace LegionRuntime {
       ElementMask *valid_mask;
       int valid_mask_count;
       bool valid_mask_complete;
-      GenEventImpl *valid_mask_event;
+      Event valid_mask_event;
+      GenEventImpl *valid_mask_event_impl;
       int valid_mask_first, valid_mask_last;
       bool valid_mask_contig;
       ElementMask *avail_mask;
@@ -1638,6 +1661,7 @@ namespace LegionRuntime {
       pthread_t *background_pthread;
 #ifdef DEADLOCK_TRACE
       unsigned next_thread;
+      unsigned signaled_threads;
       pthread_t all_threads[MAX_NUM_THREADS];
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
@@ -1658,10 +1682,8 @@ namespace LegionRuntime {
 	  // get a valid copy of the static data by taking and then releasing
 	  //  a shared lock
 	  Event e = thing_with_data->lock.acquire(1, false);
-	  if(!e.has_triggered()) {
-	    GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
-	    e_impl->external_wait(e.gen);// TODO: must this be blocking?
-	  }
+	  if(!e.has_triggered()) 
+            e.wait();
 	  thing_with_data->lock.release();
 	  assert(data->valid);
 	}
@@ -1677,10 +1699,8 @@ namespace LegionRuntime {
 	assert(lock->is_locked(1, true));
       } else {
 	Event e = thing_with_data->lock.acquire(1, false);
-	if(!e.has_triggered()) {
-	  GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
-	  e_impl->external_wait(e.gen);// TODO: must this be blocking?
-	}
+	if(!e.has_triggered())
+          e.wait();
       }
     }
 
@@ -1693,13 +1713,10 @@ namespace LegionRuntime {
 	assert(lock->is_locked(0, true));
       } else {
 	Event e = thing_with_data->lock.acquire(0, true);
-	if(!e.has_triggered()) {
-	  GenEventImpl *e_impl = get_runtime()->get_genevent_impl(e);
-	  e_impl->external_wait(e.gen);// TODO: must this be blocking?
-	}
+	if(!e.has_triggered())
+          e.wait();
       }
     }
-
 
   }; // namespace LowLevel
 }; // namespace LegionRuntime

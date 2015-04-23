@@ -123,6 +123,7 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);

@@ -211,7 +211,7 @@ namespace LegionRuntime {
                  (fatbin_args->filename_or_fatbins != NULL));
           if (fatbin_args->data != NULL)
           {
-            CHECK_CU( cuModuleLoadData(&(info.module), fatbin_args->data) );
+            load_module(&(info.module), fatbin_args->data);
           } else {
             CHECK_CU( cuModuleLoad(&(info.module), 
                   (const char*)fatbin_args->filename_or_fatbins) );
@@ -647,6 +647,7 @@ namespace LegionRuntime {
       void register_function(void **fat_bin ,const char *host_fun,
                              const char *device_fun);
       char init_module(void **fat_bin);
+      void load_module(CUmodule *module, const void *image);
     public:
       // Our cuda calls
       cudaError_t stream_synchronize(void);  
@@ -1809,7 +1810,7 @@ namespace LegionRuntime {
              (fatbin_args->filename_or_fatbins != NULL));
       if (fatbin_args->data != NULL)
       {
-        CHECK_CU( cuModuleLoadData(&(info.module), fatbin_args->data) );
+        load_module(&(info.module), fatbin_args->data);
       } else {
         CHECK_CU( cuModuleLoad(&(info.module), (const char*)fatbin_args->filename_or_fatbins) );
       }
@@ -1964,6 +1965,57 @@ namespace LegionRuntime {
     {
       // We don't really care about managed runtimes
       return 1;
+    }
+
+    void GPUProcessor::Internal::load_module(CUmodule *module, const void *image)
+    {
+      const unsigned num_options = 4;
+      CUjit_option jit_options[num_options];
+      void*        option_vals[num_options];
+      const size_t buffer_size = 16384;
+      char* log_info_buffer = (char*)malloc(buffer_size);
+      char* log_error_buffer = (char*)malloc(buffer_size);
+      jit_options[0] = CU_JIT_INFO_LOG_BUFFER;
+      jit_options[1] = CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES;
+      jit_options[2] = CU_JIT_ERROR_LOG_BUFFER;
+      jit_options[3] = CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES;
+      option_vals[0] = log_info_buffer;
+      option_vals[1] = (void*)buffer_size;
+      option_vals[2] = log_error_buffer;
+      option_vals[3] = (void*)buffer_size;
+      CUresult result = cuModuleLoadDataEx(module, image, num_options, 
+                                           jit_options, option_vals); 
+      if (result != CUDA_SUCCESS)
+      {
+#ifdef __MACH__
+        if (result == CUDA_ERROR_OPERATING_SYSTEM) {
+          log_gpu(LEVEL_ERROR,"ERROR: Device side asserts are not supported by the "
+                              "CUDA driver for MAC OSX, see NVBugs 1628896.");
+        }
+#endif
+        if (result == CUDA_ERROR_NO_BINARY_FOR_GPU) {
+          log_gpu(LEVEL_ERROR,"ERROR: The binary was compiled for the wrong GPU "
+                              "architecture. Update the 'GPU_ARCH' flag at the top "
+                              "of runtime/runtime.mk to match your current GPU "
+                              "architecture.");
+        }
+        log_gpu(LEVEL_ERROR,"Failed to load CUDA module! Error log: %s", 
+                log_error_buffer);
+#if __CUDA_API_VERSION >= 6050
+        const char *name, *str;
+        CHECK_CU( cuGetErrorName(result, &name) );
+        CHECK_CU( cuGetErrorString(result, &str) );
+        fprintf(stderr,"CU: cuModuleLoadDataEx = %d (%s): %s\n",
+                result, name, str);
+#else
+        fprintf(stderr,"CU: cuModuleLoadDataEx = %d\n", result);
+#endif
+        assert(0);
+      }
+      else
+        log_gpu(LEVEL_INFO,"Loaded CUDA Module. JIT Output: %s", log_info_buffer);
+      free(log_info_buffer);
+      free(log_error_buffer);
     }
 
     /*static*/ char GPUProcessor::init_module(void **fat_bin)

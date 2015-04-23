@@ -113,120 +113,174 @@ local function AST_factory(name)
   return factory
 end
 
+-- Location
+
+ast.location = AST_factory("location")
+
+ast.location("Position", {"line", "offset"})
+ast.location("Span", {"source", "start", "stop"})
+
+-- Helpers for extracting location from token stream.
+local function position_from_start(token)
+  return ast.location.Position {
+    line = token.linenumber,
+    offset = token.offset
+  }
+end
+
+local function position_from_stop(token)
+  return position_from_start(token)
+end
+
+function ast.save(p)
+  return position_from_start(p:cur())
+end
+
+function ast.span(start, p)
+  return ast.location.Span {
+    source = p.source,
+    start = start,
+    stop = position_from_stop(p:cur()),
+  }
+end
+
+function ast.empty_span(p)
+  return ast.location.Span {
+    source = p.source,
+    start = ast.location.Position { line = 0, offset = 0 },
+    stop = ast.location.Position { line = 0, offset = 0 },
+  }
+end
+
+function ast.trivial_span()
+  return ast.location.Span {
+    source = "",
+    start = ast.location.Position { line = 0, offset = 0 },
+    stop = ast.location.Position { line = 0, offset = 0 },
+  }
+end
+
 -- Node Types (Unspecialized)
 
 ast.unspecialized = AST_factory("unspecialized")
 
-ast.unspecialized("ExprID", {"name"})
-ast.unspecialized("ExprEscape", {"expr"})
-ast.unspecialized("ExprFieldAccess", {"value", "field_name"})
-ast.unspecialized("ExprIndexAccess", {"value", "index"})
-ast.unspecialized("ExprMethodCall", {"value", "method_name", "args"})
-ast.unspecialized("ExprCall", {"fn", "args"})
-ast.unspecialized("ExprCtor", {"fields"})
-ast.unspecialized("ExprCtorListField", {"value"})
-ast.unspecialized("ExprCtorRecField", {"name_expr", "value"})
-ast.unspecialized("ExprConstant", {"value", "expr_type"})
-ast.unspecialized("ExprRawContext", {})
-ast.unspecialized("ExprRawFields", {"region"})
-ast.unspecialized("ExprRawPhysical", {"region"})
-ast.unspecialized("ExprRawRuntime", {})
-ast.unspecialized("ExprIsnull", {"pointer"})
-ast.unspecialized("ExprNew", {"pointer_type_expr"})
-ast.unspecialized("ExprNull", {"pointer_type_expr"})
-ast.unspecialized("ExprDynamicCast", {"type_expr", "value"})
-ast.unspecialized("ExprStaticCast", {"type_expr", "value"})
-ast.unspecialized("ExprRegion", {"element_type_expr", "size"})
+ast.unspecialized("ExprID", {"name", "span"})
+ast.unspecialized("ExprEscape", {"expr", "span"})
+ast.unspecialized("ExprFieldAccess", {"value", "field_name", "span"})
+ast.unspecialized("ExprIndexAccess", {"value", "index", "span"})
+ast.unspecialized("ExprMethodCall", {"value", "method_name", "args", "span"})
+ast.unspecialized("ExprCall", {"fn", "args", "span"})
+ast.unspecialized("ExprCtor", {"fields", "span"})
+ast.unspecialized("ExprCtorListField", {"value", "span"})
+ast.unspecialized("ExprCtorRecField", {"name_expr", "value", "span"})
+ast.unspecialized("ExprConstant", {"value", "expr_type", "span"})
+ast.unspecialized("ExprRawContext", {"span"})
+ast.unspecialized("ExprRawFields", {"region", "span"})
+ast.unspecialized("ExprRawPhysical", {"region", "span"})
+ast.unspecialized("ExprRawRuntime", {"span"})
+ast.unspecialized("ExprIsnull", {"pointer", "span"})
+ast.unspecialized("ExprNew", {"pointer_type_expr", "span"})
+ast.unspecialized("ExprNull", {"pointer_type_expr", "span"})
+ast.unspecialized("ExprDynamicCast", {"type_expr", "value", "span"})
+ast.unspecialized("ExprStaticCast", {"type_expr", "value", "span"})
+ast.unspecialized("ExprRegion", {"element_type_expr", "size", "span"})
 ast.unspecialized("ExprPartition", {"disjointness_expr", "region_type_expr",
-                                    "coloring"})
-ast.unspecialized("ExprCrossProduct", {"lhs_type_expr", "rhs_type_expr"})
-ast.unspecialized("ExprUnary", {"op", "rhs"})
-ast.unspecialized("ExprBinary", {"op", "lhs", "rhs"})
-ast.unspecialized("ExprDeref", {"value"})
+                                    "coloring", "span"})
+ast.unspecialized("ExprCrossProduct", {"lhs_type_expr", "rhs_type_expr",
+                                       "span"})
+ast.unspecialized("ExprUnary", {"op", "rhs", "span"})
+ast.unspecialized("ExprBinary", {"op", "lhs", "rhs", "span"})
+ast.unspecialized("ExprDeref", {"value", "span"})
 
-ast.unspecialized("Block", {"stats"})
+ast.unspecialized("Block", {"stats", "span"})
 
 ast.unspecialized("StatIf", {"cond", "then_block", "elseif_blocks",
-                             "else_block"})
-ast.unspecialized("StatElseif", {"cond", "block"})
-ast.unspecialized("StatWhile", {"cond", "block"})
-ast.unspecialized("StatForNum", {"name", "type_expr", "values", "block", "parallel"})
-ast.unspecialized("StatForList", {"name", "type_expr", "value", "block", "vectorize"})
-ast.unspecialized("StatRepeat", {"block", "until_cond"})
-ast.unspecialized("StatBlock", {"block"})
-ast.unspecialized("StatVar", {"var_names", "type_exprs", "values"})
-ast.unspecialized("StatVarUnpack", {"var_names", "fields", "value"})
-ast.unspecialized("StatReturn", {"value"})
-ast.unspecialized("StatBreak", {})
-ast.unspecialized("StatAssignment", {"lhs", "rhs"})
-ast.unspecialized("StatReduce", {"op", "lhs", "rhs"})
-ast.unspecialized("StatExpr", {"expr"})
+                             "else_block", "span"})
+ast.unspecialized("StatElseif", {"cond", "block", "span"})
+ast.unspecialized("StatWhile", {"cond", "block", "span"})
+ast.unspecialized("StatForNum", {"name", "type_expr", "values", "block",
+                                 "parallel", "span"})
+ast.unspecialized("StatForList", {"name", "type_expr", "value", "block",
+                                  "vectorize", "span"})
+ast.unspecialized("StatRepeat", {"block", "until_cond", "span"})
+ast.unspecialized("StatBlock", {"block", "span"})
+ast.unspecialized("StatVar", {"var_names", "type_exprs", "values", "span"})
+ast.unspecialized("StatVarUnpack", {"var_names", "fields", "value", "span"})
+ast.unspecialized("StatReturn", {"value", "span"})
+ast.unspecialized("StatBreak", {"span"})
+ast.unspecialized("StatAssignment", {"lhs", "rhs", "span"})
+ast.unspecialized("StatReduce", {"op", "lhs", "rhs", "span"})
+ast.unspecialized("StatExpr", {"expr", "span"})
 
-ast.unspecialized("Constraint", {"lhs", "op", "rhs"})
-ast.unspecialized("Privilege", {"privilege", "op", "regions"})
-ast.unspecialized("PrivilegeRegion", {"region_name", "fields"})
-ast.unspecialized("PrivilegeRegionField", {"field_name", "fields"})
+ast.unspecialized("Constraint", {"lhs", "op", "rhs", "span"})
+ast.unspecialized("Privilege", {"privilege", "op", "regions", "span"})
+ast.unspecialized("PrivilegeRegion", {"region_name", "fields", "span"})
+ast.unspecialized("PrivilegeRegionField", {"field_name", "fields", "span"})
 ast.unspecialized("StatTask", {"name", "params", "return_type_expr",
-                               "privileges", "constraints", "body"})
-ast.unspecialized("StatTaskParam", {"param_name", "type_expr"})
-ast.unspecialized("StatFspace", {"name", "params", "fields", "constraints"})
-ast.unspecialized("StatFspaceParam", {"param_name", "type_expr"})
-ast.unspecialized("StatFspaceField", {"field_name", "type_expr"})
+                               "privileges", "constraints", "body", "span"})
+ast.unspecialized("StatTaskParam", {"param_name", "type_expr", "span"})
+ast.unspecialized("StatFspace", {"name", "params", "fields", "constraints",
+                                 "span"})
+ast.unspecialized("StatFspaceParam", {"param_name", "type_expr", "span"})
+ast.unspecialized("StatFspaceField", {"field_name", "type_expr", "span"})
 
 -- Node Types (Specialized)
 
 ast.specialized = AST_factory("specialized")
 
-ast.specialized("ExprID", {"value"})
-ast.specialized("ExprFieldAccess", {"value", "field_name"})
-ast.specialized("ExprIndexAccess", {"value", "index"})
-ast.specialized("ExprMethodCall", {"value", "method_name", "args"})
-ast.specialized("ExprCall", {"fn", "args"})
-ast.specialized("ExprCast", {"fn", "args"})
-ast.specialized("ExprCtor", {"fields", "named"})
-ast.specialized("ExprCtorListField", {"value"})
-ast.specialized("ExprCtorRecField", {"name", "value"})
-ast.specialized("ExprConstant", {"value", "expr_type"})
-ast.specialized("ExprRawContext", {})
-ast.specialized("ExprRawFields", {"region"})
-ast.specialized("ExprRawPhysical", {"region"})
-ast.specialized("ExprRawRuntime", {})
-ast.specialized("ExprIsnull", {"pointer"})
-ast.specialized("ExprNew", {"pointer_type", "region"})
-ast.specialized("ExprNull", {"pointer_type"})
-ast.specialized("ExprDynamicCast", {"value", "expr_type"})
-ast.specialized("ExprStaticCast", {"value", "expr_type"})
-ast.specialized("ExprRegion", {"element_type", "size", "expr_type"})
+ast.specialized("ExprID", {"value", "span"})
+ast.specialized("ExprFieldAccess", {"value", "field_name", "span"})
+ast.specialized("ExprIndexAccess", {"value", "index", "span"})
+ast.specialized("ExprMethodCall", {"value", "method_name", "args", "span"})
+ast.specialized("ExprCall", {"fn", "args", "span"})
+ast.specialized("ExprCast", {"fn", "args", "span"})
+ast.specialized("ExprCtor", {"fields", "named", "span"})
+ast.specialized("ExprCtorListField", {"value", "span"})
+ast.specialized("ExprCtorRecField", {"name", "value", "span"})
+ast.specialized("ExprConstant", {"value", "expr_type", "span"})
+ast.specialized("ExprRawContext", {"span"})
+ast.specialized("ExprRawFields", {"region", "span"})
+ast.specialized("ExprRawPhysical", {"region", "span"})
+ast.specialized("ExprRawRuntime", {"span"})
+ast.specialized("ExprIsnull", {"pointer", "span"})
+ast.specialized("ExprNew", {"pointer_type", "region", "span"})
+ast.specialized("ExprNull", {"pointer_type", "span"})
+ast.specialized("ExprDynamicCast", {"value", "expr_type", "span"})
+ast.specialized("ExprStaticCast", {"value", "expr_type", "span"})
+ast.specialized("ExprRegion", {"element_type", "size", "expr_type", "span"})
 ast.specialized("ExprPartition", {"disjointness", "region",
-                                  "coloring", "expr_type"})
-ast.specialized("ExprCrossProduct", {"lhs", "rhs", "expr_type"})
-ast.specialized("ExprFunction", {"value"})
-ast.specialized("ExprUnary", {"op", "rhs"})
-ast.specialized("ExprBinary", {"op", "lhs", "rhs"})
-ast.specialized("ExprDeref", {"value"})
-ast.specialized("ExprLuaTable", {"value"})
+                                  "coloring", "expr_type", "span"})
+ast.specialized("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})
+ast.specialized("ExprFunction", {"value", "span"})
+ast.specialized("ExprUnary", {"op", "rhs", "span"})
+ast.specialized("ExprBinary", {"op", "lhs", "rhs", "span"})
+ast.specialized("ExprDeref", {"value", "span"})
+ast.specialized("ExprLuaTable", {"value", "span"})
 
-ast.specialized("Block", {"stats"})
+ast.specialized("Block", {"stats", "span"})
 
-ast.specialized("StatIf", {"cond", "then_block", "elseif_blocks", "else_block"})
-ast.specialized("StatElseif", {"cond", "block"})
-ast.specialized("StatWhile", {"cond", "block"})
-ast.specialized("StatForNum", {"symbol", "values", "block", "parallel"})
-ast.specialized("StatForList", {"symbol", "value", "block", "vectorize"})
-ast.specialized("StatRepeat", {"block", "until_cond"})
-ast.specialized("StatBlock", {"block"})
-ast.specialized("StatVar", {"symbols", "values"})
-ast.specialized("StatVarUnpack", {"symbols", "fields", "value"})
-ast.specialized("StatReturn", {"value"})
-ast.specialized("StatBreak", {})
-ast.specialized("StatAssignment", {"lhs", "rhs"})
-ast.specialized("StatReduce", {"op", "lhs", "rhs"})
-ast.specialized("StatExpr", {"expr"})
+ast.specialized("StatIf", {"cond", "then_block", "elseif_blocks", "else_block",
+                           "span"})
+ast.specialized("StatElseif", {"cond", "block", "span"})
+ast.specialized("StatWhile", {"cond", "block", "span"})
+ast.specialized("StatForNum", {"symbol", "values", "block", "parallel",
+                               "span"})
+ast.specialized("StatForList", {"symbol", "value", "block", "vectorize",
+                                "span"})
+ast.specialized("StatRepeat", {"block", "until_cond", "span"})
+ast.specialized("StatBlock", {"block", "span"})
+ast.specialized("StatVar", {"symbols", "values", "span"})
+ast.specialized("StatVarUnpack", {"symbols", "fields", "value", "span"})
+ast.specialized("StatReturn", {"value", "span"})
+ast.specialized("StatBreak", {"span"})
+ast.specialized("StatAssignment", {"lhs", "rhs", "span"})
+ast.specialized("StatReduce", {"op", "lhs", "rhs", "span"})
+ast.specialized("StatExpr", {"expr", "span"})
 
 ast.specialized("StatTask", {"name", "params", "return_type", "privileges",
-                             "constraints", "body", "prototype"})
-ast.specialized("StatTaskParam", {"symbol"})
-ast.specialized("StatFspace", {"name", "fspace"})
+                             "constraints", "body", "prototype", "span"})
+ast.specialized("StatTaskParam", {"symbol", "span"})
+ast.specialized("StatFspace", {"name", "fspace", "span"})
 
 -- Node Types (Typed)
 
@@ -234,63 +288,65 @@ ast.typed = AST_factory("typed")
 
 ast.typed("ExprInternal", {"value", "expr_type"}) -- internal use only
 
-ast.typed("ExprID", {"value", "expr_type"})
-ast.typed("ExprFieldAccess", {"value", "field_name", "expr_type"})
-ast.typed("ExprIndexAccess", {"value", "index", "expr_type"})
-ast.typed("ExprMethodCall", {"value", "method_name", "args", "expr_type"})
-ast.typed("ExprCall", {"fn", "args", "expr_type"})
-ast.typed("ExprCast", {"fn", "arg", "expr_type"})
-ast.typed("ExprCtor", {"fields", "named", "expr_type"})
-ast.typed("ExprCtorListField", {"value"})
-ast.typed("ExprCtorRecField", {"name", "value"})
-ast.typed("ExprRawContext", {"expr_type"})
-ast.typed("ExprRawFields", {"region", "fields", "expr_type"})
-ast.typed("ExprRawPhysical", {"region", "fields", "expr_type"})
-ast.typed("ExprRawRuntime", {"expr_type"})
-ast.typed("ExprIsnull", {"pointer", "expr_type"})
-ast.typed("ExprNew", {"pointer_type", "region", "expr_type"})
-ast.typed("ExprNull", {"pointer_type", "expr_type"})
-ast.typed("ExprDynamicCast", {"value", "expr_type"})
-ast.typed("ExprStaticCast", {"value", "parent_region_map", "expr_type"})
-ast.typed("ExprRegion", {"element_type", "size", "expr_type"})
+ast.typed("ExprID", {"value", "expr_type", "span"})
+ast.typed("ExprFieldAccess", {"value", "field_name", "expr_type", "span"})
+ast.typed("ExprIndexAccess", {"value", "index", "expr_type", "span"})
+ast.typed("ExprMethodCall", {"value", "method_name", "args", "expr_type", "span"})
+ast.typed("ExprCall", {"fn", "args", "expr_type", "span"})
+ast.typed("ExprCast", {"fn", "arg", "expr_type", "span"})
+ast.typed("ExprCtor", {"fields", "named", "expr_type", "span"})
+ast.typed("ExprCtorListField", {"value", "expr_type", "span"})
+ast.typed("ExprCtorRecField", {"name", "value", "expr_type", "span"})
+ast.typed("ExprRawContext", {"expr_type", "span"})
+ast.typed("ExprRawFields", {"region", "fields", "expr_type", "span"})
+ast.typed("ExprRawPhysical", {"region", "fields", "expr_type", "span"})
+ast.typed("ExprRawRuntime", {"expr_type", "span"})
+ast.typed("ExprIsnull", {"pointer", "expr_type", "span"})
+ast.typed("ExprNew", {"pointer_type", "region", "expr_type", "span"})
+ast.typed("ExprNull", {"pointer_type", "expr_type", "span"})
+ast.typed("ExprDynamicCast", {"value", "expr_type", "span"})
+ast.typed("ExprStaticCast", {"value", "parent_region_map", "expr_type", "span"})
+ast.typed("ExprRegion", {"element_type", "size", "expr_type", "span"})
 ast.typed("ExprPartition", {"disjointness", "region",
-                            "coloring", "expr_type"})
-ast.typed("ExprCrossProduct", {"lhs", "rhs", "expr_type"})
-ast.typed("ExprConstant", {"value", "expr_type"})
-ast.typed("ExprFunction", {"value", "expr_type"})
-ast.typed("ExprUnary", {"op", "rhs", "expr_type"})
-ast.typed("ExprBinary", {"op", "lhs", "rhs", "expr_type"})
-ast.typed("ExprDeref", {"value", "expr_type"})
-ast.typed("ExprFuture", {"value", "expr_type"})
-ast.typed("ExprFutureGetResult", {"value", "expr_type"})
+                            "coloring", "expr_type", "span"})
+ast.typed("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})
+ast.typed("ExprConstant", {"value", "expr_type", "span"})
+ast.typed("ExprFunction", {"value", "expr_type", "span"})
+ast.typed("ExprUnary", {"op", "rhs", "expr_type", "span"})
+ast.typed("ExprBinary", {"op", "lhs", "rhs", "expr_type", "span"})
+ast.typed("ExprDeref", {"value", "expr_type", "span"})
+ast.typed("ExprFuture", {"value", "expr_type", "span"})
+ast.typed("ExprFutureGetResult", {"value", "expr_type", "span"})
 
-ast.typed("Block", {"stats"})
+ast.typed("Block", {"stats", "span"})
 
-ast.typed("StatIf", {"cond", "then_block", "elseif_blocks", "else_block"})
-ast.typed("StatElseif", {"cond", "block"})
-ast.typed("StatWhile", {"cond", "block"})
-ast.typed("StatForNum", {"symbol", "values", "block", "parallel"})
-ast.typed("StatForList", {"symbol", "value", "block", "vectorize"})
-ast.typed("StatForListVectorized", {"symbol", "value", "block", "orig_block", "vector_width"})
-ast.typed("StatRepeat", {"block", "until_cond"})
-ast.typed("StatBlock", {"block"})
+ast.typed("StatIf", {"cond", "then_block", "elseif_blocks", "else_block", "span"})
+ast.typed("StatElseif", {"cond", "block", "span"})
+ast.typed("StatWhile", {"cond", "block", "span"})
+ast.typed("StatForNum", {"symbol", "values", "block", "parallel", "span"})
+ast.typed("StatForList", {"symbol", "value", "block", "vectorize", "span"})
+ast.typed("StatForListVectorized", {"symbol", "value", "block", "orig_block",
+                                    "vector_width", "span"})
+ast.typed("StatRepeat", {"block", "until_cond", "span"})
+ast.typed("StatBlock", {"block", "span"})
 ast.typed("StatIndexLaunch", {"symbol", "domain", "call", "reduce_lhs",
-                              "reduce_op", "args_provably"})
+                              "reduce_op", "args_provably", "span"})
 ast.typed("StatIndexLaunchArgsProvably", {"invariant", "variant"})
-ast.typed("StatVar", {"symbols", "types", "values"})
-ast.typed("StatVarUnpack", {"symbols", "fields", "field_types", "value"})
-ast.typed("StatReturn", {"value"})
-ast.typed("StatBreak", {})
-ast.typed("StatAssignment", {"lhs", "rhs"})
-ast.typed("StatReduce", {"op", "lhs", "rhs"})
-ast.typed("StatExpr", {"expr"})
+ast.typed("StatVar", {"symbols", "types", "values", "span"})
+ast.typed("StatVarUnpack", {"symbols", "fields", "field_types", "value", "span"})
+ast.typed("StatReturn", {"value", "span"})
+ast.typed("StatBreak", {"span"})
+ast.typed("StatAssignment", {"lhs", "rhs", "span"})
+ast.typed("StatReduce", {"op", "lhs", "rhs", "span"})
+ast.typed("StatExpr", {"expr", "span"})
 ast.typed("StatMapRegions", {"region_types"})
 ast.typed("StatUnmapRegions", {"region_types"})
 
 ast.typed("StatTask", {"name", "params", "return_type", "privileges",
-                       "constraints", "body", "config_options", "prototype"})
-ast.typed("StatTaskParam", {"symbol", "param_type"})
+                       "constraints", "body", "config_options",
+                       "region_divergence", "prototype", "span"})
+ast.typed("StatTaskParam", {"symbol", "param_type", "span"})
 ast.typed("StatTaskConfigOptions", {"leaf", "inner", "idempotent"})
-ast.typed("StatFspace", {"name", "fspace"})
+ast.typed("StatFspace", {"name", "fspace", "span"})
 
 return ast

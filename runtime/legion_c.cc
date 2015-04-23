@@ -98,6 +98,14 @@ legion_domain_get_rect_3d(legion_domain_t d_)
   return CObjectWrapper::wrap(d.get_rect<3>());
 }
 
+size_t
+legion_domain_get_volume(legion_domain_t d_)
+{
+  Domain d = CObjectWrapper::unwrap(d_);
+
+  return d.get_volume();
+}
+
 legion_domain_t
 legion_domain_from_index_space(legion_index_space_t is_)
 {
@@ -485,6 +493,28 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
   runtime->destroy_logical_region(ctx, handle);
+}
+
+void
+legion_logical_region_attach_name(legion_runtime_t runtime_,
+                                  legion_logical_region_t handle_,
+                                  const char *name)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_logical_region_retrieve_name(legion_runtime_t runtime_,
+                                    legion_logical_region_t handle_,
+                                    const char **result)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
 }
 
 // -----------------------------------------------------------------------
@@ -1491,6 +1521,105 @@ legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
   runtime->unmap_all_regions(ctx);
 }
 
+
+// -----------------------------------------------------------------------
+// Copy Operations
+// -----------------------------------------------------------------------
+
+legion_copy_launcher_t
+legion_copy_launcher_create(
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  CopyLauncher *launcher = new CopyLauncher(*pred, id, launcher_tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_copy_launcher_destroy(legion_copy_launcher_t handle_)
+{
+  CopyLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_copy_launcher_execute(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             legion_copy_launcher_t launcher_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->issue_copy_operation(ctx, *launcher);
+}
+
+unsigned
+legion_copy_launcher_add_src_region_requirement_logical_region(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->src_requirements.size();
+  launcher->src_requirements.push_back(
+    RegionRequirement(handle, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+unsigned
+legion_copy_launcher_add_dst_region_requirement_logical_region(
+  legion_copy_launcher_t launcher_,
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->dst_requirements.size();
+  launcher->dst_requirements.push_back(
+    RegionRequirement(handle, priv, prop, parent, tag, verified));
+  return idx;
+}
+
+void
+legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher_,
+                                   unsigned idx,
+                                   legion_field_id_t fid,
+                                   bool inst /* = true */)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_src_field(idx, fid, inst);
+}
+
+void
+legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher_,
+                                   unsigned idx,
+                                   legion_field_id_t fid,
+                                   bool inst /* = true */)
+{
+  CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_dst_field(idx, fid, inst);
+}
+
 // -----------------------------------------------------------------------
 // Tracing Operations
 // -----------------------------------------------------------------------
@@ -1515,6 +1644,45 @@ legion_runtime_end_trace(legion_runtime_t runtime_,
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
   runtime->end_trace(ctx, tid);
+}
+
+// -----------------------------------------------------------------------
+// Fence Operations
+// -----------------------------------------------------------------------
+
+void
+legion_runtime_issue_mapping_fence(legion_runtime_t runtime_,
+                                   legion_context_t ctx_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->issue_mapping_fence(ctx);
+}
+
+void
+legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
+                                     legion_context_t ctx_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  runtime->issue_execution_fence(ctx);
+}
+
+// -----------------------------------------------------------------------
+// Miscellaneous Operations
+// -----------------------------------------------------------------------
+
+legion_processor_t
+legion_runtime_get_executing_processor(legion_runtime_t runtime_,
+                                       legion_context_t ctx_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+
+  Processor proc = runtime->get_executing_processor(ctx);
+  return CObjectWrapper::wrap(proc);
 }
 
 // -----------------------------------------------------------------------
@@ -1853,6 +2021,14 @@ legion_task_get_arglen(legion_task_t task_)
   Task *task = CObjectWrapper::unwrap(task_);
 
   return task->arglen;
+}
+
+legion_domain_t
+legion_task_get_index_domain(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return CObjectWrapper::wrap(task->index_domain);
 }
 
 legion_domain_point_t

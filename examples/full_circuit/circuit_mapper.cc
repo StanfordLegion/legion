@@ -41,6 +41,26 @@ CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
     }
   }
   map_to_gpus = !all_gpus.empty();
+  {
+    for (std::vector<Processor>::iterator itr = all_cpus.begin();
+         itr != all_cpus.end(); ++itr) {
+      Memory sysmem = machine_interface.find_memory_kind(*itr, Memory::SYSTEM_MEM);
+      all_sysmems[*itr] = sysmem;
+    }
+  }
+}
+
+void CircuitMapper::select_task_options(Task *task)
+{
+  if (map_to_gpus)
+    DefaultMapper::select_task_options(task);
+  else
+  {
+    task->inline_task = false;
+    task->spawn_task = false;
+    task->map_locally = true;
+    task->profile_task = false;
+  }
 }
 
 void CircuitMapper::slice_domain(const Task *task, const Domain &domain,
@@ -133,9 +153,7 @@ bool CircuitMapper::map_task(Task *task)
   else
   {
     // Put everything in the system memory
-    Memory sys_mem = 
-      machine_interface.find_memory_kind(task->target_proc,
-                                         Memory::SYSTEM_MEM);
+    Memory sys_mem = all_sysmems[task->target_proc];
     assert(sys_mem.exists());
     for (unsigned idx = 0; idx < task->regions.size(); idx++)
     {

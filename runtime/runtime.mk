@@ -71,6 +71,9 @@ GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
 GCC=CC
+F90=ftn
+# without this, lapack stuff will link, but generate garbage output - thanks Cray!
+LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
 MARCH=bdver1
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
@@ -81,6 +84,9 @@ LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
 GCC=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
 MARCH=corei7-avx
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
@@ -207,7 +213,9 @@ ifeq ($(strip $(USE_MPI)),1)
     CC		:= mpicc
     CXX		:= mpicxx
     GCC		:= $(CXX)
+    F90         := mpif90
     LD_FLAGS	+= -L$(MPI)/lib -lmpi
+    LAPACK_LIBS ?= -lblas
   endif
 endif
 

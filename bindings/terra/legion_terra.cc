@@ -131,15 +131,15 @@ DECLARE_REDUCTION(register_reduction_plus_int32,
 DECLARE_REDUCTION(register_reduction_minus_float,
                   safe_reduce_minus_float,
                   reduce_minus_float,
-                  MinusOpFloat, float, int, SUB, ADD, 0.0f)
+                  MinusOpFloat, float, int, ADD, SUB, 0.0f)
 DECLARE_REDUCTION(register_reduction_minus_double,
                   safe_reduce_minus_double,
                   reduce_minus_double,
-                  MinusOpDouble, double, size_t, SUB, ADD, 0.0)
+                  MinusOpDouble, double, size_t, ADD, SUB, 0.0)
 DECLARE_REDUCTION(register_reduction_minus_int32,
                   safe_reduce_minus_int32,
                   reduce_minus_int32,
-                  MinusOpInt, int, int, SUB, ADD, 0)
+                  MinusOpInt, int, int, ADD, SUB, 0)
 
 DECLARE_REDUCTION(register_reduction_times_float,
                   safe_reduce_times_float,

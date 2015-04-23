@@ -743,6 +743,8 @@ namespace LegionRuntime {
       inline RegionRequirement& add_field(FieldID fid, bool instance = true);
       inline RegionRequirement& add_fields(const std::vector<FieldID>& fids, 
                                            bool instance = true);
+
+      inline RegionRequirement& add_flags(RegionFlags new_flags);
     public:
 #ifdef PRIVILEGE_CHECKS
       AccessorPrivilege get_accessor_privilege(void) const;
@@ -5194,6 +5196,64 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline RegionFlags operator~(RegionFlags f)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(~unsigned(f));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator|(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator&(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator^(RegionFlags left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionFlags>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator|=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<RegionFlags>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator&=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<RegionFlags>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionFlags operator^=(RegionFlags &left, RegionFlags right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<RegionFlags>(l);
+    }
+
+    //--------------------------------------------------------------------------
     inline RegionRequirement& RegionRequirement::add_field(FieldID fid, 
                                              bool instance/*= true*/)
     //--------------------------------------------------------------------------
@@ -5212,6 +5272,14 @@ namespace LegionRuntime {
       privilege_fields.insert(fids.begin(), fids.end());
       if (instance)
         instance_fields.insert(instance_fields.end(), fids.begin(), fids.end());
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionRequirement& RegionRequirement::add_flags(RegionFlags new_flags)
+    //--------------------------------------------------------------------------
+    {
+      flags |= new_flags;
       return *this;
     }
 
@@ -6677,64 +6745,6 @@ namespace LegionRuntime {
       unsigned r = static_cast<unsigned>(right);
       l ^= r;
       return left = static_cast<AllocateMode>(l);
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator~(RegionFlags f)
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<RegionFlags>(~unsigned(f));
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator|(RegionFlags left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<RegionFlags>(unsigned(left) | unsigned(right));
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator&(RegionFlags left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<RegionFlags>(unsigned(left) & unsigned(right));
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator^(RegionFlags left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<RegionFlags>(unsigned(left) ^ unsigned(right));
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator|=(RegionFlags &left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      unsigned l = static_cast<unsigned>(left);
-      unsigned r = static_cast<unsigned>(right);
-      l |= r;
-      return left = static_cast<RegionFlags>(l);
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator&=(RegionFlags &left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      unsigned l = static_cast<unsigned>(left);
-      unsigned r = static_cast<unsigned>(right);
-      l &= r;
-      return left = static_cast<RegionFlags>(l);
-    }
-
-    //--------------------------------------------------------------------------
-    inline RegionFlags operator^=(RegionFlags &left, RegionFlags right)
-    //--------------------------------------------------------------------------
-    {
-      unsigned l = static_cast<unsigned>(left);
-      unsigned r = static_cast<unsigned>(right);
-      l ^= r;
-      return left = static_cast<RegionFlags>(l);
     }
 
   }; // namespace HighLevel

@@ -12826,6 +12826,8 @@ namespace LegionRuntime {
           return "Current Logical Users";
         case PREV_LOGICAL_ALLOC:
           return "Previous Logical Users";
+        case LOGICAL_REC_ALLOC:
+          return "Recorded Logical Users";
         case CLOSE_LOGICAL_ALLOC:
           return "Close Logical Users";
         case VALID_VIEW_ALLOC:

@@ -80,6 +80,7 @@ function type_check.expr_id(cx, node)
   return ast.typed.ExprID {
     value = node.value,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -87,6 +88,7 @@ function type_check.expr_constant(cx, node)
   return ast.typed.ExprConstant {
     value = node.value,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -101,6 +103,7 @@ function type_check.expr_function(cx, node)
   return ast.typed.ExprFunction {
     value = node.value,
     expr_type = untyped,
+    span = node.span,
   }
 end
 
@@ -108,36 +111,64 @@ function type_check.expr_field_access(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = value.expr_type -- Keep references, do NOT std.check_read
 
-  -- If the value is an fspace instance, unpack before allowing access.
-  local unpack_type, constraints = value_type
-  if std.is_fspace_instance(value_type) or
-    (std.is_ptr(value_type) and std.is_fspace_instance(value_type.points_to_type)) or
-    (std.is_ref(value_type) and std.is_fspace_instance(value_type.refers_to_type))
-  then
-    local fspace = value_type
-    if std.is_ptr(value_type) then
-      fspace = value_type.points_to_type
-    elseif std.is_ref(value_type) then
-      fspace = value_type.refers_to_type
+  if std.is_region(std.as_read(value_type)) then
+    local region_type = std.as_read(value_type)
+    if node.field_name == "partition" and
+      region_type:has_default_partition()
+    then
+      local field_type = region_type:default_partition()
+      return ast.typed.ExprFieldAccess {
+        value = value,
+        field_name = node.field_name,
+        expr_type = field_type,
+        span = node.span,
+      }
+    else
+      log.error("no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(value_type)))
     end
-    unpack_type, constraints = std.unpack_fields(fspace)
+  else
+    -- If the value is an fspace instance, unpack before allowing access.
+    local unpack_type, constraints = value_type
+    if std.is_fspace_instance(value_type) or
+      (std.is_ptr(value_type) and std.is_fspace_instance(value_type.points_to_type)) or
+      (std.is_fspace_instance(std.as_read(value_type))) or
+      (std.is_ptr(std.as_read(value_type)) and std.is_fspace_instance(std.as_read(value_type).points_to_type))
+    then
+      local fspace = std.as_read(value_type)
+      if std.is_ptr(fspace) then
+        fspace = fspace.points_to_type
+      end
+      unpack_type, constraints = std.unpack_fields(fspace)
+
+      if std.is_ptr(std.as_read(value_type)) then
+        local ptr_type = std.as_read(value_type)
+        unpack_type = std.ref(std.ptr(unpack_type, unpack(ptr_type.points_to_region_symbols)))
+      elseif std.is_ref(value_type) then
+        unpack_type = std.ref(std.ptr(unpack_type, unpack(value_type.refers_to_region_symbols)))
+      elseif std.is_rawref(value_type) then
+        unpack_type = std.rawref(&unpack_type)
+      end
+    end
+
+    if constraints then
+      std.add_constraints(cx, constraints)
+    end
+
+    local field_type = std.get_field(unpack_type, node.field_name)
+
+    if not field_type then
+      log.error("no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(value_type)))
+    end
+
+    return ast.typed.ExprFieldAccess {
+      value = value,
+      field_name = node.field_name,
+      expr_type = field_type,
+      span = node.span,
+    }
   end
-
-  if constraints then
-    std.add_constraints(cx, constraints)
-  end
-
-  local field_type = std.get_field(unpack_type, node.field_name)
-
-  if not field_type then
-    log.error("no field '" .. node.field_name .. "' in type " .. tostring(value_type))
-  end
-
-  return ast.typed.ExprFieldAccess {
-    value = value,
-    field_name = node.field_name,
-    expr_type = field_type,
-  }
 end
 
 function type_check.expr_index_access(cx, node)
@@ -149,7 +180,9 @@ function type_check.expr_index_access(cx, node)
   if std.is_partition(value_type) or std.is_cross_product(value_type) or
     (std.is_region(value_type) and value_type:has_default_partition())
   then
-    if index:is(ast.typed.ExprConstant) then
+    if index:is(ast.typed.ExprConstant) or
+      (index:is(ast.typed.ExprID) and not std.is_rawref(index.expr_type))
+    then
       local parent = value_type:parent_region()
       local subregion = value_type:subregion_constant(index.value)
       std.add_constraint(cx, subregion, parent, "<=", false)
@@ -167,6 +200,7 @@ function type_check.expr_index_access(cx, node)
         value = value,
         index = index,
         expr_type = subregion,
+        span = node.span,
       }
     else
       local parent = value_type:parent_region()
@@ -177,6 +211,7 @@ function type_check.expr_index_access(cx, node)
         value = value,
         index = index,
         expr_type = subregion,
+        span = node.span,
       }
     end
   else
@@ -193,10 +228,18 @@ function type_check.expr_index_access(cx, node)
       log.error("invalid index access for " .. tostring(value_type) .. " and " .. tostring(index_type))
     end
 
+    -- Hack: Fix up the type to be a reference if the original was.
+    if std.is_ref(value.expr_type) then
+      result_type = std.rawref(&result_type)
+    elseif std.is_rawref(value.expr_type) then
+      result_type = std.rawref(&result_type)
+    end
+
     return ast.typed.ExprIndexAccess {
       value = value,
       index = index,
       expr_type = result_type,
+      span = node.span,
     }
   end
 end
@@ -230,6 +273,7 @@ function type_check.expr_method_call(cx, node)
     method_name = node.method_name,
     args = args,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -343,6 +387,7 @@ function type_check.expr_call(cx, node)
     fn = fn,
     args = args,
     expr_type = expr_type,
+    span = node.span,
   }
   if expr_type == untyped then
     cx.fixup_nodes:insert(result)
@@ -409,6 +454,7 @@ function type_check.expr_cast(cx, node)
     fn = fn,
     arg = arg,
     expr_type = to_type,
+    span = node.span,
   }
 end
 
@@ -417,6 +463,8 @@ function type_check.expr_ctor_list_field(cx, node)
   local value_type = std.check_read(cx, value.expr_type)
   return ast.typed.ExprCtorListField {
     value = value,
+    expr_type = value_type,
+    span = node.span,
   }
 end
 
@@ -426,6 +474,8 @@ function type_check.expr_ctor_rec_field(cx, node)
   return ast.typed.ExprCtorRecField {
     name = node.name,
     value = value,
+    expr_type = value_type,
+    span = node.span,
   }
 end
 
@@ -447,22 +497,24 @@ function type_check.expr_ctor(cx, node)
   if node.named then
     expr_type = std.ctor(
       fields:map(
-        function(field) return { field.name, field.value.expr_type } end))
+        function(field) return { field.name, field.expr_type } end))
   else
     expr_type = terralib.types.tuple(unpack(fields:map(
-      function(field) return field.value.expr_type end)))
+      function(field) return field.expr_type end)))
   end
 
   return ast.typed.ExprCtor {
     fields = fields,
     named = node.named,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
 function type_check.expr_raw_context(cx, node)
   return ast.typed.ExprRawContext {
     expr_type = std.c.legion_context_t,
+    span = node.span,
   }
 end
 
@@ -483,6 +535,7 @@ function type_check.expr_raw_fields(cx, node)
     region = region,
     fields = privilege_fields,
     expr_type = fields_type,
+    span = node.span,
   }
 end
 
@@ -503,12 +556,14 @@ function type_check.expr_raw_physical(cx, node)
     region = region,
     fields = privilege_fields,
     expr_type = physical_type,
+    span = node.span,
   }
 end
 
 function type_check.expr_raw_runtime(cx, node)
   return ast.typed.ExprRawRuntime {
     expr_type = std.c.legion_runtime_t,
+    span = node.span,
   }
 end
 
@@ -518,6 +573,7 @@ function type_check.expr_isnull(cx, node)
   return ast.typed.ExprIsnull {
     pointer = pointer,
     expr_type = bool,
+    span = node.span,
   }
 end
 
@@ -528,6 +584,7 @@ function type_check.expr_new(cx, node)
     pointer_type = node.pointer_type,
     region = region,
     expr_type = node.pointer_type,
+    span = node.span,
   }
 end
 
@@ -538,6 +595,7 @@ function type_check.expr_null(cx, node)
   return ast.typed.ExprNull {
     pointer_type = node.pointer_type,
     expr_type = node.pointer_type,
+    span = node.span,
   }
 end
 
@@ -558,6 +616,7 @@ function type_check.expr_dynamic_cast(cx, node)
   return ast.typed.ExprDynamicCast {
     value = value,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -578,7 +637,6 @@ function type_check.expr_static_cast(cx, node)
 
   local parent_region_map = {}
   for i, value_region_symbol in ipairs(value_type.points_to_region_symbols) do
-    local has_bound = false
     for j, expr_region_symbol in ipairs(expr_type.points_to_region_symbols) do
       local constraint = {
         lhs = value_region_symbol,
@@ -587,12 +645,8 @@ function type_check.expr_static_cast(cx, node)
       }
       if std.check_constraint(cx, constraint) then
         parent_region_map[i] = j
-        has_bound = true
         break
       end
-    end
-    if not has_bound then
-      log.error("invalid constraint in static_cast: region " .. tostring(value_region_symbol) .. " has no parent in " .. tostring(expr_type.points_to_region_symbols:mkstring(", ")))
     end
   end
 
@@ -600,6 +654,7 @@ function type_check.expr_static_cast(cx, node)
     value = value,
     parent_region_map = parent_region_map,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -626,6 +681,7 @@ function type_check.expr_region(cx, node)
     element_type = node.element_type,
     size = size,
     expr_type = region,
+    span = node.span,
   }
 end
 
@@ -659,6 +715,7 @@ function type_check.expr_partition(cx, node)
     region = region,
     coloring = coloring,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -683,6 +740,7 @@ function type_check.expr_cross_product(cx, node)
     lhs = lhs,
     rhs = rhs,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -720,6 +778,7 @@ function type_check.expr_unary(cx, node)
     op = node.op,
     rhs = rhs,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -790,6 +849,7 @@ function type_check.expr_binary(cx, node)
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -806,6 +866,7 @@ function type_check.expr_deref(cx, node)
   return ast.typed.ExprDeref {
     value = value,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -894,6 +955,7 @@ function type_check.block(cx, node)
   return ast.typed.Block {
     stats = node.stats:map(
       function(stat) return type_check.stat(cx, stat) end),
+    span = node.span,
   }
 end
 
@@ -909,6 +971,7 @@ function type_check.stat_if(cx, node)
     elseif_blocks = node.elseif_blocks:map(
       function(block) return type_check.stat_elseif(cx, block) end),
     else_block = type_check.block(else_cx, node.else_block),
+    span = node.span,
   }
 end
 
@@ -920,6 +983,7 @@ function type_check.stat_elseif(cx, node)
   return ast.typed.StatElseif {
     cond = cond,
     block = type_check.block(body_cx, node.block),
+    span = node.span,
   }
 end
 
@@ -931,6 +995,7 @@ function type_check.stat_while(cx, node)
   return ast.typed.StatWhile {
     cond = cond,
     block = type_check.block(body_cx, node.block),
+    span = node.span,
   }
 end
 
@@ -965,6 +1030,7 @@ function type_check.stat_for_num(cx, node)
     values = values,
     block = type_check.block(cx, node.block),
     parallel = node.parallel,
+    span = node.span,
   }
 end
 
@@ -1005,6 +1071,7 @@ function type_check.stat_for_list(cx, node)
     value = value,
     block = type_check.block(cx, node.block),
     vectorize = node.vectorize,
+    span = node.span,
   }
 end
 
@@ -1016,13 +1083,15 @@ function type_check.stat_repeat(cx, node)
   return ast.typed.StatRepeat {
     block = type_check.block(cx, node.block),
     until_cond = until_cond,
+    span = node.span,
   }
 end
 
 function type_check.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return ast.typed.StatBlock {
-    block = type_check.block(cx, node.block)
+    block = type_check.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -1031,7 +1100,7 @@ function type_check.stat_var(cx, node)
     local var_type = symbol.type
     local value = node.values[i]
     if value and value:is(ast.specialized.ExprRegion) then
-      cx.type_env:insert(symbol, std.as_read(value.expr_type))
+      cx.type_env:insert(symbol, std.rawref(&std.as_read(value.expr_type)))
     end
   end
 
@@ -1061,7 +1130,7 @@ function type_check.stat_var(cx, node)
       symbol.type = var_type
     end
     if not (node.values[i] and node.values[i]:is(ast.specialized.ExprRegion)) then
-      cx.type_env:insert(symbol, var_type)
+      cx.type_env:insert(symbol, std.rawref(&var_type))
     end
     types:insert(var_type)
   end
@@ -1070,6 +1139,7 @@ function type_check.stat_var(cx, node)
     symbols = node.symbols,
     types = types,
     values = values,
+    span = node.span,
   }
 end
 
@@ -1114,7 +1184,7 @@ function type_check.stat_var_unpack(cx, node)
       log.error("no field '" .. tostring(field) .. "' in type " .. tostring(value_type))
     end
     symbol.type = field_type
-    cx.type_env:insert(symbol, field_type)
+    cx.type_env:insert(symbol, std.rawref(&field_type))
     field_types:insert(field_type)
   end
 
@@ -1127,12 +1197,18 @@ function type_check.stat_var_unpack(cx, node)
     fields = node.fields,
     field_types = field_types,
     value = value,
+    span = node.span,
   }
 end
 
 function type_check.stat_return(cx, node)
-  local value = type_check.expr(cx, node.value)
-  local value_type = std.check_read(cx, value.expr_type)
+  local value = node.value and type_check.expr(cx, node.value)
+  local value_type
+  if value then
+    value_type = std.check_read(cx, value.expr_type)
+  else
+    value_type = terralib.types.unit
+  end
 
   local expected_type = cx:get_return_type()
   assert(expected_type)
@@ -1148,11 +1224,14 @@ function type_check.stat_return(cx, node)
 
   return ast.typed.StatReturn {
     value = value,
+    span = node.span,
   }
 end
 
 function type_check.stat_break(cx, node)
-  return ast.typed.StatBreak {}
+  return ast.typed.StatBreak {
+    span = node.span,
+  }
 end
 
 function type_check.stat_assignment(cx, node)
@@ -1177,6 +1256,7 @@ function type_check.stat_assignment(cx, node)
   return ast.typed.StatAssignment {
     lhs = lhs,
     rhs = rhs,
+    span = node.span,
   }
 end
 
@@ -1195,6 +1275,7 @@ function type_check.stat_reduce(cx, node)
     op = node.op,
     lhs = lhs,
     rhs = rhs,
+    span = node.span,
   }
 end
 
@@ -1204,6 +1285,7 @@ function type_check.stat_expr(cx, node)
 
   return ast.typed.StatExpr {
     expr = value,
+    span = node.span,
   }
 end
 
@@ -1254,11 +1336,12 @@ end
 
 function type_check.stat_task_param(cx, node)
   local param_type = node.symbol.type
-  cx.type_env:insert(node.symbol, param_type)
+  cx.type_env:insert(node.symbol, std.rawref(&param_type))
 
   return ast.typed.StatTaskParam {
     symbol = node.symbol,
     param_type = param_type,
+    span = node.span,
   }
 end
 
@@ -1327,7 +1410,9 @@ function type_check.stat_task(cx, node)
       inner = false,
       idempotent = false,
     },
+    region_divergence = false,
     prototype = prototype,
+    span = node.span,
   }
 end
 
@@ -1335,6 +1420,7 @@ function type_check.stat_fspace(cx, node)
   return ast.typed.StatFspace {
     name = node.name,
     fspace = node.fspace,
+    span = node.span,
   }
 end
 

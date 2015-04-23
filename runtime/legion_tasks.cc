@@ -172,7 +172,7 @@ namespace LegionRuntime {
       deleted_fields.clear();
       deleted_field_spaces.clear();
       deleted_index_spaces.clear();
-      enclosing_physical_contexts.clear();
+      parent_req_indexes.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -355,6 +355,8 @@ namespace LegionRuntime {
         early_mapped_regions[index] = 
         InstanceRef::unpack_reference(derez, runtime->forest, depth);
       }
+      // Parent requirement indexes don't mean anything remotely
+      parent_req_indexes.resize(regions.size(), 0);
     }
 
     //--------------------------------------------------------------------------
@@ -428,18 +430,6 @@ namespace LegionRuntime {
       task_priority = 0;
       start_time = 0;
       stop_time = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::initialize_physical_contexts(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing_physical_contexts.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        enclosing_physical_contexts[idx] = 
-          get_enclosing_physical_context(idx);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -544,6 +534,16 @@ namespace LegionRuntime {
     {
       Processor exec_proc = parent_ctx->get_executing_processor();
       return runtime->invoke_mapper_speculate(exec_proc, this, value);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned TaskOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < parent_req_indexes.size());
+#endif
+      return parent_req_indexes[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -907,34 +907,34 @@ namespace LegionRuntime {
       // Shouldn't need the lock here since we only do this
       // while there is no one else executing
       RezCheck z(rez);
-      rez.serialize(created_regions.size());
+      rez.serialize<size_t>(created_regions.size());
       for (std::set<LogicalRegion>::const_iterator it =
             created_regions.begin(); it != created_regions.end(); it++)
       {
         rez.serialize(*it);
         runtime->forest->send_tree_shape(*it, target);
       }
-      rez.serialize(deleted_regions.size());
+      rez.serialize<size_t>(deleted_regions.size());
       for (std::set<LogicalRegion>::const_iterator it =
             deleted_regions.begin(); it != deleted_regions.end(); it++)
       {
         rez.serialize(*it);
       }
-      rez.serialize(created_fields.size());
+      rez.serialize<size_t>(created_fields.size());
       for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
             created_fields.begin(); it != created_fields.end(); it++)
       {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
-      rez.serialize(deleted_fields.size());
+      rez.serialize<size_t>(deleted_fields.size());
       for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
             deleted_fields.begin(); it != deleted_fields.end(); it++)
       {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
-      rez.serialize(created_field_spaces.size());
+      rez.serialize<size_t>(created_field_spaces.size());
       for (std::set<FieldSpace>::const_iterator it = 
             created_field_spaces.begin(); it != 
             created_field_spaces.end(); it++)
@@ -942,14 +942,14 @@ namespace LegionRuntime {
         rez.serialize(*it);
         runtime->forest->send_tree_shape(*it, target);
       }
-      rez.serialize(deleted_field_spaces.size());
+      rez.serialize<size_t>(deleted_field_spaces.size());
       for (std::set<FieldSpace>::const_iterator it = 
             deleted_field_spaces.begin(); it !=
             deleted_field_spaces.end(); it++)
       {
         rez.serialize(*it);
       }
-      rez.serialize(created_index_spaces.size());
+      rez.serialize<size_t>(created_index_spaces.size());
       for (std::set<IndexSpace>::const_iterator it = 
             created_index_spaces.begin(); it != 
             created_index_spaces.end(); it++)
@@ -957,7 +957,7 @@ namespace LegionRuntime {
         rez.serialize(*it);
         runtime->forest->send_tree_shape(*it, target);
       }
-      rez.serialize(deleted_index_spaces.size());
+      rez.serialize<size_t>(deleted_index_spaces.size());
       for (std::set<IndexSpace>::const_iterator it = 
             deleted_index_spaces.begin(); it !=
             deleted_index_spaces.end(); it++)
@@ -1331,16 +1331,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext TaskOp::get_enclosing_physical_context(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent_ctx != NULL);
-#endif
-      return parent_ctx->find_enclosing_physical_context(regions[idx].parent);
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::clone_task_op_from(TaskOp *rhs, Processor p, 
                                     bool stealable, bool duplicate_args)
     //--------------------------------------------------------------------------
@@ -1405,6 +1395,7 @@ namespace LegionRuntime {
       this->task_priority = rhs->task_priority;
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
+      this->parent_req_indexes = rhs->parent_req_indexes;
     }
 
     //--------------------------------------------------------------------------
@@ -1425,14 +1416,7 @@ namespace LegionRuntime {
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
         // Update the arrival count
-        // TODO: Put this back in once Sean fixes barriers
-#if 0
-        arrive_barriers.push_back(
-            PhaseBarrier(it->phase_barrier.alter_arrival_count(1),
-                         it->participants));
-#else
         arrive_barriers.push_back(*it);
-#endif
         // Note it is imperative we do this off the new barrier
         // generated after updating the arrival count.
         arrive_barriers.back().phase_barrier.arrive(1, get_task_completion());
@@ -1589,7 +1573,25 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         RegionRequirement &req = regions[idx];
-        if (req.must_early_map || req.early_map)
+        // If this is restricted we already know the answer
+        if (req.restricted)
+        {
+          has_early_maps = true;
+          InstanceRef target = 
+            parent_ctx->get_local_reference(parent_req_indexes[idx]);
+          mapping_refs[idx] = runtime->forest->map_restricted_region(
+                                        enclosing_physical_contexts[idx],
+                                                      req, idx, target
+#ifdef DEBUG_HIGH_LEVEL
+                                                      , get_logging_name()
+                                                      , unique_op_id
+#endif
+                                                      );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(mapping_refs[idx].has_ref());
+#endif
+        }
+        else if (req.must_early_map || req.early_map)
         {
           if (req.handle_type == SINGULAR)
           {
@@ -1613,20 +1615,6 @@ namespace LegionRuntime {
               regions[idx].mapping_failed = true;
               break;
             }
-            else if (IS_NO_ACCESS(req))
-            {
-              // If it is a no-access then we are done
-              continue;
-            }
-#ifndef S3D_STARTUP_HACK
-            else if (IS_WRITE(regions[idx]))
-            {
-              // Issue an invalidation if this was a write
-              StateDirectory *directory = parent_ctx->get_directory();
-              directory->issue_invalidations(runtime->address_space,
-                                             false/*remote*/, regions[idx]);
-            }
-#endif
           }
           else
           {
@@ -1646,7 +1634,7 @@ namespace LegionRuntime {
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             RegionRequirement &req = regions[idx];
-            if (req.must_early_map || req.early_map)
+            if (mapping_refs[idx].has_ref())
             {
               Event term_event = get_task_completion();
 #ifdef DEBUG_HIGH_LEVEL
@@ -1670,6 +1658,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
               assert(early_mapped_regions[idx].has_ref());
 #endif
+#ifndef S3D_STARTUP_HACK
+              if (IS_WRITE(regions[idx]))
+              {
+                // Issue an invalidation if this was a write
+                StateDirectory *directory = parent_ctx->get_directory();
+                directory->issue_invalidations(runtime->address_space,
+                                               false/*remote*/, regions[idx]);
+              }
+#endif
               if (notify)
               {
                 regions[idx].mapping_failed = false;
@@ -1688,6 +1685,54 @@ namespace LegionRuntime {
         }
       }
       return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::compute_parent_indexes(void)
+    //--------------------------------------------------------------------------
+    {
+      parent_req_indexes.resize(regions.size());
+      enclosing_physical_contexts.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        int parent_index = 
+          parent_ctx->find_parent_region_req(regions[idx]);
+        if (parent_index < 0)
+        {
+          log_region(LEVEL_ERROR,"Parent task %s (ID %lld) of task %s "
+                                 "(ID %lld) does not have a region "
+                                 "requirement for region (" IDFMT 
+                                 ",%x,%x) as a parent of child task's "
+                                 "region requirement index %d",
+                                 parent_ctx->variants->name, 
+                                 parent_ctx->get_unique_task_id(),
+                                 this->variants->name, 
+                                 get_unique_task_id(), 
+                                 regions[idx].region.index_space.id,
+                                 regions[idx].region.field_space.id, 
+                                 regions[idx].region.tree_id, idx);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_BAD_PARENT_REGION);
+        }
+        parent_req_indexes[idx] = parent_index;
+        enclosing_physical_contexts[idx] = 
+          parent_ctx->find_enclosing_physical_context(parent_req_indexes[idx]);
+      }
+      if (parent_ctx->has_simultaneous_coherence())
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          regions[idx].restricted = 
+            parent_ctx->is_simultaneous_restricted(parent_req_indexes[idx]);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          regions[idx].restricted = false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1993,7 +2038,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_task();
-      physical_instances.clear();
+      clear_physical_instances();
       local_instances.clear();
       physical_regions.clear();
       inline_regions.clear();
@@ -2138,6 +2183,17 @@ namespace LegionRuntime {
 #endif
       return physical_regions[idx];
     } 
+
+    //--------------------------------------------------------------------------
+    InstanceRef SingleTask::get_local_reference(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < local_instances.size());
+#endif
+      return local_instances[idx];
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::add_inline_task(InlineTask *inline_task)
@@ -2377,6 +2433,8 @@ namespace LegionRuntime {
       {
         physical_instances[idx] = 
           InstanceRef::unpack_reference(derez, runtime->forest, depth);
+        if (physical_instances[idx].has_ref())
+          physical_instances[idx].add_valid_reference();
       }
       locally_mapped.resize(num_phy,false);
       // Initialize the mapping paths on this node
@@ -3616,6 +3674,39 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    int SingleTask::find_parent_region_req(const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // First check that the regions match
+        if ((regions[idx].region != req.parent) || region_deleted[idx])
+          continue;
+        // Next check the privileges
+        if ((req.privilege & regions[idx].privilege) != req.privilege)
+          continue;
+        // Finally check that all the fields are contained
+        bool dominated = true;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it !=
+              req.privilege_fields.end(); it++)
+        {
+          if (regions[idx].privilege_fields.find(*it) ==
+              regions[idx].privilege_fields.end())
+          {
+            dominated = false;
+            break;
+          }
+        }
+        if (!dominated)
+          continue;
+        return int(idx);
+      }
+      return -1;
+    }
+
+    //--------------------------------------------------------------------------
     unsigned SingleTask::find_parent_region(unsigned index, TaskOp *child)
     //--------------------------------------------------------------------------
     {
@@ -3878,96 +3969,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::check_simultaneous_restricted(
-                                    RegionRequirement &child_requirement) const
+    bool SingleTask::is_simultaneous_restricted(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(has_simultaneous);
+      assert(index < regions.size());
 #endif
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // Restriction is transitive so we need to be restricted if
-        // our parent was also restricted
-        if ((regions[idx].prop != SIMULTANEOUS) &&
-            !regions[idx].restricted)
-          continue;
-        // Also check to see if we have a physical region
-        // If not then we don't need to bother with coherence
-        if (!physical_regions[idx].is_mapped())
-          continue;
-        // Check to see if the child parent region matches this region
-        if (child_requirement.parent == regions[idx].region)
-        {
-          // If it does, see if there are any fields which overlap
-          std::vector<FieldID> intersection(
-                              regions[idx].privilege_fields.size());
-          std::vector<FieldID>::iterator intersect_it = 
-            std::set_intersection(
-                              regions[idx].privilege_fields.begin(),
-                              regions[idx].privilege_fields.end(),
-                              child_requirement.privilege_fields.begin(),
-                              child_requirement.privilege_fields.end(),
-                              intersection.begin());
-          intersection.resize(intersect_it - intersection.begin());
-          // If we had overlapping fields then mark that the
-          // requirement is now restricted.  We might find later
-          // during dependence analysis that user-level software
-          // coherence changes this, but for now it is true.
-          if (!intersection.empty())
-          {
-            child_requirement.restricted = true;
-            // At this point we're done
-            return;
-          }
-        }
-      }
+      if ((regions[index].prop == SIMULTANEOUS) ||
+           regions[index].restricted)
+        return true;
+      return false;
     }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::check_simultaneous_restricted(
-                      std::vector<RegionRequirement> &child_requirements) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(has_simultaneous);
-#endif
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if ((regions[idx].prop != SIMULTANEOUS) &&
-            !regions[idx].restricted)
-          continue;
-        if (!physical_regions[idx].is_mapped())
-          continue;
-        std::vector<FieldID> intersection(regions[idx].privilege_fields.size());
-        for (unsigned child_idx = 0; 
-              child_idx < child_requirements.size(); child_idx++)
-        {
-          // If the child has already been marked restricted
-          // then we don't need to do the test again
-          if (child_requirements[child_idx].restricted)
-            continue;
-          if (child_requirements[child_idx].parent == regions[idx].region)
-          {
-            std::vector<FieldID>::iterator intersect_it = 
-              std::set_intersection(
-                    regions[idx].privilege_fields.begin(),
-                    regions[idx].privilege_fields.end(),
-                    child_requirements[child_idx].privilege_fields.begin(),
-                    child_requirements[child_idx].privilege_fields.end(),
-                    intersection.begin());
-            intersection.resize(intersect_it - intersection.begin());
-            if (!intersection.empty())
-              child_requirements[child_idx].restricted = true;
-            // Reset the intersection vector
-            intersection.resize(regions[idx].privilege_fields.size());
-          }
-        }
-      }
-    }
-
+    
     //--------------------------------------------------------------------------
     bool SingleTask::has_created_region(LogicalRegion handle) const
     //--------------------------------------------------------------------------
@@ -4244,34 +4257,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext SingleTask::find_enclosing_physical_context(
-                                                           LogicalRegion parent)
+    RegionTreeContext SingleTask::find_enclosing_physical_context(unsigned idx)
     //--------------------------------------------------------------------------
     {
       // Need to hold the lock when accessing these data structures
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == virtual_mapped.size());
+      assert(idx < regions.size());
+      assert(idx < enclosing_physical_contexts.size());
 #endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if ((regions[idx].region == parent) && !region_deleted[idx])
-        {
-          if (!virtual_mapped[idx])
-            return context;
-          else
-          {
-#ifdef DEBUG_HIGH_LEVEL
-            assert(idx < enclosing_physical_contexts.size());
-#endif
-            return enclosing_physical_contexts[idx];
-          }
-        }
-      }
-      // If we get here that means that our privilege checking framework
-      // is failing to catch a case where we don't actually have privileges.
-      assert(false);
-      return RegionTreeContext();
+      if (!virtual_mapped[idx])
+        return context;
+      else
+        return enclosing_physical_contexts[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -4371,6 +4370,20 @@ namespace LegionRuntime {
       virtual_mapped.clear();
       region_deleted.clear();
       num_virtual_mappings = 0;
+      clear_physical_instances();
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::clear_physical_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionDeque<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::tracked::
+            iterator it = physical_instances.begin(); it != 
+            physical_instances.end(); it++)
+      {
+        if (it->has_ref())
+          it->remove_valid_reference();
+      }
       physical_instances.clear();
     }
 
@@ -4482,30 +4495,34 @@ namespace LegionRuntime {
           if (premapped.has_ref())
           {
 #ifdef DEBUG_HIGH_LEVEL
-            // Check to make sure the pre-mapped region is visible to
-            // the target processor
-            Machine machine = Machine::get_machine();
-            std::set<Memory> visible_memories;
-	    machine.get_visible_memories(target, visible_memories);
-            Memory premap_memory = premapped.get_memory();
-            if (visible_memories.find(premap_memory) != visible_memories.end())
-            {
-              log_region(LEVEL_ERROR,"Illegal premapped region for logical "
-                                      "region (" IDFMT ",%d,%d) index %d of "
-                                      "task %s (UID %lld)!  Memory " IDFMT 
-                                      " is not visible from processor " IDFMT 
-                                      "!", 
+	    if (!(regions[idx].flags & NO_ACCESS_FLAG))
+	    {
+	      // Check to make sure the pre-mapped region is visible to
+	      // the target processor
+	      Machine machine = Machine::get_machine();
+	      std::set<Memory> visible_memories;
+	      machine.get_visible_memories(target, visible_memories);
+	      Memory premap_memory = premapped.get_memory();
+	      if (visible_memories.find(premap_memory) == visible_memories.end())
+              {
+		log_region(LEVEL_ERROR,"Illegal premapped region for logical "
+			               "region (" IDFMT ",%d,%d) index %d of "
+			               "task %s (UID %lld)!  Memory " IDFMT 
+                                       " is not visible from processor " IDFMT 
+                                       "!", 
                                        regions[idx].region.index_space.id, 
                                        regions[idx].region.field_space.id, 
                                        regions[idx].region.tree_id, idx, 
                                        this->variants->name, 
                                        this->get_unique_task_id(), 
                                        premap_memory.id, target.id);
-              assert(false);
-              exit(ERROR_INVALID_PREMAPPED_REGION_LOCATION);
-            }
+		assert(false);
+		exit(ERROR_INVALID_PREMAPPED_REGION_LOCATION);
+	      }
+	    }
 #endif
             physical_instances[idx] = premapped;
+            physical_instances[idx].add_valid_reference();
             continue;
           }
           // Finally, finish setting up the actual instance
@@ -4527,6 +4544,7 @@ namespace LegionRuntime {
                                                           , mapping_paths[idx]
 #endif
                                                           );
+          physical_instances[idx].add_valid_reference();
           if (notify)
             regions[idx].selected_memory = physical_instances[idx].get_memory();
 #ifdef DEBUG_HIGH_LEVEL
@@ -5218,7 +5236,6 @@ namespace LegionRuntime {
         all_children_mapped = UserEvent::NO_USER_EVENT;
 #endif
       }
-      local_instances.clear();
 
       // Handle the future result
       handle_future(res, res_size, owned); 
@@ -5885,8 +5902,6 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
       grants = launcher.grants;
       update_grants(launcher.grants);
@@ -5960,8 +5975,6 @@ namespace LegionRuntime {
       }
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
-      remote_contexts = enclosing_physical_contexts;
       remote_outermost_context = 
         find_outermost_physical_context()->get_context();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6017,8 +6030,6 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       arglen = arg.get_size();
       if (arglen > 0)
       {
@@ -6032,8 +6043,6 @@ namespace LegionRuntime {
       remote_owner_uid = ctx->get_unique_task_id();
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
-      remote_contexts = enclosing_physical_contexts;
       remote_outermost_context = 
         find_outermost_physical_context()->get_context();
 #ifdef DEBUG_HIGH_LEVEL
@@ -6094,6 +6103,8 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_DEP_ANALYSIS);
 #endif
+      // First compute the parent indexes
+      compute_parent_indexes();
       begin_dependence_analysis();
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
@@ -6581,6 +6592,9 @@ namespace LegionRuntime {
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
+      // If we haven't been moved remotely yet, record our contexts
+      if (!is_remote())
+        remote_contexts = enclosing_physical_contexts;
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       AddressSpaceID addr_target = runtime->find_address_space(target);
@@ -7665,8 +7679,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext RemoteTask::find_enclosing_physical_context(
-                                                          LogicalRegion handle)
+    RegionTreeContext RemoteTask::find_enclosing_physical_context(unsigned idx)
     //--------------------------------------------------------------------------
     {
       // This will always contains the virtual context
@@ -7775,6 +7788,7 @@ namespace LegionRuntime {
         regions[idx].parent = enclosing->regions[index].parent;
         physical_regions[idx] = enclosing->get_physical_region(index);
       }
+      compute_parent_indexes();
     }
 
     //--------------------------------------------------------------------------
@@ -7805,18 +7819,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return enclosing->get_context_id();
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreeContext InlineTask::find_enclosing_physical_context(
-                                                          LogicalRegion parent)
-    //--------------------------------------------------------------------------
-    {
-      if (created_regions.find(parent) != created_regions.end())
-      {
-        return find_outermost_physical_context()->get_context();
-      }
-      return enclosing->find_enclosing_physical_context(parent);
     }
 
     //--------------------------------------------------------------------------
@@ -7994,8 +7996,6 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -8025,7 +8025,6 @@ namespace LegionRuntime {
                              launcher.predicate_false_result);
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMap::Impl>(ctx, this, runtime));
@@ -8073,8 +8072,6 @@ namespace LegionRuntime {
             launcher.region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -8118,7 +8115,6 @@ namespace LegionRuntime {
                              launcher.predicate_false_result);
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<Future::Impl>(runtime, 
@@ -8170,8 +8166,6 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -8194,7 +8188,6 @@ namespace LegionRuntime {
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMap::Impl>(ctx, this, runtime));
@@ -8249,8 +8242,6 @@ namespace LegionRuntime {
         regions[idx].copy_without_mapping_info(region_requirements[idx]);
         regions[idx].initialize_mapping_fields();
       }
-      if (parent_ctx->has_simultaneous_coherence())
-        parent_ctx->check_simultaneous_restricted(regions);
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -8287,7 +8278,6 @@ namespace LegionRuntime {
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
         perform_privilege_checks();
-      initialize_physical_contexts();
       initialize_paths();
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<Future::Impl>(runtime, 
@@ -8410,6 +8400,8 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(get_unique_task_id(), PROF_BEGIN_DEP_ANALYSIS);
 #endif
+      // First compute the parent indexes
+      compute_parent_indexes();
       begin_dependence_analysis();
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
@@ -8456,7 +8448,7 @@ namespace LegionRuntime {
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
-      log_run(LEVEL_WARNING,"Region requirements %d and %d of individual task "
+      log_run(LEVEL_WARNING,"Region requirements %d and %d of index task "
                             "%s (UID %lld) in parent task %s (UID %lld) are "
                             "aliased.  This behavior is currently undefined. "
                             "You better really know what you are doing.",
@@ -8977,6 +8969,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       bool need_trigger = false;
+      bool trigger_children_completed = false;
+      bool trigger_children_commit = false;
       {
         AutoLock o_lock(op_lock);
         total_points += points;
@@ -8984,13 +8978,31 @@ namespace LegionRuntime {
         slice_fraction.add(Fraction<long long>(1,denom));
         // Already know that mapped points is the same as total points
         if (slice_fraction.is_whole())
+        {
           need_trigger = true;
+          if ((complete_points == total_points) &&
+              !children_complete_invoked)
+          {
+            trigger_children_completed = true;
+            children_complete_invoked = true;
+          }
+          if ((committed_points == total_points) &&
+              !children_commit_invoked)
+          {
+            trigger_children_commit = true;
+            children_commit_invoked = true;
+          }
+        }
       }
       if (need_trigger)
       {
         complete_mapping();
         complete_execution();
       }
+      if (trigger_children_completed)
+        trigger_children_complete();
+      if (trigger_children_commit)
+        trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -9608,6 +9620,9 @@ namespace LegionRuntime {
     bool SliceTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
+      // If we haven't been moved remotely record our contexts
+      if (!is_remote())
+        remote_contexts = enclosing_physical_contexts;
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped

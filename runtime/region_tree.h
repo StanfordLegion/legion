@@ -205,6 +205,18 @@ namespace LegionRuntime {
                                        , UniqueID uid
 #endif
                                        );
+      // This call will not actually perform a traversal
+      // but will instead compute the proper view on which
+      // to perform the mapping based on a target instance
+      MappingRef map_restricted_region(RegionTreeContext ctx,
+                                       RegionRequirement &req,
+                                       unsigned index,
+                                       const InstanceRef &parent_ref
+#ifdef DEBUG_HIGH_LEVEL
+                                       , const char *log_name
+                                       , UniqueID uid
+#endif
+                                       );
       InstanceRef register_physical_region(RegionTreeContext ctx,
                                            const MappingRef &ref,
                                            RegionRequirement &req,
@@ -231,7 +243,8 @@ namespace LegionRuntime {
                                    const std::set<Color> &targets,
                                    bool leave_open,
                                    int next_child,
-                                   Event &closed
+                                   Event &closed,
+                                   const MappingRef &target
 #ifdef DEBUG_HIGH_LEVEL
                                    , unsigned index
                                    , const char *log_name
@@ -854,6 +867,7 @@ namespace LegionRuntime {
       RegionTreeForest *const context;
     public:
       NodeSet creation_set;
+      NodeSet child_creation;
       NodeSet destruction_set;
     protected:
       Reservation node_lock;
@@ -1216,6 +1230,25 @@ namespace LegionRuntime {
     };
 
     /**
+     * \struct RestrictInfo
+     * Information about whether this region requirement
+     * needs to be restricted for certain fields
+     */
+    struct RestrictInfo {
+    public:
+      RestrictInfo(bool res) : restricted(res) { }
+    public:
+      inline bool is_restricted(void) const { return restricted; }
+      inline void record_coherence(const FieldMask &m)
+        { coherence_mask |= m; }
+      inline bool is_coherent(const FieldMask &m) const
+        { return !(m - coherence_mask); }
+    protected:
+      FieldMask coherence_mask;
+      bool restricted;
+    };
+
+    /**
      * \struct TracingInfo
      * Information about tracing needed for logical
      * dependence analysis.
@@ -1392,6 +1425,7 @@ namespace LegionRuntime {
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
                                        int next_child, 
+                                       const RestrictInfo &restrict_info,
                                        const TraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -1404,12 +1438,14 @@ namespace LegionRuntime {
                       LegionList<ClosingSet>::aligned &close_sets);
       void create_close_operations(RegionTreeNode *target, 
                           Operation *creator, int next_child,
+                          const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info, bool open,
                           const LegionList<ClosingSet>::aligned &close_sets,
                       LegionMap<InterCloseOp*,LogicalUser>::aligned &close_ops);
       void register_dependences(const LogicalUser &current,
              LegionMap<InterCloseOp*,LogicalUser>::aligned &closes,
              LegionMap<Color,ClosingInfo>::aligned &children,
+             LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
     public:
@@ -1753,6 +1789,7 @@ namespace LegionRuntime {
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
+                                 RestrictInfo &restrict_info,
                                  const TraceInfo &trace_info);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
@@ -1787,7 +1824,6 @@ namespace LegionRuntime {
       template<bool DOMINATE>
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
-      void record_user_coherence(ContextID ctx, FieldMask &coherence_mask);
       void acquire_user_coherence(ContextID ctx, 
                                   const FieldMask &coherence_mask);
       void release_user_coherence(ContextID ctx, 
@@ -1958,10 +1994,12 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<Color> &targets,
                                             int next_child, 
+                                            const RestrictInfo &res_info,
                                             const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
                                            const std::set<Color> &targets,
+                                           const MappingRef &target_region,
                                            StateDirectory *directory,
                                            bool leave_open,
                                            int next_child,
@@ -2005,7 +2043,7 @@ namespace LegionRuntime {
                              FieldSpaceNode *column, AddressSpaceID source);
     public:
       // Logical helper operations
-      template<AllocationType ALLOC, bool HAS_SKIP> 
+      template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP> 
       static FieldMask perform_dependence_checks(const LogicalUser &user, 
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask, bool validates_regions,
@@ -2081,10 +2119,12 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<Color> &targets,
                                             int next_child,
+                                            const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
                                            const std::set<Color> &targets,
+                                           const MappingRef &target_region,
                                            StateDirectory *directory,
                                            bool leave_open,
                                            int next_child,
@@ -2221,10 +2261,12 @@ namespace LegionRuntime {
                                             bool leave_open,
                                             const std::set<Color> &targets,
                                             int next_child,
+                                            const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
                                            const std::set<Color> &targets,
+                                           const MappingRef &target_region,
                                            StateDirectory *directory,
                                            bool leave_open,
                                            int next_child,
@@ -2445,28 +2487,6 @@ namespace LegionRuntime {
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
-    };
-
-    /**
-     * \class RestrictedTraverser
-     * A class for checking for user-level software coherence
-     * on restricted logical regions.
-     */
-    class RestrictedTraverser : public PathTraverser {
-    public:
-      RestrictedTraverser(ContextID ctx, RegionTreePath &path);
-      RestrictedTraverser(const RestrictedTraverser &rhs);
-      virtual ~RestrictedTraverser(void);
-    public:
-      RestrictedTraverser& operator=(const RestrictedTraverser &rhs);
-    public:
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      const FieldMask& get_coherence_mask(void) const;
-    protected:
-      const ContextID ctx;
-      FieldMask coherence_mask;
     };
 
     /**

@@ -26,6 +26,7 @@ class CircuitMapper : public DefaultMapper {
 public:
   CircuitMapper(Machine machine, HighLevelRuntime *runtime, Processor local);
 public:
+  virtual void select_task_options(Task *task);
   virtual void slice_domain(const Task *task, const Domain &domain,
                             std::vector<DomainSplit> &slices);
   virtual bool map_task(Task *task);
@@ -46,6 +47,7 @@ protected:
   bool map_to_gpus;
   std::vector<Processor> all_cpus;
   std::vector<Processor> all_gpus;
+  std::map<Processor, Memory> all_sysmems;
 };
 
 #endif // __CIRCUIT_MAPPER_H__

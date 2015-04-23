@@ -25,11 +25,7 @@ symbol_table.new_global_scope = function(lua_env)
   st.local_env = {}
   st.combined_env = setmetatable({}, {
       __index = function(_, index)
-        local value = st.local_env[index] or st.lua_env[index]
-        if not value then
-          log.error("name '" .. tostring(index) .. "' is undefined or nil")
-        end
-        return value
+        return st.local_env[index] or st.lua_env[index]
       end,
       __newindex = function()
         log.error("cannot create global variables")
@@ -44,11 +40,7 @@ function symbol_table:new_local_scope()
   st.local_env = setmetatable({}, { __index = self.local_env })
   st.combined_env = setmetatable({}, {
       __index = function(_, index)
-        local value = st.local_env[index] or st.lua_env[index]
-        if not value then
-          log.error("name '" .. tostring(index) .. "' is undefined or nil")
-        end
-        return value
+        return st.local_env[index] or st.lua_env[index]
       end,
       __newindex = function()
         log.error("cannot create global variables")
@@ -57,8 +49,16 @@ function symbol_table:new_local_scope()
   return st
 end
 
-function symbol_table:lookup(index)
+function symbol_table:safe_lookup(index)
   return self.combined_env[index]
+end
+
+function symbol_table:lookup(index)
+  local value = self.combined_env[index]
+  if value == nil then
+    log.error("name '" .. tostring(index) .. "' is undefined or nil")
+  end
+  return value
 end
 
 function symbol_table:insert(index, value)

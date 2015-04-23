@@ -16,6 +16,7 @@
 #ifndef __PENNANT_H__
 #define __PENNANT_H__
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,14 +39,23 @@ void generate_mesh_raw(
   int64_t conf_numpcy,
   int64_t conf_npieces,
   int64_t conf_meshtype,
+  bool conf_compact,
+  int64_t conf_stripsize,
+  int64_t conf_spansize,
   double *pointpos_x, size_t *pointpos_x_size,
   double *pointpos_y, size_t *pointpos_y_size,
   int64_t *pointcolors, size_t *pointcolors_size,
   uint64_t *pointmcolors, size_t *pointmcolors_size,
+  int64_t *pointspancolors, size_t *pointspancolors_size,
   int64_t *zonestart, size_t *zonestart_size,
   int64_t *zonesize, size_t *zonesize_size,
   int64_t *zonepoints, size_t *zonepoints_size,
-  int64_t *zonecolors, size_t *zonecolors_size);
+  int64_t *zonecolors, size_t *zonecolors_size,
+  int64_t *zonespancolors, size_t *zonespancolors_size,
+  int64_t *nspans_zones,
+  int64_t *nspans_points);
+
+void print_rusage(const char *);
 
 void register_mappers();
 

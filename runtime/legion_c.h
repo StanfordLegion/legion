@@ -56,6 +56,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
+  NEW_OPAQUE_TYPE(legion_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_generic_t);
   NEW_OPAQUE_TYPE(legion_accessor_array_t);
@@ -353,6 +354,12 @@ extern "C" {
    */
   legion_rect_3d_t
   legion_domain_get_rect_3d(legion_domain_t d);
+
+  /**
+   * @see LegionRuntime::HighLevel::Domain::get_volume()
+   */
+  size_t
+  legion_domain_get_volume(legion_domain_t d);
 
   /**
    * @see LegionRuntime::HighLevel::Domain::Domain(
@@ -663,6 +670,22 @@ extern "C" {
   legion_logical_region_destroy(legion_runtime_t runtime,
                                 legion_context_t ctx,
                                 legion_logical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::attach_name()
+   */
+  void
+  legion_logical_region_attach_name(legion_runtime_t runtime,
+                                    legion_logical_region_t handle,
+                                    const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::retrieve_name()
+   */
+  void
+  legion_logical_region_retrieve_name(legion_runtime_t runtime,
+                                      legion_logical_region_t handle,
+                                      const char **result);
 
   // -----------------------------------------------------------------------
   // Logical Region Tree Traversal Operations
@@ -1486,6 +1509,101 @@ extern "C" {
                                    legion_context_t ctx);
 
   // -----------------------------------------------------------------------
+  // Copy Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::CopyLauncher::CopyLauncher()
+   */
+  legion_copy_launcher_t
+  legion_copy_launcher_create(
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::CopyLauncher::~CopyLauncher()
+   */
+  void
+  legion_copy_launcher_destroy(legion_copy_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::issue_copy_operation()
+   */
+  void
+  legion_copy_launcher_execute(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_copy_launcher_t launcher);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_copy_launcher_add_src_region_requirement_logical_region(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_copy_requirements()
+   */
+  unsigned
+  legion_copy_launcher_add_dst_region_requirement_logical_region(
+    legion_copy_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
+   */
+  void
+  legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher,
+                                     unsigned idx,
+                                     legion_field_id_t fid,
+                                     bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
+   */
+  void
+  legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher,
+                                     unsigned idx,
+                                     legion_field_id_t fid,
+                                     bool inst /* = true */);
+
+  // -----------------------------------------------------------------------
+  // Fence Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::issue_mapping_fence()
+   */
+  void
+  legion_runtime_issue_mapping_fence(legion_runtime_t runtime,
+                                     legion_context_t ctx);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::issue_execution_fence()
+   */
+  void
+  legion_runtime_issue_execution_fence(legion_runtime_t runtime,
+                                       legion_context_t ctx);
+
+  // -----------------------------------------------------------------------
   // Tracing Operations
   // -----------------------------------------------------------------------
 
@@ -1505,6 +1623,16 @@ extern "C" {
                            legion_context_t ctx,
                            legion_trace_id_t tid);
 
+  // -----------------------------------------------------------------------
+  // Miscellaneous Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::get_executing_processor()
+   */
+  legion_processor_t
+  legion_runtime_get_executing_processor(legion_runtime_t runtime,
+                                         legion_context_t ctx);
 
   // -----------------------------------------------------------------------
   // Physical Data Operations
@@ -1752,6 +1880,12 @@ extern "C" {
    */
   size_t
   legion_task_get_arglen(legion_task_t task);
+
+  /**
+   * @see LegionRuntime::HighLevel::Task::index_domain
+   */
+  legion_domain_t
+  legion_task_get_index_domain(legion_task_t task);
 
   /**
    * @see LegionRuntime::HighLevel::Task::index_point

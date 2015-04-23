@@ -347,6 +347,7 @@ function concretize(node)
     return ast.typed.ExprFutureGetResult {
       value = node,
       expr_type = expr_type.result_type,
+      span = node.span,
     }
   end
   return node
@@ -358,6 +359,7 @@ function promote(node)
     return ast.typed.ExprFuture {
       value = node,
       expr_type = std.future(expr_type),
+      span = node.span,
     }
   end
   return node
@@ -365,10 +367,19 @@ end
 
 function optimize_futures.expr_id(cx, node)
   if cx:is_future(node.value) then
-    return ast.typed.ExprID {
-      value = node.value,
-      expr_type = std.future(node.expr_type),
-    }
+    if std.is_rawref(node.expr_type) then
+      return ast.typed.ExprID {
+        value = node.value,
+        expr_type = std.rawref(&std.future(std.as_read(node.expr_type))),
+        span = node.span,
+      }
+    else
+      return ast.typed.ExprID {
+        value = node.value,
+        expr_type = std.future(node.expr_type),
+        span = node.span,
+      }
+    end
   else
     return node
   end
@@ -380,6 +391,7 @@ function optimize_futures.expr_field_access(cx, node)
     value = value,
     field_name = node.field_name,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -390,6 +402,7 @@ function optimize_futures.expr_index_access(cx, node)
     value = value,
     index = index,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -402,6 +415,7 @@ function optimize_futures.expr_method_call(cx, node)
     method_name = node.method_name,
     args = args,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -422,6 +436,7 @@ function optimize_futures.expr_call(cx, node)
     fn = fn,
     args = args,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -432,6 +447,7 @@ function optimize_futures.expr_cast(cx, node)
     fn = fn,
     arg = arg,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -439,6 +455,8 @@ function optimize_futures.expr_ctor_list_field(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return ast.typed.ExprCtorListField {
     value = value,
+    expr_type = value.expr_type,
+    span = node.span,
   }
 end
 
@@ -447,6 +465,8 @@ function optimize_futures.expr_ctor_rec_field(cx, node)
   return ast.typed.ExprCtorRecField {
     name = node.name,
     value = value,
+    expr_type = value.expr_type,
+    span = node.span,
   }
 end
 
@@ -467,6 +487,7 @@ function optimize_futures.expr_ctor(cx, node)
     fields = fields,
     named = node.named,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -476,6 +497,7 @@ function optimize_futures.expr_raw_fields(cx, node)
     region = region,
     fields = node.fields,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -485,6 +507,7 @@ function optimize_futures.expr_raw_physical(cx, node)
     region = region,
     fields = node.fields,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -493,6 +516,7 @@ function optimize_futures.expr_isnull(cx, node)
   return ast.typed.ExprIsnull {
     pointer = pointer,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -502,6 +526,7 @@ function optimize_futures.expr_new(cx, node)
     pointer_type = node.pointer_type,
     region = region,
     expr_type = node.pointer_type,
+    span = node.span,
   }
 end
 
@@ -514,6 +539,7 @@ function optimize_futures.expr_dynamic_cast(cx, node)
   return ast.typed.ExprDynamicCast {
     value = value,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -523,6 +549,7 @@ function optimize_futures.expr_static_cast(cx, node)
     value = value,
     parent_region_map = node.parent_region_map,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -532,6 +559,7 @@ function optimize_futures.expr_region(cx, node)
     element_type = node.element_type,
     size = size,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -543,6 +571,7 @@ function optimize_futures.expr_partition(cx, node)
     region = region,
     coloring = coloring,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -553,6 +582,7 @@ function optimize_futures.expr_cross_product(cx, node)
     lhs = lhs,
     rhs = rhs,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -569,6 +599,7 @@ function optimize_futures.expr_unary(cx, node)
     op = node.op,
     rhs = rhs,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -588,6 +619,7 @@ function optimize_futures.expr_binary(cx, node)
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
+    span = node.span,
   }
 end
 
@@ -596,6 +628,7 @@ function optimize_futures.expr_deref(cx, node)
   return ast.typed.ExprDeref {
     value = value,
     expr_type = node.expr_type,
+    span = node.span,
   }
 end
 
@@ -681,6 +714,7 @@ function optimize_futures.block(cx, node)
   return ast.typed.Block {
     stats = node.stats:map(
       function(stat) return optimize_futures.stat(cx, stat) end),
+    span = node.span,
   }
 end
 
@@ -691,6 +725,7 @@ function optimize_futures.stat_if(cx, node)
     elseif_blocks = node.elseif_blocks:map(
       function(block) return optimize_futures.stat_elseif(cx, block) end),
     else_block = optimize_futures.block(cx, node.else_block),
+    span = node.span,
   }
 end
 
@@ -698,6 +733,7 @@ function optimize_futures.stat_elseif(cx, node)
   return ast.typed.StatElseif {
     cond = concretize(optimize_futures.expr(cx, node.cond)),
     block = optimize_futures.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -705,6 +741,7 @@ function optimize_futures.stat_while(cx, node)
   return ast.typed.StatWhile {
     cond = concretize(optimize_futures.expr(cx, node.cond)),
     block = optimize_futures.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -715,6 +752,7 @@ function optimize_futures.stat_for_num(cx, node)
       function(value) return concretize(optimize_futures.expr(cx, value)) end),
     block = optimize_futures.block(cx, node.block),
     parallel = node.parallel,
+    span = node.span,
   }
 end
 
@@ -724,6 +762,7 @@ function optimize_futures.stat_for_list(cx, node)
     value = concretize(optimize_futures.expr(cx, node.value)),
     block = optimize_futures.block(cx, node.block),
     vectorize = node.vectorize,
+    span = node.span,
   }
 end
 
@@ -731,12 +770,14 @@ function optimize_futures.stat_repeat(cx, node)
   return ast.typed.StatRepeat {
     block = optimize_futures.block(cx, node.block),
     until_cond = concretize(optimize_futures.expr(cx, node.until_cond)),
+    span = node.span,
   }
 end
 
 function optimize_futures.stat_block(cx, node)
   return ast.typed.StatBlock {
-    block = optimize_futures.block(cx, node.block)
+    block = optimize_futures.block(cx, node.block),
+    span = node.span,
   }
 end
 
@@ -773,6 +814,7 @@ function optimize_futures.stat_index_launch(cx, node)
     reduce_lhs = reduce_lhs,
     reduce_op = node.reduce_op,
     args_provably = node.args_provably,
+    span = node.span,
   }
 end
 
@@ -804,6 +846,7 @@ function optimize_futures.stat_var(cx, node)
     symbols = node.symbols,
     types = types,
     values = values,
+    span = node.span,
   }
 end
 
@@ -813,12 +856,15 @@ function optimize_futures.stat_var_unpack(cx, node)
     fields = node.fields,
     field_types = node.field_types,
     value = concretize(optimize_futures.expr(cx, node.value)),
+    span = node.span,
   }
 end
 
 function optimize_futures.stat_return(cx, node)
+  local value = node.value and concretize(optimize_futures.expr(cx, node.value))
   return ast.typed.StatReturn {
-    value = concretize(optimize_futures.expr(cx, node.value)),
+    value = value,
+    span = node.span,
   }
 end
 
@@ -844,6 +890,7 @@ function optimize_futures.stat_assignment(cx, node)
   return ast.typed.StatAssignment {
     lhs = lhs,
     rhs = normalized_rhs,
+    span = node.span,
   }
 end
 
@@ -852,12 +899,14 @@ function optimize_futures.stat_reduce(cx, node)
     op = node.op,
     lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end),
     rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end),
+    span = node.span,
   }
 end
 
 function optimize_futures.stat_expr(cx, node)
   return ast.typed.StatExpr {
     expr = optimize_futures.expr(cx, node.expr),
+    span = node.span,
   }
 end
 
@@ -923,7 +972,9 @@ function optimize_futures.stat_task(cx, node)
     constraints = node.constraints,
     body = body,
     config_options = node.config_options,
+    region_divergence = node.region_divergence,
     prototype = node.prototype,
+    span = node.span,
   }
 end
 

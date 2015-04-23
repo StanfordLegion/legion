@@ -25,7 +25,24 @@ local min = math.min
 
 -- vectorizer
 
-local SIMD_REG_SIZE = 16
+local SIMD_REG_SIZE
+if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+  if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
+    SIMD_REG_SIZE = 32
+  elseif os.execute("sysctl -a | grep machdep.cpu.features | grep SSE > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
+  else
+    error("Unable to determine CPU architecture")
+  end
+else
+  if os.execute("grep avx /proc/cpuinfo > /dev/null") == 0 then
+    SIMD_REG_SIZE = 32
+  elseif os.execute("grep sse /proc/cpuinfo > /dev/null") == 0 then
+    SIMD_REG_SIZE = 16
+  else
+    error("Unable to determine CPU architecture")
+  end
+end
 
 local V = {}
 V.__index = V
@@ -83,13 +100,17 @@ function flip_types.block(simd_width, symbol, node)
     stats:insert(flip_types.stat(simd_width, symbol, stat))
   end
   node.stats:map(flip_type_each)
-  return ast.typed.Block { stats = stats }
+  return ast.typed.Block {
+    stats = stats,
+    span = node.span,
+  }
 end
 
 function flip_types.stat(simd_width, symbol, node)
   if node:is(ast.typed.StatBlock) then
     return ast.typed.StatBlock {
-      block = flip_types.block(simd_width, symbol, node.block)
+      block = flip_types.block(simd_width, symbol, node.block),
+      span = node.span,
     }
 
   elseif node:is(ast.typed.StatVar) then
@@ -108,6 +129,7 @@ function flip_types.stat(simd_width, symbol, node)
       types = types,
       values = values,
       vectorize = true,
+      span = node.span,
     }
 
   elseif node:is(ast.typed.StatAssignment) or
@@ -126,12 +148,14 @@ function flip_types.stat(simd_width, symbol, node)
       return ast.typed.StatAssignment {
         lhs = lhs,
         rhs = rhs,
+        span = node.span,
       }
     else -- node:is(ast.typed.StatReduce)
       return ast.typed.StatReduce {
         lhs = lhs,
         rhs = rhs,
         op = node.op,
+        span = node.span,
       }
     end
 
@@ -141,6 +165,7 @@ function flip_types.stat(simd_width, symbol, node)
       values = node.values,
       block = flip_types.block(simd_width, symbol, node.block),
       parallel = node.parallel,
+      span = node.span,
     }
 
   else
@@ -166,27 +191,30 @@ function flip_types.exp(simd_width, symbol, node)
     new_node.rhs = flip_types.exp(simd_width, symbol, new_node.rhs)
 
     local expr_type
-    if new_node.lhs.expr_type:isvector() then
+    if std.as_read(new_node.lhs.expr_type):isvector() then
       expr_type = new_node.lhs.expr_type
     else
       expr_type = new_node.rhs.expr_type
     end
 
     if (node.op == "min" or node.op == "max") and
-       std.is_minmax_supported(expr_type) then
+      std.is_minmax_supported(std.as_read(expr_type)) then
       local args = terralib.newlist()
       args:insert(new_node.lhs)
       args:insert(new_node.rhs)
-      local fn = std["v" .. node.op](expr_type)
-      local fn_type = ({expr_type, expr_type} -> expr_type).type
+      local rval_type = std.as_read(expr_type)
+      local fn = std["v" .. node.op](rval_type)
+      local fn_type = ({rval_type, rval_type} -> rval_type).type
       local fn_node = ast.typed.ExprFunction {
         expr_type = fn_type,
         value = fn,
+        span = node.span,
       }
       return ast.typed.ExprCall {
         fn = fn_node,
         args = args,
-        expr_type = expr_type,
+        expr_type = rval_type,
+        span = node.span,
       }
     end
 
@@ -210,14 +238,16 @@ function flip_types.exp(simd_width, symbol, node)
     new_node.fn = flip_types.exp_function(simd_width, node.fn)
 
   elseif node:is(ast.typed.ExprCast) then
-    new_node.arg = flip_types.exp(simd_width, symbol, node.arg)
-    new_node.fn = ast.typed.ExprFunction {
-      expr_type = flip_types.type(simd_width, node.fn.expr_type),
-      value = flip_types.type(simd_width, node.fn.value),
-    }
+    if node.fact == V then
+      new_node.arg = flip_types.exp(simd_width, symbol, node.arg)
+      new_node.fn = ast.typed.ExprFunction {
+        expr_type = flip_types.type(simd_width, node.fn.expr_type),
+        value = flip_types.type(simd_width, node.fn.value),
+        span = node.span,
+      }
+    end
 
   elseif node:is(ast.typed.ExprID) then
-    new_node.value.type = new_node.expr_type
 
   elseif node:is(ast.typed.ExprConstant) then
 
@@ -226,7 +256,8 @@ function flip_types.exp(simd_width, symbol, node)
 
   end
   if node.fact == V and
-    not (node:is(ast.typed.ExprID) and node.value == symbol) then
+    not (node:is(ast.typed.ExprID) and node.value == symbol)
+  then
     new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
   end
   return node:type()(new_node)
@@ -242,11 +273,18 @@ function flip_types.exp_function(simd_width, node)
   return ast.typed.ExprFunction {
     expr_type = expr_type,
     value = value,
+    span = node.span,
   }
 end
 
 function flip_types.type(simd_width, ty)
-  if ty:isprimitive() then
+  if std.is_ref(ty) then
+    local vector_type = flip_types.type(simd_width, std.as_read(ty))
+    return std.ref(std.ptr(vector_type, unpack(ty.refers_to_region_symbols)))
+  elseif std.is_rawref(ty) then
+    local vector_type = flip_types.type(simd_width, std.as_read(ty))
+    return std.rawref(&vector_type)
+  elseif ty:isprimitive() then
     return vector(ty, simd_width)
   elseif ty:isarray() then
     return (vector(ty.type, simd_width))[ty.N]
@@ -315,7 +353,7 @@ end
 function min_simd_width.exp(reg_size, node)
   local simd_width = reg_size
   if node.fact == V then
-    simd_width = min_simd_width.type(reg_size, node.expr_type)
+    simd_width = min_simd_width.type(reg_size, std.as_read(node.expr_type))
   end
 
   if node:is(ast.typed.ExprID) then
@@ -362,6 +400,7 @@ function min_simd_width.exp(reg_size, node)
 end
 
 function min_simd_width.type(reg_size, ty)
+  assert(not (std.is_ref(ty) or std.is_rawref(ty)))
   if std.is_ptr(ty) then
     return reg_size / sizeof(uint32)
   elseif ty:isarray() then
@@ -370,7 +409,7 @@ function min_simd_width.type(reg_size, ty)
     local simd_width = reg_size
     for _, entry in pairs(ty.entries) do
       local entry_type = entry[2] or entry.type
-      simd_width = min(simd_width, min_simd_width.type(reg_size, entry_type))
+      simd_width = min(simd_width, min_simd_width.type(reg_size, std.as_read(entry_type)))
     end
     return simd_width
   else
@@ -389,6 +428,7 @@ function vectorize.stat_for_list(node)
     block = body,
     orig_block = node.block,
     vector_width = simd_width,
+    span = node.span,
   }
 end
 
@@ -418,7 +458,9 @@ function annotate_vectorizability.stat(vars, node)
   if node:is(ast.typed.StatBlock) then
     annotate_vectorizability.block(vars, node.block)
     node.vectorizable = node.block.vectorizable
-    node.error_msg = node.block.error_msg
+    if not node.vectorizable then
+      node.error_msg = node.block.error_msg
+    end
 
   elseif node:is(ast.typed.StatVar) then
     for i, symbol in pairs(node.symbols) do
@@ -449,8 +491,8 @@ function annotate_vectorizability.stat(vars, node)
          node:is(ast.typed.StatReduce) then
     for i, rh in pairs(node.rhs) do
       local lh = node.lhs[i]
-      if not (annotate_vectorizability.type(lh.expr_type) and
-              annotate_vectorizability.type(rh.expr_type)) then
+      if not (annotate_vectorizability.type(std.as_read(lh.expr_type)) and
+              annotate_vectorizability.type(std.as_read(rh.expr_type))) then
         node.vectorizable = false
         node.error_msg = error_prefix ..
           "an assignment between non-scalar expressions"
@@ -462,8 +504,7 @@ function annotate_vectorizability.stat(vars, node)
         node.vectorizable = lh.vectorizable and rh.vectorizable
         if not node.vectorizable then
           node.error_msg = rawget(lh, "error_msg") or rawget(rh, "error_msg")
-        end
-        if lh.fact == S and rh.fact == V then
+        elseif lh.fact == S and rh.fact == V then
           node.vectorizable = false
           node.error_msg = error_prefix ..
             "an assignment of a non-scalar expression to a scalar expression"
@@ -556,7 +597,7 @@ function annotate_vectorizability.exp(vars, node)
 
     if node.index.fact ~= S then
       node.vectorizable = false
-      node.error_msg = error_prefix + "an array access with a non-scalar index"
+      node.error_msg = error_prefix .. "an array access with a non-scalar index"
       return
     end
 
@@ -578,7 +619,7 @@ function annotate_vectorizability.exp(vars, node)
     end
 
   elseif node:is(ast.typed.ExprBinary) then
-    if not annotate_vectorizability.binary_op(node.op, node.expr_type) then
+    if not annotate_vectorizability.binary_op(node.op, std.as_read(node.expr_type)) then
       node.vectorizable = false
       node.error_msg = error_prefix .. "an unsupported binary operator"
       return
@@ -746,7 +787,7 @@ function annotate_vectorizability.type(ty)
   elseif ty:isstruct() then
     for _, entry in pairs(ty.entries) do
       local entry_type = entry[2] or entry.type
-      if not entry_type:isprimitive() then
+      if not annotate_vectorizability.type(entry_type) then
         return false
       end
     end
@@ -763,6 +804,7 @@ function vectorize_loops.block(node)
   return ast.typed.Block {
     stats = node.stats:map(
       function(stat) return vectorize_loops.stat(stat) end),
+    span = node.span,
   }
 end
 
@@ -773,6 +815,7 @@ function vectorize_loops.stat_if(node)
     elseif_blocks = node.elseif_blocks:map(
       function(block) return vectorize_loops.stat_elseif(block) end),
     else_block = vectorize_loops.block(node.else_block),
+    span = node.span,
   }
 end
 
@@ -780,6 +823,7 @@ function vectorize_loops.stat_elseif(node)
   return ast.typed.StatElseif {
     cond = node.cond,
     block = vectorize_loops.block(node.block),
+    span = node.span,
   }
 end
 
@@ -787,6 +831,7 @@ function vectorize_loops.stat_while(node)
   return ast.typed.StatWhile {
     cond = node.cond,
     block = vectorize_loops.block(node.block),
+    span = node.span,
   }
 end
 
@@ -796,6 +841,7 @@ function vectorize_loops.stat_for_num(node)
     values = node.values,
     block = vectorize_loops.block(node.block),
     parallel = node.parallel,
+    span = node.span,
   }
 end
 
@@ -806,6 +852,7 @@ function vectorize_loops.stat_for_list(node)
       value = node.value,
       block = body,
       vectorize = node.vectorize,
+    span = node.span,
     }
   end
 
@@ -830,12 +877,14 @@ function vectorize_loops.stat_repeat(node)
   return ast.typed.StatRepeat {
     block = vectorize_loops.block(node.block),
     until_cond = node.until_cond,
+    span = node.span,
   }
 end
 
 function vectorize_loops.stat_block(node)
   return ast.typed.StatBlock {
-    block = vectorize_loops.block(node.block)
+    block = vectorize_loops.block(node.block),
+    span = node.span,
   }
 end
 
@@ -904,7 +953,9 @@ function vectorize_loops.stat_task(node)
     constraints = node.constraints,
     body = body,
     config_options = node.config_options,
+    region_divergence = node.region_divergence,
     prototype = node.prototype,
+    span = node.span,
   }
 end
 
