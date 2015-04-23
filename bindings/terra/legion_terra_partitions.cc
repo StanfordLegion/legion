@@ -29,7 +29,8 @@ using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::LowLevel;
 
 #ifndef USE_TLS
-#ifdef __MACH__
+// Mac OS X and GCC <= 4.6 do not support C++11 thread_local.
+#if defined(__MACH__) || (defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ <= 6)))
 #define USE_TLS 0
 #else
 #define USE_TLS 1
