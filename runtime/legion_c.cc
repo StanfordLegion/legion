@@ -2385,6 +2385,22 @@ legion_get_current_time_in_micros(void)
 // Machine Operations
 // -----------------------------------------------------------------------
 
+legion_machine_t
+legion_machine_create()
+{
+  Machine *result = new Machine(Machine::get_machine());
+
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_machine_destroy(legion_machine_t handle_)
+{
+  Machine *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
 void
 legion_machine_get_all_processors(
   legion_machine_t machine_,

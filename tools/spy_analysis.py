@@ -993,6 +993,9 @@ class SingleTask(object):
                                 traverser.visited = dict()
                                 # TODO: support virtual mappings
                                 dst_inst = inst2.get_instance(dep.idx2)
+                                if dst_inst == None and isinstance(inst2, Close):
+                                    # this is an InterCloseOp
+                                    continue
                                 dst_field = f
                                 # a hack for copy operations
                                 if (isinstance(inst2, CopyOp) or \
@@ -1844,7 +1847,7 @@ class Close(object):
 
     def get_instance(self, idx):
         assert idx == 0
-        assert self.instance <> None
+        #assert self.instance <> None
         return self.instance
 
     def physical_traverse(self, component):
@@ -2971,7 +2974,7 @@ class State(object):
 
     def add_partition_name(self, iid, fid, tid, name):
         assert tid in self.region_trees
-        if iid not in self.index_space_nodes:
+        if iid not in self.index_part_nodes:
             return False
         if fid not in self.field_space_nodes:
             return False

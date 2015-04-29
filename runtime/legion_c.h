@@ -2078,6 +2078,22 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::LowLevel::Machine::get_machine()
+   */
+  legion_machine_t
+  legion_machine_create();
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::LowLevel::Machine::~Machine()
+   */
+  void
+  legion_machine_destroy(legion_machine_t handle);
+
+  /**
    * @see LegionRuntime::LowLevel::Machine::get_all_processors()
    */
   void

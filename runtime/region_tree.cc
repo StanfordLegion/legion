@@ -9405,8 +9405,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       closed_mask |= mask;
-      if (closed_users.empty())
-        return;
+      // IMPORTANT: Always do this even if we don't have any closed users
+      // They could have been pruned out because they finished executing, but
+      // we still need to do the close operation.
       if (leave_open)
       {
         LegionMap<Color,ClosingInfo>::aligned::iterator finder = 

@@ -3879,7 +3879,7 @@ namespace LegionRuntime {
 	  switch(get_dim()) {
 	  case 1:
 	    {
-	      Arrays::FortranArrayLinearization<1> cl(get_rect<1>());
+	      Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	      dl = DomainLinearization::from_mapping<1>(Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	      inst_extent = cl.image_convex(get_rect<1>());
 	      break;
@@ -3887,7 +3887,7 @@ namespace LegionRuntime {
 
 	  case 2:
 	    {
-	      Arrays::FortranArrayLinearization<2> cl(get_rect<2>());
+	      Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
 	      dl = DomainLinearization::from_mapping<2>(Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
 	      inst_extent = cl.image_convex(get_rect<2>());
 	      break;
@@ -3895,7 +3895,7 @@ namespace LegionRuntime {
 
 	  case 3:
 	    {
-	      Arrays::FortranArrayLinearization<3> cl(get_rect<3>());
+	      Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
 	      dl = DomainLinearization::from_mapping<3>(Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
 	      inst_extent = cl.image_convex(get_rect<3>());
 	      break;
@@ -4425,7 +4425,7 @@ namespace LegionRuntime {
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
-		//        inst->get_address(index, field_start, within_field));
+		//        inst->get_address(inst->get_linearization().get_image(dp), field_start, field_size, within_field));
 		assert(bytes > 0);
 		memcpy(buffer + write_offset, 
 		       inst->get_address(inst->get_linearization().get_image(dp), 
@@ -4450,7 +4450,7 @@ namespace LegionRuntime {
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
-		//        inst->get_address(index, field_start, within_field));
+		//        inst->get_address(inst->get_linearization().get_image(dp), field_start, field_size, within_field));
 		assert(bytes > 0);
 		memcpy(inst->get_address(inst->get_linearization().get_image(dp),
 					 field_start, field_size, within_field),
