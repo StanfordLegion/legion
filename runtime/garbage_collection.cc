@@ -1123,9 +1123,10 @@ namespace LegionRuntime {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(target != runtime->address_space);
-      if (subscribers.find(target) != subscribers.end())
-        assert(subscribers[target] == subscriber);
 #endif
+      // Note that it is safe to over-write the subscriber for a target
+      // because we might have initially provided a subscriber ID, but in
+      // the meantime the remote node selected a new Distributed ID.
       subscribers[target] = subscriber;
     }
 

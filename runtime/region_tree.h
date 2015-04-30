@@ -343,6 +343,7 @@ namespace LegionRuntime {
       bool has_tree(RegionTreeID tid) const;
       bool has_field(FieldSpace space, FieldID fid);
     public:
+      bool is_subregion(LogicalRegion child, LogicalRegion parent);
       bool is_disjoint(IndexPartition handle);
       bool is_disjoint(LogicalPartition handle);
       bool are_disjoint(IndexSpace parent, IndexSpace child);

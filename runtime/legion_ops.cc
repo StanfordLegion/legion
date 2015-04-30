@@ -4643,6 +4643,44 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region);
+      // Do a little bit of error checking
+      {
+        const RegionRequirement &physical_req = 
+          launcher.physical_region.impl->get_requirement();
+        if (!runtime->forest->is_subregion(launcher.logical_region, 
+                                           physical_req.region))
+        {
+          log_task(LEVEL_ERROR,"ERROR: Acquire operation requested privileges "
+                               "on logical region (" IDFMT ",%d,%d) which is "
+                               "not a subregion of the physical instance "
+                               "region (" IDFMT ",%d,%d)",
+                               launcher.logical_region.index_space.id,
+                               launcher.logical_region.field_space.id,
+                               launcher.logical_region.get_tree_id(),
+                               physical_req.region.index_space.id,
+                               physical_req.region.field_space.id,
+                               physical_req.region.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_ACQUIRE_MISMATCH);
+        }
+        for (std::set<FieldID>::const_iterator it = launcher.fields.begin();
+              it != launcher.fields.end(); it++)
+        {
+          if (physical_req.privilege_fields.find(*it) == 
+              physical_req.privilege_fields.end())
+          {
+            log_task(LEVEL_ERROR,"ERROR: Acquire operation requested on "
+                                 "field %d which is not contained in the "
+                                 "requested physical instance", *it);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_ACQUIRE_MISMATCH);
+          }
+        }
+      }
       if (launcher.fields.empty())
       {
         log_task(LEVEL_WARNING,"WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
@@ -5167,6 +5205,44 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region);
+      // Do a little bit of error checking
+      {
+        const RegionRequirement &physical_req = 
+          launcher.physical_region.impl->get_requirement();
+        if (!runtime->forest->is_subregion(launcher.logical_region, 
+                                           physical_req.region))
+        {
+          log_task(LEVEL_ERROR,"ERROR: Release operation requested privileges "
+                               "on logical region (" IDFMT ",%d,%d) which is "
+                               "not a subregion of the physical instance "
+                               "region (" IDFMT ",%d,%d)",
+                               launcher.logical_region.index_space.id,
+                               launcher.logical_region.field_space.id,
+                               launcher.logical_region.get_tree_id(),
+                               physical_req.region.index_space.id,
+                               physical_req.region.field_space.id,
+                               physical_req.region.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RELEASE_MISMATCH);
+        }
+        for (std::set<FieldID>::const_iterator it = launcher.fields.begin();
+              it != launcher.fields.end(); it++)
+        {
+          if (physical_req.privilege_fields.find(*it) == 
+              physical_req.privilege_fields.end())
+          {
+            log_task(LEVEL_ERROR,"ERROR: Release operation requested on "
+                                 "field %d which is not contained in the "
+                                 "requested physical instance", *it);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_RELEASE_MISMATCH);
+          }
+        }
+      }
       if (launcher.fields.empty())
       {
         log_task(LEVEL_WARNING,"WARNING: PRIVILEGE FIELDS OF RELEASE OPERATION"

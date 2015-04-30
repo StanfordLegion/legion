@@ -2614,6 +2614,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_subregion(LogicalRegion child, 
+                                        LogicalRegion parent)
+    //--------------------------------------------------------------------------
+    {
+      if (child == parent)
+        return true;
+      if (child.get_tree_id() != parent.get_tree_id())
+        return false;
+      std::vector<Color> path;
+      return compute_index_path(parent.get_index_space(),
+                                child.get_index_space(), path);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::is_disjoint(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -19847,7 +19861,9 @@ namespace LegionRuntime {
         {
           // The view already existed so add an alias
           result->set_no_free_did();
-          legion_delete(result);
+          // We always add resource references if did != owner_did
+          if (result->remove_resource_reference())
+            legion_delete(result);
           result = parent->get_materialized_subview(view_color);
           result->add_alias_did(did);
           need_lock = true;
@@ -21223,7 +21239,9 @@ namespace LegionRuntime {
         if (!parent->add_subview(result, view_color))
         {
           result->set_no_free_did();
-          legion_delete(result);
+          // We always add resource references when did != owner_did
+          if (result->remove_resource_reference())
+            legion_delete(result);
           result = parent->get_subview(view_color)->as_composite_view();
           result->add_alias_did(did);
           result->update_valid_mask(valid_mask);
