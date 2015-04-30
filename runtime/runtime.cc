@@ -4905,14 +4905,18 @@ namespace LegionRuntime {
         for (std::set<Processor>::const_iterator it = local_procs.begin();
               it != local_procs.end(); it++)
         {
+#ifndef NDEBUG
           Processor::Kind kind = it->kind();
+#endif
           assert(kind != Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
         }
         for (std::set<Processor>::const_iterator it = local_utils.begin();
               it != local_utils.end(); it++)
         {
+#ifndef NDEBUG
           Processor::Kind kind = it->kind();
+#endif
           assert(kind == Processor::UTIL_PROC);
           LegionProf::finalize_processor(*it);
         }
@@ -13230,7 +13234,10 @@ namespace LegionRuntime {
       // which means any logging that occurs before this has undefined behavior.
       LLRuntime ll;
 
-      bool ok = ll.init(&argc, &argv);
+#ifndef NDEBUG
+      bool ok = 
+#endif
+        ll.init(&argc, &argv);
       assert(ok);
 
       // register tasks and reduction ops with LLR

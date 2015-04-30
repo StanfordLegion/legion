@@ -901,7 +901,7 @@ namespace LegionRuntime {
       /**
        * Block until the future completes.
        */
-      void get_void_result(void);
+      void get_void_result(void) const;
       /**
        * Check to see if the future is empty.  The
        * user can specify whether to block and wait
@@ -910,7 +910,7 @@ namespace LegionRuntime {
        * of the call will return true, until
        * the future actually completes.
        */
-      bool is_empty(bool block = false);
+      bool is_empty(bool block = false) const;
     public:
       /**
        * Return a const reference to the future.

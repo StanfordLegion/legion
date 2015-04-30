@@ -341,7 +341,10 @@ namespace LegionRuntime {
 	    //printf("in aos(%zd) converter\n", STRIDE);
 	    void *aos_base = 0;
 	    size_t aos_stride = STRIDE;
-	    bool ok = get_aos_parameters(aos_base, aos_stride);
+#ifndef NDEBUG
+	    bool ok = 
+#endif
+              get_aos_parameters(aos_base, aos_stride);
 	    return ok;
 	  }
 
@@ -350,7 +353,10 @@ namespace LegionRuntime {
 	    //printf("in aos(%zd) converter\n", STRIDE);
 	    void *aos_base = 0;
 	    size_t aos_stride = STRIDE;
-	    bool ok = get_aos_parameters(aos_base, aos_stride);
+#ifndef NDEBUG
+	    bool ok = 
+#endif
+              get_aos_parameters(aos_base, aos_stride);
 	    assert(ok);
 	    typename AT::template Typed<T, T> t(aos_base, aos_stride);
             RegionAccessor<AT, T> result(t);

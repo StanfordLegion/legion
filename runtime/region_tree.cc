@@ -7601,6 +7601,7 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -8166,6 +8167,7 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -11316,12 +11318,14 @@ namespace LegionRuntime {
               // Disjointness check on fields
               if (cit1->second * cit2->second)
                 continue;
+#ifndef NDEBUG
               Color c1 = cit1->first;
               Color c2 = cit2->first;
               // Some aliasing in the fields, so do the check 
               // for child disjointness
               assert(c1 != c2);
               assert(are_children_disjoint(c1, c2));
+#endif
             }
           }
         }

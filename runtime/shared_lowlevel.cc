@@ -3875,7 +3875,7 @@ namespace LegionRuntime {
 	if(get_dim() > 0) {
 	  // we have a rectangle - figure out its volume and create based on that
 	  DomainLinearization dl;
-	  Arrays::Rect<1> inst_extent;
+	  Arrays::Rect<1> inst_extent = 0;
 	  switch(get_dim()) {
 	  case 1:
 	    {
@@ -4360,7 +4360,7 @@ namespace LegionRuntime {
 	      while(size > 0) {
 		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					  field_start, field_size, within_field);
+                                          field_start, field_size, within_field);
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
@@ -4387,7 +4387,7 @@ namespace LegionRuntime {
 	      while(size > 0) {
 		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
-					  field_start, field_size, within_field);
+		                          field_start, field_size, within_field);
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
 		//        i->inst.id, i->offset, i->size, offset, size, field_start, within_field, bytes,
 		//        inst->get_base_ptr(),
@@ -4538,8 +4538,11 @@ namespace LegionRuntime {
           size_t offset = dsts[0].offset;
           size_t size = dsts[0].size;
           size_t field_start = 0, field_size = 0, within_field = 0;
-          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
-                                    field_start, field_size, within_field);
+#ifndef NDEBUG
+          size_t bytes = 
+#endif
+            find_field(dst_inst->get_field_sizes(), offset, size,
+                       field_start, field_size, within_field);
 	  assert(bytes == size);
           for (int index = start; index < (start+count); index++)
           {
@@ -4561,8 +4564,11 @@ namespace LegionRuntime {
           size_t offset = dsts[0].offset;
           size_t size = dsts[0].size;
           size_t field_start = 0, field_size = 0, within_field = 0;
-          size_t bytes = find_field(dst_inst->get_field_sizes(), offset, size,
-                                    field_start, field_size, within_field);
+#ifndef NDEBUG
+          size_t bytes = 
+#endif
+            find_field(dst_inst->get_field_sizes(), offset, size,
+                       field_start, field_size, within_field);
 	  assert(bytes == size);
           for (Domain::DomainPointIterator dpi(domain); dpi; dpi++) {
             DomainPoint dp = dpi.p;
@@ -5992,8 +5998,11 @@ namespace LegionRuntime {
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
       size_t field_start, field_size, within_field;
-      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
-				 field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes2 = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+ 		   field_start, field_size, within_field);
       assert(bytes == bytes2);
       const char *src = (const char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
@@ -6010,8 +6019,11 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
       size_t field_start, field_size, within_field;
-      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
-				 field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes2 = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+		   field_start, field_size, within_field);
       assert(bytes == bytes2);
       const char *src = (const char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
@@ -6030,8 +6042,11 @@ namespace LegionRuntime {
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
       size_t field_start, field_size, within_field;
-      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
-				 field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes2 = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+		   field_start, field_size, within_field);
       assert(bytes == bytes2);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
@@ -6048,8 +6063,11 @@ namespace LegionRuntime {
       RegionInstance::Impl *impl = (RegionInstance::Impl *) internal;
       int index = impl->get_linearization().get_image(dp);
       size_t field_start, field_size, within_field;
-      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset + offset, bytes,
-				 field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes2 = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset + offset, bytes,
+    		   field_start, field_size, within_field);
       assert(bytes == bytes2);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       memcpy(dst, src, bytes);
@@ -6065,8 +6083,11 @@ namespace LegionRuntime {
 		     (int)(impl->get_linearization().get_mapping<1>()->image(ptr.value)) :
 		     ptr.value);
       size_t field_start, field_size, within_field;
-      size_t bytes = find_field(impl->get_field_sizes(), field_offset, 0,
-				field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset, 0,
+		   field_start, field_size, within_field);
       assert(bytes > 0);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       // actual count and stride depend on whether instance is blocked
@@ -6090,8 +6111,11 @@ namespace LegionRuntime {
       int index = mapping->image_linear_subrect(r, subrect, strides);
       // TODO: trim subrect in HybridSOA case
       size_t field_start, field_size, within_field;
-      size_t bytes2 = find_field(impl->get_field_sizes(), field_offset, 1,
-				 field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes2 = 
+#endif
+        find_field(impl->get_field_sizes(), field_offset, 1,
+                   field_start, field_size, within_field);
       assert(bytes2 == 1);
       char *dst = (char *)(impl->get_address(index, field_start, field_size, within_field));
       for(int i = 0; i < DIM; i++)

@@ -472,7 +472,10 @@ namespace LegionRuntime {
 
       static Mapping<IDIM, ODIM> *deserialize(const int *data)
       {
-	int id = Mapping<T::IDIM, T::ODIM>::registry.template get_id<DynamicMapping<T> >();
+#ifndef NDEBUG
+	int id = 
+#endif
+          Mapping<T::IDIM, T::ODIM>::registry.template get_id<DynamicMapping<T> >();
 	assert(data[0] == id);
 	DynamicMapping<T> *m = new DynamicMapping<T>();
 	memcpy(&(m->t), data + 1, sizeof(T));

@@ -346,8 +346,7 @@ namespace LegionRuntime {
               it != memories.end(); it++)
         {
           std::vector<Machine::ProcessorMemoryAffinity> affinity; 
-          int size = machine.get_proc_mem_affinity(affinity, proc, *it);
-          assert(size == 1);
+          assert(machine.get_proc_mem_affinity(affinity, proc, *it) == 1);
           bool inserted = false;
           if (latency)
           {
@@ -636,7 +635,7 @@ namespace LegionRuntime {
       {
         bool best_set = false;
         float best_time = 0.f;
-        Processor::Kind best_kind;
+        Processor::Kind best_kind = Processor::LOC_PROC;
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         assert(finder != task_profiles.end());
         for (VariantMap::const_iterator it = finder->second.begin();
