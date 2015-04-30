@@ -3875,7 +3875,7 @@ namespace LegionRuntime {
 	if(get_dim() > 0) {
 	  // we have a rectangle - figure out its volume and create based on that
 	  DomainLinearization dl;
-	  Arrays::Rect<1> inst_extent = 0;
+	  Arrays::Rect<1> inst_extent;
 	  switch(get_dim()) {
 	  case 1:
 	    {
