@@ -269,7 +269,7 @@ namespace LegionRuntime {
     class Rect {
     public:
       Rect(void) {}
-      Rect(const int *vals) : lo(vals), hi(vals + DIM) {}
+      explicit Rect(const int *vals) : lo(vals), hi(vals + DIM) {}
       Rect(const Point<DIM> _lo, const Point<DIM> _hi) : lo(_lo), hi(_hi) {}
       Rect(const Rect<DIM>& other) : lo(other.lo), hi(other.hi) {}
 
