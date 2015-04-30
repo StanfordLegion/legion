@@ -1588,7 +1588,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Future::get_void_result(void) const
+    void Future::get_void_result(void)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
@@ -1596,7 +1596,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Future::is_empty(bool block /*= true*/) const
+    bool Future::is_empty(bool block /*= true*/)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
