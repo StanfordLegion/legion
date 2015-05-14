@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch between int32 and bool
+-- type_mismatch_arithmetic1.lg:23: type mismatch between int32 and bool
+--   var z = x + y
+--           ^
 
 import "legion"
 

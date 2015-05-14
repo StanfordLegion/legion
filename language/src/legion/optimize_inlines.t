@@ -390,21 +390,14 @@ function fixup_block(annotated_block, in_usage, out_usage)
   stats:insertall(map_regions(usage_diff(in_usage, node_in_usage)))
   stats:insertall(node.stats)
   stats:insertall(map_regions(usage_diff(node_out_usage, out_usage)))
-  return ast.typed.Block {
-    stats = stats,
-    span = node.span,
-  }
+  return node { stats = stats }
 end
 
 function fixup_elseif(annotated_node, in_usage, out_usage)
   local node, node_in_usage, node_out_usage = unpack(annotated_node)
   local annotated_block = annotate(node.block, node_in_usage, node_out_usage)
   local block = fixup_block(annotated_block, in_usage, out_usage)
-  return ast.typed.StatElseif {
-    cond = node.cond,
-    block = block,
-    span = node.span,
-  }
+  return node { block = block }
 end
 
 function optimize_inlines.block(cx, node)
@@ -429,10 +422,7 @@ function optimize_inlines.block(cx, node)
   end
 
   return annotate(
-    ast.typed.Block {
-      stats = result_stats,
-      span = node.span,
-    },
+    node { stats = result_stats },
     in_usage, out_usage)
 end
 
@@ -459,12 +449,10 @@ function optimize_inlines.stat_if(cx, node)
   local else_block = fixup_block(else_annotated, initial_usage, final_usage)
 
   return annotate(
-    ast.typed.StatIf {
-      cond = node.cond,
+    node {
       then_block = then_block,
       elseif_blocks = elseif_blocks,
       else_block = else_block,
-      span = node.span,
     },
     initial_usage, final_usage)
 end
@@ -472,11 +460,7 @@ end
 function optimize_inlines.stat_elseif(cx, node)
   local block, in_usage, out_usage = unpack(optimize_inlines.block(cx, node.block))
   return annotate(
-    ast.typed.StatElseif {
-      cond = node.cond,
-      block = block,
-      span = node.span,
-    },
+    node { block = block },
     in_usage, out_usage)
 end
 
@@ -486,11 +470,7 @@ function optimize_inlines.stat_while(cx, node)
   local loop_usage = usage_meet(cond_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
-    ast.typed.StatWhile {
-      cond = node.cond,
-      block = block,
-      span = node.span,
-    },
+    node { block = block },
     loop_usage, loop_usage)
 end
 
@@ -502,13 +482,7 @@ function optimize_inlines.stat_for_num(cx, node)
   local loop_usage = usage_meet(values_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
-    ast.typed.StatForNum {
-      symbol = node.symbol,
-      values = node.values,
-      block = block,
-      parallel = node.parallel,
-      span = node.span,
-    },
+    node { block = block },
     loop_usage, loop_usage)
 end
 
@@ -518,13 +492,7 @@ function optimize_inlines.stat_for_list(cx, node)
   local loop_usage = usage_meet(value_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
-    ast.typed.StatForList {
-      symbol = node.symbol,
-      value = node.value,
-      block = block,
-      vectorize = node.vectorize,
-      span = node.span,
-    },
+    node { block = block },
     loop_usage, loop_usage)
 end
 
@@ -535,11 +503,7 @@ function optimize_inlines.stat_repeat(cx, node)
                                 annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
-    ast.typed.StatRepeat {
-      block = block,
-      until_cond = node.until_cond,
-      span = node.span,
-    },
+    node { block = block },
     loop_usage, loop_usage)
 end
 
@@ -547,10 +511,7 @@ function optimize_inlines.stat_block(cx, node)
   local block, block_in_usage, block_out_usage = unpack(
     optimize_inlines.block(cx, node.block))
   return annotate(
-    ast.typed.StatBlock {
-      block = block,
-      span = node.span,
-    },
+    node { block = block },
     block_in_usage, block_out_usage)
 end
 
@@ -682,18 +643,7 @@ function optimize_inlines.stat_task(cx, node)
   local annotated_body = optimize_inlines.block(cx, node.body)
   local body = fixup_block(annotated_body, initial_usage, nil)
 
-  return ast.typed.StatTask {
-    name = node.name,
-    params = node.params,
-    return_type = node.return_type,
-    privileges = node.privileges,
-    constraints = node.constraints,
-    body = body,
-    config_options = node.config_options,
-    region_divergence = node.region_divergence,
-    prototype = node.prototype,
-    span = node.span,
-  }
+  return node { body = body }
 end
 
 function optimize_inlines.stat_top(cx, node)

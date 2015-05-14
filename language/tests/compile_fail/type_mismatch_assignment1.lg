@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in assignment: expected s but got t
+-- type_mismatch_assignment1.lg:27: type mismatch in assignment: expected s but got t
+--   x = t {}
+--   ^
 
 import "legion"
 

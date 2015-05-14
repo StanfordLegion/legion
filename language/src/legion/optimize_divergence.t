@@ -361,18 +361,7 @@ function optimize_divergence.stat_task(cx, node)
   analyze_region_divergence.block(cx, node.body)
   local divergence = invert_forest(cx.region_div)
 
-  return ast.typed.StatTask {
-    name = node.name,
-    params = node.params,
-    return_type = node.return_type,
-    privileges = node.privileges,
-    constraints = node.constraints,
-    body = node.body,
-    config_options = node.config_options,
-    region_divergence = divergence,
-    prototype = node.prototype,
-    span = node.span,
-  }
+  return node { region_divergence = divergence }
 end
 
 function optimize_divergence.stat_top(cx, node)

@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- no field 'f' in type p($r)
+-- undefined_field_access2.lg:25: no field 'f' in type p($r)
+--   var y = x.f
+--           ^
 
 import "legion"
 

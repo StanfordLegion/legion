@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- iterator for loop expected pointer type, got double
+-- type_mismatch_for5.lg:23: iterator for loop expected pointer type, got double
+--   for x : double in r do end
+--     ^
 
 import "legion"
 

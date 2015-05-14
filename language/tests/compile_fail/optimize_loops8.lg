@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- loop optimization failed: argument 1 interferes with itself
+-- optimize_loops8.lg:69: loop optimization failed: argument 1 interferes with itself
+--     g(p_aliased[i])
+--     ^
 
 import "legion"
 

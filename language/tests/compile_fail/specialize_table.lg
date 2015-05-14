@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- unable to specialize value of type table
+-- specialize_table.lg:25: unable to specialize value of type table
+--   var x = t
+--           ^
 
 import "legion"
 

@@ -16,15 +16,27 @@
 
 local log = {}
 
-log.warn = function(...)
+log.warn = function(node, ...)
   io.stderr:write(...)
   io.stderr:write("\n")
 end
 
-log.error = function(...)
-  io.stderr:write(...)
-  io.stderr:write("\n")
-  os.exit(1)
+log.error = function(node, ...)
+  if node == nil then
+    node = { span = { source = "internal", start = { line = 0, offset = 0 } } }
+  end
+
+  -- The compiler cannot handle running past an error anyway, so just
+  -- build the diagnostics object here and don't bother reusing it.
+  local diag = terralib.newdiagnostics()
+  diag:reporterror(
+    {
+      filename = node.span.source,
+      linenumber = node.span.start.line,
+      offset = node.span.start.offset,
+    }, ...)
+  diag:finishandabortiferrors("Errors reported during typechecking.", 2)
+  assert(false) -- unreachable
 end
 
 return log

@@ -24,6 +24,7 @@ extern "C" {
 
 typedef struct legion_terra_index_cross_product_t {
   legion_index_partition_t partition;
+  legion_index_partition_t other;
 } legion_terra_index_cross_product_t;
 
 typedef struct legion_terra_cached_index_iterator_t {

@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid cast missing constraint $t * $t0
+-- constraint_disjointness1.lg:39: invalid cast missing constraint $t * $t0
+--   assert_disjoint { x = t, y = t0 }
+--                 ^
 
 import 'legion'
 

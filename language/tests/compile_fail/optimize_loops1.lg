@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- loop optimization failed: stride not equal to 1
+-- optimize_loops1.lg:68: loop optimization failed: stride not equal to 1
+--   for i = 0, n, 2 do
+--                 ^
 
 import "legion"
 

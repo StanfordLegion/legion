@@ -13,7 +13,10 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid cast missing constraint $s <= $r
+-- constraint_pack1.lg:30: invalid cast missing constraint $s <= $r
+--   var x = [t(r)] { b = s }
+--           ^
+
 
 import "legion"
 

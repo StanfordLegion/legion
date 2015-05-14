@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-import argparse, json, multiprocessing, os, optparse, re, subprocess, sys, traceback
+import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, traceback
 from collections import OrderedDict
 import legion
 
@@ -58,7 +58,13 @@ def test_compile_fail(filename, verbose, flags):
     try:
         run(filename, False, flags)
     except TestFailure as e:
-        failure = '\n'.join(line.strip() for line in e.output.strip().split('\n'))
+        failure = '\n'.join(
+            itertools.takewhile(
+                (lambda line: line != 'stack traceback:'),
+                itertools.dropwhile(
+                    (lambda line: 'Errors reported during' in line),
+                    (line.strip() for line in e.output.strip().split('\n')
+                     if len(line.strip()) > 0))))
         if failure != expected_failure:
             raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
     else:

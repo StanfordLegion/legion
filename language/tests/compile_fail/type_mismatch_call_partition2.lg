@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected partition(disjoint, $s) but got partition(aliased, $r)
+-- type_mismatch_call_partition2.lg:32: type mismatch in argument 3: expected partition(disjoint, $s) but got partition(aliased, $r)
+--   f(r, s, p)
+--   ^
 
 import "legion"
 

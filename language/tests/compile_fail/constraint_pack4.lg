@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid cast missing constraint $s * $r
+-- constraint_pack4.lg:28: invalid cast missing constraint $s * $r
+--   var x = t { a = r, b = s }
+--           ^
 
 import "legion"
 

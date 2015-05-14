@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- destructuring var expected struct or fspace, got int32
+-- type_mismatch_unpack3.lg:23: destructuring var expected struct or fspace, got int32
+--   var { x } = 123
+--     ^
 
 import "legion"
 

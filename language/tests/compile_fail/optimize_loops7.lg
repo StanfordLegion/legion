@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- loop optimization failed: argument 1 interferes with itself
+-- optimize_loops7.lg:71: loop optimization failed: argument 1 interferes with itself
+--       g(p_disjoint[(j + 1) % n])
+--       ^
 
 import "legion"
 

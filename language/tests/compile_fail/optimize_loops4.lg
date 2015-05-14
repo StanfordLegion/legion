@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- loop optimization failed: body is not a function call
+-- optimize_loops4.lg:69: loop optimization failed: body is not a function call
+--     var x = f(p_disjoint[i])
+--       ^
 
 import "legion"
 

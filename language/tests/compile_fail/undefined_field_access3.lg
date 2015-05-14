@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- no field 'f' in type ptr(p, $r)
+-- undefined_field_access3.lg:25: no field 'f' in type ptr(p, $r)
+--   var y = x.f
+--           ^
 
 import "legion"
 

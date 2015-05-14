@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid method call for s:f(int32, int32)
+-- type_mismatch_call_terra_method2.lg:28: invalid method call for s:f(int32, int32)
+--   x:f(0, 1)
+--   ^
 
 import "legion"
 

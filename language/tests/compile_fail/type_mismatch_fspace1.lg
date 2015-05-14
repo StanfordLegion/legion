@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected ptr(list($rd), $rd) but got ptr(list($re), $re)
+-- type_mismatch_fspace1.lg:32: type mismatch in argument 3: expected ptr(list($rd), $rd) but got ptr(list($re), $re)
+--   walk(rd, re, le)
+--      ^
 
 import "legion"
 

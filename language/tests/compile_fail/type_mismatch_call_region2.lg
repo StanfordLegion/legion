@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected ptr(int32, $s) but got ptr(int32, $r)
+-- type_mismatch_call_region2.lg:28: type mismatch in argument 3: expected ptr(int32, $s) but got ptr(int32, $r)
+--   f(r, s, t)
+--   ^
 
 import "legion"
 

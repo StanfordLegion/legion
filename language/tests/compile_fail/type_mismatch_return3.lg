@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in return: expected {} but got int32
+-- type_mismatch_return3.lg:26: type mismatch in return: expected {} but got int32
+--     return 5
+--          ^
 
 import "legion"
 

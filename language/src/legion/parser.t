@@ -131,15 +131,22 @@ function parser.expr_primary(p)
 
   while true do
     if p:nextif(".") then
-      local field_name
+      local field_names = terralib.newlist()
       if p:nextif("partition") then
-        field_name = "partition"
+        field_names:insert("partition")
+      elseif p:nextif("{") then
+        repeat
+          if p:matches("}") then break end
+          local field_name = p:next(p.name).value
+          field_names:insert(field_name)
+        until not p:sep()
+        p:expect("}")
       else
-        field_name = p:next(p.name).value
+        field_names:insert(p:next(p.name).value)
       end
       expr = ast.unspecialized.ExprFieldAccess {
         value = expr,
-        field_name = field_name,
+        field_names = field_names,
         span = ast.span(start, p),
       }
 
@@ -930,7 +937,7 @@ function parser.stat_task_privileges_and_constraints(p)
   return privileges, constraints
 end
 
-function parser.stat_task(p)
+function parser.stat_task(p, task_opts)
   local start = ast.save(p)
   p:expect("task")
   local name = p:expect(p.name).value
@@ -947,6 +954,8 @@ function parser.stat_task(p)
     privileges = privileges,
     constraints = constraints,
     body = body,
+    inline = task_opts.inline,
+    cuda = task_opts.cuda,
     span = ast.span(start, p),
   }
 end
@@ -1022,10 +1031,29 @@ end
 
 function parser.stat_top(p)
   if p:matches("task") then
-    return p:stat_task()
+    return p:stat_task { inline = false, cuda = false }
 
   elseif p:matches("fspace") then
     return p:stat_fspace()
+
+  elseif p:matches("__demand") then
+    local task_opts = { inline = false, cuda = false }
+    p:expect("__demand")
+    p:expect("(")
+    repeat
+      if p:matches("__inline") then
+        p:expect("__inline")
+        task_opts.inline = true
+      elseif p:matches("__cuda") then
+        p:expect("__cuda")
+        if not terralib.cudacompile then
+          p:error("CUDA tasks are demanded, but CUDA is not enabled")
+        end
+        task_opts.cuda = true
+      end
+    until not p:nextif(",")
+    p:expect(")")
+    return p:stat_task(task_opts)
 
   else
     p:error("unexpected token in top-level statement")

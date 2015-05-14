@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privilege writes($r) for dereference of ptr(int32, $r, $s)
+-- privilege_deref_multiregion2.lg:24: invalid privilege writes($r) for dereference of ptr(int32, $r, $s)
+--   @x = 5
+--   ^
 
 import "legion"
 

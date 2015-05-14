@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privileges in argument 1: reads($c)
+-- privilege_unpack2.lg:33: invalid privileges in argument 1: reads($c)
+--   return f(c)
+--          ^
 
 import "legion"
 

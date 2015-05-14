@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 1: expected &int32 but got int32
+-- type_mismatch_call.lg:31: type mismatch in argument 1: expected &int32 but got int32
+--   f(y, x)
+--   ^
 
 import "legion"
 

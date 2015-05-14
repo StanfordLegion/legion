@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- iterator for loop expected region, got int32
+-- type_mismatch_for4.lg:23: iterator for loop expected region, got int32
+--   for x in 1 do end
+--     ^
 
 import "legion"
 

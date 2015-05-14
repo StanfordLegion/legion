@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- incompatible pointers for static_cast: ptr(int32, $r) and ptr(float, $s)
+-- type_mismatch_static_cast3.lg:26: incompatible pointers for static_cast: ptr(int32, $r) and ptr(float, $s)
+--   var y = static_cast(ptr(int, r), x)
+--                     ^
 
 import "legion"
 

@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privilege reads($r.a) for dereference of ptr(s, $r)
+-- privilege_field_access3.lg:29: invalid privilege reads($r.a) for dereference of ptr(s, $r)
+--   return p.a
+--          ^
 
 import "legion"
 

@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 2: expected ptr(int32, $d) but got ptr(int32, $q)
+-- type_mismatch_unpack1.lg:32: type mismatch in argument 2: expected ptr(int32, $d) but got ptr(int32, $q)
+--   f(d, e)
+--   ^
 
 import "legion"
 

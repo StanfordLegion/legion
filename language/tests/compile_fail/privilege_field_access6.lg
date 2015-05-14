@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privilege reads($rp.pu.x) for dereference of ptr(point, $rp)
+-- privilege_field_access6.lg:43: invalid privilege reads($rp.pu.x) for dereference of ptr(point, $rp)
+--     p.px.x = p.px0.x + dth*(p.pu.x + p.pu0.x)
+--                             ^
 
 import "legion"
 

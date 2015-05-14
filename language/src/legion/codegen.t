@@ -18,6 +18,8 @@ local ast = require("legion/ast")
 local log = require("legion/log")
 local std = require("legion/std")
 local symbol_table = require("legion/symbol_table")
+local traverse_symbols = require("legion/traverse_symbols")
+local cudahelper = require("legion/cudahelper")
 
 -- Configuration Variables
 
@@ -54,6 +56,7 @@ function context:new_local_scope(div)
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
     task = self.task,
+    task_meta = self.task_meta,
     leaf = self.leaf,
     divergence = div,
     context = self.context,
@@ -62,12 +65,13 @@ function context:new_local_scope(div)
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, leaf, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     expected_return_type = expected_return_type,
     constraints = constraints,
     task = task,
+    task_meta = task_meta,
     leaf = leaf,
     divergence = nil,
     context = ctx,
@@ -111,7 +115,7 @@ function context:region(region_type)
   if not rawget(self, "regions") then
     error("not in task context", 2)
   end
-  return self.regions:lookup(region_type)
+  return self.regions:lookup(nil, region_type)
 end
 
 function context:add_region_root(region_type, logical_region, index_allocator,
@@ -126,6 +130,7 @@ function context:add_region_root(region_type, logical_region, index_allocator,
     error("region " .. tostring(region_type) .. " already defined in this context", 2)
   end
   self.regions:insert(
+    nil,
     region_type,
     setmetatable(
       {
@@ -157,6 +162,7 @@ function context:add_region_subregion(region_type, logical_region,
     error("parent to region " .. tostring(region_type) .. " not defined in this context", 2)
   end
   self.regions:insert(
+    nil,
     region_type,
     setmetatable(
       {
@@ -2053,6 +2059,8 @@ local lift_unary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
+      inline = false,
+      cuda = false,
       span = ast.trivial_span(),
     }
     task:settype(
@@ -2134,6 +2142,8 @@ local lift_binary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
+      inline = false,
+      cuda = false,
       span = ast.trivial_span(),
     }
     task:settype(
@@ -2503,24 +2513,69 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
-  return quote
-    do
-      [actions]
-      while iterator_has_next([it]) do
-        var count : c.size_t = 0
-        var base = iterator_next_span([it], &count, -1).value
-        for i = 0, count do
-          var [symbol] = [symbol.type]{
-            __ptr = c.legion_ptr_t {
-              value = base + i
+  if not cx.task_meta:getcuda() then
+    return quote
+      do
+        [actions]
+        while iterator_has_next([it]) do
+          var count : c.size_t = 0
+          var base = iterator_next_span([it], &count, -1).value
+          for i = 0, count do
+            var [symbol] = [symbol.type]{
+              __ptr = c.legion_ptr_t {
+                value = base + i
+              }
             }
-          }
-          do
-            [block]
+            do
+              [block]
+            end
           end
         end
+        [cleanup_actions]
       end
-      [cleanup_actions]
+    end
+  else
+    local tid = cudalib.nvvm_read_ptx_sreg_tid_x
+    local base = terralib.newsymbol(uint32, "base")
+    local ptr_init = quote
+      var [symbol] = [symbol.type]{
+        __ptr = c.legion_ptr_t {
+          value = [base] + tid()
+        }
+      }
+    end
+    local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
+    local undefined =
+      traverse_symbols.find_undefined_symbols(expr_codegen, symbol, node.block)
+    local args = terralib.newlist()
+    for symbol, _ in pairs(undefined) do args:insert(symbol) end
+    args:insert(base)
+    local terra kernel([args])
+      [ptr_init];
+      [block]
+    end
+
+    local count = terralib.newsymbol(c.size_t, "count")
+    local load_ptx, module_ptr, module_name = cudahelper.codegen_ptx_load(kernel)
+    local get_function, fn = cudahelper.codegen_get_function(module_ptr, module_name)
+    local kernel_call = cudahelper.codegen_kernel_call(fn, count, args)
+
+    return quote
+      do
+        [actions];
+        [load_ptx];
+        [get_function];
+        while iterator_has_next([it]) do
+          var [count] : c.size_t = 0
+          var [base] = iterator_next_span([it], &[count], -1).value
+          -- launch CUDA kernel here
+          for i = 0, count do
+            -- call CUDA kernel here
+            [kernel_call]
+          end
+        end
+        [cleanup_actions]
+      end
     end
   end
 end
@@ -3130,6 +3185,7 @@ end
 
 function codegen.stat_task(cx, node)
   local task = node.prototype
+  task:setcuda(node.cuda)
   std.register_task(task)
 
   task:set_config_options(node.config_options)
@@ -3195,7 +3251,10 @@ function codegen.stat_task(cx, node)
   local c_params = terralib.newlist({
       c_task, c_regions, c_num_regions, c_context, c_runtime })
 
-  local cx = cx:new_task_scope(return_type, task:get_constraints(), task:get_config_options().leaf, c_task, c_context, c_runtime)
+  local cx = cx:new_task_scope(return_type,
+                               task:get_constraints(),
+                               task:get_config_options().leaf,
+                               task, c_task, c_context, c_runtime)
 
   -- Unpack the by-value parameters to the task.
   local task_args_setup = terralib.newlist()

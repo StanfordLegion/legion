@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid index access for int32 and int32
+-- type_mismatch_access1.lg:24: invalid index access for int32 and int32
+--   var y = x[0]
+--           ^
 
 import "legion"
 

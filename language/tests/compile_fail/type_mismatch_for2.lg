@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- numeric for loop expected integral type, got double
+-- type_mismatch_for2.lg:23: numeric for loop expected integral type, got double
+--   for x = 1, 3.14 do end
+--     ^
 
 import "legion"
 

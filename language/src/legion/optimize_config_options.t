@@ -684,21 +684,12 @@ function optimize_config_options.stat_task(cx, node)
   local leaf = analyze_leaf.block(cx, node.body)
   local inner = not leaf and analyze_inner.block(cx, node.body)
 
-  return ast.typed.StatTask {
-    name = node.name,
-    params = node.params,
-    return_type = node.return_type,
-    privileges = node.privileges,
-    constraints = node.constraints,
-    body = node.body,
+  return node {
     config_options = ast.typed.StatTaskConfigOptions {
       leaf = leaf,
       inner = inner,
       idempotent = false,
     },
-    region_divergence = node.region_divergence,
-    prototype = node.prototype,
-    span = node.span,
   }
 end
 

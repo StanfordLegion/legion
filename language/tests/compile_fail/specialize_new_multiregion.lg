@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- new requires pointer type with exactly one region, got ptr(int32, $r, $s)
+-- specialize_new_multiregion.lg:25: new requires pointer type with exactly one region, got ptr(int32, $r, $s)
+--   var x = new(ptr(int, r, s))
+--             ^
 
 import "legion"
 

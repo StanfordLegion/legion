@@ -161,6 +161,7 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
 
   legion_terra_index_cross_product_t prod;
   prod.partition = lhs;
+  prod.other = rhs;
 
   for (Domain::DomainPointIterator lhs_dp(lhs_colors); lhs_dp; lhs_dp++) {
     Color lhs_color = lhs_dp.p.get_point<1>()[0];
@@ -192,7 +193,7 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
     runtime->create_index_partition(
       ctx, lhs_space, lhs_coloring,
       runtime->is_index_partition_disjoint(ctx, rhs),
-      runtime->get_index_partition_color(ctx, lhs));
+      runtime->get_index_partition_color(ctx, rhs));
   }
 
   return prod;
@@ -217,7 +218,7 @@ legion_terra_index_cross_product_get_subpartition_by_color(
 
   IndexSpace is = runtime->get_index_subspace(ctx, prod.partition, color);
   IndexPartition ip = runtime->get_index_partition(
-    ctx, is, runtime->get_index_partition_color(ctx, prod.partition));
+    ctx, is, runtime->get_index_partition_color(ctx, prod.other));
   return ip;
 }
 

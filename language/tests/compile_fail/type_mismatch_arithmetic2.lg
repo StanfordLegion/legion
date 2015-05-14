@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch between int32 and bool
+-- type_mismatch_arithmetic2.lg:25: type mismatch between int32 and bool
+--   g(x + y)
+--     ^
 
 import "legion"
 

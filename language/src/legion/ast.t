@@ -67,6 +67,21 @@ function ast_node:type()
   return self.node_type
 end
 
+ast_node.__call = function(node, fields_to_update)
+  local ctor = rawget(node, "node_type")
+  local values = {}
+  for _, f in ipairs(ctor.expected_fields) do
+    values[f] = node[f]
+  end
+  for f, v in pairs(fields_to_update) do
+    if values[f] == nil then
+      error(tostring(ctor) .. " does not require argument '" .. f .. "'", 2)
+    end
+    values[f] = v
+  end
+  return ctor(values)
+end
+
 -- Constructors
 
 local ast_ctor = {}
@@ -166,7 +181,7 @@ ast.unspecialized = AST_factory("unspecialized")
 
 ast.unspecialized("ExprID", {"name", "span"})
 ast.unspecialized("ExprEscape", {"expr", "span"})
-ast.unspecialized("ExprFieldAccess", {"value", "field_name", "span"})
+ast.unspecialized("ExprFieldAccess", {"value", "field_names", "span"})
 ast.unspecialized("ExprIndexAccess", {"value", "index", "span"})
 ast.unspecialized("ExprMethodCall", {"value", "method_name", "args", "span"})
 ast.unspecialized("ExprCall", {"fn", "args", "span"})
@@ -217,7 +232,8 @@ ast.unspecialized("Privilege", {"privilege", "op", "regions", "span"})
 ast.unspecialized("PrivilegeRegion", {"region_name", "fields", "span"})
 ast.unspecialized("PrivilegeRegionField", {"field_name", "fields", "span"})
 ast.unspecialized("StatTask", {"name", "params", "return_type_expr",
-                               "privileges", "constraints", "body", "span"})
+                               "privileges", "constraints", "body",
+                               "inline", "cuda", "span"})
 ast.unspecialized("StatTaskParam", {"param_name", "type_expr", "span"})
 ast.unspecialized("StatFspace", {"name", "params", "fields", "constraints",
                                  "span"})
@@ -278,7 +294,8 @@ ast.specialized("StatReduce", {"op", "lhs", "rhs", "span"})
 ast.specialized("StatExpr", {"expr", "span"})
 
 ast.specialized("StatTask", {"name", "params", "return_type", "privileges",
-                             "constraints", "body", "prototype", "span"})
+                             "constraints", "body", "prototype", "inline",
+                             "cuda", "span"})
 ast.specialized("StatTaskParam", {"symbol", "span"})
 ast.specialized("StatFspace", {"name", "fspace", "span"})
 
@@ -344,7 +361,8 @@ ast.typed("StatUnmapRegions", {"region_types"})
 
 ast.typed("StatTask", {"name", "params", "return_type", "privileges",
                        "constraints", "body", "config_options",
-                       "region_divergence", "prototype", "span"})
+                       "region_divergence", "prototype", "inline", "cuda",
+                       "span"})
 ast.typed("StatTaskParam", {"symbol", "param_type", "span"})
 ast.typed("StatTaskConfigOptions", {"leaf", "inner", "idempotent"})
 ast.typed("StatFspace", {"name", "fspace", "span"})

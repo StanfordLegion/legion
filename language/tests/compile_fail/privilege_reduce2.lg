@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privilege reduces +($r) for dereference of ptr(int32, $r)
+-- privilege_reduce2.lg:24: invalid privilege reduces +($r) for dereference of ptr(int32, $r)
+--   @p += 1
+--   ^
 
 import "legion"
 

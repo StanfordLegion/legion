@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected region(ptr(int32, $rd)) but got region(ptr(int32, $re))
+-- type_mismatch_fspace4.lg:22: type mismatch in argument 3: expected region(ptr(int32, $rd)) but got region(ptr(int32, $re))
+-- fspace s(ra : region(int), rb : region(int), rc : region(ptr(int, ra))) {
+--      ^
 
 import "legion"
 

@@ -53,17 +53,17 @@ function symbol_table:safe_lookup(index)
   return self.combined_env[index]
 end
 
-function symbol_table:lookup(index)
+function symbol_table:lookup(node, index)
   local value = self.combined_env[index]
   if value == nil then
-    log.error("name '" .. tostring(index) .. "' is undefined or nil")
+    log.error(node, "name '" .. tostring(index) .. "' is undefined or nil")
   end
   return value
 end
 
-function symbol_table:insert(index, value)
+function symbol_table:insert(node, index, value)
   if rawget(self.local_env, index) then
-    log.error("name '" .. tostring(index) .. "' is already defined")
+    log.error(node, "name '" .. tostring(index) .. "' is already defined")
   end
   rawset(self.local_env, index, value)
   return value

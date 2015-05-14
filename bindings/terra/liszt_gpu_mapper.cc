@@ -374,7 +374,7 @@ Color LzGpuMapper::get_task_color_by_region(Task *task, const RegionRequirement 
   return 0;
 }
 
-void create_mappers(
+static void create_mappers(
   Machine machine,
   HighLevelRuntime *runtime,
   const std::set<Processor> &local_procs

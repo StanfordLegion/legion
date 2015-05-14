@@ -100,18 +100,12 @@ function flip_types.block(simd_width, symbol, node)
     stats:insert(flip_types.stat(simd_width, symbol, stat))
   end
   node.stats:map(flip_type_each)
-  return ast.typed.Block {
-    stats = stats,
-    span = node.span,
-  }
+  return node { stats = stats }
 end
 
 function flip_types.stat(simd_width, symbol, node)
   if node:is(ast.typed.StatBlock) then
-    return ast.typed.StatBlock {
-      block = flip_types.block(simd_width, symbol, node.block),
-      span = node.span,
-    }
+    return node { block = flip_types.block(simd_width, symbol, node.block) }
 
   elseif node:is(ast.typed.StatVar) then
     local types = terralib.newlist()
@@ -121,16 +115,10 @@ function flip_types.stat(simd_width, symbol, node)
       types:insert(flip_types.type(simd_width, ty))
     end)
     node.values:map(function(exp)
-      values:insert(flip_types.exp(simd_width, symbol, exp))
+      values:insert(flip_types.expr(simd_width, symbol, exp))
     end)
 
-    return ast.typed.StatVar {
-      symbols = node.symbols,
-      types = types,
-      values = values,
-      vectorize = true,
-      span = node.span,
-    }
+    return node { types = types, values = values }
 
   elseif node:is(ast.typed.StatAssignment) or
          node:is(ast.typed.StatReduce) then
@@ -138,35 +126,32 @@ function flip_types.stat(simd_width, symbol, node)
     local rhs = terralib.newlist()
 
     node.lhs:map(function(exp)
-      lhs:insert(flip_types.exp(simd_width, symbol, exp))
+      lhs:insert(flip_types.expr(simd_width, symbol, exp))
     end)
     node.rhs:map(function(exp)
-      rhs:insert(flip_types.exp(simd_width, symbol, exp))
+      rhs:insert(flip_types.expr(simd_width, symbol, exp))
     end)
 
     if node:is(ast.typed.StatAssignment) then
-      return ast.typed.StatAssignment {
-        lhs = lhs,
-        rhs = rhs,
-        span = node.span,
-      }
+      return node { lhs = lhs, rhs = rhs }
     else -- node:is(ast.typed.StatReduce)
-      return ast.typed.StatReduce {
-        lhs = lhs,
-        rhs = rhs,
-        op = node.op,
-        span = node.span,
-      }
+      return node { lhs = lhs, rhs = rhs }
     end
 
   elseif node:is(ast.typed.StatForNum) then
-    return ast.typed.StatForNum {
-      symbol = node.symbol,
-      values = node.values,
-      block = flip_types.block(simd_width, symbol, node.block),
-      parallel = node.parallel,
-      span = node.span,
+    return node { block = flip_types.block(simd_width, symbol, node.block) }
+
+  elseif node:is(ast.typed.StatIf) then
+    return node {
+      then_block = flip_types.block(simd_width, symbol, node.then_block),
+      elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+        return flip_types.stat(simd_width, symbol, elseif_block)
+      end),
+      else_block = flip_types.block(simd_width, symbol, node.else_block),
     }
+
+  elseif node:is(ast.typed.StatElseif) then
+    return node { block = flip_types.block(simd_width, symbol, node.block) }
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -175,20 +160,20 @@ function flip_types.stat(simd_width, symbol, node)
   return res
 end
 
-function flip_types.exp(simd_width, symbol, node)
+function flip_types.expr(simd_width, symbol, node)
   local new_node = {}
   for k, v in pairs(node) do
     new_node[k] = v
   end
   if node:is(ast.typed.ExprFieldAccess) then
-    new_node.value = flip_types.exp(simd_width, symbol, node.value)
+    new_node.value = flip_types.expr(simd_width, symbol, node.value)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
-    new_node.value = flip_types.exp(simd_width, symbol, node.value)
+    new_node.value = flip_types.expr(simd_width, symbol, node.value)
 
   elseif node:is(ast.typed.ExprBinary) then
-    new_node.lhs = flip_types.exp(simd_width, symbol, new_node.lhs)
-    new_node.rhs = flip_types.exp(simd_width, symbol, new_node.rhs)
+    new_node.lhs = flip_types.expr(simd_width, symbol, new_node.lhs)
+    new_node.rhs = flip_types.expr(simd_width, symbol, new_node.rhs)
 
     local expr_type
     if std.as_read(new_node.lhs.expr_type):isvector() then
@@ -219,27 +204,27 @@ function flip_types.exp(simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.ExprUnary) then
-    new_node.rhs = flip_types.exp(simd_width, symbol, new_node.rhs)
+    new_node.rhs = flip_types.expr(simd_width, symbol, new_node.rhs)
 
   elseif node:is(ast.typed.ExprCtor) then
     new_node.fields = node.fields:map(
       function(field)
-        return flip_types.exp(simd_width, symbol, field)
+        return flip_types.expr(simd_width, symbol, field)
       end)
 
   elseif node:is(ast.typed.ExprCtorRecField) then
-    new_node.value = flip_types.exp(simd_width, symbol, node.value)
+    new_node.value = flip_types.expr(simd_width, symbol, node.value)
 
   elseif node:is(ast.typed.ExprCall) then
     new_node.args = node.args:map(
       function(arg)
-        return flip_types.exp(simd_width, symbol, arg)
+        return flip_types.expr(simd_width, symbol, arg)
       end)
-    new_node.fn = flip_types.exp_function(simd_width, node.fn)
+    new_node.fn = flip_types.expr_function(simd_width, node.fn)
 
   elseif node:is(ast.typed.ExprCast) then
     if node.fact == V then
-      new_node.arg = flip_types.exp(simd_width, symbol, node.arg)
+      new_node.arg = flip_types.expr(simd_width, symbol, node.arg)
       new_node.fn = ast.typed.ExprFunction {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
@@ -263,17 +248,16 @@ function flip_types.exp(simd_width, symbol, node)
   return node:type()(new_node)
 end
 
-function flip_types.exp_function(simd_width, node)
+function flip_types.expr_function(simd_width, node)
   local elmt_type = node.expr_type.returntype
   local vector_type = vector(elmt_type, simd_width)
 
   local value = std.convert_math_op(node.value, vector_type)
   local expr_type = flip_types.type(simd_width, node.expr_type)
 
-  return ast.typed.ExprFunction {
+  return node {
     expr_type = expr_type,
     value = value,
-    span = node.span,
   }
 end
 
@@ -312,7 +296,7 @@ function min_simd_width.block(reg_size, node)
   local simd_width = reg_size
   node.stats:map(function(stat)
     local simd_width_ = min_simd_width.stat(reg_size, stat)
-    simd_width = math.min(simd_width, simd_width_)
+    simd_width = min(simd_width, simd_width_)
   end)
   return simd_width
 end
@@ -327,7 +311,7 @@ function min_simd_width.stat(reg_size, node)
       simd_width = min(simd_width, min_simd_width.type(reg_size, type))
     end)
     node.values:map(function(value)
-      simd_width = min(simd_width, min_simd_width.exp(reg_size, value))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size, value))
     end)
     return simd_width
 
@@ -335,14 +319,26 @@ function min_simd_width.stat(reg_size, node)
          node:is(ast.typed.StatReduce) then
     local simd_width = reg_size
     node.lhs:map(function(lh)
-      simd_width = min(simd_width, min_simd_width.exp(reg_size, lh))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size, lh))
     end)
     node.rhs:map(function(rh)
-      simd_width = min(simd_width, min_simd_width.exp(reg_size, rh))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size, rh))
     end)
     return simd_width
 
   elseif node:is(ast.typed.StatForNum) then
+    return min_simd_width.block(reg_size, node.block)
+
+  elseif node:is(ast.typed.StatIf) then
+    local simd_width = reg_size
+    min(simd_width, min_simd_width.block(reg_size, node.then_block))
+    node.elseif_blocks:map(function(elseif_block)
+      min(simd_width, min_simd_width.stat(reg_size, elseif_block))
+    end)
+    min(simd_width, min_simd_width.block(reg_size, node.else_block))
+    return simd_width
+
+  elseif node:is(ast.typed.StatElseif) then
     return min_simd_width.block(reg_size, node.block)
 
   else
@@ -350,7 +346,7 @@ function min_simd_width.stat(reg_size, node)
   end
 end
 
-function min_simd_width.exp(reg_size, node)
+function min_simd_width.expr(reg_size, node)
   local simd_width = reg_size
   if node.fact == V then
     simd_width = min_simd_width.type(reg_size, std.as_read(node.expr_type))
@@ -360,36 +356,36 @@ function min_simd_width.exp(reg_size, node)
 
   elseif node:is(ast.typed.ExprFieldAccess) then
     if not node.value:is(ast.typed.ExprID) then
-      simd_width = min(simd_width, min_simd_width.exp(reg_size, node.value))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size, node.value))
     end
 
   elseif node:is(ast.typed.ExprIndexAccess) then
-    simd_width = min(simd_width, min_simd_width.exp(reg_size, node.value))
+    simd_width = min(simd_width, min_simd_width.expr(reg_size, node.value))
 
   elseif node:is(ast.typed.ExprUnary) then
-    simd_width = min_simd_width.exp(reg_size, node.rhs)
+    simd_width = min_simd_width.expr(reg_size, node.rhs)
 
   elseif node:is(ast.typed.ExprBinary) then
-    simd_width = min(min_simd_width.exp(reg_size, node.lhs),
-                     min_simd_width.exp(reg_size, node.rhs))
+    simd_width = min(min_simd_width.expr(reg_size, node.lhs),
+                     min_simd_width.expr(reg_size, node.rhs))
 
   elseif node:is(ast.typed.ExprCtor) then
     for _, field in pairs(node.fields) do
-      simd_width = min(simd_width, min_simd_width.exp(reg_size,field))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size,field))
     end
 
   elseif node:is(ast.typed.ExprCtorRecField) then
-    simd_width = min_simd_width.exp(reg_size, node.value)
+    simd_width = min_simd_width.expr(reg_size, node.value)
 
   elseif node:is(ast.typed.ExprConstant) then
 
   elseif node:is(ast.typed.ExprCall) then
     for _, arg in pairs(node.args) do
-      simd_width = min(simd_width, min_simd_width.exp(reg_size, arg))
+      simd_width = min(simd_width, min_simd_width.expr(reg_size, arg))
     end
 
   elseif node:is(ast.typed.ExprCast) then
-    simd_width = min(simd_width, min_simd_width.exp(reg_size, node.arg))
+    simd_width = min(simd_width, min_simd_width.expr(reg_size, node.arg))
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -475,7 +471,7 @@ function annotate_vectorizability.stat(vars, node)
 
       if #node.values > 0 then
         local value = node.values[i]
-        annotate_vectorizability.exp(vars, value)
+        annotate_vectorizability.expr(vars, value)
         node.vectorizable = value.vectorizable
         if not node.vectorizable then
           node.error_msg = value.error_msg
@@ -499,8 +495,8 @@ function annotate_vectorizability.stat(vars, node)
         break
       end
       if node.vectorizable then
-        annotate_vectorizability.exp(vars, lh)
-        annotate_vectorizability.exp(vars, rh)
+        annotate_vectorizability.expr(vars, lh)
+        annotate_vectorizability.expr(vars, rh)
         node.vectorizable = lh.vectorizable and rh.vectorizable
         if not node.vectorizable then
           node.error_msg = rawget(lh, "error_msg") or rawget(rh, "error_msg")
@@ -516,7 +512,7 @@ function annotate_vectorizability.stat(vars, node)
 
   elseif node:is(ast.typed.StatForNum) then
     for _, value in pairs(node.values) do
-      annotate_vectorizability.exp(vars, value)
+      annotate_vectorizability.expr(vars, value)
       node.vectorizable = value.vectorizable
       if not node.vectorizable then
         node.error_msg = value.error_msg
@@ -531,13 +527,64 @@ function annotate_vectorizability.stat(vars, node)
       annotate_vectorizability.block(vars, node.block)
     end
 
+  elseif node:is(ast.typed.StatIf) then
+    annotate_vectorizability.expr(vars, node.cond)
+    if not node.cond.vectorizable then
+      node.vectorizable = node.cond.vectorizable
+      node.error_msg = node.cond.error_msg
+      return
+    elseif node.cond.fact ~= S then
+      node.vectorizable = false
+      node.error_msg = error_prefix ..  "a non-scalar if condition"
+      return
+    end
+
+    annotate_vectorizability.block(vars, node.then_block)
+    if not node.then_block.vectorizable then
+      node.vectorizable = node.then_block.vectorizable
+      node.error_msg = node.then_block.error_msg
+      return
+    end
+
+    node.elseif_blocks:map(function(elseif_block)
+      annotate_vectorizability.stat(vars, elseif_block)
+      if not elseif_block.vectorizable then
+        node.vectorizable = elseif_block.vectorizable
+        node.error_msg = elseif_block.error_msg
+        return
+      end
+    end)
+
+    annotate_vectorizability.block(vars, node.else_block)
+    if not node.else_block.vectorizable then
+      node.vectorizable = node.else_block.vectorizable
+      node.error_msg = node.else_block.error_msg
+      return
+    end
+
+  elseif node:is(ast.typed.StatElseif) then
+    annotate_vectorizability.expr(vars, node.cond)
+    if not node.cond.vectorizable then
+      node.vectorizable = node.cond.vectorizable
+      node.error_msg = node.cond.error_msg
+      return
+    elseif node.cond.fact ~= S then
+      node.vectorizable = false
+      node.error_msg = error_prefix ..  "a non-scalar if condition"
+      return
+    end
+
+    annotate_vectorizability.block(vars, node.block)
+    if not node.block.vectorizable then
+      node.vectorizable = node.block.vectorizable
+      node.error_msg = node.block.error_msg
+      return
+    end
+
   else
     node.vectorizable = false
 
-    if node:is(ast.typed.StatIf) then
-      node.error_msg = error_prefix .. "an if statement"
-
-    elseif node:is(ast.typed.StatWhile) then
+    if node:is(ast.typed.StatWhile) then
       node.error_msg = error_prefix .. "an inner loop"
 
     elseif node:is(ast.typed.StatForList) then
@@ -569,7 +616,7 @@ end
 
 -- function 'annotate_vectorizability.exp' additionally annotates
 -- an expression node with a dataflow fact
-function annotate_vectorizability.exp(vars, node)
+function annotate_vectorizability.expr(vars, node)
   node.vectorizable = true
 
   if node:is(ast.typed.ExprID) then
@@ -577,7 +624,7 @@ function annotate_vectorizability.exp(vars, node)
     node.fact = vars:get(node.value)
 
   elseif node:is(ast.typed.ExprFieldAccess) then
-    annotate_vectorizability.exp(vars, node.value)
+    annotate_vectorizability.expr(vars, node.value)
     node.vectorizable = node.value.vectorizable
     if not node.vectorizable then
       node.error_msg = node.value.error_msg
@@ -592,8 +639,8 @@ function annotate_vectorizability.exp(vars, node)
       return
     end
 
-    annotate_vectorizability.exp(vars, node.value)
-    annotate_vectorizability.exp(vars, node.index)
+    annotate_vectorizability.expr(vars, node.value)
+    annotate_vectorizability.expr(vars, node.index)
 
     if node.index.fact ~= S then
       node.vectorizable = false
@@ -610,7 +657,7 @@ function annotate_vectorizability.exp(vars, node)
     end
 
   elseif node:is(ast.typed.ExprUnary) then
-    annotate_vectorizability.exp(vars, node.rhs)
+    annotate_vectorizability.expr(vars, node.rhs)
     node.vectorizable = node.rhs.vectorizable
     if not node.vectorizable then
       node.error_msg = node.rhs.error_msg
@@ -625,8 +672,8 @@ function annotate_vectorizability.exp(vars, node)
       return
     end
 
-    annotate_vectorizability.exp(vars, node.lhs)
-    annotate_vectorizability.exp(vars, node.rhs)
+    annotate_vectorizability.expr(vars, node.lhs)
+    annotate_vectorizability.expr(vars, node.rhs)
 
     node.vectorizable = node.lhs.vectorizable and node.rhs.vectorizable
     if not node.vectorizable then
@@ -640,7 +687,7 @@ function annotate_vectorizability.exp(vars, node)
   elseif node:is(ast.typed.ExprCtor) then
     node.fact = S
     for _, field in pairs(node.fields) do
-      annotate_vectorizability.exp(vars, field)
+      annotate_vectorizability.expr(vars, field)
       node.vectorizable = field.vectorizable
       if not node.vectorizable then
         node.error_msg = field.error_msg
@@ -651,22 +698,19 @@ function annotate_vectorizability.exp(vars, node)
     end
 
   elseif node:is(ast.typed.ExprCtorRecField) then
-    annotate_vectorizability.exp(vars, node.value)
+    annotate_vectorizability.expr(vars, node.value)
     node.vectorizable = node.value.vectorizable
     if not node.vectorizable then
       node.error_msg = node.value.error_msg
     else
       node.fact = node.value.fact
-      -- copy the expr_type field from its child to
-      -- make it consistent with other nodes
-      node.expr_type = node.value.expr_type
     end
 
   elseif node:is(ast.typed.ExprConstant) then
     node.fact = S
 
   elseif node:is(ast.typed.ExprCall) then
-    annotate_vectorizability.exp_call(vars, node)
+    annotate_vectorizability.expr_call(vars, node)
 
   elseif node:is(ast.typed.ExprCast) then
     if not (node.expr_type:isprimitive()) then
@@ -674,7 +718,7 @@ function annotate_vectorizability.exp(vars, node)
       node.error_msg = error_prefix .. "an unsupported casting expression"
       return
     else
-      annotate_vectorizability.exp(vars, node.arg)
+      annotate_vectorizability.expr(vars, node.arg)
       node.fact = node.arg.fact
     end
 
@@ -745,7 +789,7 @@ end
 
 local predefined_functions = {}
 
-function annotate_vectorizability.exp_call(vars, node)
+function annotate_vectorizability.expr_call(vars, node)
   assert(node:is(ast.typed.ExprCall))
   node.vectorizable = false
   node.error_msg = error_prefix .. "an unsupported function call"
@@ -753,7 +797,7 @@ function annotate_vectorizability.exp_call(vars, node)
   if std.is_math_op(node.fn.value) then
     node.fact = S
     for _, arg in pairs(node.args) do
-      annotate_vectorizability.exp(vars, arg)
+      annotate_vectorizability.expr(vars, arg)
       if not arg.vectorizable then
         node.error_msg = arg.error_msg
         node.fact = nil
@@ -801,63 +845,36 @@ end
 local vectorize_loops = {}
 
 function vectorize_loops.block(node)
-  return ast.typed.Block {
+  return node {
     stats = node.stats:map(
-      function(stat) return vectorize_loops.stat(stat) end),
-    span = node.span,
+      function(stat) return vectorize_loops.stat(stat) end)
   }
 end
 
 function vectorize_loops.stat_if(node)
-  return ast.typed.StatIf {
-    cond = node.cond,
+  return node {
     then_block = vectorize_loops.block(node.then_block),
     elseif_blocks = node.elseif_blocks:map(
       function(block) return vectorize_loops.stat_elseif(block) end),
     else_block = vectorize_loops.block(node.else_block),
-    span = node.span,
   }
 end
 
 function vectorize_loops.stat_elseif(node)
-  return ast.typed.StatElseif {
-    cond = node.cond,
-    block = vectorize_loops.block(node.block),
-    span = node.span,
-  }
+  return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat_while(node)
-  return ast.typed.StatWhile {
-    cond = node.cond,
-    block = vectorize_loops.block(node.block),
-    span = node.span,
-  }
+  return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat_for_num(node)
-  return ast.typed.StatForNum {
-    symbol = node.symbol,
-    values = node.values,
-    block = vectorize_loops.block(node.block),
-    parallel = node.parallel,
-    span = node.span,
-  }
+  return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat_for_list(node)
-  local function mk_stat_for_list(body)
-    return ast.typed.StatForList {
-      symbol = node.symbol,
-      value = node.value,
-      block = body,
-      vectorize = node.vectorize,
-    span = node.span,
-    }
-  end
-
   if node.vectorize ~= "demand" then
-    return mk_stat_for_list(vectorize_loops.block(node.block))
+    return node { block = vectorize_loops.block(node.block) }
   end
 
   local body = node.block
@@ -869,23 +886,16 @@ function vectorize_loops.stat_for_list(node)
     return vectorize.stat_for_list(node)
   else
     log.warn(body.error_msg)
-    return mk_stat_for_list(body)
+    return node { block = body }
   end
 end
 
 function vectorize_loops.stat_repeat(node)
-  return ast.typed.StatRepeat {
-    block = vectorize_loops.block(node.block),
-    until_cond = node.until_cond,
-    span = node.span,
-  }
+  return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat_block(node)
-  return ast.typed.StatBlock {
-    block = vectorize_loops.block(node.block),
-    span = node.span,
-  }
+  return node { block = vectorize_loops.block(node.block) }
 end
 
 function vectorize_loops.stat(node)
@@ -945,18 +955,7 @@ end
 function vectorize_loops.stat_task(node)
   local body = vectorize_loops.block(node.body)
 
-  return ast.typed.StatTask {
-    name = node.name,
-    params = node.params,
-    return_type = node.return_type,
-    privileges = node.privileges,
-    constraints = node.constraints,
-    body = body,
-    config_options = node.config_options,
-    region_divergence = node.region_divergence,
-    prototype = node.prototype,
-    span = node.span,
-  }
+  return node { body = body }
 end
 
 function vectorize_loops.stat_top(node)

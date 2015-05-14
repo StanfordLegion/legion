@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privileges in argument 1: writes($s)
+-- privilege_call3.lg:28: invalid privileges in argument 1: writes($s)
+--   return f(s)
+--          ^
 
 import "legion"
 

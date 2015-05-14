@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected e($s) but got e($r)
+-- type_mismatch_call_region4.lg:28: type mismatch in argument 3: expected e($s) but got e($r)
+--   f(r, s, t)
+--   ^
 
 import "legion"
 

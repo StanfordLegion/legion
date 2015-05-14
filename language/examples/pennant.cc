@@ -1270,7 +1270,7 @@ LogicalRegion PennantMapper::get_root_region(LogicalPartition handle)
   return get_root_region(get_parent_logical_region(handle));
 }
 
-void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
+static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)

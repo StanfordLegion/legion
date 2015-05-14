@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch between ptr(int32, $a) and ptr(int32, $a)
+-- type_mismatch_unpack2.lg:30: type mismatch between ptr(int32, $a) and ptr(int32, $a)
+--   if y == z then
+--      ^
 
 import "legion"
 

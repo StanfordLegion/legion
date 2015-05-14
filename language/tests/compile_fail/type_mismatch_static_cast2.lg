@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- static_cast requires ptr as argument 2, got int32
+-- type_mismatch_static_cast2.lg:25: static_cast requires ptr as argument 2, got int32
+--   var y = static_cast(ptr(int, r), x)
+--                     ^
 
 import "legion"
 

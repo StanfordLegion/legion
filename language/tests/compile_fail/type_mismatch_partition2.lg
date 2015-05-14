@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type mismatch in argument 3: expected legion_coloring_t but got int32
+-- type_mismatch_partition2.lg:24: type mismatch in argument 3: expected legion_coloring_t but got int32
+--   var p = partition(disjoint, r, 0)
+--                   ^
 
 import "legion"
 

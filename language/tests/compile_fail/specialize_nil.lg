@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- name 'x' is undefined or nil
+-- specialize_nil.lg:25: name 'x' is undefined or nil
+--   var y : int = x
+--                 ^
 
 import "legion"
 

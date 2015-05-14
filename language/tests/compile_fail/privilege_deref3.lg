@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid privilege reads($r) for dereference of ptr(int32, $r)
+-- privilege_deref3.lg:24: invalid privilege reads($r) for dereference of ptr(int32, $r)
+--   return @p
+--          ^
 
 import "legion"
 

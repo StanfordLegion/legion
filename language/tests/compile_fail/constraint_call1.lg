@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid call missing constraint $a * $a
+-- constraint_call1.lg:31: invalid call missing constraint $a * $a
+--   f(a, a)
+--   ^
 
 import "legion"
 

@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- name 'x' is undefined or nil
+-- undefined_var.lg:23: name 'x' is undefined or nil
+--   var y : int = x
+--                 ^
 
 import "legion"
 

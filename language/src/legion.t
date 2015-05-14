@@ -66,6 +66,7 @@ local language = {
   entrypoints = {
     "task",
     "fspace",
+    "__demand",
   },
   keywords = {
     "__context",
@@ -75,6 +76,8 @@ local language = {
     "__vectorize",
     "__physical",
     "__runtime",
+    "__inline",
+    "__cuda",
     "cross_product",
     "dynamic_cast",
     "isnull",

@@ -708,9 +708,9 @@ function std.fn_param_symbols(fn_type)
   return param_symbols
 end
 
-function std.validate_args(params, args, isvararg, return_type, mapping, strict)
+function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
   if (#args < #params) or (#args > #params and not isvararg) then
-    log.error("expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
+    log.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
 
   local check
@@ -749,7 +749,7 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
             param_as_arg_type = v
           end
         end
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
       end
@@ -759,7 +759,7 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
       if not check(param_type.element_type, arg_type.element_type, mapping) then
         local element_type = std.type_sub(param_type.element_type, mapping)
         local param_as_arg_type = std.region(element_type)
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
@@ -775,7 +775,7 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
             param_as_arg_type = v
           end
         end
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
       end
@@ -794,7 +794,7 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
         end
         local param_as_arg_type = std.partition(
           param_type.disjointness, param_parent_region_as_arg_type)
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
@@ -810,7 +810,7 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
             param_as_arg_type = v
           end
         end
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
       end
@@ -834,13 +834,13 @@ function std.validate_args(params, args, isvararg, return_type, mapping, strict)
         end
         local param_as_arg_type = std.cross_product(
           param_partition_as_arg_type, param_cross_partition_as_arg_type)
-        log.error("type mismatch in argument " .. tostring(i) ..
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
     elseif not check(param_type, arg_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
-      log.error("type mismatch in argument " .. tostring(i) ..
+      log.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
                   " but got " .. tostring(arg_type))
     end
@@ -1001,7 +1001,8 @@ function std.as_read(t)
   end
 end
 
-function std.check_read(cx, t)
+function std.check_read(cx, node)
+  local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
     local region_types, field_path = t:refers_to_regions(), t.field_path
@@ -1009,7 +1010,7 @@ function std.check_read(cx, t)
       if not std.check_privilege(cx, std.reads, region_type, field_path) then
         local regions = t.refers_to_region_symbols
         local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
-        log.error("invalid privilege reads(" ..
+        log.error(node, "invalid privilege reads(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1018,7 +1019,8 @@ function std.check_read(cx, t)
   return std.as_read(t)
 end
 
-function std.check_write(cx, t)
+function std.check_write(cx, node)
+  local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
     local region_types, field_path = t:refers_to_regions(), t.field_path
@@ -1026,7 +1028,7 @@ function std.check_write(cx, t)
       if not std.check_privilege(cx, std.writes, region_type, field_path) then
         local regions = t.refers_to_region_symbols
         local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
-        log.error("invalid privilege writes(" ..
+        log.error(node, "invalid privilege writes(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1035,11 +1037,12 @@ function std.check_write(cx, t)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error("type mismatch: write expected an lvalue but got " .. tostring(t))
+    log.error(node, "type mismatch: write expected an lvalue but got " .. tostring(t))
   end
 end
 
-function std.check_reduce(cx, op, t)
+function std.check_reduce(cx, op, node)
+  local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
     local region_types, field_path = t:refers_to_regions(), t.field_path
@@ -1047,7 +1050,7 @@ function std.check_reduce(cx, op, t)
       if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
         local regions = t.refers_to_region_symbols
         local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
-        log.error("invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
+        log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1056,7 +1059,7 @@ function std.check_reduce(cx, op, t)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error("type mismatch: reduce expected an lvalue but got " .. tostring(t))
+    log.error(node, "type mismatch: reduce expected an lvalue but got " .. tostring(t))
   end
 end
 
@@ -1471,13 +1474,13 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
         region = std.as_read(region)
       end
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        log.error("ptr expected a region as argument " .. tostring(i+1) ..
+        log.error(nil, "ptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end
       if not (std.type_eq(region.element_type, points_to_type) or
                 std.is_unpack_result(points_to_type))
       then
-        log.error("ptr expected region(" .. tostring(points_to_type) ..
+        log.error(nil, "ptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end
@@ -1555,11 +1558,11 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     for i, region_symbol in ipairs(self.points_to_region_symbols) do
       local region = region_symbol.type
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        log.error("vptr expected a region as argument " .. tostring(i+1) ..
+        log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region.type))
       end
       if not std.type_eq(region.element_type, points_to_type) then
-        log.error("vptr expected region(" .. tostring(points_to_type) ..
+        log.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end
@@ -1861,6 +1864,10 @@ function task:settype(t)
   self.type = t
 end
 
+function task:setcuda(cuda)
+  self.cuda = cuda
+end
+
 function task:gettype()
   assert(rawget(self, "type") ~= nil)
   return self.type
@@ -1928,6 +1935,10 @@ function task:getdefinition()
   return self.definition
 end
 
+function task:getcuda()
+  return self.cuda
+end
+
 function task:printpretty()
   return self:getdefinition():printpretty()
 end
@@ -1950,6 +1961,7 @@ function std.newtask(name)
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),
     name = name,
+    cuda = false,
   }, task)
 end
 
@@ -1998,7 +2010,7 @@ fspace.__call = terralib.memoize(function(fs, ...)
     local constraints = rawget(st, "constraints") or fs.constraints
     assert(params and fields, "Attempted to complete fspace too early.")
 
-    std.validate_args(params, args, false, terralib.types.unit, {}, true)
+    std.validate_args(fs.node, params, args, false, terralib.types.unit, {}, true)
 
     local entries, st_constraints = std.validate_fields(fields, constraints, params, args)
     st.__constraints = st_constraints
@@ -2031,8 +2043,8 @@ fspace.__call = terralib.memoize(function(fs, ...)
   return st
 end)
 
-function std.newfspace(name, has_params)
-  local fs = setmetatable({name = name}, fspace)
+function std.newfspace(node, name, has_params)
+  local fs = setmetatable({node = node, name = name}, fspace)
   if not has_params then
     fs = fs()
   end
@@ -2206,9 +2218,12 @@ function std.start(main_task)
 
       local options = task:get_config_options()
 
+      local proc_type = c.LOC_PROC
+      if task:getcuda() then proc_type = c.TOC_PROC end
+
       return quote [register](
         [next_task_id],
-        c.LOC_PROC,
+        proc_type,
         true,
         true,
         -1 --[[ AUTO_GENERATE_ID ]],

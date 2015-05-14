@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- expected 2 arguments but got 1
+-- type_mismatch_fspace2.lg:22: expected 2 arguments but got 1
+-- fspace f(a : region(int), b : region(int)) {}
+--      ^
 
 import "legion"
 

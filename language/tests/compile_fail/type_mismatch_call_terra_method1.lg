@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid method call for s:f()
+-- type_mismatch_call_terra_method1.lg:25: invalid method call for s:f()
+--   x:f()
+--   ^
 
 import "legion"
 

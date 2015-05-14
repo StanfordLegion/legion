@@ -13,7 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- loop optimization failed: argument 2 interferes with argument 1
+-- optimize_loops11.lg:78: loop optimization failed: argument 2 interferes with argument 1
+--     h2b(p0_disjoint[i], p1_disjoint[i])
+--       ^
 
 import "legion"
 
