@@ -1077,15 +1077,26 @@ function rawref:get_index(cx, index, result_type)
   return values.rawref(result, &result_type, std.newtuple())
 end
 
+-- A helper for capturing debug information.
+function emit_debuginfo(node)
+  return quote
+    terralib.debuginfo(node.span.source, node.span.start.line)
+  end
+end
+
 function codegen.expr_internal(cx, node)
   return node.value
 end
 
 function codegen.expr_id(cx, node)
   if std.is_rawref(node.expr_type) then
-    return values.rawref(expr.just(quote end, node.value), node.expr_type.pointer_type)
+    return values.rawref(
+      expr.just(emit_debuginfo(node), node.value),
+      node.expr_type.pointer_type)
   else
-    return values.value(expr.just(quote end, node.value), node.expr_type)
+    return values.value(
+      expr.just(emit_debuginfo(node), node.value),
+      node.expr_type)
   end
 end
 
@@ -1093,14 +1104,14 @@ function codegen.expr_constant(cx, node)
   local value = node.value
   local value_type = std.as_read(node.expr_type)
   return values.value(
-    expr.just(quote end, `([terralib.constant(value_type, value)])),
+    expr.just(emit_debuginfo(node), `([terralib.constant(value_type, value)])),
     value_type)
 end
 
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
   return values.value(
-    expr.just(quote end, node.value),
+    expr.just(emit_debuginfo(node), node.value),
     value_type)
 end
 
@@ -1111,12 +1122,17 @@ function codegen.expr_field_access(cx, node)
     node.field_name == "partition"
   then
     local value = codegen.expr(cx, node.value):read(cx)
+    local actions = quote
+      [value.actions];
+      [emit_debuginfo(node)]
+    end
+
     assert(cx:has_region(value_type))
     local lp = cx:region(value_type).logical_partition
     assert(lp)
     local partition_type = std.as_read(node.expr_type)
     return values.value(
-      expr.once_only(value.actions, `([partition_type]({ impl = lp }))),
+      expr.once_only(actions, `([partition_type]({ impl = lp }))),
       node.expr_type)
   else
     local field_name = node.field_name
@@ -1135,7 +1151,11 @@ function codegen.expr_index_access(cx, node)
     local value = codegen.expr(cx, node.value):read(cx)
     local index = codegen.expr(cx, node.index):read(cx)
 
-    local actions = quote [value.actions]; [index.actions] end
+    local actions = quote
+      [value.actions];
+      [index.actions];
+      [emit_debuginfo(node)]
+    end
 
     if cx:has_region(expr_type) then
       local lr = cx:region(expr_type).logical_region
@@ -1226,7 +1246,8 @@ function codegen.expr_method_call(cx, node)
 
   local actions = quote
     [value.actions];
-    [args:map(function(arg) return arg.actions end)]
+    [args:map(function(arg) return arg.actions end)];
+    [emit_debuginfo(node)]
   end
   local expr_type = std.as_read(node.expr_type)
 
@@ -1455,7 +1476,8 @@ function codegen.expr_call(cx, node)
 
   local actions = quote
     [fn.actions];
-    [args:map(function(arg) return arg.actions end)]
+    [args:map(function(arg) return arg.actions end)];
+    [emit_debuginfo(node)]
   end
 
   local arg_types = terralib.newlist()
@@ -1576,7 +1598,9 @@ function codegen.expr_cast(cx, node)
   local arg = codegen.expr(cx, node.arg):read(cx, node.arg.expr_type)
 
   local actions = quote
-    [fn.actions]; [arg.actions]
+    [fn.actions];
+    [arg.actions];
+    [emit_debuginfo(node)]
   end
   local value_type = std.as_read(node.expr_type)
   return values.value(
@@ -1606,7 +1630,10 @@ function codegen.expr_ctor(cx, node)
     function(field) return codegen.expr_ctor_field(cx, field) end)
 
   local field_values = fields:map(function(field) return field.value end)
-  local actions = fields:map(function(field) return field.actions end)
+  local actions = quote
+    [fields:map(function(field) return field.actions end)];
+    [emit_debuginfo(node)]
+  end
   local expr_type = std.as_read(node.expr_type)
 
   if node.named then
@@ -1630,7 +1657,7 @@ end
 function codegen.expr_raw_context(cx, node)
   local value_type = std.as_read(node.expr_type)
   return values.value(
-    expr.just(quote end, cx.context),
+    expr.just(emit_debuginfo(node), cx.context),
     value_type)
 end
 
@@ -1647,6 +1674,7 @@ function codegen.expr_raw_fields(cx, node)
 
   local result = terralib.newsymbol("raw_fields")
   local actions = quote
+    [emit_debuginfo(node)]
     var [result] : expr_type
     [field_ids:map(
        function(pair)
@@ -1673,6 +1701,7 @@ function codegen.expr_raw_physical(cx, node)
 
   local result = terralib.newsymbol("raw_physical")
   local actions = quote
+    [emit_debuginfo(node)]
     var [result] : expr_type
     [physical_regions:map(
        function(pair)
@@ -1689,17 +1718,21 @@ end
 function codegen.expr_raw_runtime(cx, node)
   local value_type = std.as_read(node.expr_type)
   return values.value(
-    expr.just(quote end, cx.runtime),
+    expr.just(emit_debuginfo(node), cx.runtime),
     value_type)
 end
 
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
   local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [pointer.actions];
+    [emit_debuginfo(node)]
+  end
 
   return values.value(
     expr.once_only(
-      pointer.actions,
+      actions,
       `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr)))),
     expr_type)
 end
@@ -1711,10 +1744,14 @@ function codegen.expr_new(cx, node)
   local isa = cx:region(region_type).index_allocator
 
   local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [emit_debuginfo(node)]
+  end
 
   return values.value(
     expr.once_only(
-      region.actions,
+      actions,
       `([pointer_type]{ __ptr = c.legion_index_allocator_alloc([isa], 1) })),
     expr_type)
 end
@@ -1725,7 +1762,7 @@ function codegen.expr_null(cx, node)
 
   return values.value(
     expr.once_only(
-      quote end,
+      emit_debuginfo(node),
       `([pointer_type]{ __ptr = c.legion_ptr_nil() })),
     expr_type)
 end
@@ -1734,7 +1771,10 @@ function codegen.expr_dynamic_cast(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = value.actions
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
   local input = `([value.value].__ptr)
   local result
   local regions = expr_type:points_to_regions()
@@ -1779,7 +1819,10 @@ function codegen.expr_static_cast(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = value.actions
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
   local input = value.value
   local result
   if #(expr_type:points_to_regions()) == 1 then
@@ -1875,6 +1918,10 @@ function codegen.expr_region(cx, node)
   local element_type = node.element_type
   local size = codegen.expr(cx, node.size):read(cx)
   local region_type = std.as_read(node.expr_type)
+  local actions = quote
+    [size.actions];
+    [emit_debuginfo(node)]
+  end
 
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
@@ -1913,8 +1960,8 @@ function codegen.expr_region(cx, node)
                      std.dict(std.zip(field_paths:map(std.hash), accessors)),
                      std.dict(std.zip(field_paths:map(std.hash), base_pointers)))
 
-  local actions = quote
-    [size.actions]
+  actions = quote
+    [actions]
     var capacity = [size.value]
     var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
     var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
@@ -1961,12 +2008,16 @@ function codegen.expr_partition(cx, node)
   local region_expr = codegen.expr(cx, node.region):read(cx)
   local coloring_expr = codegen.expr(cx, node.coloring):read(cx)
   local partition_type = std.as_read(node.expr_type)
-
-  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
-  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   local actions = quote
     [region_expr.actions];
     [coloring_expr.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
     var [ip] = c.legion_index_partition_create_coloring(
       [cx.runtime], [cx.context],
       [region_expr.value].impl.index_space,
@@ -1986,14 +2037,18 @@ function codegen.expr_cross_product(cx, node)
   local lhs = codegen.expr(cx, node.lhs):read(cx)
   local rhs = codegen.expr(cx, node.rhs):read(cx)
   local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lhs.actions];
+    [rhs.actions];
+    [emit_debuginfo(node)]
+  end
 
   local product = terralib.newsymbol(
     c.legion_terra_index_cross_product_t, "cross_product")
   local lr = cx:region(expr_type:parent_region()).logical_region
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
-  local actions = quote
-    [lhs.actions]
-    [rhs.actions]
+  actions = quote
+    [actions]
     var [product] = c.legion_terra_index_cross_product_create(
       [cx.runtime], [cx.context],
       [lhs.value].impl.index_partition,
@@ -2178,8 +2233,12 @@ function codegen.expr_unary(cx, node)
     return codegen.expr(cx, call)
   else
     local rhs = codegen.expr(cx, node.rhs):read(cx, expr_type)
+    local actions = quote
+      [rhs.actions];
+      [emit_debuginfo(node)]
+    end
     return values.value(
-      expr.once_only(rhs.actions, std.quote_unary_op(node.op, rhs.value)),
+      expr.once_only(actions, std.quote_unary_op(node.op, rhs.value)),
       expr_type)
   end
 end
@@ -2207,8 +2266,12 @@ function codegen.expr_binary(cx, node)
   else
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
+    local actions = quote
+      [lhs.actions];
+      [rhs.actions];
+      [emit_debuginfo(node)]
+    end
 
-    local actions = quote [lhs.actions]; [rhs.actions] end
     local expr_type = std.as_read(node.expr_type)
     return values.value(
       expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value)),
@@ -2234,7 +2297,10 @@ function codegen.expr_future(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = quote [value.actions] end
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
 
   local result_type = std.type_size_bucket_type(value_type)
   if result_type == terralib.types.unit then
@@ -2271,7 +2337,10 @@ function codegen.expr_future_get_result(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
-  local actions = quote [value.actions] end
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
 
   local result_type = std.type_size_bucket_type(expr_type)
   if result_type == terralib.types.unit then
@@ -3478,7 +3547,7 @@ function codegen.stat_task(cx, node)
     end
   end
 
-  local preamble = quote [task_args_setup]; [region_args_setup] end
+  local preamble = quote [emit_debuginfo(node)]; [task_args_setup]; [region_args_setup] end
 
   local body
   local has_divergence = false

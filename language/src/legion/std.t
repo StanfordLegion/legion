@@ -1957,6 +1957,7 @@ end
 
 function std.newtask(name)
   local terra proto
+  proto.name = name
   return setmetatable({
     definition = proto,
     taskid = terralib.global(c.legion_task_id_t),

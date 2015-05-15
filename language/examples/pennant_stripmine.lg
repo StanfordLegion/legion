@@ -1320,13 +1320,8 @@ do
   var uinitradial = conf.uinitradial
   var vfix = {x = 0.0, y = 0.0}
 
-  -- FIXME: Using a dry-run warmup (where enable is false the first
-  -- iteration) appears to conflict with composite instances. For the
-  -- moment, stick to a simpler strategy: Just run the first iteration
-  -- normally and start timing after it has finished.
-
   var use_foreign = conf.use_foreign
-  var enable = conf.enable -- and not conf.warmup
+  var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
 
   var interval = 100
@@ -1342,10 +1337,10 @@ do
       wait_for(dt)
       enable = true
       warmup = false
-      -- time = 0.0
-      -- cycle = 0
-      -- dt = dtmax
-      -- dthydro = dtmax
+      time = 0.0
+      cycle = 0
+      dt = dtmax
+      dthydro = dtmax
       start_time = c.legion_get_current_time_in_micros()/1.e6
       last_time = start_time
     end
