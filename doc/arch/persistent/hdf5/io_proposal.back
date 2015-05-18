@@ -1,0 +1,82 @@
+\documentclass[report]
+%\usepackage{times}
+%\usepackage{fixltx2e}
+\usepackage[pdftex]{hyperref}
+\usepackage{xargs}                      % Use more than one optional parameter in a new commands
+\usepackage[pdftex,dvipsnames]{xcolor}  % Coloured text etc.
+\usepackage{url}
+\usepackage{verbatim}
+\usepackage{listings}
+\usepackage{xkvltxp}
+\usepackage{fixme}
+\usepackage{enumerate}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{balance}
+\usepackage{dblfloatfix}
+\usepackage[skip=0pt,textfont={small,it,bf},labelfont={small,bf}]{caption}
+%\usepackage{fancyhdr}
+\usepackage{xspace}
+\usepackage{subfigure}
+\usepackage{filecontents}
+\usepackage{pbox}
+
+% tight lists
+\newenvironment{tight_itemize}{
+\begin{itemize}[noitemsep,leftmargin=.2in,topsep=0.in]
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{itemize}}
+
+\newenvironment{tight_enumerate}{
+\begin{enumerate}[noitemsep]
+  \setlength{\parskip}{0pt}
+  \setlength{\parsep}{0pt}
+}{\end{enumerate}}
+
+\definecolor{darkgreen}{rgb}{0,0.5,0}
+\definecolor{darkblue}{rgb}{0,0,0.5}
+\definecolor{blue}{rgb}{0,0,0.85}
+\definecolor{darkred}{rgb}{0.5,0,0}
+\definecolor{gray}{rgb}{0.95,0.95,0.95}
+
+\lstset{% general command to set parameters for the listings package
+    language=c++,
+        basicstyle=\scriptsize\ttfamily,      % print entire listing as small.
+        keywordstyle=\color{blue}\bfseries\ttfamily,
+        identifierstyle=\ttfamily,
+        commentstyle=\color{darkgreen}\itshape\ttfamily,
+        showstringspaces=false,
+        backgroundcolor=\color{gray},
+        frame=single,               % adds a frame around the code
+    tabsize=2,                      % sets default tabsize to 2 spaces
+    captionpos=b,                   % sets the caption-position to bottom
+    breaklines=true,                % sets automatic line breaking
+    emphstyle=\color{darkred}\bfseries\sffamily,
+    morekeywords={uniform,mesh,cells,vertices,edges,float3,of,forall,renderall},
+}
+
+
+\newcommand{\kbf}[1]{\textcolor{blue}{[kbf: #1]}}
+
+\newcounter{todo}
+\newcommand\ToDo[1]{\refstepcounter{todo}\marginpar{\color{red}{#1}}\addcontentsline{todo}{subsection}{#1~\thetodo}}%
+
+
+\makeatletter
+\newcommand\todoname{todo}
+\newcommand\listtodoname{List of todos}
+\newcommand\listoftodos{%
+  \section*{\listtodoname}\@starttoc{tod}}
+\makeatother
+
+%\setlength{\belowcaptionskip}{-8pt}  % Make up a bit of space after figures. 
+
+\begin{document}
+
+%\title{ IO Proposal } 
+%\maketitle
+
+This is good stuff 
+
+\end{document}
