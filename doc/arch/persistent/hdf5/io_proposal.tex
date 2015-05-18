@@ -269,10 +269,68 @@ Figure~\ref{figure:hdf5layout-climate}.
      temp--;
  }
  
- runtime->unmap_region(hdf5_climate);
+ runtime->unmap_region(ctx, hdf5_climate);
  \end{lstlisting}
  
  \subsection{Copy HDF5 fields to other fields mapped in fast memory}
+ 
+ \begin{lstlisting}
+ Rect<1> elem_rect(Point<1>(0), Point<1>(3));
+
+ IndexSpace is = runtime->create_index_space(ctx,
+                                             Domain::from_rect<1>(elem_rect));
+ 
+ enum FieldIDs {
+     FID_TEMP,
+     FID_SAL,
+     FID_KE,
+     FID_VOR
+ }
+ 
+ FieldSpace fs = runtime->create_field_space(ctx);
+ {
+     FieldAllocator allocator = create_field_allocator(ctx, fs);
+     allocator.allocate_field(sizeof(double), FID_TEMP);
+     allocator.allocate_field(sizeof(double), FID_SAL);
+     allocator.allocate_field(sizeof(double), FID_KE);
+     allocator.allocate_field(sizeof(double), FID_VOR);
+     allocator.allocate_field(sizeof(double), FID_TEMP_FM);
+     allocator.allocate_field(sizeof(double), FID_SAL_FM);
+     allocator.allocate_field(sizeof(double), FID_KE_FM);
+     allocator.allocate_field(sizeof(double), FID_VOR_FM);
+     
+ }
+ 
+ LogicalRegion ocean_lr = runtime->create_logical_region(ctx, is, fs);
+ 
+ std::map<FieldID, char*> fields_map;
+ fields_map[FID_TEMP] = “/ocean/temperature”;
+ fields_map[FID_SAL] = “/ocean/salinity”;
+ fields_map[FID_KE] = “/ocean/kinetic_energy”;
+ fields_map[FID_VOR] = “/ocean/vorticity”;
+ 
+ 
+ PhysicalRegion hdf5_climate = runtime->map_hdf(ctx, “./climate.h5”,
+                                                ocean_lr, fields_map,
+                                                FILE_READ_WRITE);
+
+
+ RegionRequirement req(ocean_lr, READ_WRITE, EXCLUSIVE, ocean_lr);
+ req.add_field(FID_TEMP_FM);
+ req.add_field(FID_SAL_FM);
+ req.add_field(FID_KE_FM);
+ req.add_field(FID_VOR_FM);
+ InlineLauncher ocean_launcher(req);
+
+ PhysicalRegion ocean_pr = runtime->map_region(ctx, ocean_launcher);
+ ocean_pr.wait_until_valid();
+
+
+ \\ need more here.. 
+ 
+ \end{lstlisting}
+ 
+
  
  \textbf{We need fleshed out examples here}
  
