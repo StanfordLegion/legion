@@ -51,6 +51,8 @@ legion_terra_index_cross_product_get_subpartition_by_color(
 
 legion_terra_cached_index_iterator_t
 legion_terra_cached_index_iterator_create(
+  legion_runtime_t runtime,
+  legion_context_t ctx,
   legion_index_space_t handle);
 
 void

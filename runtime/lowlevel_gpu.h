@@ -58,14 +58,42 @@
 namespace LegionRuntime {
   namespace LowLevel {
 
-    void start_gpu_dma_thread(void);
+    // Forard declaration
+    class GPUProcessor;
+
+    class GPUWorker : public PreemptableThread {
+    public:
+      GPUWorker(void);
+      virtual ~GPUWorker(void);
+    public:
+      void notify_pending_copy(GPUProcessor *gpu);
+      void notify_complete_task(GPUProcessor *gpu);
+      void notify_complete_copy(GPUProcessor *gpu);
+      void shutdown(void);
+    public:
+      virtual Processor get_processor(void) const;
+      virtual void thread_main(void);
+      virtual void sleep_on_event(Event wait_for, bool block = false);
+    public:
+      static GPUWorker* start_gpu_worker_thread(size_t stack_size);
+      static void stop_gpu_worker_thread(void);
+    private:
+      static GPUWorker*& get_worker(void);
+    protected:
+      std::set<GPUProcessor*> pending_copies;
+      std::set<GPUProcessor*> complete_tasks;
+      std::set<GPUProcessor*> complete_copies;
+      gasnet_hsl_t   worker_lock;
+      gasnett_cond_t worker_cond;
+      bool worker_shutdown_requested;
+    };
 
     class GPUProcessor : public Processor::Impl {
     public:
       GPUProcessor(Processor _me, int _gpu_index, 
                    int num_local_gpus,
 		   size_t _zcmem_size, size_t _fbmem_size, 
-                   size_t _stack_size, bool gpu_dma_thread,
+                   size_t _stack_size, GPUWorker *worker/*can be 0*/,
                    int _streams);
 
       ~GPUProcessor(void);
@@ -151,7 +179,10 @@ namespace LegionRuntime {
       void register_host_memory(void *base, size_t size);
       void enable_peer_access(GPUProcessor *peer);
       bool can_access_peer(GPUProcessor *peer) const;
-      void handle_copies(void);
+      void launch_copies(void);
+      void complete_tasks(void);
+      void complete_copies(void);
+      void process_callback(CUstream stream);
 #ifdef EVENT_GRAPH_TRACE
     public:
       inline Event find_enclosing(void)
@@ -164,10 +195,8 @@ namespace LegionRuntime {
     public:
       // Helper method for getting a thread's processor value
       static Processor get_processor(void);
-      static void* gpu_dma_worker_loop(void *args);
-
-      static void start_gpu_dma_thread(const std::vector<GPUProcessor*> &local_gpus);
-      static void stop_gpu_dma_threads(void);
+      // Helper method for handling a callback
+      static void handle_callback(CUstream stream, CUresult res, void *data);
     private:
       static GPUProcessor **node_gpus;
       static size_t num_node_gpus;

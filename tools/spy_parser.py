@@ -33,9 +33,9 @@ mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (
 # Calls for the shape of region trees
 top_index_pat           = re.compile(prefix+"Index Space (?P<uid>[0-9a-f]+)")
 top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
-index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<color>[0-9]+)")
+index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>\w+)")
-index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<color>[0-9]+)")
+index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>\w+)")
 field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
@@ -117,7 +117,7 @@ def parse_log_line(line, state):
             return True
     m = index_part_pat.match(line)
     if m <> None:
-        if state.add_index_partition(int(m.group('pid'),16), int(m.group('uid'),16), True if (int(m.group('disjoint'))) == 1 else False, int(m.group('color'))):
+        if state.add_index_partition(int(m.group('pid'),16), int(m.group('uid'),16), True if (int(m.group('disjoint'))) == 1 else False, int(m.group('dim')), int(m.group('val1')), int(m.group('val2')), int(m.group('val3'))):
             return True
     m = index_part_name_pat.match(line)
     if m <> None:
@@ -125,7 +125,7 @@ def parse_log_line(line, state):
             return True
     m = index_subspace_pat.match(line)
     if m <> None:
-        if state.add_index_subspace(int(m.group('pid'),16), int(m.group('uid'),16), int(m.group('color'))):
+        if state.add_index_subspace(int(m.group('pid'),16), int(m.group('uid'),16), int(m.group('dim')), int(m.group('val1')), int(m.group('val2')), int(m.group('val3'))):
             return True
     m = field_space_pat.match(line)
     if m <> None:

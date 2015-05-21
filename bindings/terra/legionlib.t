@@ -740,26 +740,26 @@ end
 
 -- Lua wrapper for LegionRuntime::LowLevel::IndexSpace
 function IndexSpace:from_cobj(cobj)
-  local is = { id = cobj.id, is_index_space = true }
+  local is = { id = cobj.id, tid = cobj.tid, is_index_space = true }
   setmetatable(is, self)
   return is
 end
 
 function IndexSpace:clone()
-  local is = { id = self.id, is_index_space = true }
+  local is = { id = self.id, tid = self.tid, is_index_space = true }
   setmetatable(is, IndexSpace)
   return is
 end
 
 -- Lua wrapper for LegionRuntime::HighLevel::IndexPartition
 function IndexPartition:from_cobj(cobj)
-  local ip = { id = cobj, is_index_partition = true }
+  local ip = { id = cobj.id, tid = cobj.tid, is_index_partition = true }
   setmetatable(ip, self)
   return ip
 end
 
 function IndexPartition:clone()
-  local ip = { id = self.id, is_index_partition = true }
+  local ip = { id = self.id, tid = self.tid, is_index_partition = true }
   setmetatable(ip, self)
   return ip
 end
@@ -844,7 +844,7 @@ function LogicalPartition:from_cobj(cobj)
 end
 
 function LogicalPartition:to_cobj()
-  return { index_partition = self.index_partition.id,
+  return { index_partition = self.index_partition,
            field_space = self.field_space,
            tree_id = self.tree_id }
 end
@@ -1363,7 +1363,7 @@ function legion:get_logical_partition(ctx, parent, ip)
     "Error: get_logical_partition takes a LogicalRegion object as the second argument")
   assert(ip.is_index_partition,
     "Error: get_logical_partition takes an IndexPartition object as the third argument")
-  local cobj = legion_c.legion_logical_partition_create(self, ctx, parent, ip.id)
+  local cobj = legion_c.legion_logical_partition_create(self, ctx, parent, ip)
   return LogicalPartition:from_cobj(cobj)
 end
 

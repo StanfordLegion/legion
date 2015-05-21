@@ -79,14 +79,14 @@ void legion_main(const void *args, size_t arglen,
   }
   if (base_name == NULL)
   {
-    log_delaunay(LEVEL_ERROR,"ERROR: No input file specified");
+    log_delaunay.error("ERROR: No input file specified");
     exit(1);
   }
-  log_delaunay(LEVEL_PRINT,"Loading experiment %s", base_name);
+  log_delaunay.print("Loading experiment %s", base_name);
   LegionVector<Triangle> triangles(runtime, ctx, max_triangles);   
   triangles.map(runtime, ctx, READ_WRITE, EXCLUSIVE);
   load_triangles(base_name, triangles);
-  log_delaunay(LEVEL_PRINT,"Loaded %ld triangles", triangles.size());
+  log_delaunay.print("Loaded %ld triangles", triangles.size());
   triangles.unmap(runtime, ctx);
 
   {
@@ -115,7 +115,7 @@ void refine_mesh(const void *args, size_t arglen,
   LegionVector<BadTriangle> bad_triangles(runtime, ctx, max_bad);
   bad_triangles.map(runtime, ctx, READ_WRITE, EXCLUSIVE);
   find_bad_triangles(triangles, bad_triangles);
-  log_delaunay(LEVEL_PRINT,"Found %ld initial bad triangles", bad_triangles.size());
+  log_delaunay.print("Found %ld initial bad triangles", bad_triangles.size());
   triangles.unmap(runtime, ctx);
   std::vector<IndexSpaceRequirement> index_reqs;
   std::vector<FieldSpaceRequirement> field_reqs;
@@ -162,7 +162,7 @@ void delaunay_recurse(const void *args, size_t arglen,
   std::vector<Future>            cavity_futures;
   std::vector<Future>               bad_futures;
 
-  log_delaunay(LEVEL_INFO,"Starting delaunay recurse with %ld bad triangles %p", bad_triangles.size(), ctx);
+  log_delaunay.info("Starting delaunay recurse with %ld bad triangles %p", bad_triangles.size(), ctx);
 
   while (!bad_triangles.empty())
   {
@@ -212,7 +212,7 @@ void delaunay_recurse(const void *args, size_t arglen,
     // spread it out into additional tasks
     region_reqs.clear();
     region_reqs.push_back(triangles.get_region_requirement(READ_WRITE,SIMULTANEOUS));
-    log_delaunay(LEVEL_INFO,"Delaunay recurse now has %ld bad triangles %p", bad_triangles.size(), ctx);
+    log_delaunay.info("Delaunay recurse now has %ld bad triangles %p", bad_triangles.size(), ctx);
     while (bad_triangles.size() > max_bad)
     {
       unsigned to_pull = (bad_triangles.size() >= (2*max_bad)) ? max_bad : (bad_triangles.size() - max_bad);
@@ -229,7 +229,7 @@ void delaunay_recurse(const void *args, size_t arglen,
       runtime->execute_task(ctx, DELAUNAY_RECURSE, index_reqs, field_reqs,
                             region_reqs, TaskArgument(buffer, buffer_size));
     }
-    log_delaunay(LEVEL_INFO,"Continuing delaunay recurse with %ld bad triangles %p", bad_triangles.size(), ctx);
+    log_delaunay.info("Continuing delaunay recurse with %ld bad triangles %p", bad_triangles.size(), ctx);
   }
 }
 

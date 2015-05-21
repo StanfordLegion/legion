@@ -1094,6 +1094,11 @@ bool PennantMapper::map_task(Task *task)
     // assert(all_regmem.count(task->target_proc));
     // req.target_ranking.push_back(all_regmem[task->target_proc]);
 
+    // Hack: Ask Legion to not garbage collect reserved instances.
+    // if (task->variants->name == std::string("reserve_space")) {
+    //   req.make_persistent = true;
+    // }
+
     // Request additional fields.
     if (!req.redop) {
       LogicalRegion root;
@@ -1148,7 +1153,7 @@ bool PennantMapper::map_inline(Inline *inline_operation)
 
   log_mapper.debug(
     "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
-    req.region.get_index_space().id,
+    req.region.get_index_space().get_id(),
     req.region.get_field_space().get_id(),
     req.region.get_tree_id(),
     req.target_ranking[0].id,
@@ -1178,7 +1183,7 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
       log_mapper.warning(
         "mapping %s on inline region (%d,%d,%d) memory %d",
         (req.mapping_failed ? "failed" : "succeeded"),
-        region.get_index_space().id,
+        region.get_index_space().get_id(),
         region.get_field_space().get_id(),
         region.get_tree_id(),
         req.selected_memory.id);

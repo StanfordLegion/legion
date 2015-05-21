@@ -57,7 +57,8 @@ namespace LegionRuntime {
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
     struct OffsetsAndSize {
-      unsigned src_offset, dst_offset, size;
+      off_t src_offset, dst_offset;
+      int size;
     };
     typedef std::vector<OffsetsAndSize> OASVec;
     typedef std::map<InstPair, OASVec> OASByInst;
@@ -302,7 +303,7 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
-      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,
@@ -373,7 +374,7 @@ namespace LegionRuntime {
       // better have consumed exactly the right amount of data
       assert(((idata - ((const IDType *)data))*sizeof(IDType)) == datalen);
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,
@@ -1066,9 +1067,9 @@ namespace LegionRuntime {
       virtual void copy_field(int src_index, int dst_index, int elem_count,
                               unsigned offset_index)
       {
-        unsigned src_offset = oas_vec[offset_index].src_offset;
-        unsigned dst_offset = oas_vec[offset_index].dst_offset;
-        unsigned bytes = oas_vec[offset_index].size;
+        off_t src_offset = oas_vec[offset_index].src_offset;
+        off_t dst_offset = oas_vec[offset_index].dst_offset;
+        int bytes = oas_vec[offset_index].size;
 
 	assert(src_inst->metadata.is_valid());
 	assert(dst_inst->metadata.is_valid());
@@ -1197,8 +1198,8 @@ namespace LegionRuntime {
 	    if(partial_field[field_idx2])
 	      break;
 
-	    unsigned src_offset2 = oas_vec[field_idx2].src_offset;
-	    unsigned dst_offset2 = oas_vec[field_idx2].dst_offset;
+	    off_t src_offset2 = oas_vec[field_idx2].src_offset;
+	    off_t dst_offset2 = oas_vec[field_idx2].dst_offset;
 
 	    // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
 	    if(src_bsize == 1) {
@@ -1216,8 +1217,8 @@ namespace LegionRuntime {
 	      int dst_fstride2 = dst_offset2 - dst_offset;
 	      if(src_fstride == 0) src_fstride = src_fstride2;
 	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
-	      if((src_fstride2 != (field_idx2 - field_idx) * src_fstride) ||
-		 (dst_fstride2 != (field_idx2 - field_idx) * dst_fstride))
+	      if((src_fstride2 != (int)(field_idx2 - field_idx) * src_fstride) ||
+		 (dst_fstride2 != (int)(field_idx2 - field_idx) * dst_fstride))
 		break;
 
 	      // if tests pass, we have another line
@@ -1339,8 +1340,8 @@ namespace LegionRuntime {
 	      int dst_fstride2 = dst_offset2 - dst_offset;
 	      if(src_fstride == 0) src_fstride = src_fstride2;
 	      if(dst_fstride == 0) dst_fstride = dst_fstride2;
-	      if((src_fstride2 != (field_idx2 - field_idx) * src_fstride) ||
-		 (dst_fstride2 != (field_idx2 - field_idx) * dst_fstride))
+	      if((src_fstride2 != (int)(field_idx2 - field_idx) * src_fstride) ||
+		 (dst_fstride2 != (int)(field_idx2 - field_idx) * dst_fstride))
 		break;
 
 	      // if tests pass, we have another line
@@ -2536,7 +2537,7 @@ namespace LegionRuntime {
 	  }
 
       int curdim = -1;
-      unsigned exp1 = 0, exp2 = 0;
+      int exp1 = 0, exp2 = 0;
 
       // now go through dimensions, collapsing each if it matches the expected stride for
       //  both sets (can't collapse for first)
@@ -2803,7 +2804,7 @@ namespace LegionRuntime {
       default: assert(0);
       };
 
-      log_dma.info("dma request %p finished - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   oas_by_inst->begin()->first.first.id, 
 		   oas_by_inst->begin()->second[0].src_offset,

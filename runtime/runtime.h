@@ -77,8 +77,7 @@ namespace LegionRuntime {
       FRIEND_ALL_RUNTIME_CLASSES
       Impl(void);
       Impl(ArgumentMapStore *st);
-      Impl(ArgumentMapStore *st,
-        const std::map<DomainPoint,TaskArgument,DomainPoint::STLComparator> &);
+      Impl(ArgumentMapStore *st, const std::map<DomainPoint,TaskArgument> &);
       Impl(const Impl &impl);
       ~Impl(void);
     public:
@@ -96,7 +95,7 @@ namespace LegionRuntime {
       Impl* freeze(void);
       Impl* clone(void);
     private:
-      std::map<DomainPoint,TaskArgument,DomainPoint::STLComparator> arguments;
+      std::map<DomainPoint,TaskArgument> arguments;
       Impl *next;
       ArgumentMapStore *const store;
       bool frozen;
@@ -248,14 +247,14 @@ namespace LegionRuntime {
       Runtime *const runtime;
     private:
       Event ready_event;
-      std::map<DomainPoint,Future,DomainPoint::STLComparator> futures;
+      std::map<DomainPoint,Future> futures;
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
       Reservation lock;
 #ifdef DEBUG_HIGH_LEVEL
     private:
       std::vector<Domain> valid_domains;
-      std::set<DomainPoint,DomainPoint::STLComparator> valid_points;
+      std::set<DomainPoint> valid_points;
 #endif
     };
 
@@ -740,8 +739,14 @@ namespace LegionRuntime {
         STEAL_MESSAGE,
         ADVERTISEMENT_MESSAGE,
         SEND_INDEX_SPACE_NODE,
+        SEND_INDEX_SPACE_REQUEST,
+        SEND_INDEX_SPACE_RETURN,
         SEND_INDEX_PARTITION_NODE,
+        SEND_INDEX_PARTITION_REQUEST,
+        SEND_INDEX_PARTITION_RETURN,
         SEND_FIELD_SPACE_NODE,
+        SEND_FIELD_SPACE_REQUEST,
+        SEND_FIELD_SPACE_RETURN,
         SEND_LOGICAL_REGION_NODE,
         INDEX_SPACE_DESTRUCTION_MESSAGE,
         INDEX_PARTITION_DESTRUCTION_MESSAGE,
@@ -823,8 +828,14 @@ namespace LegionRuntime {
       void send_steal_request(Serializer &rez, bool flush);
       void send_advertisement(Serializer &rez, bool flush);
       void send_index_space_node(Serializer &rez, bool flush);
+      void send_index_space_request(Serializer &rez, bool flush);
+      void send_index_space_return(Serializer &rez, bool flush);
       void send_index_partition_node(Serializer &rez, bool flush);
+      void send_index_partition_request(Serializer &rez, bool flush);
+      void send_index_partition_return(Serializer &rez, bool flush);
       void send_field_space_node(Serializer &rez, bool flush);
+      void send_field_space_request(Serializer &rez, bool flush);
+      void send_field_space_return(Serializer &rez, bool flush);
       void send_logical_region_node(Serializer &rez, bool flush);
       void send_index_space_destruction(Serializer &rez, bool flush);
       void send_index_partition_destruction(Serializer &rez, bool flush);
@@ -1056,14 +1067,27 @@ namespace LegionRuntime {
       bool finalize_index_space_destroy(IndexSpace handle);
     public:
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space,
+                                            const PointColoring &coloring,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable);
+      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             const Coloring &coloring,
                                             bool disjoint,
                                             int part_color);
+      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             Domain color_space,
                                             const DomainColoring &coloring,
                                             bool disjoint,
                                             int part_color);
+      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space,
+                                       const MultiDomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             Domain color_space,
                                             const MultiDomainColoring &coloring,
@@ -1075,6 +1099,93 @@ namespace LegionRuntime {
       void destroy_index_partition(Context ctx, IndexPartition handle);
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);
+    public:
+      // Helper methods for partition construction
+      void validate_unstructured_disjointness(IndexPartition pid,
+                                  const std::map<DomainPoint,Domain> &domains);
+      void validate_structured_disjointness(IndexPartition pid,
+                                  const std::map<DomainPoint,Domain> &domains);
+      void validate_multi_structured_disjointness(IndexPartition pid,
+                       const std::map<DomainPoint,std::set<Domain> > &domains);
+      Domain construct_convex_hull(const std::set<Domain> &domains);
+    public:
+      IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space, 
+                                            size_t granuarlity,
+                                            int color, bool allocable);
+      IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space,
+                                      const std::map<DomainPoint,int> &weights,
+                                            size_t granularity, int color,
+                                            bool allocable);
+      IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
+                                               IndexPartition handle1,
+                                               IndexPartition handle2,
+                                               PartitionKind kind,
+                                               int color, bool allocable);
+      IndexPartition create_partition_by_intersection(Context ctx, 
+                                               IndexSpace parent,
+                                               IndexPartition handle1,
+                                               IndexPartition handle2,
+                                               PartitionKind kind,
+                                               int color, bool allocable);
+      IndexPartition create_partition_by_difference(Context ctx, 
+                                               IndexSpace parent,
+                                               IndexPartition handle1,
+                                               IndexPartition handle2,
+                                               PartitionKind kind,
+                                               int color, bool allocable);
+      void create_cross_product_partition(Context ctx, 
+                                          IndexPartition handle1,
+                                          IndexPartition handle2,
+                              std::map<DomainPoint,IndexPartition> &handles,
+                                          PartitionKind kind,
+                                          int color, bool allocable);
+      IndexPartition create_partition_by_field(Context ctx, 
+                                               LogicalRegion handle,
+                                               LogicalRegion parent,
+                                               FieldID fid,
+                                               const Domain &color_space,
+                                               int color, bool allocable);
+      IndexPartition create_partition_by_image(Context ctx,
+                                               IndexSpace handle,
+                                               LogicalPartition projection,
+                                               LogicalRegion parent,
+                                               FieldID fid, 
+                                               const Domain &color_space,
+                                               PartitionKind part_kind,
+                                               int color, bool allocable);
+      IndexPartition create_partition_by_preimage(Context ctx,
+                                               IndexPartition projection,
+                                               LogicalRegion handle,
+                                               LogicalRegion parent,
+                                               FieldID fid,
+                                               const Domain &color_space,
+                                               PartitionKind part_kind,
+                                               int color, bool allocable);
+      IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
+                                              const Domain &color_space,
+                                              PartitionKind part_kind,
+                                              int color, bool allocable);
+      IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
+                                          const DomainPoint &color, 
+                                        const std::vector<IndexSpace> &handles);
+      IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
+                                          const DomainPoint &color,
+                                          IndexPartition handle);
+      IndexSpace create_index_space_intersection(Context ctx, 
+                                                 IndexPartition parent,
+                                                 const DomainPoint &color,
+                                       const std::vector<IndexSpace> &handles);
+      IndexSpace create_index_space_intersection(Context ctx,
+                                                 IndexPartition parent,
+                                                 const DomainPoint &color,
+                                                 IndexPartition handle); 
+      IndexSpace create_index_space_difference(Context ctx, 
+                                               IndexPartition parent,
+                                               const DomainPoint &color,
+                                               IndexSpace initial,
+                                       const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
@@ -1229,6 +1340,16 @@ namespace LegionRuntime {
       void unmap_region(Context ctx, PhysicalRegion region);
       void unmap_all_regions(Context ctx);
     public:
+      void fill_field(Context ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid,
+                      const void *value, size_t value_size,
+                      const Predicate &pred);
+      void fill_fields(Context ctx, LogicalRegion handle,
+                       LogicalRegion parent,
+                       const std::set<FieldID> &fields,
+                       const void *value, size_t value_size,
+                       const Predicate &pred);
+    public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
@@ -1368,8 +1489,14 @@ namespace LegionRuntime {
       void send_advertisements(const std::set<Processor> &targets,
                               MapperID map_id, Processor source);
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
+      void send_index_space_request(AddressSpaceID target, Serializer &rez);
+      void send_index_space_return(AddressSpaceID target, Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_request(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_return(AddressSpaceID target, Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
+      void send_field_space_request(AddressSpaceID target, Serializer &rez);
+      void send_field_space_return(AddressSpaceID target, Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -1451,9 +1578,18 @@ namespace LegionRuntime {
       void handle_steal(Deserializer &derez);
       void handle_advertisement(Deserializer &derez);
       void handle_index_space_node(Deserializer &derez, AddressSpaceID source);
+      void handle_index_space_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_index_space_return(Deserializer &derez); 
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
+      void handle_index_partition_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_index_partition_return(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
+      void handle_field_space_request(Deserializer &derez,
+                                      AddressSpaceID source);
+      void handle_field_space_return(Deserializer &derez);
       void handle_logical_region_node(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez,
@@ -1653,29 +1789,32 @@ namespace LegionRuntime {
       void decrement_outstanding_top_level_tasks(void);
       void initiate_runtime_shutdown(void);
     public:
-      IndividualTask*      get_available_individual_task(void);
-      PointTask*           get_available_point_task(void);
-      IndexTask*           get_available_index_task(void);
-      SliceTask*           get_available_slice_task(void);
-      RemoteTask*          get_available_remote_task(void);
-      InlineTask*          get_available_inline_task(void);
-      MapOp*               get_available_map_op(void);
-      CopyOp*              get_available_copy_op(void);
-      FenceOp*             get_available_fence_op(void);
-      FrameOp*             get_available_frame_op(void);
-      DeletionOp*          get_available_deletion_op(void);
-      InterCloseOp*        get_available_inter_close_op(void);
-      PostCloseOp*         get_available_post_close_op(void);
-      DynamicCollectiveOp* get_available_dynamic_collective_op(void);
-      FuturePredOp*        get_available_future_pred_op(void);
-      NotPredOp*           get_available_not_pred_op(void);
-      AndPredOp*           get_available_and_pred_op(void);
-      OrPredOp*            get_available_or_pred_op(void);
-      AcquireOp*           get_available_acquire_op(void);
-      ReleaseOp*           get_available_release_op(void);
-      TraceCaptureOp*      get_available_capture_op(void);
-      TraceCompleteOp*     get_available_trace_op(void);
-      MustEpochOp*         get_available_epoch_op(void);
+      IndividualTask*       get_available_individual_task(void);
+      PointTask*            get_available_point_task(void);
+      IndexTask*            get_available_index_task(void);
+      SliceTask*            get_available_slice_task(void);
+      RemoteTask*           get_available_remote_task(void);
+      InlineTask*           get_available_inline_task(void);
+      MapOp*                get_available_map_op(void);
+      CopyOp*               get_available_copy_op(void);
+      FenceOp*              get_available_fence_op(void);
+      FrameOp*              get_available_frame_op(void);
+      DeletionOp*           get_available_deletion_op(void);
+      InterCloseOp*         get_available_inter_close_op(void);
+      PostCloseOp*          get_available_post_close_op(void);
+      DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
+      FuturePredOp*         get_available_future_pred_op(void);
+      NotPredOp*            get_available_not_pred_op(void);
+      AndPredOp*            get_available_and_pred_op(void);
+      OrPredOp*             get_available_or_pred_op(void);
+      AcquireOp*            get_available_acquire_op(void);
+      ReleaseOp*            get_available_release_op(void);
+      TraceCaptureOp*       get_available_capture_op(void);
+      TraceCompleteOp*      get_available_trace_op(void);
+      MustEpochOp*          get_available_epoch_op(void);
+      PendingPartitionOp*   get_available_pending_partition_op(void);
+      DependentPartitionOp* get_available_dependent_partition_op(void);
+      FillOp*               get_available_fill_op(void);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -1700,16 +1839,21 @@ namespace LegionRuntime {
       void free_capture_op(TraceCaptureOp *op);
       void free_trace_op(TraceCompleteOp *op);
       void free_epoch_op(MustEpochOp *op);
+      void free_pending_partition_op(PendingPartitionOp *op);
+      void free_dependent_partition_op(DependentPartitionOp* op);
+      void free_fill_op(FillOp *op);
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid); 
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
     public:
-      IndexPartition  get_unique_partition_id(void);
-      FieldSpaceID    get_unique_field_space_id(void);
-      RegionTreeID    get_unique_tree_id(void);
-      UniqueID        get_unique_operation_id(void);
-      FieldID         get_unique_field_id(void);
+      IndexSpaceID     get_unique_index_space_id(void);
+      IndexPartitionID get_unique_index_partition_id(void);
+      FieldSpaceID     get_unique_field_space_id(void);
+      IndexTreeID      get_unique_index_tree_id(void);
+      RegionTreeID     get_unique_region_tree_id(void);
+      UniqueID         get_unique_operation_id(void);
+      FieldID          get_unique_field_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -1721,10 +1865,6 @@ namespace LegionRuntime {
       bool help_reset_future(const Future &f);
     public:
       unsigned generate_random_integer(void);
-#ifdef DYNAMIC_TESTS
-    public:
-      bool perform_dynamic_independence_tests(void);
-#endif
 #ifdef TRACE_ALLOCATION
     public:
       void trace_allocation(AllocationType type, size_t size, int elems);
@@ -1800,9 +1940,11 @@ namespace LegionRuntime {
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
 #endif
     protected:
-      unsigned unique_partition_id;
+      unsigned unique_index_space_id;
+      unsigned unique_index_partition_id;
       unsigned unique_field_space_id;
-      unsigned unique_tree_id;
+      unsigned unique_index_tree_id;
+      unsigned unique_region_tree_id;
       unsigned unique_operation_id;
       unsigned unique_field_id; 
     protected:
@@ -1893,30 +2035,36 @@ namespace LegionRuntime {
       Reservation capture_op_lock;
       Reservation trace_op_lock;
       Reservation epoch_op_lock;
+      Reservation pending_partition_op_lock;
+      Reservation dependent_partition_op_lock;
+      Reservation fill_op_lock;
     protected:
-      std::deque<IndividualTask*>      available_individual_tasks;
-      std::deque<PointTask*>           available_point_tasks;
-      std::deque<IndexTask*>           available_index_tasks;
-      std::deque<SliceTask*>           available_slice_tasks;
-      std::deque<RemoteTask*>          available_remote_tasks;
-      std::deque<InlineTask*>          available_inline_tasks;
-      std::deque<MapOp*>               available_map_ops;
-      std::deque<CopyOp*>              available_copy_ops;
-      std::deque<FenceOp*>             available_fence_ops;
-      std::deque<FrameOp*>             available_frame_ops;
-      std::deque<DeletionOp*>          available_deletion_ops;
-      std::deque<InterCloseOp*>        available_inter_close_ops;
-      std::deque<PostCloseOp*>         available_post_close_ops;
-      std::deque<DynamicCollectiveOp*> available_dynamic_collective_ops;
-      std::deque<FuturePredOp*>        available_future_pred_ops;
-      std::deque<NotPredOp*>           available_not_pred_ops;
-      std::deque<AndPredOp*>           available_and_pred_ops;
-      std::deque<OrPredOp*>            available_or_pred_ops;
-      std::deque<AcquireOp*>           available_acquire_ops;
-      std::deque<ReleaseOp*>           available_release_ops;
-      std::deque<TraceCaptureOp*>      available_capture_ops;
-      std::deque<TraceCompleteOp*>     available_trace_ops;
-      std::deque<MustEpochOp*>         available_epoch_ops;
+      std::deque<IndividualTask*>       available_individual_tasks;
+      std::deque<PointTask*>            available_point_tasks;
+      std::deque<IndexTask*>            available_index_tasks;
+      std::deque<SliceTask*>            available_slice_tasks;
+      std::deque<RemoteTask*>           available_remote_tasks;
+      std::deque<InlineTask*>           available_inline_tasks;
+      std::deque<MapOp*>                available_map_ops;
+      std::deque<CopyOp*>               available_copy_ops;
+      std::deque<FenceOp*>              available_fence_ops;
+      std::deque<FrameOp*>              available_frame_ops;
+      std::deque<DeletionOp*>           available_deletion_ops;
+      std::deque<InterCloseOp*>         available_inter_close_ops;
+      std::deque<PostCloseOp*>          available_post_close_ops;
+      std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
+      std::deque<FuturePredOp*>         available_future_pred_ops;
+      std::deque<NotPredOp*>            available_not_pred_ops;
+      std::deque<AndPredOp*>            available_and_pred_ops;
+      std::deque<OrPredOp*>             available_or_pred_ops;
+      std::deque<AcquireOp*>            available_acquire_ops;
+      std::deque<ReleaseOp*>            available_release_ops;
+      std::deque<TraceCaptureOp*>       available_capture_ops;
+      std::deque<TraceCompleteOp*>      available_trace_ops;
+      std::deque<MustEpochOp*>          available_epoch_ops;
+      std::deque<PendingPartitionOp*>   available_pending_partition_ops;
+      std::deque<DependentPartitionOp*> available_dependent_partition_ops;
+      std::deque<FillOp*>               available_fill_ops;
 #if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
@@ -2021,8 +2169,9 @@ namespace LegionRuntime {
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
-      static bool unsafe_launch;
       static bool resilient_mode;
+      static bool unsafe_launch;
+      static bool dynamic_independence_tests;
       static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
@@ -2040,10 +2189,6 @@ namespace LegionRuntime {
 #ifdef INORDER_EXECUTION
       static bool program_order_execution;
 #endif
-#ifdef DYNAMIC_TESTS
-    public:
-      static bool dynamic_independence_tests;
-#endif 
 #ifdef DEBUG_PERF
     public:
       static unsigned long long perf_trace_tolerance;

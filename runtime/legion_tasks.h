@@ -361,6 +361,12 @@ namespace LegionRuntime {
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(ReleaseOp *release,
                                     std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(DependentPartitionOp *partition,
+                                    std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_internal(const RegionRequirement &req,
+                                     std::vector<PhysicalRegion> &conflicting);
+      void find_conflicting_regions(FillOp *fill,
+                                    std::vector<PhysicalRegion> &conflicting);
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
                                   const RegionRequirement &our_req,
                                   const RegionUsage &our_usage,
@@ -369,9 +375,11 @@ namespace LegionRuntime {
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
       bool is_region_mapped(unsigned idx);
-      int find_parent_region_req(const RegionRequirement &req);
+      int find_parent_region_req(const RegionRequirement &req, 
+                                 bool check_privilege = true);
       unsigned find_parent_region(unsigned idx, TaskOp *task);
       unsigned find_parent_index_region(unsigned idx, TaskOp *task);
+      PrivilegeMode find_parent_privilege_mode(unsigned idx);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, 
@@ -1151,8 +1159,7 @@ namespace LegionRuntime {
       UniqueID remote_owner_uid;
     protected:
       // Temporary storage for future results
-      std::map<DomainPoint,std::pair<void*,size_t>,
-                DomainPoint::STLComparator> temporary_futures;
+      std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
     };
 
     /**

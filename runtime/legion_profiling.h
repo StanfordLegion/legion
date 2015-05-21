@@ -185,7 +185,7 @@ namespace LegionRuntime {
                                                const char *name)
       {
         if (profiling_enabled)
-          log_prof(LEVEL_INFO,"Prof Task Variant %u %s", task_id, name);
+          log_prof.info("Prof Task Variant %u %s", task_id, name);
       }
 
       static inline void initialize_processor(Processor proc, 
@@ -199,7 +199,7 @@ namespace LegionRuntime {
       static inline void initialize_memory(Memory mem, Memory::Kind kind)
       {
         if (profiling_enabled)
-          log_prof(LEVEL_INFO,"Prof Memory " IDFMT " %u", mem.id, kind);
+          log_prof.info("Prof Memory " IDFMT " %u", mem.id, kind);
       }
 
       static inline void initialize_copy_processor()
@@ -215,12 +215,12 @@ namespace LegionRuntime {
         if (perform_dump > 0)
           return;
         if (profiling_enabled)
-          log_prof(LEVEL_INFO,"Prof Processor " IDFMT " %u %u", 
+          log_prof.info("Prof Processor " IDFMT " %u %u", 
                     proc.id, prof.utility, prof.kind);
         for (unsigned idx = 0; idx < prof.tasks.size(); idx++)
         {
           const TaskInstance &inst = prof.tasks[idx];
-          log_prof(LEVEL_INFO,"Prof Unique Task " IDFMT " %llu %u %u %u %u %u",
+          log_prof.info("Prof Unique Task " IDFMT " %llu %u %u %u %u %u",
               proc.id, inst.unique_id, inst.task_id, 
               inst.point.get_dim(), inst.point.point_data[0],
               inst.point.point_data[1], inst.point.point_data[2]);
@@ -229,21 +229,21 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < prof.mappings.size(); idx++)
         {
           const OpInstance &inst = prof.mappings[idx];
-          log_prof(LEVEL_INFO,"Prof Unique Map " IDFMT " %llu %llu",
+          log_prof.info("Prof Unique Map " IDFMT " %llu %llu",
               proc.id, inst.unique_id, inst.parent_id);
         }
         prof.mappings.clear();
         for (unsigned idx = 0; idx < prof.closes.size(); idx++)
         {
           const OpInstance &inst = prof.closes[idx];
-          log_prof(LEVEL_INFO,"Prof Unique Close " IDFMT " %llu %llu",
+          log_prof.info("Prof Unique Close " IDFMT " %llu %llu",
               proc.id, inst.unique_id, inst.parent_id);
         }
         prof.closes.clear();
         for (unsigned idx = 0; idx < prof.copies.size(); idx++)
         {
           const OpInstance &inst = prof.copies[idx];
-          log_prof(LEVEL_INFO,"Prof Unique Copy " IDFMT " %llu %llu",
+          log_prof.info("Prof Unique Copy " IDFMT " %llu %llu",
               proc.id, inst.unique_id, inst.parent_id);
         }
         prof.copies.clear();
@@ -253,7 +253,7 @@ namespace LegionRuntime {
           // Probably shouldn't role over, if something did then
           // we may need to change our assumptions
           assert(event.time >= prof.init_time);
-          log_prof(LEVEL_INFO, "Prof Event " IDFMT " %u %llu %llu", 
+          log_prof.info("Prof Event " IDFMT " %u %llu %llu", 
             proc.id, event.kind, event.unique_id, (event.time-prof.init_time));
         }
         prof.proc_events.clear();
@@ -264,7 +264,7 @@ namespace LegionRuntime {
           if (event.creation)
           {
             // First log the instance information
-            log_prof(LEVEL_INFO,"Prof Create Instance %u %u %u %ld %llu", 
+            log_prof.info("Prof Create Instance %u %u %u %ld %llu", 
                 event.inst_id, event.memory, event.redop, 
                 event.blocking_factor, (event.time - prof.init_time));
             // Then log the creation of the fields
@@ -272,14 +272,14 @@ namespace LegionRuntime {
                   event.field_infos.begin(); it != 
                   event.field_infos.end(); it++)
             {
-              log_prof(LEVEL_INFO,"Prof Instance Field %u %u %ld", 
+              log_prof.info("Prof Instance Field %u %u %ld", 
                   event.inst_id, it->first, it->second);
             }
           }
           else
           {
             // Log the instance destruction
-            log_prof(LEVEL_INFO,"Prof Destroy Instance %u %llu", 
+            log_prof.info("Prof Destroy Instance %u %llu", 
                 event.inst_id , (event.time - prof.init_time));
           }
         }
@@ -301,14 +301,14 @@ namespace LegionRuntime {
         // Someone else has already dumped this processor
         if (perform_dump > 0) return;
         if (profiling_enabled)
-          log_prof(LEVEL_INFO,"Prof Processor " IDFMT " 1 3",
+          log_prof.info("Prof Processor " IDFMT " 1 3",
               last_proc_id);
 
         for (unsigned idx = 0; idx < copy_prof.proc_events.size(); idx++)
         {
           ProfilingEvent &event = copy_prof.proc_events[idx];
           assert(event.time >= copy_prof.init_time);
-          log_prof(LEVEL_INFO, "Prof Event " IDFMT " %u %llu %llu",
+          log_prof.info("Prof Event " IDFMT " %u %llu %llu",
               last_proc_id, event.kind, event.unique_id,
               event.time - copy_prof.init_time);
         }

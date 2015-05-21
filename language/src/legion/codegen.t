@@ -34,6 +34,11 @@ local aligned_instances = std.config["aligned-instances"]
 -- is never modified (by allocator or deleting elements).
 local cache_index_iterator = std.config["cached-iterators"]
 
+-- Setting this flag to true directs the compiler to emit assertions
+-- whenever two regions being placed in different physical regions
+-- would require the use of the divergence-safe code path to be used.
+local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
+
 local codegen = {}
 
 -- load Legion dynamic library
@@ -85,14 +90,20 @@ function context.new_global_scope()
   }, context)
 end
 
-function context:check_divergence(region_types)
+function context:check_divergence(region_types, field_paths)
   if not self.divergence then
     return false
   end
-  for _, group in ipairs(self.divergence) do
+  for _, divergence in ipairs(self.divergence) do
     local contained = true
     for _, r in ipairs(region_types) do
-      if not group[r] then
+      if not divergence.group[r] then
+        contained = false
+        break
+      end
+    end
+    for _, field_path in ipairs(field_paths) do
+      if not divergence.valid_fields[std.hash(field_path)] then
         contained = false
         break
       end
@@ -120,7 +131,7 @@ end
 
 function context:add_region_root(region_type, logical_region, index_allocator,
                                  index_iterator, field_paths,
-                                 privilege_field_paths, field_types,
+                                 privilege_field_paths, field_privileges, field_types,
                                  field_ids, physical_regions, accessors,
                                  base_pointers)
   if not self.regions then
@@ -140,6 +151,7 @@ function context:add_region_root(region_type, logical_region, index_allocator,
         index_iterator = index_iterator,
         field_paths = field_paths,
         privilege_field_paths = privilege_field_paths,
+        field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
         physical_regions = physical_regions,
@@ -172,6 +184,7 @@ function context:add_region_subregion(region_type, logical_region,
         index_iterator = index_iterator,
         field_paths = self:region(parent_region_type).field_paths,
         privilege_field_paths = self:region(parent_region_type).privilege_field_paths,
+        field_privileges = self:region(parent_region_type).field_privileges,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
         physical_regions = self:region(parent_region_type).physical_regions,
@@ -291,7 +304,8 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   if cache_index_iterator then
     actions = quote
       [actions]
-      var [it] = c.legion_terra_cached_index_iterator_create([lr].index_space)
+      var [it] = c.legion_terra_cached_index_iterator_create(
+        [cx.runtime], [cx.context], [lr].index_space)
     end
   end
 
@@ -470,7 +484,7 @@ function ref:__ref(cx, expr_type)
 
   local base_pointers
 
-  if cx.check_divergence(region_types) or #region_types == 1 then
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     base_pointers = base_pointers_by_region[1]
   else
     base_pointers = std.zip(absolute_field_paths, field_types):map(
@@ -722,7 +736,7 @@ function vref:read(cx, expr_type)
   end
 
   -- if the vptr points to a single region
-  if cx.check_divergence(region_types) or #region_types == 1 then
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
     std.zip(base_pointers, field_paths):map(
@@ -811,7 +825,7 @@ function vref:write(cx, value, expr_type)
     [actions]
   end
 
-  if cx.check_divergence(region_types) or #region_types == 1 then
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
     std.zip(base_pointers, field_paths):map(
@@ -896,7 +910,7 @@ function vref:reduce(cx, value, op, expr_type)
     [actions]
   end
 
-  if cx.check_divergence(region_types) or #region_types == 1 then
+  if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     local base_pointers = base_pointers_by_region[1]
 
     std.zip(base_pointers, field_paths):map(
@@ -1213,7 +1227,8 @@ function codegen.expr_index_access(cx, node)
     if cache_index_iterator then
       actions = quote
         [actions]
-        var [it] = c.legion_terra_cached_index_iterator_create([lr].index_space)
+        var [it] = c.legion_terra_cached_index_iterator_create(
+          [cx.runtime], [cx.context], [lr].index_space)
       end
     end
 
@@ -1934,6 +1949,7 @@ function codegen.expr_region(cx, node)
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
   local field_paths, field_types = std.flatten_struct_fields(element_type)
+  local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id = 100
   local field_ids = field_paths:map(
     function(_)
@@ -1954,6 +1970,7 @@ function codegen.expr_region(cx, node)
   cx:add_region_root(region_type, r, isa, it,
                      field_paths,
                      terralib.newlist({field_paths}),
+                     std.dict(std.zip(field_paths:map(std.hash), field_privileges)),
                      std.dict(std.zip(field_paths:map(std.hash), field_types)),
                      std.dict(std.zip(field_paths:map(std.hash), field_ids)),
                      std.dict(std.zip(field_paths:map(std.hash), physical_regions)),
@@ -1997,7 +2014,8 @@ function codegen.expr_region(cx, node)
   if cache_index_iterator then
     actions = quote
       [actions]
-      var [it] = c.legion_terra_cached_index_iterator_create([lr].index_space)
+      var [it] = c.legion_terra_cached_index_iterator_create(
+        [cx.runtime], [cx.context], [lr].index_space)
     end
   end
 
@@ -2575,7 +2593,7 @@ function codegen.stat_for_list(cx, node)
     actions = quote
       [actions]
       var is = [lr].impl.index_space
-      var [it] = c.legion_index_iterator_create(is)
+      var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], is)
     end
     cleanup_actions = quote
       c.legion_index_iterator_destroy([it])
@@ -2684,7 +2702,7 @@ function codegen.stat_for_list_vectorized(cx, node)
     actions = quote
       [actions]
       var is = [lr].impl.index_space
-      var [it] = c.legion_index_iterator_create(is)
+      var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], is)
     end
     cleanup_actions = quote
       c.legion_index_iterator_destroy([it])
@@ -3252,6 +3270,20 @@ function get_params_map_type(params)
   end
 end
 
+local function filter_fields(fields, privileges)
+  local remove = terralib.newlist()
+  for _, field in pairs(fields) do
+    local privilege = privileges[std.hash(field)]
+    if not privilege or std.is_reduction_op(privilege) then
+      remove:insert(field)
+    end
+  end
+  for _, field in ipairs(remove) do
+    fields[field] = nil
+  end
+  return fields
+end
+
 function codegen.stat_task(cx, node)
   local task = node.prototype
   task:setcuda(node.cuda)
@@ -3490,7 +3522,8 @@ function codegen.stat_task(cx, node)
       if cache_index_iterator then
         actions = quote
           [actions]
-          var [it] = c.legion_terra_cached_index_iterator_create([r].impl.index_space)
+          var [it] = c.legion_terra_cached_index_iterator_create(
+            [cx.runtime], [cx.context], [r].impl.index_space)
         end
       end
 
@@ -3539,6 +3572,7 @@ function codegen.stat_task(cx, node)
       cx:add_region_root(region_type, r, isa, it,
                          field_paths,
                          privilege_field_paths,
+                         privileges_by_field_path,
                          std.dict(std.zip(field_paths:map(std.hash), field_types)),
                          field_ids_by_field_path,
                          physical_regions_by_field_path,
@@ -3550,85 +3584,93 @@ function codegen.stat_task(cx, node)
   local preamble = quote [emit_debuginfo(node)]; [task_args_setup]; [region_args_setup] end
 
   local body
-  local has_divergence = false
   if node.region_divergence then
-    for _, rs in pairs(node.region_divergence) do
-      local rs_diverges = #rs > 1
-      if rs_diverges then
-        for _, r in ipairs(rs) do
-          if not cx:has_region(r) then
-            rs_diverges = false
-            break
-          end
-        end
-      end
-      if rs_diverges then
-        has_divergence = true
-        break
-      end
-    end
-  end
-  if has_divergence then
     local region_divergence = terralib.newlist()
     local cases
+    local diagnostic = quote end
     for _, rs in pairs(node.region_divergence) do
       local r1 = rs[1]
       if cx:has_region(r1) then
         local contained = true
         local rs_cases
+        local rs_diagnostic = quote end
 
         local r1_fields = cx:region(r1).field_paths
-        local r1_bases = cx:region(r1).base_pointers
+        local valid_fields = std.dict(std.zip(r1_fields, r1_fields))
         for _, r in ipairs(rs) do
-          if r1 ~= r then
-            if not cx:has_region(r) then
-              contained = false
-            else
+          if not cx:has_region(r) then
+            contained = false
+            break
+          end
+          filter_fields(valid_fields, cx:region(r).field_privileges)
+        end
+
+        if contained then
+          local r1_bases = cx:region(r1).base_pointers
+          for _, r in ipairs(rs) do
+            if r1 ~= r then
               local r_base = cx:region(r).base_pointers
-              for _, field in ipairs(r1_fields) do
+              for field, _ in pairs(valid_fields) do
                 local r1_base = r1_bases[field:hash()]
                 local r_base = r_base[field:hash()]
-                if r1_base and r_base then
-                  if rs_cases == nil then
-                    rs_cases = `([r1_base] == [r_base])
-                  else
-                    rs_cases = `([rs_cases] and [r1_base] == [r_base])
+                assert(r1_base and r_base)
+                if rs_cases == nil then
+                  rs_cases = `([r1_base] == [r_base])
+                else
+                  rs_cases = `([rs_cases] and [r1_base] == [r_base])
+                  rs_diagnostic = quote
+                    [rs_diagnostic]
+                    c.printf(["comparing for divergence: regions %s %s field %s bases %p and %p\n"],
+                      [tostring(r1)], [tostring(r)], [tostring(field)],
+                      [r1_base], [r_base])
                   end
                 end
               end
             end
           end
-        end
 
-        if contained then
           local group = {}
           for _, r in ipairs(rs) do
             group[r] = true
           end
-          region_divergence:insert(group)
+          region_divergence:insert({group = group, valid_fields = valid_fields})
           if cases == nil then
             cases = rs_cases
           else
             cases = `([cases] and [rs_cases])
           end
+          diagnostic = quote
+            [diagnostic]
+            [rs_diagnostic]
+          end
         end
       end
     end
-    assert(cases)
 
-    local div_cx = cx:new_local_scope()
-    local body_div = codegen.block(div_cx, node.body)
-
-    local nodiv_cx = cx:new_local_scope(region_divergence)
-    local body_nodiv = codegen.block(nodiv_cx, node.body)
-
-    body = quote
-      if [cases] then
-        [body_nodiv]
-      else
-        c.printf(["warning: falling back to slow path in task " .. task.name .. "\n"])
-        [body_div]
+    if cases then
+      local div_cx = cx:new_local_scope()
+      local body_div = codegen.block(div_cx, node.body)
+      local check_div = quote end
+      if dynamic_branches_assert then
+        check_div = quote
+          [diagnostic]
+          std.assert(false, ["falling back to slow path in task " .. task.name .. "\n"])
+        end
       end
+
+      local nodiv_cx = cx:new_local_scope(region_divergence)
+      local body_nodiv = codegen.block(nodiv_cx, node.body)
+
+      body = quote
+        if [cases] then
+          [body_nodiv]
+        else
+          [check_div]
+          [body_div]
+        end
+      end
+    else
+      body = codegen.block(cx, node.body)
     end
   else
     body = codegen.block(cx, node.body)

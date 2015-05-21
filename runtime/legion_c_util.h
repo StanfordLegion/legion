@@ -237,6 +237,7 @@ namespace LegionRuntime {
       {
         legion_index_space_t is_;
         is_.id = is.id;
+        is_.tid = is.tid;
         return is_;
       }
 
@@ -245,7 +246,26 @@ namespace LegionRuntime {
       {
         IndexSpace is;
         is.id = is_.id;
+        is.tid = is_.tid;
         return is;
+      }
+
+      static legion_index_partition_t
+      wrap(IndexPartition ip)
+      {
+        legion_index_partition_t ip_;
+        ip_.id = ip.id;
+        ip_.tid = ip.tid;
+        return ip_;
+      }
+
+      static IndexPartition
+      unwrap(legion_index_partition_t ip_)
+      {
+        IndexPartition ip;
+        ip.id = ip_.id;
+        ip.tid = ip_.tid;
+        return ip;
       }
 
       static legion_index_allocator_t
@@ -263,7 +283,7 @@ namespace LegionRuntime {
         IndexAllocator allocator(unwrap(allocator_.index_space),
                                  unwrap(allocator_.allocator));
         return allocator;
-      }
+      } 
 
       static legion_field_space_t
       wrap(FieldSpace fs)
@@ -304,7 +324,7 @@ namespace LegionRuntime {
       {
         legion_logical_partition_t r_;
         r_.tree_id = r.tree_id;
-        r_.index_partition = r.index_partition;
+        r_.index_partition = wrap(r.index_partition);
         r_.field_space = wrap(r.field_space);
         return r_;
       }
@@ -313,7 +333,7 @@ namespace LegionRuntime {
       unwrap(legion_logical_partition_t r_)
       {
         LogicalPartition r(r_.tree_id,
-                           r_.index_partition,
+                           unwrap(r_.index_partition),
                            unwrap(r_.field_space));
         return r;
       }

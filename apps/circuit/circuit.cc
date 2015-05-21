@@ -71,7 +71,7 @@ void region_main(const void *args, size_t arglen,
 		     wires_per_piece, pct_wire_in_piece, random_seed,
 		     steps, sync);
 
-    log_circuit(LEVEL_PRINT,"circuit settings: loops=%d pieces=%d nodes/piece=%d wires/piece=%d pct_in_piece=%d seed=%d",
+    log_circuit.print("circuit settings: loops=%d pieces=%d nodes/piece=%d wires/piece=%d pct_in_piece=%d seed=%d",
        num_loops, num_pieces, nodes_per_piece, wires_per_piece,
        pct_wire_in_piece, random_seed);
   }
@@ -164,7 +164,7 @@ void region_main(const void *args, size_t arglen,
   FutureMap last;
   for (int i = 0; i < num_loops; i++)
   {
-    log_circuit(LEVEL_PRINT,"starting loop %d of %d", i, num_loops);
+    log_circuit.print("starting loop %d of %d", i, num_loops);
 
     // Calculate new currents
     runtime->execute_index_space(ctx, CALC_NEW_CURRENTS, task_space,
@@ -182,12 +182,12 @@ void region_main(const void *args, size_t arglen,
                                   global_arg, local_args);
   }
 
-  log_circuit(LEVEL_PRINT,"waiting for all simulation tasks to complete");
+  log_circuit.print("waiting for all simulation tasks to complete");
   last.wait_all_results();
 
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
 
-  log_circuit(LEVEL_PRINT,"SUCCESS!");
+  log_circuit.print("SUCCESS!");
   {
     double sim_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
                        (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
@@ -211,7 +211,7 @@ void region_main(const void *args, size_t arglen,
   }
   LegionRuntime::LowLevel::DetailedTimer::report_timers();
 
-  log_circuit(LEVEL_PRINT,"simulation complete - destroying regions");
+  log_circuit.print("simulation complete - destroying regions");
 
   // Now we can destroy all the things that we made
   {
@@ -235,7 +235,7 @@ void calculate_currents_task_cpu(const void *global_args, size_t global_arglen,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU calculate currents for point %d",point.point_data[0]);
+  log_circuit.print("CPU calculate currents for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   calc_new_currents_cpu(p, physical_regions);
 }
@@ -247,7 +247,7 @@ void distribute_charge_task_cpu(const void *global_args, size_t global_arglen,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU distribute charge for point %d",point.point_data[0]);
+  log_circuit.print("CPU distribute charge for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_cpu(p, physical_regions);
 }
@@ -259,7 +259,7 @@ void update_voltages_task_cpu(const void *global_args, size_t global_arglen,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"CPU update voltages for point %d",point.point_data[0]);
+  log_circuit.print("CPU update voltages for point %d",point.point_data[0]);
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_cpu(p, physical_regions);
 }
@@ -273,7 +273,7 @@ void calculate_currents_task_gpu(const void *global_args, size_t global_arglen,
                                  const std::vector<PhysicalRegion> &physical_regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU calculate currents for point %d on proc %x",
+  log_circuit.print("GPU calculate currents for point %d on proc %x",
 	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   // Call the __host__ function in circuit_gpu.cc that launches the kernel
@@ -287,7 +287,7 @@ void distribute_charge_task_gpu(const void *global_args, size_t global_arglen,
                                 const std::vector<PhysicalRegion> &physical_regions,
                                 Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU distribute charge for point %d on proc %x",
+  log_circuit.print("GPU distribute charge for point %d on proc %x",
 	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   distribute_charge_gpu(p, physical_regions);
@@ -300,7 +300,7 @@ void update_voltages_task_gpu(const void *global_args, size_t global_arglen,
                               const std::vector<PhysicalRegion> &physical_regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  log_circuit(LEVEL_PRINT,"GPU update voltages for point %d on proc %x",
+  log_circuit.print("GPU update voltages for point %d on proc %x",
 	      point.point_data[0], runtime->get_executing_processor(ctx).id);
   CircuitPiece *p = (CircuitPiece*)local_args;
   update_voltages_gpu(p, physical_regions);
@@ -463,7 +463,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
                         int wires_per_piece, int pct_wire_in_piece, int random_seed,
 			int steps)
 {
-  log_circuit(LEVEL_PRINT,"Initializing circuit simulation...");
+  log_circuit.print("Initializing circuit simulation...");
   // inline map physical instances for the nodes and wire regions
   RegionRequirement wires_req(ckt.all_wires, READ_WRITE, EXCLUSIVE, ckt.all_wires);
   wires_req.add_field(ckt.wire_field);
@@ -677,7 +677,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   delete [] first_wires;
   delete [] first_nodes;
 
-  log_circuit(LEVEL_PRINT,"Finished initializing simulation...");
+  log_circuit.print("Finished initializing simulation...");
 
   return result;
 }

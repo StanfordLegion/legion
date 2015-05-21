@@ -152,7 +152,8 @@ protected:
                               RegionAccessor<AccessorType::Generic, float> *fa_voltage);
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 };
@@ -177,7 +178,8 @@ public:
   static const int MAPPER_ID = 0;
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 };
@@ -201,7 +203,8 @@ public:
   static const int MAPPER_ID = 0;
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
 };
@@ -250,7 +253,7 @@ namespace TaskHelper {
                         Context ctx, HighLevelRuntime *runtime)
   {
     const CircuitPiece *p = (CircuitPiece*)task->local_args;
-    T::cpu_base_impl(*p, regions);
+    T::cpu_base_impl(*p, regions, ctx, runtime);
   }
 
   template<typename T>

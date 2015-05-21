@@ -721,43 +721,43 @@ namespace LegionRuntime {
       // Called in Runtime destructor in runtime.cc
       static void finalize_legion_logging(const std::set<Processor> &processors)
       {
-        log_logging(LEVEL_INFO, "nodeinfo: {\"address_space\": %u, \"init_time\":%llu}", address_space, init_time);
+        log_logging.info("nodeinfo: {\"address_space\": %u, \"init_time\":%llu}", address_space, init_time);
         // global log messages
         for (unsigned idx = 0; idx < msgs_processor.size(); idx++)
         {
           LogMsgProcessor &msg = msgs_processor[idx];
           Machine *machine = Machine::get_machine();
-          log_logging(LEVEL_INFO, "processor: {\"address_space\": %d, \"id\":%u, \"utility\":%u, \"kind\":%d}", msg.address_space, msg.proc.id, msg.proc.get_utility_processor().id, machine->get_processor_kind(msg.proc));
+          log_logging.info("processor: {\"address_space\": %d, \"id\":%u, \"utility\":%u, \"kind\":%d}", msg.address_space, msg.proc.id, msg.proc.get_utility_processor().id, machine->get_processor_kind(msg.proc));
         }
         for (unsigned idx = 0; idx < msgs_memory.size(); idx++)
         {
           LogMsgMemory &msg = msgs_memory[idx];
-          log_logging(LEVEL_INFO, "memory: {\"id\":%d, \"kind\":%d, \"capacity\":%ld}", msg.mem.id, msg.kind, msg.capacity);
+          log_logging.info("memory: {\"id\":%d, \"kind\":%d, \"capacity\":%ld}", msg.mem.id, msg.kind, msg.capacity);
         }
         for (unsigned idx = 0; idx < msgs_proc_mem_affinity.size(); idx++)
         {
           LogMsgProcMemAffinity &msg = msgs_proc_mem_affinity[idx];
-          log_logging(LEVEL_INFO, "proc_mem_affinity: {\"proc\":%u, \"mem\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.proc.id, msg.mem.id, msg.bandwidth, msg.latency);
+          log_logging.info("proc_mem_affinity: {\"proc\":%u, \"mem\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.proc.id, msg.mem.id, msg.bandwidth, msg.latency);
         }
         for (unsigned idx = 0; idx < msgs_mem_mem_affinity.size(); idx++)
         {
           LogMsgMemMemAffinity &msg = msgs_mem_mem_affinity[idx];
-          log_logging(LEVEL_INFO, "mem_mem_affinity: {\"mem1\":%d, \"mem2\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.mem1.id, msg.mem2.id, msg.bandwidth, msg.latency);
+          log_logging.info("mem_mem_affinity: {\"mem1\":%d, \"mem2\":%d, \"bandwidth\":%ld, \"latency\":%ld}", msg.mem1.id, msg.mem2.id, msg.bandwidth, msg.latency);
         }
         for (unsigned idx = 0; idx < msgs_task_collection.size(); idx++)
         {
           LogMsgTaskCollection &msg = msgs_task_collection[idx];
-          log_logging(LEVEL_INFO, "task_collection: {\"task_id\":%d, \"leaf\":%d, \"idempotent\":%d, \"name\":\"%s\"}", msg.task_id, msg.leaf, msg.idempotent, msg.name);
+          log_logging.info("task_collection: {\"task_id\":%d, \"leaf\":%d, \"idempotent\":%d, \"name\":\"%s\"}", msg.task_id, msg.leaf, msg.idempotent, msg.name);
         }
         for (unsigned idx = 0; idx < msgs_task_variant.size(); idx++)
         {
           LogMsgTaskVariant &msg = msgs_task_variant[idx];
-          log_logging(LEVEL_INFO, "task_variant: {\"task_id\":%d, \"proc_kind\":%d, \"single_task\":%d, \"index_task\":%d, \"vid\":%ld}", msg.task_id, msg.proc_kind, msg.single_task, msg.index_task, msg.vid);
+          log_logging.info("task_variant: {\"task_id\":%d, \"proc_kind\":%d, \"single_task\":%d, \"index_task\":%d, \"vid\":%ld}", msg.task_id, msg.proc_kind, msg.single_task, msg.index_task, msg.vid);
         }
         for (unsigned idx = 0; idx < msgs_top_level_task.size(); idx++)
         {
           LogMsgTopLevelTask &msg = msgs_top_level_task[idx];
-          log_logging(LEVEL_INFO, "top_level_task: {\"task_id\":%d, \"unique_op_id\":%lld}", msg.task_id, msg.unique_op_id);
+          log_logging.info("top_level_task: {\"task_id\":%d, \"unique_op_id\":%lld}", msg.task_id, msg.unique_op_id);
         }
         // per thread log messages
         for (std::list<ProcessorProfiler *>::iterator it=processor_profilers.begin(); it != processor_profilers.end(); ++it)
@@ -766,7 +766,7 @@ namespace LegionRuntime {
           for (unsigned idx = 0; idx < prof.msgs_task_operation.size(); idx++)
           {
             LogMsgTaskOperation &msg = prof.msgs_task_operation[idx];
-            log_logging(LEVEL_INFO, "task_operation: {\"processor\":%u, \"is_individual\":%d, \"unique_op_id\":%lld, \"task_id\":%d, \"context\":%lld, \"time\":%lld, \"tag\":%lu}", msg.proc.id, msg.isIndividual, msg.unique_op_id, msg.task_id, msg.context, msg.time, msg.tag);
+            log_logging.info("task_operation: {\"processor\":%u, \"is_individual\":%d, \"unique_op_id\":%lld, \"task_id\":%d, \"context\":%lld, \"time\":%lld, \"tag\":%lu}", msg.proc.id, msg.isIndividual, msg.unique_op_id, msg.task_id, msg.context, msg.time, msg.tag);
           }
           for (unsigned idx = 0; idx < prof.msgs_operation.size(); idx++)
           {
@@ -781,137 +781,137 @@ namespace LegionRuntime {
               case CLOSE_OPERATION: kind = "CLOSE_OPERATION"; break;
               default: kind = "UNKNOWN_OPERATION"; break;
             }
-            log_logging(LEVEL_INFO, "operation: {\"processor\":%u, \"kind\":\"%s\", \"unique_op_id\":%lld, \"context\":%lld, \"time\":%lld}", msg.proc.id, kind, msg.unique_op_id, msg.context, msg.time);
+            log_logging.info("operation: {\"processor\":%u, \"kind\":\"%s\", \"unique_op_id\":%lld, \"context\":%lld, \"time\":%lld}", msg.proc.id, kind, msg.unique_op_id, msg.context, msg.time);
           }
           for (unsigned idx = 0; idx < prof.msgs_task_instance_variant.size(); idx++) {
             LogMsgTaskInstanceVariant &msg = prof.msgs_task_instance_variant[idx];
-            log_logging(LEVEL_INFO, "task_instance_variant: {\"unique_op_id\":%lld, \"vid\":%ld}", msg.unique_op_id, msg.vid);
+            log_logging.info("task_instance_variant: {\"unique_op_id\":%lld, \"vid\":%ld}", msg.unique_op_id, msg.vid);
           }
           for (unsigned idx = 0; idx < prof.msgs_index_slice.size(); idx++)
           {
             LogMsgIndexSlice &msg = prof.msgs_index_slice[idx];
-            log_logging(LEVEL_INFO, "index_slice: {\"index_id\":%lld, \"slice_id\":%lld}", msg.index_id, msg.slice_id);
+            log_logging.info("index_slice: {\"index_id\":%lld, \"slice_id\":%lld}", msg.index_id, msg.slice_id);
           }
           for (unsigned idx = 0; idx < prof.msgs_slice_slice.size(); idx++)
           {
             LogMsgSliceSlice &msg = prof.msgs_slice_slice[idx];
-            log_logging(LEVEL_INFO, "slice_slice: {\"slice_parent\":%lld, \"slice_subslice\":%lld}", msg.slice_parent, msg.slice_subslice);
+            log_logging.info("slice_slice: {\"slice_parent\":%lld, \"slice_subslice\":%lld}", msg.slice_parent, msg.slice_subslice);
           }
           for (unsigned idx = 0; idx < prof.msgs_point_point.size(); idx++)
           {
             LogMsgPointPoint &msg = prof.msgs_point_point[idx];
-            log_logging(LEVEL_INFO, "point_point: {\"orig_point\":%lld, \"new_point\":%lld}", msg.orig_point, msg.new_point);
+            log_logging.info("point_point: {\"orig_point\":%lld, \"new_point\":%lld}", msg.orig_point, msg.new_point);
           }
           for (unsigned idx = 0; idx < prof.msgs_slice_point.size(); idx++)
           {
             LogMsgSlicePoint &msg = prof.msgs_slice_point[idx];
-            log_logging(LEVEL_INFO, "slice_point: {\"slice_id\":%lld, \"point_id\":%lld, \"dim\":%d, \"d0\":%d, \"d1\":%d, \"d2\":%d}", msg.slice_id, msg.point_id, msg.point.dim, msg.point.point_data[0], msg.point.point_data[1], msg.point.point_data[2]);
+            log_logging.info("slice_point: {\"slice_id\":%lld, \"point_id\":%lld, \"dim\":%d, \"d0\":%d, \"d1\":%d, \"d2\":%d}", msg.slice_id, msg.point_id, msg.point.dim, msg.point.point_data[0], msg.point.point_data[1], msg.point.point_data[2]);
           }
           for (unsigned idx = 0; idx < prof.msgs_lowlevel_copy.size(); idx++)
           {
             LogMsgLowlevelCopy &msg = prof.msgs_lowlevel_copy[idx];
-            log_logging(LEVEL_INFO, "lowlevel_copy: {\"src_instance\":%u, \"dst_instance\":%u, \"index_handle\":%u, \"field_handle\":%d, \"tree_id\":%u, \"begin_event_id\":%d, \"begin_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d, \"redop\":%d, \"fields\":\"%s\"}", msg.src_instance.id, msg.dst_instance.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.start_event.id, msg.start_event.gen, msg.termination_event.id, msg.termination_event.gen, msg.redop, msg.fields.c_str());
+            log_logging.info("lowlevel_copy: {\"src_instance\":%u, \"dst_instance\":%u, \"index_handle\":%u, \"field_handle\":%d, \"tree_id\":%u, \"begin_event_id\":%d, \"begin_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d, \"redop\":%d, \"fields\":\"%s\"}", msg.src_instance.id, msg.dst_instance.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.start_event.id, msg.start_event.gen, msg.termination_event.id, msg.termination_event.gen, msg.redop, msg.fields.c_str());
           }
           for (unsigned idx = 0; idx < prof.msgs_operation_timing.size(); idx++)
           {
             LogMsgOperationTiming &msg = prof.msgs_operation_timing[idx];
-            log_logging(LEVEL_INFO, "operation_timing: {\"processor\":%u, \"unique_op_id\":%lld, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.unique_op_id, msg.kind, msg.time);
+            log_logging.info("operation_timing: {\"processor\":%u, \"unique_op_id\":%lld, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.unique_op_id, msg.kind, msg.time);
           }
           for (unsigned idx = 0; idx < prof.msgs_event_timing.size(); idx++)
           {
             LogMsgEventTiming &msg = prof.msgs_event_timing[idx];
-            log_logging(LEVEL_INFO, "event_timing: {\"address_space\": %u, \"processor\":%u, \"event_id\":%d, \"event_gen\":%d, \"kind\":%d, \"time\":%lld}", address_space, msg.proc.id, msg.event.id, msg.event.gen, msg.kind, msg.time);
+            log_logging.info("event_timing: {\"address_space\": %u, \"processor\":%u, \"event_id\":%d, \"event_gen\":%d, \"kind\":%d, \"time\":%lld}", address_space, msg.proc.id, msg.event.id, msg.event.gen, msg.kind, msg.time);
           }
           for (unsigned idx = 0; idx < prof.msgs_future_wait.size(); idx++)
           {
             LogMsgFutureWait &msg = prof.msgs_future_wait[idx];
-            log_logging(LEVEL_INFO, "future_wait: {\"processor\":%u, \"context\":%lld, \"wait_on\":%lld, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.context, msg.wait_on, msg.kind, msg.time);
+            log_logging.info("future_wait: {\"processor\":%u, \"context\":%lld, \"wait_on\":%lld, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.context, msg.wait_on, msg.kind, msg.time);
           }
           for (unsigned idx = 0; idx < prof.msgs_inline_wait.size(); idx++)
           {
             LogMsgInlineWait &msg = prof.msgs_inline_wait[idx];
-            log_logging(LEVEL_INFO, "inline_wait: {\"processor\":%u, \"context\":%lld, \"event_id\":%d, \"event_gen\":%d, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.context, msg.wait_on.id, msg.wait_on.gen, msg.kind, msg.time);
+            log_logging.info("inline_wait: {\"processor\":%u, \"context\":%lld, \"event_id\":%d, \"event_gen\":%d, \"kind\":%d, \"time\":%lld}", msg.proc.id, msg.context, msg.wait_on.id, msg.wait_on.gen, msg.kind, msg.time);
           }
           for (unsigned idx = 0; idx < prof.msgs_top_index_space.size(); idx++)
           {
             LogMsgTopIndexSpace &msg = prof.msgs_top_index_space[idx];
-            log_logging(LEVEL_INFO, "top_index_space: {\"id\":%d}", msg.space.id);
+            log_logging.info("top_index_space: {\"id\":%d}", msg.space.id);
           }
           for (unsigned idx = 0; idx < prof.msgs_index_partition.size(); idx++)
           {
             LogMsgIndexPartition &msg = prof.msgs_index_partition[idx];
-            log_logging(LEVEL_INFO, "index_partition: {\"parent\":%d, \"handle\":%d, \"disjoint\":%d, \"color\":%d}", msg.parent.id, msg.handle, msg.disjoint, msg.color);
+            log_logging.info("index_partition: {\"parent\":%d, \"handle\":%d, \"disjoint\":%d, \"color\":%d}", msg.parent.id, msg.handle, msg.disjoint, msg.color);
           }
           for (unsigned idx = 0; idx < prof.msgs_index_subspace.size(); idx++)
           {
             LogMsgIndexSubspace &msg = prof.msgs_index_subspace[idx];
-            log_logging(LEVEL_INFO, "index_subspace: {\"parent\":%d, \"handle\":%d, \"color\":%d}", msg.parent, msg.handle.id, msg.color);
+            log_logging.info("index_subspace: {\"parent\":%d, \"handle\":%d, \"color\":%d}", msg.parent, msg.handle.id, msg.color);
           }
           for (unsigned idx = 0; idx < prof.msgs_field_space.size(); idx++)
           {
             LogMsgFieldSpace &msg = prof.msgs_field_space[idx];
-            log_logging(LEVEL_INFO, "field_space: {\"handle\":%d}", msg.handle.get_id());
+            log_logging.info("field_space: {\"handle\":%d}", msg.handle.get_id());
           }
           for (unsigned idx = 0; idx < prof.msgs_field_creation.size(); idx++)
           {
             LogMsgFieldCreation &msg = prof.msgs_field_creation[idx];
-            log_logging(LEVEL_INFO, "field_creation: {\"handle\":%d, \"fid\":%d, \"local\":%d}", msg.handle.get_id(), msg.fid, msg.local);
+            log_logging.info("field_creation: {\"handle\":%d, \"fid\":%d, \"local\":%d}", msg.handle.get_id(), msg.fid, msg.local);
           }
           for (unsigned idx = 0; idx < prof.msgs_top_region.size(); idx++)
           {
             LogMsgTopRegion &msg = prof.msgs_top_region[idx];
-            log_logging(LEVEL_INFO, "top_region: {\"ispace\":%d, \"fspace\":%d, \"tid\":%d}", msg.ispace.id, msg.fspace.get_id(), msg.tid);
+            log_logging.info("top_region: {\"ispace\":%d, \"fspace\":%d, \"tid\":%d}", msg.ispace.id, msg.fspace.get_id(), msg.tid);
           }
           for (unsigned idx = 0; idx < prof.msgs_logical_requirement.size(); idx++)
           {
             LogMsgLogicalRequirement &msg = prof.msgs_logical_requirement[idx];
-            log_logging(LEVEL_INFO, "logical_requirement: {\"unique_op_id\":%lld, \"index\":%d, \"region\":%d, \"index_component\":%d, \"field_component\":%d, \"tid\":%d, \"privilege\":%d, \"prop\":%d, \"redop\":%d}", msg.unique_op_id, msg.index, msg.region, msg.index_component, msg.field_component, msg.tid, msg.privilege, msg.prop, msg.redop);
+            log_logging.info("logical_requirement: {\"unique_op_id\":%lld, \"index\":%d, \"region\":%d, \"index_component\":%d, \"field_component\":%d, \"tid\":%d, \"privilege\":%d, \"prop\":%d, \"redop\":%d}", msg.unique_op_id, msg.index, msg.region, msg.index_component, msg.field_component, msg.tid, msg.privilege, msg.prop, msg.redop);
           }
           for (unsigned idx = 0; idx < prof.msgs_requirement_fields.size(); idx++)
           {
             LogMsgRequirementFields &msg = prof.msgs_requirement_fields[idx];
             for (std::set<FieldID>::iterator it = msg.logical_fields.begin(); it!=msg.logical_fields.end(); ++it)
-              log_logging(LEVEL_INFO, "requirement_fields: {\"unique_op_id\":%lld, \"index\":%d, \"logical_field\":%d}", msg.unique_op_id, msg.index, *it);
+              log_logging.info("requirement_fields: {\"unique_op_id\":%lld, \"index\":%d, \"logical_field\":%d}", msg.unique_op_id, msg.index, *it);
           }
           for (unsigned idx = 0; idx < prof.msgs_mapping_dependence.size(); idx++)
           {
             LogMsgMappingDependence &msg = prof.msgs_mapping_dependence[idx];
-            log_logging(LEVEL_INFO, "mapping_dependence: {\"parent_context\":%lld, \"previous_id\":%lld, \"previous_index\":%d, \"next_id\":%lld, \"next_index\":%d, \"dep_type\":%d}", msg.parent_context, msg.previous_id, msg.previous_index, msg.next_id, msg.next_index, msg.dep_type);
+            log_logging.info("mapping_dependence: {\"parent_context\":%lld, \"previous_id\":%lld, \"previous_index\":%d, \"next_id\":%lld, \"next_index\":%d, \"dep_type\":%d}", msg.parent_context, msg.previous_id, msg.previous_index, msg.next_id, msg.next_index, msg.dep_type);
           }
           for (unsigned idx = 0; idx < prof.msgs_task_instance_requirement.size(); idx++)
           {
             LogMsgTaskInstanceRequirement &msg = prof.msgs_task_instance_requirement[idx];
-            log_logging(LEVEL_INFO, "task_instance_requirement: {\"unique_id\":%lld, \"index\":%d, \"handle\":%d}", msg.unique_id, msg.index, msg.handle.id);
+            log_logging.info("task_instance_requirement: {\"unique_id\":%lld, \"index\":%d, \"handle\":%d}", msg.unique_id, msg.index, msg.handle.id);
           }
           for (unsigned idx = 0; idx < prof.msgs_operation_events.size(); idx++)
           {
             LogMsgOperationEvents &msg = prof.msgs_operation_events[idx];
-            log_logging(LEVEL_INFO, "operation_events: {\"unique_op_id\":%lld, \"begin_event_id\":%d, \"begin_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d}", msg.unique_op_id, msg.start_event.id, msg.start_event.gen, msg.end_event.id, msg.end_event.gen);
+            log_logging.info("operation_events: {\"unique_op_id\":%lld, \"begin_event_id\":%d, \"begin_event_gen\":%d, \"end_event_id\":%d, \"end_event_gen\":%d}", msg.unique_op_id, msg.start_event.id, msg.start_event.gen, msg.end_event.id, msg.end_event.gen);
           }
           for (unsigned idx = 0; idx < prof.msgs_event_dependency.size(); idx++)
           {
             LogMsgEventDependency &msg = prof.msgs_event_dependency[idx];
-            log_logging(LEVEL_INFO, "event_dependency: {\"event1_id\":%d, \"event1_gen\":%d, \"event2_id\":%d, \"event2_gen\":%d}", msg.one.id, msg.one.gen, msg.two.id, msg.two.gen);
+            log_logging.info("event_dependency: {\"event1_id\":%d, \"event1_gen\":%d, \"event2_id\":%d, \"event2_gen\":%d}", msg.one.id, msg.one.gen, msg.two.id, msg.two.gen);
           }
           for (unsigned idx = 0; idx < prof.msgs_physical_instance.size(); idx++)
           {
             LogMsgPhysicalInstance &msg = prof.msgs_physical_instance[idx];
-            log_logging(LEVEL_INFO, "physical_instance: {\"instance\":%d, \"memory\":%d, \"index_handle\":%d, \"field_handle\":%d, \"tree_id\":%d, \"redop\":%d, \"fold\":%d, \"indirect_domain\":%d}", msg.instance.id, msg.memory.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.redop, msg.fold, msg.indirect_domain.is_id);
+            log_logging.info("physical_instance: {\"instance\":%d, \"memory\":%d, \"index_handle\":%d, \"field_handle\":%d, \"tree_id\":%d, \"redop\":%d, \"fold\":%d, \"indirect_domain\":%d}", msg.instance.id, msg.memory.id, msg.index_handle.id, msg.field_handle.get_id(), msg.tree_id, msg.redop, msg.fold, msg.indirect_domain.is_id);
           }
           for (unsigned idx = 0; idx < prof.msgs_phyiscal_user.size(); idx++)
           {
             LogMsgPhysicalUser &msg = prof.msgs_phyiscal_user[idx];
-            log_logging(LEVEL_INFO, "physical_user: {\"instance\":%d, \"unique_op_id\":%lld, \"index\":%d}", msg.instance.id, msg.unique_op_id, msg.index);
+            log_logging.info("physical_user: {\"instance\":%d, \"unique_op_id\":%lld, \"index\":%d}", msg.instance.id, msg.unique_op_id, msg.index);
           }
           for (unsigned idx = 0; idx < prof.msgs_lowlevel_copy_assoc.size(); idx++)
           {
             LogMsgLowlevelCopyAssoc &msg = prof.msgs_lowlevel_copy_assoc[idx];
-            log_logging(LEVEL_INFO, "llcopy_assoc: {\"highlevel_id\":%d, \"highlevel_gen\":%d, \"lowlevel_id\":%d, \"lowlevel_gen\":%d, \"channel_id\":%u}", msg.highlevel_end_event.id, msg.highlevel_end_event.gen, msg.lowlevel_end_event.id, msg.lowlevel_end_event.gen, msg.channel_id);
+            log_logging.info("llcopy_assoc: {\"highlevel_id\":%d, \"highlevel_gen\":%d, \"lowlevel_id\":%d, \"lowlevel_gen\":%d, \"channel_id\":%u}", msg.highlevel_end_event.id, msg.highlevel_end_event.gen, msg.lowlevel_end_event.id, msg.lowlevel_end_event.gen, msg.channel_id);
           }
           for (unsigned idx = 0; idx < prof.msgs_lowlevel_copy_channel.size(); idx++)
           {
             LogMsgLowlevelCopyChannel &msg = prof.msgs_lowlevel_copy_channel[idx];
-            log_logging(LEVEL_INFO, "llcopy_channel: {\"id\":%u, \"name\":%s}", msg.id, msg.name);
+            log_logging.info("llcopy_channel: {\"id\":%u, \"name\":%s}", msg.id, msg.name);
           }
         }
       }

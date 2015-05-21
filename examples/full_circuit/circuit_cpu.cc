@@ -362,7 +362,8 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
 
 /*static*/
 void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
-                                        const std::vector<PhysicalRegion> &regions)
+                                        const std::vector<PhysicalRegion> &regions,
+                                        Context ctx, HighLevelRuntime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, float> fa_current[WIRE_SEGMENTS];
@@ -399,7 +400,7 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
                               fa_current, fa_voltage))
     return;
 
-  LegionRuntime::HighLevel::IndexIterator itr(p.pvt_wires);
+  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
   float temp_v[WIRE_SEGMENTS+1];
   float temp_i[WIRE_SEGMENTS];
   float old_i[WIRE_SEGMENTS];
@@ -537,7 +538,8 @@ static inline void reduce_node(const RegionAccessor<AT1,typename REDOP::LHS> &pr
 
 /*static*/
 void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
-                                         const std::vector<PhysicalRegion> &regions)
+                                         const std::vector<PhysicalRegion> &regions,
+                                         Context ctx, HighLevelRuntime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr = 
@@ -567,7 +569,7 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   RegionAccessor<AccessorType::ReductionFold<AccumulateCharge>, float> fa_ghost_charge = 
     fa_ghost_temp.convert<AccessorType::ReductionFold<AccumulateCharge> >();
 
-  LegionRuntime::HighLevel::IndexIterator itr(p.pvt_wires);
+  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
   while (itr.has_next())
   {
     ptr_t wire_ptr = itr.next();
@@ -659,9 +661,10 @@ static inline void update_voltages(LogicalRegion lr,
                                    const RegionAccessor<AT,float> &fa_voltage,
                                    const RegionAccessor<AT,float> &fa_charge,
                                    const RegionAccessor<AT,float> &fa_cap,
-                                   const RegionAccessor<AT,float> &fa_leakage)
+                                   const RegionAccessor<AT,float> &fa_leakage,
+                                   Context ctx, HighLevelRuntime* rt)
 {
-  IndexIterator itr(lr);
+  IndexIterator itr(rt, ctx, lr);
   while (itr.has_next())
   {
     ptr_t node_ptr = itr.next();
@@ -679,7 +682,8 @@ static inline void update_voltages(LogicalRegion lr,
 
 /*static*/
 void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
-                                       const std::vector<PhysicalRegion> &regions)
+                                       const std::vector<PhysicalRegion> &regions,
+                                       Context ctx, HighLevelRuntime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage = 
@@ -703,9 +707,9 @@ void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
   //  regions[4].get_field_accessor(FID_LOCATOR).typeify<PointerLocation>();
 
   update_voltages(p.pvt_nodes, fa_pvt_voltage, fa_pvt_charge, 
-                  fa_pvt_cap, fa_pvt_leakage);
+                  fa_pvt_cap, fa_pvt_leakage, ctx, rt);
   update_voltages(p.shr_nodes, fa_shr_voltage, fa_shr_charge, 
-                  fa_shr_cap, fa_shr_leakage);
+                  fa_shr_cap, fa_shr_leakage, ctx, rt);
 #endif
 }
 
@@ -743,7 +747,7 @@ bool CheckTask::cpu_impl(const Task *task,
   RegionAccessor<AccessorType::Generic, float> fa_check = 
     regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>();
   LogicalRegion lr = task->regions[0].region;
-  IndexIterator itr(lr);
+  IndexIterator itr(runtime, ctx, lr);
   bool success = true;
   while (itr.has_next() && success)
   {

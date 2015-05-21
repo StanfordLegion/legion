@@ -49,7 +49,7 @@ terra edit(runtime : c.legion_runtime_t,
   var r_logical = c.legion_physical_region_get_logical_region(
     r_physical[0])
   var r_iterator = c.legion_index_iterator_create(
-    r_logical.index_space)
+    runtime, ctx, r_logical.index_space)
   var sum : int64 = 0
   while c.legion_index_iterator_has_next(r_iterator) do
     var p = c.legion_index_iterator_next(r_iterator)

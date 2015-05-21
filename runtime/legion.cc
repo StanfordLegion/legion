@@ -174,6 +174,60 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // IndexSpace 
+    /////////////////////////////////////////////////////////////
+
+    /*static*/ const IndexSpace IndexSpace::NO_SPACE = IndexSpace();
+
+    //--------------------------------------------------------------------------
+    IndexSpace::IndexSpace(IndexSpaceID _id, IndexTreeID _tid)
+      : id(_id), tid(_tid)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace::IndexSpace(void)
+      : id(0), tid(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace::IndexSpace(const IndexSpace &rhs)
+      : id(rhs.id), tid(rhs.tid)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // IndexPartition 
+    /////////////////////////////////////////////////////////////
+
+    /*static*/ const IndexPartition IndexPartition::NO_PART = IndexPartition();
+
+    //--------------------------------------------------------------------------
+    IndexPartition::IndexPartition(IndexPartitionID _id, IndexTreeID _tid)
+      : id(_id), tid(_tid)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition::IndexPartition(void)
+      : id(0), tid(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition::IndexPartition(const IndexPartition &rhs)
+      : id(rhs.id), tid(rhs.tid)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // FieldSpace 
     /////////////////////////////////////////////////////////////
 
@@ -242,7 +296,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LogicalPartition::LogicalPartition(void)
-      : tree_id(0), index_partition(0), field_space(FieldSpace::NO_SPACE)
+      : tree_id(0), index_partition(IndexPartition::NO_PART), 
+        field_space(FieldSpace::NO_SPACE)
     //--------------------------------------------------------------------------
     {
     }
@@ -749,7 +804,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -774,7 +829,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -799,7 +854,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -824,7 +879,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -849,7 +904,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -874,7 +929,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -896,7 +951,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -920,7 +975,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -944,7 +999,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        log_region(LEVEL_ERROR,"ERROR: Use different RegionRequirement "
+        log_region.error("ERROR: Use different RegionRequirement "
                                 "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -967,7 +1022,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -990,7 +1045,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1013,7 +1068,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        log_region(LEVEL_ERROR,"Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1809,18 +1864,30 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(IndexSpace space)
-      : enumerator(space.get_valid_mask().enumerate_enabled())
+    IndexIterator::IndexIterator(const Domain &dom)
+      : enumerator(dom.get_index_space().get_valid_mask().enumerate_enabled())
     //--------------------------------------------------------------------------
     {
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(LogicalRegion handle)
-      : enumerator(handle.get_index_space().get_valid_mask().enumerate_enabled())
+    IndexIterator::IndexIterator(HighLevelRuntime *rt, Context ctx,
+                                 IndexSpace space)
     //--------------------------------------------------------------------------
     {
+      Domain dom = rt->get_index_space_domain(ctx, space);
+      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
+      finished = !(enumerator->get_next(current_pointer,remaining_elmts));
+    }
+
+    //--------------------------------------------------------------------------
+    IndexIterator::IndexIterator(HighLevelRuntime *rt, Context ctx,
+                                 LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
+      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
@@ -1888,7 +1955,7 @@ namespace LegionRuntime {
           return it->first;
         }
       }
-      log_variant(LEVEL_ERROR,"User task %s (ID %d) has no registered variants "
+      log_variant.error("User task %s (ID %d) has no registered variants "
                               "for processors of kind %d and index space %d",
                               name, user_id, kind, index_space);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1953,7 +2020,7 @@ namespace LegionRuntime {
           return it->second;
         }
       }
-      log_variant(LEVEL_ERROR,"User task %s (ID %d) has no registered variants "
+      log_variant.error("User task %s (ID %d) has no registered variants "
                               "for processors of kind %d and index space %d",
                               name, user_id, kind, index);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2189,6 +2256,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+                                          IndexSpace parent,
+                                          const Domain &color_space,
+                                          const PointColoring &coloring,
+                                          PartitionKind part_kind,
+                                          int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_partition(ctx, parent, color_space, coloring,
+                                             part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition HighLevelRuntime::create_index_partition(
                                           Context ctx, IndexSpace parent,
                                           const Coloring &coloring,
@@ -2198,6 +2278,18 @@ namespace LegionRuntime {
     {
       return runtime->create_index_partition(ctx, parent, coloring, disjoint,
                                              part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+                                          IndexSpace parent, 
+                                          const Domain &color_space,
+                                          const DomainPointColoring &coloring,
+                                          PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_partition(ctx, parent, color_space,
+                                             coloring, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2211,6 +2303,18 @@ namespace LegionRuntime {
     {
       return runtime->create_index_partition(ctx, parent, color_space, coloring,
                                              disjoint, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_index_partition(Context ctx,
+                                       IndexSpace parent,
+                                       const Domain &color_space,
+                                       const MultiDomainPointColoring &coloring,
+                                       PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_partition(ctx, parent, color_space,
+                                             coloring, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2243,6 +2347,173 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->destroy_index_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_equal_partition(Context ctx, 
+                                                      IndexSpace parent,
+                                                      Domain color_space,
+                                                      size_t granularity,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_equal_partition(ctx, parent, color_space,
+                                             granularity, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_weighted_partition(Context ctx,
+                                      IndexSpace parent, Domain color_space,
+                                      const std::map<DomainPoint,int> &weights,
+                                      size_t granularity, int color,
+                                      bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_weighted_partition(ctx, parent, color_space, 
+                                                weights, granularity, 
+                                                color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_union(Context ctx,
+                                    IndexSpace parent, IndexPartition handle1,
+                                    IndexPartition handle2, PartitionKind kind,
+                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_union(ctx, parent, handle1, handle2, 
+                                                kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_intersection(
+                                                Context ctx, IndexSpace parent,
+                                                IndexPartition handle1, 
+                                                IndexPartition handle2,
+                                                PartitionKind kind, int color, 
+                                                bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_intersection(ctx, parent, handle1,
+                                                       handle2, kind,
+                                                       color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_difference(
+                                                Context ctx, IndexSpace parent,
+                                                IndexPartition handle1,
+                                                IndexPartition handle2,
+                                                PartitionKind kind, int color,
+                                                bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_difference(ctx, parent, handle1,
+                                                     handle2, kind, color,
+                                                     allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::create_cross_product_partitions(Context ctx,
+                                IndexPartition handle1, IndexPartition handle2,
+                                std::map<DomainPoint,IndexPartition> &handles,
+                                PartitionKind kind, int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      runtime->create_cross_product_partition(ctx, handle1, handle2, handles,
+                                              kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_field(Context ctx,
+                   LogicalRegion handle, LogicalRegion parent, FieldID fid, 
+                   const Domain &color_space, int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_field(ctx, handle, parent, fid,
+                                                color_space, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_image(Context ctx,
+                  IndexSpace handle, LogicalPartition projection,
+                  LogicalRegion parent, FieldID fid, const Domain &color_space,
+                  PartitionKind part_kind, int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_image(ctx, handle, projection,
+                                                parent, fid, color_space,
+                                                part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_partition_by_preimage(Context ctx,
+                  IndexPartition projection, LogicalRegion handle,
+                  LogicalRegion parent, FieldID fid, const Domain &color_space,
+                  PartitionKind part_kind, int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_preimage(ctx, projection, handle,
+                                                   parent, fid, color_space,
+                                                   part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition HighLevelRuntime::create_pending_partition(Context ctx,
+                             IndexSpace parent, const Domain &color_space, 
+                             PartitionKind part_kind, int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_pending_partition(ctx, parent, color_space, 
+                                               part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space_union(Context ctx,
+                      IndexPartition parent, const DomainPoint &color,
+                      const std::vector<IndexSpace> &handles) 
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space_union(ctx, parent, color, handles);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space_union(Context ctx,
+                      IndexPartition parent, const DomainPoint &color,
+                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space_union(ctx, parent, color, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space_intersection(Context ctx,
+                      IndexPartition parent, const DomainPoint &color,
+                      const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space_intersection(ctx, parent, 
+                                                      color, handles);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space_intersection(Context ctx,
+                      IndexPartition parent, const DomainPoint &color,
+                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space_intersection(ctx, parent, 
+                                                      color, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace HighLevelRuntime::create_index_space_difference(Context ctx,
+          IndexPartition parent, const DomainPoint &color, IndexSpace initial, 
+          const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space_difference(ctx, parent, color, 
+                                                    initial, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -2651,6 +2922,27 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->unmap_all_regions(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::fill_field(Context ctx, LogicalRegion handle,
+                                      LogicalRegion parent, FieldID fid,
+                                      const void *value, size_t value_size,
+                                      Predicate pred)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_field(ctx, handle, parent, fid, value, value_size, pred);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::fill_fields(Context ctx, LogicalRegion handle,
+                                       LogicalRegion parent,
+                                       const std::set<FieldID> &fields,
+                                       const void *value, size_t size,
+                                       Predicate pred)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, handle, parent, fields, value, size, pred);
     }
 
     //--------------------------------------------------------------------------

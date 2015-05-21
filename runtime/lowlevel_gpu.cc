@@ -121,7 +121,7 @@ namespace LegionRuntime {
       const int gpu_index;
       const size_t zcmem_size, fbmem_size;
       const size_t zcmem_reserve, fbmem_reserve;
-      const bool gpu_dma_thread;
+      GPUWorker *gpu_worker;
       void *zcmem_cpu_base;
       void *zcmem_gpu_base;
       void *fbmem_gpu_base;
@@ -129,6 +129,7 @@ namespace LegionRuntime {
       bool initialized;
       bool worker_enabled;
       bool shutdown_requested;
+      bool have_complete_operations;
       int current_stream;
       pthread_t gpu_thread;
       gasnet_hsl_t mutex;
@@ -159,13 +160,13 @@ namespace LegionRuntime {
                int num_local_gpus,
                size_t _zcmem_size, size_t _fbmem_size,
                size_t _zcmem_res, size_t _fbmem_res,
-               bool gpu_dma, int streams)
+               GPUWorker *worker, int streams)
 	: gpu(_gpu), gpu_index(_gpu_index),
           zcmem_size(_zcmem_size), fbmem_size(_fbmem_size),
           zcmem_reserve(_zcmem_res), fbmem_reserve(_fbmem_res),
-          gpu_dma_thread(gpu_dma),
+          gpu_worker(worker),
           initialized(false), worker_enabled(false), 
-          shutdown_requested(false),
+          shutdown_requested(false), have_complete_operations(false),
 	  current_stream(0)
       {
 	gasnet_hsl_init(&mutex);
@@ -262,7 +263,7 @@ namespace LegionRuntime {
                                    CU_STREAM_NON_BLOCKING) );
         }
 
-	log_gpu(LEVEL_INFO, "gpu initialized: zcmem=%p/%p fbmem=%p",
+	log_gpu.info("gpu initialized: zcmem=%p/%p fbmem=%p",
 		zcmem_cpu_base, zcmem_gpu_base, fbmem_gpu_base);
 
 	// set the initialized flag and maybe wake up parent
@@ -283,10 +284,10 @@ namespace LegionRuntime {
           Processor::TaskIDTable::iterator it = 
             get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
           if (it != get_runtime()->task_table.end()) {
-            log_gpu(LEVEL_INFO, "calling processor initialization task: proc=" IDFMT "", 
+            log_gpu.info("calling processor initialization task: proc=" IDFMT "", 
                     gpu->me.id);
             (it->second)(0, 0, gpu->me);
-            log_gpu(LEVEL_INFO, "finished processor initialization task: proc=" IDFMT "", 
+            log_gpu.info("finished processor initialization task: proc=" IDFMT "", 
                     gpu->me.id);
           } 
         }
@@ -295,52 +296,29 @@ namespace LegionRuntime {
 	  // get all the copies and a job off the job queue - sleep if nothing there
 	  GPUTask *task = NULL;
           std::vector<GPUJob*> ready_copies;
+          // Only need to check for completeness if we don't have a worker
+          bool perform_checks = false;
 	  {
 	    AutoHSLLock a(mutex);
-	    while(tasks.empty() && copies.empty() && !shutdown_requested) {
-              // As long as we have CUDA events on streams
-              // we need to keep polling so don't ever go to
-              // sleep while we have pending operations either
-              // in the form of copies or kernel launches
-              bool has_pending_operations = false;
-              // If we have a DMA thread we don't need to check this
-              if (!gpu_dma_thread && (!host_device_copies.empty() || 
-                  !device_host_copies.empty() || !device_device_copies.empty()))
-                has_pending_operations = true;
-              // If we still have no pending operations, check our task
-              // We always need to do this
-              if (!has_pending_operations)
-              {
-                for (unsigned idx = 0; idx < pending_tasks.size(); idx++)
-                {
-                  if (!pending_tasks[idx].empty())
-                  {
-                    has_pending_operations = true;
-                    break;
-                  }
-                }
-              }
-              //
-	      if (!has_pending_operations) {
-		log_gpu.debug("job queue empty - sleeping\n");
+            // If we don't have anything to do then we can go to sleep
+            if (tasks.empty() && 
+                (gpu_worker || (copies.empty() && !have_complete_operations))) {
+                log_gpu.debug("job queue empty - sleeping\n");
 		gasnett_cond_wait(&worker_condvar, &mutex.lock);
 		if(shutdown_requested) {
 		  log_gpu.debug("awoke due to shutdown request...\n");
 		  break;
 		}
 		log_gpu.debug("awake again...\n");
-	      }
-              else
-              {
-                // We have pending operations so break out
-                break;
-              }
-	    }
+            }
 	    if(shutdown_requested) break;
-            if (!gpu_dma_thread)
+            if (!gpu_worker)
             {
               ready_copies.insert(ready_copies.end(),copies.begin(),copies.end());
               copies.clear();
+              perform_checks = have_complete_operations;
+              // Reset if we have complete operations
+              have_complete_operations = false;
             }
             if (!tasks.empty())
             {
@@ -349,14 +327,15 @@ namespace LegionRuntime {
             }
 	  }
 
-          // Check to see if any of our tasks are done
-          check_for_complete_tasks();
-
-          if (!gpu_dma_thread)
-          {
+          // Perform completeness checks if necessary
+          if (perform_checks) {
+            // Check to see if any of our tasks are done
+            check_for_complete_tasks();
             // Check to see if any of our copies have completed
-            check_for_complete_copies();  
+            check_for_complete_copies();
+          }
 
+          if (!ready_copies.empty()) {
             // Launch all the copies first since we know that they
             // are going to be asynchronous on streams that won't block tasks
             // These calls well enqueue the copies on the right queue.
@@ -391,6 +370,8 @@ namespace LegionRuntime {
             }
             else
             {
+              // Retake the lock to add this to the set of pending tasks
+              AutoHSLLock a(mutex);
               // Add it to the set of tasks to query
               pending_tasks[current_stream].push_back(task);
             }
@@ -405,11 +386,11 @@ namespace LegionRuntime {
         Processor::TaskIDTable::iterator it = 
           get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
         if(it != get_runtime()->task_table.end()) {
-          log_gpu(LEVEL_INFO, "calling processor shutdown task: proc=" IDFMT "", gpu->me.id);
+          log_gpu.info("calling processor shutdown task: proc=" IDFMT "", gpu->me.id);
 
           (it->second)(0, 0, gpu->me);
 
-          log_gpu(LEVEL_INFO, "finished processor shutdown task: proc=" IDFMT "", gpu->me.id);
+          log_gpu.info("finished processor shutdown task: proc=" IDFMT "", gpu->me.id);
         }
 
         // Synchronize the device so we can flush any printf buffers
@@ -458,7 +439,7 @@ namespace LegionRuntime {
       {
         AutoHSLLock a(mutex);
 
-	bool was_empty = tasks.empty() && copies.empty();
+	bool was_empty = tasks.empty();
         // Add it based on its priority
         // Common case
         if (tasks.empty() || (tasks.back()->priority >= job->priority))
@@ -489,17 +470,31 @@ namespace LegionRuntime {
 
       void enqueue_copy(GPUJob *job)
       {
-        AutoHSLLock a(mutex);
+        bool notify_worker = false;
+        {
+          AutoHSLLock a(mutex);
 
-        bool was_empty = tasks.empty() && copies.empty();
-        copies.push_back(job);
+          bool was_empty = copies.empty();
+          copies.push_back(job);
 
-        if (was_empty)
-          gasnett_cond_signal(&worker_condvar);
+          if (was_empty)
+          {
+            if (!gpu_worker) {
+              if (tasks.empty())
+                gasnett_cond_signal(&worker_condvar);
+            } else {
+              notify_worker = true;
+            }
+          }
+        }
+        if (notify_worker)
+          gpu_worker->notify_pending_copy(gpu);
       }
 
       void check_for_complete_tasks(void)
       {
+        // Need to hold the lock when checking this
+        AutoHSLLock a(mutex);
         for (unsigned idx = 0; idx < pending_tasks.size(); idx++)
         {
           std::deque<GPUJob*> &pending_stream = pending_tasks[idx];
@@ -608,7 +603,7 @@ namespace LegionRuntime {
         CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
       }
 
-      void handle_copies(void)
+      void launch_copies(void)
       {
         if (!shutdown_requested)
         {
@@ -616,8 +611,6 @@ namespace LegionRuntime {
           //CHECK_CU( cuCtxPushCurrent(proc_ctx) );
           // Don't check for errors here because CUDA is dumb
           cuCtxPushCurrent(proc_ctx);
-          // First see if any of our copies are ready
-          check_for_complete_copies();
           std::vector<GPUJob*> ready_copies;
           // Get any copies that are ready to be performed
           {
@@ -636,6 +629,58 @@ namespace LegionRuntime {
           //CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
           // Don't check for errors here because CUDA is dumb
           cuCtxPopCurrent(&proc_ctx);
+        }
+      }
+
+      void complete_tasks(void)
+      {
+        if (!shutdown_requested)
+        {
+          // Push our context onto the stack
+          //CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPushCurrent(proc_ctx);
+          check_for_complete_tasks();
+          // Now pop our context back off the stack
+          //CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPopCurrent(&proc_ctx);
+        }
+      }
+
+      void complete_copies(void)
+      {
+        if (!shutdown_requested)
+        {
+          // Push our context onto the stack
+          //CHECK_CU( cuCtxPushCurrent(proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPushCurrent(proc_ctx);
+          check_for_complete_copies();
+          // Now pop our context back off the stack
+          //CHECK_CU( cuCtxPopCurrent(&proc_ctx) );
+          // Don't check for errors here because CUDA is dumb
+          cuCtxPopCurrent(&proc_ctx);
+        }
+      }
+
+      void process_callback(CUstream stream)
+      {
+        // If we have a GPU DMA worker, see if it is
+        // one of the DMA streams and then notify the worker
+        if (gpu_worker) {
+          if ((stream == host_to_device_stream) ||
+              (stream == device_to_host_stream) || 
+              (stream == device_to_device_stream) ||
+              (stream == peer_to_peer_stream))
+            gpu_worker->notify_complete_copy(gpu);
+          else
+            gpu_worker->notify_complete_task(gpu);
+        } else {
+          // Otherwise notify ourselves that we have a complete operation
+          AutoHSLLock a(mutex);
+          have_complete_operations = true;
+          gasnett_cond_signal(&worker_condvar);
         }
       }
     public:
@@ -777,7 +822,7 @@ namespace LegionRuntime {
       //for(size_t i = 0; (i < arglen) && (i < 40); i++)
       //	sprintf(argstr+2*i, "%02x", ((unsigned char *)args)[i]);
       //if(arglen > 40) strcpy(argstr+80, "...");
-      //log_gpu(LEVEL_DEBUG, "task start: %d (%p) (%s)", func_id, fptr, argstr);
+      //log_gpu.debug("task start: %d (%p) (%s)", func_id, fptr, argstr);
 
       // make sure CUDA driver's state is ok before we start
       //assert(cudaGetLastError() == cudaSuccess);
@@ -796,6 +841,9 @@ namespace LegionRuntime {
 #endif
       // Now log our CUDA event on the stream
       CHECK_CU( cuEventRecord(complete_event, local_stream) );
+      // Add a callback for when the event has triggered
+      CHECK_CU( cuStreamAddCallback(local_stream, GPUProcessor::handle_callback, 
+                                    (void*)gpu, 0) );
       // A useful debugging macro
 #ifdef FORCE_GPU_STREAM_SYNCHRONIZE
       CHECK_CU( cuStreamSynchronize(local_stream) );
@@ -811,7 +859,7 @@ namespace LegionRuntime {
       }
 #endif
 
-      //log_gpu(LEVEL_DEBUG, "task end: %d (%p) (%s)", func_id, fptr, argstr);
+      //log_gpu.debug("task end: %d (%p) (%s)", func_id, fptr, argstr);
     }
 
     void GPUTask::finish_job(void)
@@ -888,6 +936,9 @@ namespace LegionRuntime {
           gpu->internal->add_peer_to_peer_copy(this);
         else
           assert(false);
+        // Add a callback to the stream to record when the operation is done
+        CHECK_CU( cuStreamAddCallback(local_stream, GPUProcessor::handle_callback,
+                                      (void*)gpu, 0) );
       }
 
     protected:
@@ -1229,13 +1280,13 @@ namespace LegionRuntime {
     GPUProcessor::GPUProcessor(Processor _me, int _gpu_index, 
              int num_local_gpus,
 	     size_t _zcmem_size, size_t _fbmem_size, 
-             size_t _stack_size, bool gpu_dma_thread, int _streams)
+             size_t _stack_size, GPUWorker *worker, int _streams)
       : Processor::Impl(_me, Processor::TOC_PROC)
     {
       internal = new GPUProcessor::Internal(this, _gpu_index, num_local_gpus,
                                             _zcmem_size, _fbmem_size,
                                             (16 << 20), (32 << 20),
-                                            gpu_dma_thread, _streams);
+                                            worker, _streams);
 
       // enqueue a GPU init job before we do anything else
       Processor::TaskIDTable::iterator it = get_runtime()->task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
@@ -1265,6 +1316,11 @@ namespace LegionRuntime {
       assert(tls_val != NULL);
       GPUProcessor *gpu = (GPUProcessor*)tls_val;
       return gpu->me;
+    }
+
+    /*static*/ void GPUProcessor::handle_callback(CUstream stream, CUresult res, void *data)
+    {
+      ((GPUProcessor*)data)->process_callback(stream);
     }
 
     void GPUProcessor::start_worker_thread(void)
@@ -1460,14 +1516,28 @@ namespace LegionRuntime {
       return (peer_gpus.find(peer) != peer_gpus.end());
     }
 
-    void GPUProcessor::handle_copies(void)
+    void GPUProcessor::launch_copies(void)
     {
-      internal->handle_copies();
+      internal->launch_copies();
+    }
+
+    void GPUProcessor::complete_tasks(void)
+    {
+      internal->complete_tasks();
+    }
+
+    void GPUProcessor::complete_copies(void)
+    {
+      internal->complete_copies();
+    }
+    
+    void GPUProcessor::process_callback(CUstream stream)
+    {
+      internal->process_callback(stream);
     }
 
     /*static*/ GPUProcessor** GPUProcessor::node_gpus;
     /*static*/ size_t GPUProcessor::num_node_gpus;
-    static volatile bool dma_shutdown_requested = false;
     static std::vector<pthread_t> dma_threads;
 
     struct gpu_dma_args {
@@ -1475,58 +1545,126 @@ namespace LegionRuntime {
       size_t num_node_gpus;
     };
 
-    /*static*/
-    void* GPUProcessor::gpu_dma_worker_loop(void *args)
+    GPUWorker::GPUWorker(void)
+      : worker_shutdown_requested(false)
     {
-      size_t num_local = GPUProcessor::num_node_gpus;
-      GPUProcessor **local_gpus = GPUProcessor::node_gpus;
-      while (!dma_shutdown_requested)
+      gasnet_hsl_init(&worker_lock);
+      gasnett_cond_init(&worker_cond);
+    }
+
+    GPUWorker::~GPUWorker(void)
+    {
+    }
+
+    void GPUWorker::notify_pending_copy(GPUProcessor *proc)
+    {
+      AutoHSLLock a(worker_lock);
+      pending_copies.insert(proc);
+      gasnett_cond_signal(&worker_cond);
+    }
+
+    void GPUWorker::notify_complete_task(GPUProcessor *proc)
+    {
+      AutoHSLLock a(worker_lock);
+      complete_tasks.insert(proc);
+      gasnett_cond_signal(&worker_cond);
+    }
+
+    void GPUWorker::notify_complete_copy(GPUProcessor *proc)
+    {
+      AutoHSLLock a(worker_lock);
+      complete_copies.insert(proc);
+      gasnett_cond_signal(&worker_cond);
+    }
+
+    void GPUWorker::shutdown(void)
+    {
+      AutoHSLLock a(worker_lock);
+      worker_shutdown_requested = true;
+      gasnett_cond_signal(&worker_cond);
+    }
+
+    Processor GPUWorker::get_processor(void) const
+    {
+      // should never be called
+      assert(false);
+      return Processor::NO_PROC;
+    }
+
+    void GPUWorker::thread_main(void)
+    {
+      std::vector<GPUProcessor*> pending;
+      std::vector<GPUProcessor*> tasks;
+      std::vector<GPUProcessor*> copies;
+      while (true) 
       {
-        // Iterate over all the GPU processors and perform the copies
-        for (unsigned idx = 0; idx < num_local; idx++)
         {
-          local_gpus[idx]->handle_copies();
+          AutoHSLLock a(worker_lock);
+          // See if we have any work to do
+          if (pending_copies.empty() && complete_tasks.empty() &&
+              complete_copies.empty()) {
+            if (worker_shutdown_requested)
+              break;
+            else
+              gasnett_cond_wait(&worker_cond, &worker_lock.lock);
+          } else {
+            pending.insert(pending.end(), pending_copies.begin(), pending_copies.end());
+            pending_copies.clear();
+            tasks.insert(tasks.end(), complete_tasks.begin(), complete_tasks.end());
+            complete_tasks.clear();
+            copies.insert(copies.end(), complete_copies.begin(), complete_copies.end());
+            complete_copies.clear();
+          }
         }
+        // Now that we've released the lock, handle the copies
+        for (std::vector<GPUProcessor*>::const_iterator it = pending.begin();
+              it != pending.end(); it++)
+        {
+          (*it)->launch_copies();
+        }
+        pending.clear();
+        for (std::vector<GPUProcessor*>::const_iterator it = tasks.begin();
+              it != tasks.end(); it++)
+        {
+          (*it)->complete_tasks();
+        }
+        tasks.clear();
+        for (std::vector<GPUProcessor*>::const_iterator it = copies.begin();
+              it != copies.end(); it++)
+        {
+          (*it)->complete_copies();
+        }
+        copies.clear();
       }
-      free(local_gpus);
-      return NULL;
+    }
+
+    void GPUWorker::sleep_on_event(Event wait_for, bool block)
+    {
+      // should never be called
+      assert(false);
     }
 
     /*static*/
-    void GPUProcessor::start_gpu_dma_thread(const std::vector<GPUProcessor*> &local)
+    GPUWorker* GPUWorker::start_gpu_worker_thread(size_t stack_size)
     {
-      GPUProcessor::num_node_gpus = local.size();
-      GPUProcessor::node_gpus = (GPUProcessor**)malloc(local.size()*sizeof(GPUProcessor*));
-      for (unsigned idx = 0; idx < local.size(); idx++)
-        GPUProcessor::node_gpus[idx] = local[idx];
-      pthread_attr_t attr;
-      CHECK_PTHREAD( pthread_attr_init(&attr) );
-      if (proc_assignment)
-        proc_assignment->bind_thread(-1, &attr, "GPU DMA worker");
-      pthread_t thread;
-      CHECK_PTHREAD( pthread_create(&thread, 0, gpu_dma_worker_loop, 0) );
-      CHECK_PTHREAD( pthread_attr_destroy(&attr) );
-      dma_threads.push_back(thread);
-#ifdef DEADLOCK_TRACE
-      get_runtime()->add_thread(&thread);
-#endif
+      GPUWorker *&the_gpu_worker = get_worker();
+      the_gpu_worker = new GPUWorker();
+      the_gpu_worker->start_thread(stack_size, -1, "GPU worker");
+      return the_gpu_worker;
+    }
+
+    /*static*/ void GPUWorker::stop_gpu_worker_thread(void)
+    {
+      GPUWorker *worker = get_worker();
+      if (worker != NULL)
+        get_worker()->shutdown(); 
     }
 
     /*static*/
-    void GPUProcessor::stop_gpu_dma_threads(void)
+    GPUWorker*& GPUWorker::get_worker(void)
     {
-      dma_shutdown_requested = true;
-
-      // no need to signal right now - they're all spinning
-      while(!dma_threads.empty()) {
-	pthread_t t = dma_threads.back();
-	dma_threads.pop_back();
-	
-	void *dummy;
-	CHECK_PTHREAD( pthread_join(t, &dummy) );
-      }
-
-      dma_shutdown_requested = false;
+      static GPUWorker *worker = NULL;
+      return worker;
     }
 
 #if 0
@@ -1989,17 +2127,17 @@ namespace LegionRuntime {
       {
 #ifdef __MACH__
         if (result == CUDA_ERROR_OPERATING_SYSTEM) {
-          log_gpu(LEVEL_ERROR,"ERROR: Device side asserts are not supported by the "
+          log_gpu.error("ERROR: Device side asserts are not supported by the "
                               "CUDA driver for MAC OSX, see NVBugs 1628896.");
         }
 #endif
         if (result == CUDA_ERROR_NO_BINARY_FOR_GPU) {
-          log_gpu(LEVEL_ERROR,"ERROR: The binary was compiled for the wrong GPU "
+          log_gpu.error("ERROR: The binary was compiled for the wrong GPU "
                               "architecture. Update the 'GPU_ARCH' flag at the top "
                               "of runtime/runtime.mk to match your current GPU "
                               "architecture.");
         }
-        log_gpu(LEVEL_ERROR,"Failed to load CUDA module! Error log: %s", 
+        log_gpu.error("Failed to load CUDA module! Error log: %s", 
                 log_error_buffer);
 #if __CUDA_API_VERSION >= 6050
         const char *name, *str;
@@ -2013,7 +2151,7 @@ namespace LegionRuntime {
         assert(0);
       }
       else
-        log_gpu(LEVEL_INFO,"Loaded CUDA Module. JIT Output: %s", log_info_buffer);
+        log_gpu.info("Loaded CUDA Module. JIT Output: %s", log_info_buffer);
       free(log_info_buffer);
       free(log_error_buffer);
     }
@@ -2029,14 +2167,14 @@ namespace LegionRuntime {
     // Helper methods for replacing the CUDA runtime API calls
     /*static*/ cudaError_t GPUProcessor::stream_create(cudaStream_t *stream)
     {
-      log_gpu(LEVEL_ERROR,"Stream creation not permitted in Legion CUDA!");
+      log_gpu.error("Stream creation not permitted in Legion CUDA!");
       assert(false);
       return cudaSuccess;
     }
 
     /*static*/ cudaError_t GPUProcessor::stream_destroy(cudaStream_t stream)
     {
-      log_gpu(LEVEL_ERROR,"Stream destruction not permitted in Legion CUDA!");
+      log_gpu.error("Stream destruction not permitted in Legion CUDA!");
       assert(false);
       return cudaSuccess;
     }
@@ -2118,9 +2256,10 @@ namespace LegionRuntime {
       assert(!launch_configs.empty());
       LaunchConfig &config = launch_configs.back();
       // Find our function
+      CUfunction f;
       std::map<const void*,CUfunction>::const_iterator finder = 
         device_functions.find(func);
-      assert(finder != device_functions.end());
+      if (finder != device_functions.end()) f = finder->second; else f = (CUfunction)func;
       void *args[] = { 
         CU_LAUNCH_PARAM_BUFFER_POINTER, kernel_arg_buffer,
         CU_LAUNCH_PARAM_BUFFER_SIZE, (void*)&kernel_arg_size,
@@ -2128,7 +2267,7 @@ namespace LegionRuntime {
       };
 
       // Launch the kernel on our stream dammit!
-      CHECK_CU( cuLaunchKernel(finder->second, config.grid.x, config.grid.y, config.grid.z,
+      CHECK_CU( cuLaunchKernel(f, config.grid.x, config.grid.y, config.grid.z,
                                config.block.x, config.block.y, config.block.z,
                                config.shared, get_current_task_stream(), NULL, args) );
       // Clean everything up from the launch

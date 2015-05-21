@@ -96,7 +96,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     ArgumentMap::Impl::Impl(ArgumentMapStore *st,
-      const std::map<DomainPoint,TaskArgument,DomainPoint::STLComparator> &args)
+                            const std::map<DomainPoint,TaskArgument> &args)
       : Collectable(), arguments(args), next(NULL), store(st), frozen(false)
     //--------------------------------------------------------------------------
     {
@@ -216,8 +216,8 @@ namespace LegionRuntime {
         }
         else
         {
-          std::map<DomainPoint,TaskArgument,DomainPoint::STLComparator>::
-            iterator finder = arguments.find(point);
+          std::map<DomainPoint,TaskArgument>::iterator finder = 
+                                            arguments.find(point);
           if (finder != arguments.end())
           {
             arguments.erase(finder);
@@ -241,8 +241,8 @@ namespace LegionRuntime {
     {
       if (next == NULL)
       {
-        std::map<DomainPoint,TaskArgument,DomainPoint::STLComparator>::
-          const_iterator finder = arguments.find(point);
+        std::map<DomainPoint,TaskArgument>::const_iterator finder = 
+                                                arguments.find(point);
         if (finder != arguments.end())
           return finder->second;
         // Couldn't find it so return an empty argument
@@ -476,7 +476,7 @@ namespace LegionRuntime {
       if (empty)
       {
         if (producer_op != NULL)
-          log_run(LEVEL_ERROR,"Accessing empty future! (UID %lld)",
+          log_run.error("Accessing empty future! (UID %lld)",
                               producer_op->get_unique_op_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -528,7 +528,7 @@ namespace LegionRuntime {
       if (empty)
       {
         if (producer_op != NULL)
-          log_run(LEVEL_ERROR,"Accessing empty future! (UID %lld)",
+          log_run.error("Accessing empty future! (UID %lld)",
                               producer_op->get_unique_op_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -1029,8 +1029,8 @@ namespace LegionRuntime {
         Event lock_event = lock.acquire(0, true/*exclusive*/);
         lock_event.wait(true/*block*/);
         // Check to see if we already have a future for the point
-        std::map<DomainPoint,Future,DomainPoint::STLComparator>::const_iterator
-          finder = futures.find(point);
+        std::map<DomainPoint,Future>::const_iterator finder = 
+                                              futures.find(point);
         if (finder != futures.end())
         {
           Future result = finder->second;
@@ -1100,8 +1100,7 @@ namespace LegionRuntime {
       assert(valid);
 #endif
       AutoLock l_lock(lock);
-      for (std::map<DomainPoint,Future,
-            DomainPoint::STLComparator>::const_iterator it = 
+      for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
         runtime->help_complete_future(it->second);
@@ -1117,8 +1116,7 @@ namespace LegionRuntime {
 #endif
       bool result = false;
       AutoLock l_lock(lock);
-      for (std::map<DomainPoint,Future,
-            DomainPoint::STLComparator>::const_iterator it = 
+      for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
         bool restart = runtime->help_reset_future(it->second);
@@ -1376,7 +1374,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
-        log_inst(LEVEL_ERROR,"Requested field accessor for field %d "
+        log_inst.error("Requested field accessor for field %d "
             "without privleges!", fid);
         assert(false);
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
@@ -1820,12 +1818,12 @@ namespace LegionRuntime {
     void ProcessorManager::add_mapper(MapperID mid, Mapper *m, bool check)
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_SPEW,"Adding mapper %d on processor " IDFMT "", 
+      log_run.spew("Adding mapper %d on processor " IDFMT "", 
                           mid, local_proc.id);
 #ifdef DEBUG_HIGH_LEVEL
       if (check && (mid == 0))
       {
-        log_run(LEVEL_ERROR,"Invalid mapping ID.  ID 0 is reserved.");
+        log_run.error("Invalid mapping ID.  ID 0 is reserved.");
         assert(false);
         exit(ERROR_RESERVED_MAPPING_ID);
       } 
@@ -1918,8 +1916,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -1963,8 +1960,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2009,8 +2005,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -2056,8 +2051,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2103,8 +2097,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -2150,8 +2143,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2197,8 +2189,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
     }
@@ -2244,8 +2235,7 @@ namespace LegionRuntime {
         }
       } while (BLOCK && wait_on.exists());
       if (!BLOCK && wait_on.exists())
-        log_run(LEVEL_WARNING,
-                    "Ignoring wait request in scheduling mapper call!");
+        log_run.warning(                    "Ignoring wait request in scheduling mapper call!");
       if (!messages.empty())
         send_mapper_messages(map_id, messages);
       return result;
@@ -2750,7 +2740,7 @@ namespace LegionRuntime {
                                            const std::vector<MapperID> &thieves)
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_SPEW,"handling a steal request on processor " IDFMT " "
+      log_run.spew("handling a steal request on processor " IDFMT " "
                          "from processor " IDFMT "", local_proc.id,thief.id);
       // Iterate over the task descriptions, asking the appropriate mapper
       // whether we can steal the task
@@ -2869,7 +2859,7 @@ namespace LegionRuntime {
         for (std::set<TaskOp*>::const_iterator it = stolen.begin();
               it != stolen.end(); it++)
         {
-          log_task(LEVEL_DEBUG,"task %s (ID %lld) stolen from processor " IDFMT
+          log_task.debug("task %s (ID %lld) stolen from processor " IDFMT
                                " by processor " IDFMT "", (*it)->variants->name,
                                (*it)->get_unique_task_id(), local_proc.id,
                                thief.id);
@@ -3572,6 +3562,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_index_space_request(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_SPACE_REQUEST, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_index_space_return(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_SPACE_RETURN, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_index_partition_node(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -3579,10 +3583,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_index_partition_request(Serializer &rez, 
+                                                      bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_PARTITION_REQUEST, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_index_partition_return(Serializer &rez,
+                                                     bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_INDEX_PARTITION_RETURN, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_field_space_node(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
       package_message(rez, SEND_FIELD_SPACE_NODE, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_field_space_request(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FIELD_SPACE_REQUEST, flush);
+    }
+    
+    //--------------------------------------------------------------------------
+    void MessageManager::send_field_space_return(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FIELD_SPACE_RETURN, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -4191,14 +4225,45 @@ namespace LegionRuntime {
               runtime->handle_index_space_node(derez, remote_address_space);
               break;
             }
+          case SEND_INDEX_SPACE_REQUEST:
+            {
+              runtime->handle_index_space_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_RETURN:
+            {
+              runtime->handle_index_space_return(derez);
+              break;
+            }
           case SEND_INDEX_PARTITION_NODE:
             {
               runtime->handle_index_partition_node(derez, remote_address_space);
               break;
             }
+          case SEND_INDEX_PARTITION_REQUEST:
+            {
+              runtime->handle_index_partition_request(derez, 
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_RETURN:
+            {
+              runtime->handle_index_partition_return(derez);
+              break;
+            }
           case SEND_FIELD_SPACE_NODE:
             {
               runtime->handle_field_space_node(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_REQUEST:
+            {
+              runtime->handle_field_space_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_FIELD_SPACE_RETURN:
+            {
+              runtime->handle_field_space_return(derez);
               break;
             }
           case SEND_LOGICAL_REGION_NODE:
@@ -4672,9 +4737,11 @@ namespace LegionRuntime {
         message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
         mapper_info_lock(Reservation::create_reservation()),
-        unique_partition_id((unique == 0) ? runtime_stride : unique), 
+        unique_index_space_id((unique == 0) ? runtime_stride : unique),
+        unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
-        unique_tree_id((unique == 0) ? runtime_stride : unique),
+        unique_index_tree_id((unique == 0) ? runtime_stride : unique),
+        unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
@@ -4709,10 +4776,13 @@ namespace LegionRuntime {
         release_op_lock(Reservation::create_reservation()),
         capture_op_lock(Reservation::create_reservation()),
         trace_op_lock(Reservation::create_reservation()),
-        epoch_op_lock(Reservation::create_reservation())
+        epoch_op_lock(Reservation::create_reservation()),
+        pending_partition_op_lock(Reservation::create_reservation()),
+        dependent_partition_op_lock(Reservation::create_reservation()),
+        fill_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_DEBUG,"Initializing high-level runtime in address space %x",
+      log_run.debug("Initializing high-level runtime in address space %x",
                             address_space);
 #ifdef LEGION_LOGGING
       // Initialize a logger if we have one
@@ -4968,7 +5038,7 @@ namespace LegionRuntime {
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_individual_tasks.clear();
       individual_task_lock.destroy_reservation();
@@ -4977,7 +5047,7 @@ namespace LegionRuntime {
             available_point_tasks.begin(); it != 
             available_point_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_point_tasks.clear();
       point_task_lock.destroy_reservation();
@@ -4986,7 +5056,7 @@ namespace LegionRuntime {
             available_index_tasks.begin(); it != 
             available_index_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_index_tasks.clear();
       index_task_lock.destroy_reservation();
@@ -4995,7 +5065,7 @@ namespace LegionRuntime {
             available_slice_tasks.begin(); it != 
             available_slice_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_slice_tasks.clear();
       slice_task_lock.destroy_reservation();
@@ -5004,7 +5074,7 @@ namespace LegionRuntime {
             available_remote_tasks.begin(); it != 
             available_remote_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_remote_tasks.clear();
       remote_task_lock.destroy_reservation();
@@ -5013,7 +5083,7 @@ namespace LegionRuntime {
             available_inline_tasks.begin(); it !=
             available_inline_tasks.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_inline_tasks.clear();
       inline_task_lock.destroy_reservation();
@@ -5022,7 +5092,7 @@ namespace LegionRuntime {
             available_map_ops.begin(); it != 
             available_map_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_map_ops.clear();
       map_op_lock.destroy_reservation();
@@ -5031,7 +5101,7 @@ namespace LegionRuntime {
             available_copy_ops.begin(); it != 
             available_copy_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_copy_ops.clear();
       copy_op_lock.destroy_reservation();
@@ -5040,7 +5110,7 @@ namespace LegionRuntime {
             available_fence_ops.begin(); it != 
             available_fence_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_fence_ops.clear();
       fence_op_lock.destroy_reservation();
@@ -5049,7 +5119,7 @@ namespace LegionRuntime {
             available_frame_ops.begin(); it !=
             available_frame_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_frame_ops.clear();
       frame_op_lock.destroy_reservation();
@@ -5058,7 +5128,7 @@ namespace LegionRuntime {
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_deletion_ops.clear();
       deletion_op_lock.destroy_reservation();
@@ -5067,7 +5137,7 @@ namespace LegionRuntime {
             available_inter_close_ops.begin(); it !=
             available_inter_close_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_inter_close_ops.clear();
       inter_close_op_lock.destroy_reservation();
@@ -5076,7 +5146,7 @@ namespace LegionRuntime {
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_post_close_ops.clear();
       post_close_op_lock.destroy_reservation();
@@ -5085,7 +5155,7 @@ namespace LegionRuntime {
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_dynamic_collective_ops.end();
       dynamic_collective_op_lock.destroy_reservation();
@@ -5094,7 +5164,7 @@ namespace LegionRuntime {
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_future_pred_ops.clear();
       future_pred_op_lock.destroy_reservation();
@@ -5103,7 +5173,7 @@ namespace LegionRuntime {
             available_not_pred_ops.begin(); it !=
             available_not_pred_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_not_pred_ops.clear();
       not_pred_op_lock.destroy_reservation();
@@ -5112,7 +5182,7 @@ namespace LegionRuntime {
             available_and_pred_ops.begin(); it !=
             available_and_pred_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_and_pred_ops.clear();
       and_pred_op_lock.destroy_reservation();
@@ -5121,7 +5191,7 @@ namespace LegionRuntime {
             available_or_pred_ops.begin(); it !=
             available_or_pred_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_or_pred_ops.clear();
       or_pred_op_lock.destroy_reservation();
@@ -5130,7 +5200,7 @@ namespace LegionRuntime {
             available_acquire_ops.begin(); it !=
             available_acquire_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_acquire_ops.clear();
       acquire_op_lock.destroy_reservation();
@@ -5139,7 +5209,7 @@ namespace LegionRuntime {
             available_release_ops.begin(); it !=
             available_release_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_release_ops.clear();
       release_op_lock.destroy_reservation();
@@ -5148,7 +5218,7 @@ namespace LegionRuntime {
             available_capture_ops.begin(); it !=
             available_capture_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_capture_ops.clear();
       capture_op_lock.destroy_reservation();
@@ -5157,7 +5227,7 @@ namespace LegionRuntime {
             available_trace_ops.begin(); it !=
             available_trace_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_trace_ops.clear();
       trace_op_lock.destroy_reservation();
@@ -5166,11 +5236,38 @@ namespace LegionRuntime {
             available_epoch_ops.begin(); it !=
             available_epoch_ops.end(); it++)
       {
-        delete *it;
+        legion_delete(*it);
       }
       available_epoch_ops.clear();
       epoch_op_lock.destroy_reservation();
       epoch_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<PendingPartitionOp*>::const_iterator it = 
+            available_pending_partition_ops.begin(); it !=
+            available_pending_partition_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_pending_partition_ops.clear();
+      pending_partition_op_lock.destroy_reservation();
+      pending_partition_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<DependentPartitionOp*>::const_iterator it = 
+            available_dependent_partition_ops.begin(); it !=
+            available_dependent_partition_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_dependent_partition_ops.clear();
+      dependent_partition_op_lock.destroy_reservation();
+      dependent_partition_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<FillOp*>::const_iterator it = 
+            available_fill_ops.begin(); it !=
+            available_fill_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_fill_ops.clear();
+      fill_op_lock.destroy_reservation();
+      fill_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -5413,25 +5510,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx,
-                                                    size_t max_num_elmts)
+    IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      IndexSpace space = IndexSpace::create_index_space(max_num_elmts);
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index space!");
+        log_run.error("Illegal dummy context create index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating index space " IDFMT " in task %s "
-                            "(ID %lld) with %ld maximum elements", space.id, 
+      log_index.debug("Creating index space " IDFMT " in task %s "
+                            "(ID %lld) with %ld maximum elements", handle.id, 
                             ctx->variants->name, ctx->get_unique_task_id(), 
                             max_num_elmts); 
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index space creation performed in "
+        log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5440,14 +5536,17 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         space);
+                                         handle);
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(space.id);
+      LegionSpy::log_top_index_space(handle.id);
 #endif
-      forest->create_index_space(Domain(space));
-      ctx->register_index_space_creation(space);
-      return space;
+      LowLevel::IndexSpace space = 
+                      LowLevel::IndexSpace::create_index_space(max_num_elmts);
+      forest->create_index_space(handle, Domain(space), 
+                                 UNSTRUCTURED_KIND, MUTABLE);
+      ctx->register_index_space_creation(handle);
+      return handle;
     }
 
     //--------------------------------------------------------------------------
@@ -5457,22 +5556,21 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(domain.exists());
 #endif
-      // Make a dummy index space that will be associated with the domain
-      IndexSpace space = domain.get_index_space(true/*create if needed*/);
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index space!");
+        log_run.error("Illegal dummy context create index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space " IDFMT " in task %s "
                             "(ID %lld) for domain", 
-                            space.id, ctx->variants->name,
+                            handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index space creation performed in "
+        log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5481,14 +5579,14 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         space);
+                                         handle);
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(space.id);
+      LegionSpy::log_top_index_space(handle.id);
 #endif
-      forest->create_index_space(domain);
-      ctx->register_index_space_creation(space);
-      return space;
+      forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
+      ctx->register_index_space_creation(handle);
+      return handle;
     }
 
     //--------------------------------------------------------------------------
@@ -5496,19 +5594,20 @@ namespace LegionRuntime {
                                            const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
       // First compute the convex hull of all the domains
       Domain hull = *(domains.begin());
 #ifdef DEBUG_HIGH_LEVEL
       assert(!domains.empty());
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index space!");
+        log_run.error("Illegal dummy context create index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index space creation performed in "
+        log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5516,7 +5615,7 @@ namespace LegionRuntime {
       }
       if (hull.get_dim() == 0)
       {
-        log_index(LEVEL_ERROR,"Create index space with multiple domains "
+        log_index.error("Create index space with multiple domains "
                               "must be created with domains for non-zero "
                               "dimension in task %s (ID %lld)",
                               ctx->variants->name, ctx->get_unique_task_id());
@@ -5529,7 +5628,7 @@ namespace LegionRuntime {
         assert(it->exists());
         if (hull.get_dim() != it->get_dim())
         {
-          log_index(LEVEL_ERROR,"A set of domains passed to create_index_space "
+          log_index.error("A set of domains passed to create_index_space "
                                 "must all have the same dimensions in task "
                                 "%s (ID %lld)",
                                 ctx->variants->name, ctx->get_unique_task_id());
@@ -5579,23 +5678,23 @@ namespace LegionRuntime {
         default:
           assert(false);
       }
-      IndexSpace space = hull.get_index_space(true/*create if needed*/);
 #ifdef DEBUG_HIGH_LEVEL
-      log_index(LEVEL_DEBUG,"Creating dummy index space " IDFMT " in task %s "
+      log_index.debug("Creating dummy index space " IDFMT " in task %s "
                             "(ID %lld) for domain", 
-                            space.id, ctx->variants->name,
+                            handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
 #endif
 #ifdef LEGION_LOGGING
       LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         space);
+                                         handle);
 #endif
 #ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(space.id);
+      LegionSpy::log_top_index_space(handle.id);
 #endif
-      forest->create_index_space(hull, domains);
-      ctx->register_index_space_creation(space);
-      return space;
+      forest->create_index_space(handle, hull, domains,
+                                 DENSE_ARRAY_KIND, NO_MEMORY);
+      ctx->register_index_space_creation(handle);
+      return handle;
     }
 
     //--------------------------------------------------------------------------
@@ -5607,17 +5706,17 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy index space!");
+        log_run.error("Illegal dummy context destroy index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG, "Destroying index space " IDFMT " in task %s "
+      log_index.debug("Destroying index space " IDFMT " in task %s "
                              "(ID %lld)", 
                       handle.id, ctx->variants->name, 
                       ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index space deletion performed in leaf "
+        log_task.error("Illegal index space deletion performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5652,27 +5751,94 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
+                                          const Domain &color_space,
+                                          const PointColoring &coloring,
+                                          PartitionKind part_kind,
+                                          int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context finalize index space!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal index partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      std::map<DomainPoint,Domain> new_index_spaces; 
+      Domain parent_dom = forest->get_index_space_domain(parent);
+      const size_t num_elmts = 
+        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        LowLevel::ElementMask child_mask(num_elmts);
+        const ColoredPoints<ptr_t> &pcoloring = it->second;
+        for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
+              pit != pcoloring.points.end(); pit++)
+        {
+          child_mask.enable(*pit,1);
+        }
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
+              pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
+        {
+          child_mask.enable(pit->first.value, pit->second - pit->first + 1);
+        }
+        LowLevel::IndexSpace child_space = 
+          LowLevel::IndexSpace::create_index_space(
+                          parent_dom.get_index_space(), child_mask, allocable);
+        new_index_spaces[it->first] = Domain(child_space);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      if ((part_kind == DISJOINT_KIND) && verify_disjointness)
+        validate_unstructured_disjointness(pid, new_index_spaces);
+#endif
+      ColorPoint partition_color;
+      // If we have a valid color, set it now
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_index_spaces, color_space, part_kind, 
+                                     allocable ? MUTABLE : NO_MEMORY);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_index_partition(
+                                          Context ctx, IndexSpace parent,
                                           const Coloring &coloring,
                                           bool disjoint,
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid = get_unique_partition_id();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pid > 0);
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context finalize index space!");
+        log_run.error("Illegal dummy context finalize index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
+      log_index.debug("Creating index partition %d with parent index "
                             "space " IDFMT " in task %s (ID %lld)", 
-                            pid, parent.id,
+                            pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index partition creation performed in "
+        log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -5681,7 +5847,7 @@ namespace LegionRuntime {
 #endif
       if (coloring.empty())
       {
-        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+        log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
                             ctx->variants->name, ctx->get_unique_task_id());
@@ -5698,11 +5864,13 @@ namespace LegionRuntime {
       // range.  For unspecified colors there is nothing wrong with
       // making empty index spaces.  We do this so we can save the
       // color space as a dense 1D domain.
-      std::map<Color,Domain> new_index_spaces; 
+      std::map<DomainPoint,Domain> new_index_spaces; 
+      Domain parent_dom = forest->get_index_space_domain(parent);
+      const size_t num_elmts = 
+        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
       for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
-        LowLevel::ElementMask 
-                    child_mask(parent.get_valid_mask().get_num_elmts());
+        LowLevel::ElementMask child_mask(num_elmts);
         Color c = pir.p;
         std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
           coloring.find(c);
@@ -5722,9 +5890,11 @@ namespace LegionRuntime {
           }
         }
         // Now make the index space and save the information
-        IndexSpace child_space = 
-          IndexSpace::create_index_space(parent, child_mask);
-        new_index_spaces[finder->first] = Domain(child_space);
+        LowLevel::IndexSpace child_space = 
+          LowLevel::IndexSpace::create_index_space(
+                          parent_dom.get_index_space(), child_mask);
+        new_index_spaces[DomainPoint::from_point<1>(
+            Arrays::Point<1>(finder->first))] = Domain(child_space);
       }
 #if 0
       // Now check for completeness
@@ -5765,61 +5935,69 @@ namespace LegionRuntime {
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       if (disjoint && verify_disjointness)
-      {
-        std::set<Color> current_colors;
-        for (std::map<Color,Domain>::const_iterator it1 = 
-              new_index_spaces.begin(); it1 != new_index_spaces.end(); it1++)
-        {
-          current_colors.insert(it1->first);
-          for (std::map<Color,Domain>::const_iterator it2 = 
-                new_index_spaces.begin(); it2 != new_index_spaces.end(); it2++)
-          {
-            // Skip pairs that we already checked
-            if (current_colors.find(it2->first) != current_colors.end())
-              continue;
-            // Otherwise perform the check
-            const LowLevel::ElementMask &em1 = 
-              it1->second.get_index_space().get_valid_mask();
-            const LowLevel::ElementMask &em2 = 
-              it2->second.get_index_space().get_valid_mask();
-            LowLevel::ElementMask::OverlapResult result = 
-              em1.overlaps_with(em2, 1/*effort level*/);
-            if (result == LowLevel::ElementMask::OVERLAP_YES)
-            {
-              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of partition %d "
-                              "are not disjoint when they were claimed to be!",
-                                  it1->first, it2->first, pid);
-              assert(false);
-              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-            }
-            else if (result == LowLevel::ElementMask::OVERLAP_MAYBE)
-            {
-              log_run(LEVEL_WARNING, "WARNING: colors %d and %d of partition "
-                          "%d may not be disjoint when they were claimed to be!"
-                          "(At least according to the low-level runtime.  You "
-                          "might also try telling the the low-level runtime "
-                          "to stop being lazy and try harder.)", 
-                          it1->first, it2->first, pid);
-            }
-          }
-        }
-      }
+        validate_unstructured_disjointness(pid, new_index_spaces);
 #endif 
-      forest->create_index_partition(pid, parent, disjoint,
-                                 part_color, new_index_spaces, color_space);
+      ColorPoint partition_color;
+      // If we have a valid color, set it now
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_index_spaces, color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     MUTABLE);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
                                          parent, pid, disjoint,
                                          part_color);
-      for (std::map<Color,Domain>::const_iterator it = 
+      for (std::map<ColorPoint,Domain>::const_iterator it = 
             new_index_spaces.begin(); it != new_index_spaces.end(); it++)
       {
         LegionLogging::log_index_subspace(ctx->get_executing_processor(),
                                           pid, it->second.get_index_space(),
-                                          it->first);
+                                          it->first.get_index());
       }
 #endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_index_partition(
+                                          Context ctx, IndexSpace parent,
+                                          const Domain &color_space,
+                                          const DomainPointColoring &coloring,
+                                          PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal index partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if ((part_kind == DISJOINT_KIND) && verify_disjointness)
+        validate_structured_disjointness(pid, coloring);
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     coloring, color_space, 
+                                     part_kind, NO_MEMORY);
       return pid;
     }
 
@@ -5832,82 +6010,30 @@ namespace LegionRuntime {
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid = get_unique_partition_id();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pid > 0);
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index partition!");
+        log_run.error("Illegal dummy context create index partition!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
+      log_index.debug("Creating index partition %d with parent index "
                             "space " IDFMT " in task %s (ID %lld)", 
-                            pid, parent.id,
+                            pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index partition creation performed in "
+        log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
-      if (disjoint && verify_disjointness)
-      {
-        std::set<Color> current_colors;
-        for (std::map<Color,Domain>::const_iterator it1 = 
-              coloring.begin(); it1 != coloring.end(); it1++)
-        {
-          current_colors.insert(it1->first);
-          for (std::map<Color,Domain>::const_iterator it2 = 
-                coloring.begin(); it2 != coloring.end(); it2++)
-          {
-            if (current_colors.find(it2->first) != current_colors.end())
-              continue;
-            assert(it1->second.get_dim() == it2->second.get_dim());
-            bool overlaps = false;
-            switch (it1->second.get_dim())
-            {
-              case 1:
-                {
-                  Rect<1> d1 = it1->second.get_rect<1>();
-                  Rect<1> d2 = it2->second.get_rect<1>();
-                  overlaps = d1.overlaps(d2);
-                  break;
-                }
-              case 2:
-                {
-                  Rect<2> d1 = it1->second.get_rect<2>();
-                  Rect<2> d2 = it2->second.get_rect<2>();
-                  overlaps = d1.overlaps(d2);
-                  break;
-                }
-              case 3:
-                {
-                  Rect<3> d1 = it1->second.get_rect<3>();
-                  Rect<3> d2 = it2->second.get_rect<3>();
-                  overlaps = d1.overlaps(d2);
-                  break;
-                }
-              default:
-                assert(false); // should never get here
-            }
-            if (overlaps)
-            {
-              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of partition %d "
-                              "are not disjoint when they are claimed to be!",
-                              it1->first, it2->first, pid);
-              assert(false);
-              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-            }
-          }
-        }
-      }
 #endif
       if (coloring.empty())
       {
-        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+        log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
                             ctx->variants->name, ctx->get_unique_task_id());
@@ -5916,9 +6042,24 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_EMPTY_INDEX_PARTITION);
       }
-
-      forest->create_index_partition(pid, parent, disjoint, 
-                                     part_color, coloring, color_space);
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      std::map<DomainPoint,Domain> new_subspaces;
+      for (std::map<Color,Domain>::const_iterator it = coloring.begin();
+            it != coloring.end(); it++)
+      {
+        new_subspaces[DomainPoint::from_point<1>(
+            Arrays::Point<1>(it->first))] = it->second;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      if (disjoint && verify_disjointness)
+        validate_structured_disjointness(pid, new_subspaces);
+#endif
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_subspaces, color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     NO_MEMORY);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
@@ -5939,96 +6080,86 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
+                                          const Domain &color_space,
+                                       const MultiDomainPointColoring &coloring,
+                                          PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal index partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      // Build all the convex hulls
+      std::map<DomainPoint,Domain> convex_hulls;
+      for (std::map<DomainPoint,std::set<Domain> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        Domain hull = construct_convex_hull(it->second);
+        convex_hulls[it->first] = hull;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      if ((part_kind == DISJOINT_KIND) && verify_disjointness)
+        validate_multi_structured_disjointness(pid, coloring);
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     convex_hulls, coloring,
+                                     color_space, part_kind, NO_MEMORY);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_index_partition(
+                                          Context ctx, IndexSpace parent,
                                           Domain color_space,
                                           const MultiDomainColoring &coloring,
                                           bool disjoint,
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid = get_unique_partition_id();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pid > 0);
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index partition!");
+        log_run.error("Illegal dummy context create index partition!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
+      log_index.debug("Creating index partition %d with parent index "
                             "space " IDFMT " in task %s (ID %lld)", 
-                            pid, parent.id,
+                            pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index partition creation performed in "
+        log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
-      if (disjoint && verify_disjointness)
-      {
-        std::set<Color> current_colors;
-        for (std::map<Color,std::set<Domain> >::const_iterator it1 = 
-              coloring.begin(); it1 != coloring.end(); it1++)
-        {
-          current_colors.insert(it1->first);
-          for (std::map<Color,std::set<Domain> >::const_iterator it2 = 
-                coloring.begin(); it2 != coloring.end(); it2++)
-          {
-            if (current_colors.find(it2->first) != current_colors.end())
-              continue;
-            bool overlaps = false;
-            for (std::set<Domain>::const_iterator it3 = it1->second.begin();
-                  !overlaps && (it3 != it1->second.end()); it3++)
-            {
-              for (std::set<Domain>::const_iterator it4 = it2->second.begin();
-                    !overlaps && (it4 != it2->second.end()); it4++)
-              {
-                assert(it3->get_dim() == it4->get_dim());
-                switch (it3->get_dim())
-                {
-                  case 1:
-                    {
-                      Rect<1> d1 = it3->get_rect<1>();
-                      Rect<1> d2 = it4->get_rect<1>();
-                      overlaps = d1.overlaps(d2);
-                      break;
-                    }
-                  case 2:
-                    {
-                      Rect<2> d1 = it3->get_rect<2>();
-                      Rect<2> d2 = it4->get_rect<2>();
-                      overlaps = d1.overlaps(d2);
-                      break;
-                    }
-                  case 3:
-                    {
-                      Rect<3> d1 = it3->get_rect<3>();
-                      Rect<3> d2 = it4->get_rect<3>();
-                      overlaps = d1.overlaps(d2);
-                      break;
-                    }
-                  default:
-                    assert(false);
-                }
-              }
-            }
-            if (overlaps)
-            {
-              log_run(LEVEL_ERROR, "ERROR: colors %d and %d of multi-domain "
-                              "partition %d are not disjoint when they are "
-                              "claimed to be!", it1->first, it2->first, pid);
-              assert(false);
-              exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-            }
-          }
-        }
-      }
 #endif
       if (coloring.empty())
       {
-        log_run(LEVEL_ERROR,"Attempt to create index partition with no "
+        log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
                             ctx->variants->name, ctx->get_unique_task_id());
@@ -6038,66 +6169,28 @@ namespace LegionRuntime {
         exit(ERROR_EMPTY_INDEX_PARTITION);
       }
       // Build all the convex hulls
-      std::map<Color,Domain> convex_hulls;
+      std::map<DomainPoint,Domain> convex_hulls;
+      std::map<DomainPoint,std::set<Domain> > color_sets;
       for (std::map<Color,std::set<Domain> >::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
       {
-        Domain hull = *(it->second.begin());
-        switch (hull.get_dim())
-        {
-          case 1:
-            {
-              Rect<1> base = hull.get_rect<1>();
-              for (std::set<Domain>::const_iterator dom_it =
-                    it->second.begin(); dom_it != it->second.end(); dom_it++)
-              {
-#ifdef DEBUG_HIGH_LEVEL
-                assert(dom_it->get_dim() == 1);
-#endif
-                Rect<1> next = dom_it->get_rect<1>();
-                base = base.convex_hull(next);
-              }
-              hull = Domain::from_rect<1>(base);
-              break;
-            }
-          case 2:
-            {
-              Rect<2> base = hull.get_rect<2>();
-              for (std::set<Domain>::const_iterator dom_it =
-                    it->second.begin(); dom_it != it->second.end(); dom_it++)
-              {
-#ifdef DEBUG_HIGH_LEVEL
-                assert(dom_it->get_dim() == 2);
-#endif
-                Rect<2> next = dom_it->get_rect<2>();
-                base = base.convex_hull(next);
-              }
-              hull = Domain::from_rect<2>(base);
-              break;
-            }
-          case 3:
-            {
-              Rect<3> base = hull.get_rect<3>();
-              for (std::set<Domain>::const_iterator dom_it =
-                    it->second.begin(); dom_it != it->second.end(); dom_it++)
-              {
-#ifdef DEBUG_HIGH_LEVEL
-                assert(dom_it->get_dim() == 3);
-#endif
-                Rect<3> next = dom_it->get_rect<3>();
-                base = base.convex_hull(next);
-              }
-              hull = Domain::from_rect<3>(base);
-              break;
-            }
-          default:
-            assert(false);
-        }
-        convex_hulls[it->first] = hull;
+        Domain hull = construct_convex_hull(it->second);
+        DomainPoint color = DomainPoint::from_point<1>(Point<1>(it->first));
+        convex_hulls[color] = hull;
+        color_sets[color] = it->second; 
       }
-      forest->create_index_partition(pid, parent, disjoint, 
-                                     part_color, convex_hulls, 
-                                     color_space, coloring);
+#ifdef DEBUG_HIGH_LEVEL
+      if (disjoint && verify_disjointness)
+        validate_multi_structured_disjointness(pid, color_sets);
+#endif
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     convex_hulls, color_sets,
+                                     color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     NO_MEMORY);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
@@ -6118,26 +6211,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
+       Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid = get_unique_partition_id();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
-      assert(pid > 0);
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index partition!");
+        log_run.error("Illegal dummy context create index partition!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG,"Creating index partition %d with parent index "
+      log_index.debug("Creating index partition %d with parent index "
                             "space " IDFMT " in task %s (ID %lld)", 
-                            pid, parent.id,
+                            pid.id, parent.id,
                             ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index partition creation performed in "
+        log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6145,7 +6237,7 @@ namespace LegionRuntime {
       }
 #endif
       // Perform the coloring
-      std::map<Color,Domain> new_index_spaces;
+      std::map<DomainPoint,Domain> new_index_spaces;
       Domain color_space;
       // Iterate over the parent index space and make the sub-index spaces
       // for each of the different points in the space
@@ -6153,10 +6245,12 @@ namespace LegionRuntime {
         fa_coloring = field_accessor.typeify<int>();
       {
         std::map<Color,LowLevel::ElementMask> child_masks;
-        IndexIterator iterator(parent);
-        while (iterator.has_next())
+        Domain parent_dom = forest->get_index_space_domain(parent);
+        size_t parent_elmts = 
+          parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+        for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
         {
-          ptr_t cur_ptr = iterator.next();
+          ptr_t cur_ptr = itr.p.get_index();
           int c = fa_coloring.read(cur_ptr);
           // Ignore all colors less than zero
           if (c >= 0)
@@ -6167,8 +6261,7 @@ namespace LegionRuntime {
             // Haven't made an index space for this color yet
             if (finder == child_masks.end())
             {
-              child_masks[color] = LowLevel::ElementMask(
-                  parent.get_valid_mask().get_num_elmts());
+              child_masks[color] = LowLevel::ElementMask(parent_elmts);
               finder = child_masks.find(color);
             }
 #ifdef DEBUG_HIGH_LEVEL
@@ -6190,28 +6283,36 @@ namespace LegionRuntime {
           Color c = pir.p;
           std::map<Color,LowLevel::ElementMask>::const_iterator finder = 
             child_masks.find(c);
-          IndexSpace child_space;
+          LowLevel::IndexSpace child_space;
           if (finder != child_masks.end())
           {
             child_space = 
-              IndexSpace::create_index_space(parent, finder->second);
+              LowLevel::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), finder->second);
           }
           else
           {
             LowLevel::ElementMask empty_mask;
-            child_space = IndexSpace::create_index_space(parent, empty_mask);
+            child_space = 
+              LowLevel::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), empty_mask);
           }
-          new_index_spaces[c] = Domain(child_space);
+          new_index_spaces[DomainPoint::from_point<1>(
+              Arrays::Point<1>(c))] = Domain(child_space);
         }
       }
-      forest->create_index_partition(pid, parent, true/*disjoint*/, 
-                                     part_color, new_index_spaces, color_space);
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color,
+                                     new_index_spaces, color_space,
+                                     DISJOINT_KIND, MUTABLE);
 #ifdef LEGION_LOGGING
       part_color = forest->get_index_partition_color(pid);
       LegionLogging::log_index_partition(ctx->get_executing_processor(),
                                          parent, pid, true/*disjoint*/,
                                          part_color);
-      for (std::map<Color,Domain>::const_iterator it = 
+      for (std::map<DomainPoint,Domain>::const_iterator it = 
             new_index_spaces.begin(); it != new_index_spaces.end(); it++)
       {
         IndexSpace subspace = get_index_subspace(ctx, pid, it->first);
@@ -6230,16 +6331,16 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy index partition!");
+        log_run.error("Illegal dummy context destroy index partition!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_index(LEVEL_DEBUG, "Destroying index partition %x in task %s "
+      log_index.debug("Destroying index partition %x in task %s "
                              "(ID %lld)", 
-                        handle, ctx->variants->name, ctx->get_unique_task_id());
+                    handle.id, ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal index partition deletion performed in "
+        log_task.error("Illegal index partition deletion performed in "
                              "leaf task %s (ID %lld)",
                               ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6271,6 +6372,1261 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::validate_unstructured_disjointness(IndexPartition pid,
+                                    const std::map<DomainPoint,Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      std::set<DomainPoint> current_colors;
+      for (std::map<DomainPoint,Domain>::const_iterator it1 = 
+            domains.begin(); it1 != domains.end(); it1++)
+      {
+        current_colors.insert(it1->first);
+        for (std::map<DomainPoint,Domain>::const_iterator it2 = 
+              domains.begin(); it2 != domains.end(); it2++)
+        {
+          // Skip pairs that we already checked
+          if (current_colors.find(it2->first) != current_colors.end())
+            continue;
+          // Otherwise perform the check
+          const LowLevel::ElementMask &em1 = 
+            it1->second.get_index_space().get_valid_mask();
+          const LowLevel::ElementMask &em2 = 
+            it2->second.get_index_space().get_valid_mask();
+          LowLevel::ElementMask::OverlapResult result = 
+            em1.overlaps_with(em2, 1/*effort level*/);
+          if (result == LowLevel::ElementMask::OVERLAP_YES)
+          {
+            log_run.error("ERROR: colors %d and %d of partition %d "
+                            "are not disjoint when they were claimed to be!",
+                      it1->first.get_index(), it2->first.get_index(), pid.id);
+            assert(false);
+            exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+          }
+          else if (result == LowLevel::ElementMask::OVERLAP_MAYBE)
+          {
+            log_run.warning("WARNING: colors %d and %d of partition "
+                        "%d may not be disjoint when they were claimed to be!"
+                        "(At least according to the low-level runtime.  You "
+                        "might also try telling the the low-level runtime "
+                        "to stop being lazy and try harder.)", 
+                      it1->first.get_index(), it2->first.get_index(), pid.id);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::validate_structured_disjointness(IndexPartition pid,
+                                    const std::map<DomainPoint,Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      std::set<DomainPoint> current_colors;
+      for (std::map<DomainPoint,Domain>::const_iterator it1 = 
+            domains.begin(); it1 != domains.end(); it1++)
+      {
+        current_colors.insert(it1->first);
+        for (std::map<DomainPoint,Domain>::const_iterator it2 = 
+              domains.begin(); it2 != domains.end(); it2++)
+        {
+          if (current_colors.find(it2->first) != current_colors.end())
+            continue;
+          assert(it1->second.get_dim() == it2->second.get_dim());
+          switch (it1->second.get_dim())
+          {
+            case 1:
+              {
+                Rect<1> d1 = it1->second.get_rect<1>();
+                Rect<1> d2 = it2->second.get_rect<1>();
+                if (d1.overlaps(d2))
+                {
+                  log_run.error("ERROR: colors %d and %d of "
+                                       "partition %d are not disjoint "
+                                       "when they are claimed to be!",
+                                  it1->first[0], it2->first[0], pid.id);
+                  assert(false);
+                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                }
+                break;
+              }
+            case 2:
+              {
+                Rect<2> d1 = it1->second.get_rect<2>();
+                Rect<2> d2 = it2->second.get_rect<2>();
+                if (d1.overlaps(d2))
+                {
+                  log_run.error("ERROR: colors (%d,%d) and "
+                                      "(%d,%d) of partition %d are "
+                                      "not disjoint when they are "
+                                      "claimed to be!",
+                            it1->first[0], it1->first[1],
+                            it2->first[0], it2->first[1], pid.id);
+                  assert(false);
+                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                }
+                break;
+              }
+            case 3:
+              {
+                Rect<3> d1 = it1->second.get_rect<3>();
+                Rect<3> d2 = it2->second.get_rect<3>();
+                if (d1.overlaps(d2))
+                {
+                  log_run.error("ERROR: colors (%d,%d,%d) and "
+                                       "(%d,%d,%d) of partition %d are "
+                                       "not disjoint when they are "
+                                       "claimed to be!",
+                            it1->first[0], it1->first[1], it1->first[2],
+                    it2->first[0], it2->first[1], it2->first[2], pid.id);
+                  assert(false);
+                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                }
+                break;
+              }
+            default:
+              assert(false); // should never get here
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::validate_multi_structured_disjointness(IndexPartition pid,
+                         const std::map<DomainPoint,std::set<Domain> > &domains)
+    //--------------------------------------------------------------------------
+    {
+      std::set<DomainPoint> current_colors;
+      for (std::map<DomainPoint,std::set<Domain> >::const_iterator it1 = 
+            domains.begin(); it1 != domains.end(); it1++)
+      {
+        current_colors.insert(it1->first);
+        for (std::map<DomainPoint,std::set<Domain> >::const_iterator it2 = 
+              domains.begin(); it2 != domains.end(); it2++)
+        {
+          if (current_colors.find(it2->first) != current_colors.end())
+            continue;
+          for (std::set<Domain>::const_iterator it3 = it1->second.begin();
+                it3 != it1->second.end(); it3++)
+          {
+            for (std::set<Domain>::const_iterator it4 = it2->second.begin();
+                  it4 != it2->second.end(); it4++)
+            {
+              assert(it3->get_dim() == it4->get_dim());
+              switch (it3->get_dim())
+              {
+                case 1:
+                  {
+                    Rect<1> d1 = it3->get_rect<1>();
+                    Rect<1> d2 = it4->get_rect<1>();
+                    if (d1.overlaps(d2))
+                    {
+                      log_run.error("ERROR: colors %d and %d of "
+                                           "multi-domain partition %d are "
+                                           "not disjoint when they are "
+                                           "claimed to be!", 
+                                         it1->first[0], it2->first[0], pid.id);
+                      assert(false);
+                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                    }
+                    break;
+                  }
+                case 2:
+                  {
+                    Rect<2> d1 = it3->get_rect<2>();
+                    Rect<2> d2 = it4->get_rect<2>();
+                    if (d1.overlaps(d2))
+                    {
+                      log_run.error("ERROR: colors (%d,%d) and (%d,%d) "
+                                           "of multi-domain partition %d are "
+                                           "not disjoint when they are "
+                                           "claimed to be!", 
+                                         it1->first[0], it1->first[1],
+                                         it2->first[0], it2->first[1], pid.id);
+                      assert(false);
+                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                    }
+                    break;
+                  }
+                case 3:
+                  {
+                    Rect<3> d1 = it3->get_rect<3>();
+                    Rect<3> d2 = it4->get_rect<3>();
+                    if (d1.overlaps(d2))
+                    {
+                      log_run.error("ERROR: colors (%d,%d,%d) and "
+                                           "(%d,%d,%d) of multi-domain "
+                                           "partition %d are not disjoint "
+                                           "when they are claimed to be!", 
+                           it1->first[0], it1->first[1], it1->first[2], 
+                           it2->first[0], it2->first[1], it2->first[2], pid.id);
+                      assert(false);
+                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
+                    }
+                    break;
+                  }
+                default:
+                  assert(false);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::construct_convex_hull(const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      Domain hull = *(domains.begin());
+      switch (hull.get_dim())
+      {
+        case 1:
+          {
+            Rect<1> base = hull.get_rect<1>();
+            for (std::set<Domain>::const_iterator dom_it =
+                  domains.begin(); dom_it != domains.end(); dom_it++)
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(dom_it->get_dim() == 1);
+#endif
+              Rect<1> next = dom_it->get_rect<1>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<1>(base);
+            break;
+          }
+        case 2:
+          {
+            Rect<2> base = hull.get_rect<2>();
+            for (std::set<Domain>::const_iterator dom_it =
+                  domains.begin(); dom_it != domains.end(); dom_it++)
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(dom_it->get_dim() == 2);
+#endif
+              Rect<2> next = dom_it->get_rect<2>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<2>(base);
+            break;
+          }
+        case 3:
+          {
+            Rect<3> base = hull.get_rect<3>();
+            for (std::set<Domain>::const_iterator dom_it =
+                  domains.begin(); dom_it != domains.end(); dom_it++)
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(dom_it->get_dim() == 3);
+#endif
+              Rect<3> next = dom_it->get_rect<3>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<3>(base);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return hull;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_equal_partition(Context ctx, 
+                                                   IndexSpace parent,
+                                                   const Domain &color_space,
+                                                   size_t granularity,
+                                                   int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create equal partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating equal partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal equal partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_equal_partition(ctx, pid, granularity);
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       partition_color, DISJOINT_KIND,
+                                       allocable, handle_ready, term_event);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid; 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_weighted_partition(Context ctx, 
+                                                      IndexSpace parent,
+                                                      const Domain &color_space,
+                                       const std::map<DomainPoint,int> &weights,
+                                                      size_t granularity,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create weighted partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating weighted partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal weighted partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_weighted_partition(ctx, pid, granularity, weights);
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, DISJOINT_KIND,
+                                       allocable, handle_ready, term_event);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_union(Context ctx, 
+                                                      IndexSpace parent,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                                      PartitionKind kind,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create partition by union!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating union partition %d with parent index "
+                            "space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal union partition creation performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by union!",
+                              handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by union!",
+                              handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          LowLevel::IndexSpace::ISO_UNION);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_union_partition(ctx, pid, handle1, handle2);
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
+                                                      IndexSpace parent,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                                      PartitionKind kind,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create partition "
+                            "by intersection!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating intersection partition %d with parent "
+                            "index space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal intersection partition creation "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by intersection!",
+                              handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by intersection!",
+                              handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          LowLevel::IndexSpace::ISO_INTERSECT);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_intersection_partition(ctx, pid, handle1, handle2);
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_difference(Context ctx, 
+                                                      IndexSpace parent,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                                      PartitionKind kind,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create difference "
+                            "partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating difference partition %d with parent "
+                            "index space " IDFMT " in task %s (ID %lld)", 
+                            pid.id, parent.id,
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal difference partition creation "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          LowLevel::IndexSpace::ISO_SUBTRACT);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_difference_partition(ctx, pid, handle1, handle2);
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_cross_product_partition(Context ctx,
+                                                 IndexPartition handle1,
+                                                 IndexPartition handle2,
+                                  std::map<DomainPoint,IndexPartition> &handles,
+                                                 PartitionKind kind,
+                                                 int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create cross product "
+                            "partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating cross product partitions "
+                            "in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create cross product partitions "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      if (handle1.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexPartition %d in create "
+                              "cross product partitions!",
+                              handle1.id, handle2.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      Event handle_ready = part_op->get_handle_ready();
+      Event term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      std::map<DomainPoint,IndexPartition> local;
+      forest->create_pending_cross_product(handle1, handle2, local, handles,
+                                           kind, partition_color, allocable,
+                                           handle_ready, term_event);
+      part_op->initialize_cross_product(ctx, handle1, handle2, local);
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_field(Context ctx,
+                                                      LogicalRegion handle,
+                                                      LogicalRegion parent_priv,
+                                                      FieldID fid,
+                                                      const Domain &color_space,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpace parent = handle.get_index_space();
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context partition by field!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating partition by field "
+                            "in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal partition by field "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint part_color;
+      if (color != AUTO_GENERATE_ID)
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      part_op->initialize_by_field(ctx, pid, handle, 
+                                   parent_priv, color_space, fid);
+      Event term_event = part_op->get_completion_event();
+      Event handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition 
+      forest->create_pending_partition(pid, parent, color_space, part_color,
+                                       DISJOINT_KIND, allocable, 
+                                       handle_ready, term_event); 
+      Processor proc = ctx->get_executing_processor();
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_image(Context ctx,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), handle.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context partition by image!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating partition by image "
+                            "in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal partition by image "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint part_color;
+      if (color != AUTO_GENERATE_ID)
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      part_op->initialize_by_image(ctx, pid, projection,
+                                   parent, fid, color_space);
+      Event term_event = part_op->get_completion_event();
+      Event handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, allocable, 
+                                       handle_ready, term_event); 
+      Processor proc = ctx->get_executing_processor();
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_preimage(Context ctx,
+                                                    IndexPartition projection,
+                                                    LogicalRegion handle,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context partition by preimage!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating partition by preimage "
+                            "in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal partition by preimage "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint part_color;
+      if (color != AUTO_GENERATE_ID)
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = get_available_dependent_partition_op();
+      part_op->initialize_by_preimage(ctx, pid, projection, handle,
+                                      parent, fid, color_space);
+      Event term_event = part_op->get_completion_event();
+      Event handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       allocable, handle_ready, term_event);
+      Processor proc = ctx->get_executing_processor();
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_pending_partition(Context ctx, 
+                                                     IndexSpace parent, 
+                                                     const Domain &color_space,
+                                                     PartitionKind part_kind,
+                                                     int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create pending partition!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating pending partition in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create pending partition "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      ColorPoint part_color;
+      if (color != AUTO_GENERATE_ID)
+        part_color = ColorPoint(color);
+      forest->create_pending_partition(pid, parent, color_space, part_color,
+                                       part_kind, allocable, Event::NO_EVENT,
+                                       Event::NO_EVENT, true/*separate*/);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_union(Context ctx, 
+                                                 IndexPartition parent,
+                                                 const DomainPoint &color,
+                                         const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index space union!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create index space union "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      UserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_index_space_union(ctx, result, handles);
+      handle_ready.trigger(part_op->get_handle_ready());
+      domain_ready.trigger(part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_union(Context ctx,
+                                                 IndexPartition parent,
+                                                 const DomainPoint &color,
+                                                 IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index space union!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create index space union "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      UserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_index_space_union(ctx, result, handle);
+      handle_ready.trigger(part_op->get_handle_ready());
+      domain_ready.trigger(part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_intersection(Context ctx,
+                                                        IndexPartition parent,
+                                                       const DomainPoint &color,
+                                         const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index "
+                            "space intersection!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index space intersection in task %s "
+                            "(ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create index space intersection"
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      UserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_index_space_intersection(ctx, result, handles);
+      handle_ready.trigger(part_op->get_handle_ready());
+      domain_ready.trigger(part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_intersection(Context ctx,
+                                                        IndexPartition parent,
+                                                       const DomainPoint &color,
+                                                        IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index "
+                            "space intersection!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index space intersection in task %s "
+                            "(ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create index space intersection "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      UserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_index_space_intersection(ctx, result, handle);
+      handle_ready.trigger(part_op->get_handle_ready());
+      domain_ready.trigger(part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_difference(Context ctx,
+                                                      IndexPartition parent,
+                                                      const DomainPoint &color,
+                                                      IndexSpace initial,
+                                         const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index "
+                            "space difference!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      log_index.debug("Creating index space difference in task %s "
+                            "(ID %lld)", 
+                            ctx->variants->name, ctx->get_unique_task_id());
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal create index space difference "
+                             "performed in leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      UserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = get_available_pending_partition_op();
+      part_op->initialize_index_space_difference(ctx, result, initial, handles);
+      handle_ready.trigger(part_op->get_handle_ready());
+      domain_ready.trigger(part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      Processor proc = ctx->get_executing_processor();
+      add_to_dependence_queue(proc, part_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::get_index_partition(Context ctx, 
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
@@ -6279,11 +7635,12 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_index_subspace(parent, "get_index_partition");
 #endif
-      IndexPartition result = forest->get_index_partition(parent, color);
+      IndexPartition result = forest->get_index_partition(parent, 
+                                                          ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
-      if (result == 0)
+      if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid color %d for get index partitions", 
+        log_index.error("Invalid color %d for get index partitions", 
                                 color);
         assert(false);
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
@@ -6296,7 +7653,7 @@ namespace LegionRuntime {
     IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition(parent, color);
+      return forest->get_index_partition(parent, ColorPoint(color));
     }
 
     //--------------------------------------------------------------------------
@@ -6308,11 +7665,11 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_index_subpartition(p, "get_index_subspace");
 #endif
-      IndexSpace result = forest->get_index_subspace(p, color);
+      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid color %d for get index subspace", 
+        log_index.error("Invalid color %d for get index subspace", 
                                 color);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_COLOR); 
@@ -6325,7 +7682,7 @@ namespace LegionRuntime {
     IndexSpace Runtime::get_index_subspace(IndexPartition p, Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_subspace(p, c);
+      return forest->get_index_subspace(p, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -6358,7 +7715,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid handle " IDFMT " for get index space "
+        log_index.error("Invalid handle " IDFMT " for get index space "
                                "domain", 
                                 handle.id);
         assert(false);
@@ -6408,8 +7765,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index(LEVEL_ERROR, "Invalid partition handle %d for get index "
-                               "partition color space", p);
+        log_index.error("Invalid partition handle %d for get index "
+                               "partition color space", p.id);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_DOMAIN);
       }
@@ -6433,7 +7790,13 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_index_subspace(sp, "get_index_space_partition_colors");
 #endif
-      forest->get_index_space_partition_colors(sp, colors);
+      std::set<ColorPoint> color_points;
+      forest->get_index_space_partition_colors(sp, color_points);
+      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
+            it != color_points.end(); it++)
+      {
+        colors.insert(it->get_index());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6441,7 +7804,13 @@ namespace LegionRuntime {
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-      forest->get_index_space_partition_colors(handle, colors);
+      std::set<ColorPoint> color_points;
+      forest->get_index_space_partition_colors(handle, color_points);
+      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
+            it != color_points.end(); it++)
+      {
+        colors.insert(it->get_index());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6470,14 +7839,14 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_index_subspace(handle, "get_index_space_color");
 #endif
-      return forest->get_index_space_color(handle);
+      return forest->get_index_space_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::get_index_space_color(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_space_color(handle);
+      return forest->get_index_space_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
@@ -6489,14 +7858,14 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_index_subpartition(handle, "get_index_partition_color");
 #endif
-      return forest->get_index_partition_color(handle);
+      return forest->get_index_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::get_index_partition_color(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition_color(handle);
+      return forest->get_index_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
@@ -6591,15 +7960,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create field space!");
+        log_run.error("Illegal dummy context create field space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_field(LEVEL_DEBUG, "Creating field space %x in task %s (ID %lld)", 
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, ctx->variants->name,ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal create field space performed in leaf "
+        log_task.error("Illegal create field space performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6624,15 +7993,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy field space!");
+        log_run.error("Illegal dummy context destroy field space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_field(LEVEL_DEBUG, "Destroying field space %x in task %s (ID %lld)", 
+      log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                     handle.id, ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal destroy field space performed in leaf "
+        log_task.error("Illegal destroy field space performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6701,23 +8070,23 @@ namespace LegionRuntime {
                                 IndexSpace index_space, FieldSpace field_space)
     //--------------------------------------------------------------------------
     {
-      RegionTreeID tid = get_unique_tree_id();
+      RegionTreeID tid = get_unique_region_tree_id();
       LogicalRegion region(tid, index_space, field_space);
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create logical region!");
+        log_run.error("Illegal dummy context create logical region!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_region(LEVEL_DEBUG, "Creating logical region in task %s (ID %lld) "
+      log_region.debug("Creating logical region in task %s (ID %lld) "
                               "with index space " IDFMT " and field space %x "
                               "in new tree %d",
                               ctx->variants->name,ctx->get_unique_task_id(), 
                               index_space.id, field_space.id, tid);
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal region creation performed in leaf task "
+        log_task.error("Illegal region creation performed in leaf task "
                              "%s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6745,17 +8114,17 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy logical region!");
+        log_run.error("Illegal dummy context destroy logical region!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_region(LEVEL_DEBUG, "Deleting logical region (" IDFMT ",%x) in "
+      log_region.debug("Deleting logical region (" IDFMT ",%x) in "
                               "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
                               ctx->variants->name,ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal region destruction performed in leaf "
+        log_task.error("Illegal region destruction performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6787,17 +8156,17 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy logical partition!");
+        log_run.error("Illegal dummy context destroy logical partition!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_region(LEVEL_DEBUG, "Deleting logical partition (%x,%x) in task %s "
+      log_region.debug("Deleting logical partition (%x,%x) in task %s "
                               "(ID %lld)",
-                              handle.index_partition, handle.field_space.id, 
+                              handle.index_partition.id, handle.field_space.id,
                               ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal partition destruction performed in "
+        log_task.error("Illegal partition destruction performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -6865,7 +8234,7 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_logical_subregion(parent, "get_logical_partition_by_color");
 #endif
-      return forest->get_logical_partition_by_color(parent, c);
+      return forest->get_logical_partition_by_color(parent, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -6873,7 +8242,7 @@ namespace LegionRuntime {
                                                              Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_by_color(par, c);
+      return forest->get_logical_partition_by_color(par, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -6931,7 +8300,7 @@ namespace LegionRuntime {
         ctx->check_logical_subpartition(parent, 
                                         "get_logical_subregion_by_color");
 #endif
-      return forest->get_logical_subregion_by_color(parent, c);
+      return forest->get_logical_subregion_by_color(parent, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -6939,7 +8308,7 @@ namespace LegionRuntime {
                                                           Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion_by_color(par, c);
+      return forest->get_logical_subregion_by_color(par, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -6975,14 +8344,14 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_logical_subregion(handle, "get_logical_region_color");
 #endif
-      return forest->get_logical_region_color(handle);
+      return forest->get_logical_region_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_region_color(handle);
+      return forest->get_logical_region_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
@@ -6994,14 +8363,14 @@ namespace LegionRuntime {
       if (ctx != DUMMY_CONTEXT)
         ctx->check_logical_subpartition(handle, "get_logical_partition_color");
 #endif
-      return forest->get_logical_partition_color(handle);
+      return forest->get_logical_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
     Color Runtime::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_color(handle);
+      return forest->get_logical_partition_color(handle).get_index();
     }
 
     //--------------------------------------------------------------------------
@@ -7069,13 +8438,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create index allocator!");
+        log_run.error("Illegal dummy context create index allocator!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal create index allocation requested in "
+        log_task.error("Illegal create index allocation requested in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7093,13 +8462,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create field allocator!");
+        log_run.error("Illegal dummy context create field allocator!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal create field allocation requested in "
+        log_task.error("Illegal create field allocation requested in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7129,7 +8498,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute task!");
+        log_run.error("Illegal dummy context execute task!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -7159,7 +8528,7 @@ namespace LegionRuntime {
             get_variant_collection(launcher.task_id);
           if (variants->return_size > 0)
           {
-            log_run(LEVEL_ERROR,"Predicated task launch for task %s "
+            log_run.error("Predicated task launch for task %s "
                                 "in parent task %s (UID %lld) has non-void "
                                 "return type but no default value for its "
                                 "future if the task predicate evaluates to "
@@ -7183,14 +8552,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute task call performed in leaf "
+        log_task.error("Illegal execute task call performed in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       Future result = task->initialize_task(ctx, launcher, check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new single task with unique id %lld "
+      log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
                       "addresss space %d",
                       task->get_unique_task_id(), task->variants->name, 
@@ -7217,7 +8586,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute index space!");
+        log_run.error("Illegal dummy context execute index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -7272,7 +8641,7 @@ namespace LegionRuntime {
             get_variant_collection(launcher.task_id);
           if (variants->return_size > 0)
           {
-            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+            log_run.error("Predicated index task launch for task %s "
                                 "in parent task %s (UID %lld) has non-void "
                                 "return type but no default value for its "
                                 "future if the task predicate evaluates to "
@@ -7310,14 +8679,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute index space call performed in "
+        log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       FutureMap result = task->initialize_task(ctx, launcher, check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new index space task with unique id "
+      log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
                   task->get_unique_task_id(), task->variants->name, 
@@ -7345,7 +8714,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute index space!");
+        log_run.error("Illegal dummy context execute index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -7370,7 +8739,7 @@ namespace LegionRuntime {
             get_variant_collection(launcher.task_id);
           if (variants->return_size > 0)
           {
-            log_run(LEVEL_ERROR,"Predicated index task launch for task %s "
+            log_run.error("Predicated index task launch for task %s "
                                 "in parent task %s (UID %lld) has non-void "
                                 "return type but no default value for its "
                                 "future if the task predicate evaluates to "
@@ -7394,7 +8763,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute index space call performed in "
+        log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7402,7 +8771,7 @@ namespace LegionRuntime {
       }
       Future result = task->initialize_task(ctx, launcher, redop, 
                                             check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new index space task with unique id "
+      log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
                   task->get_unique_task_id(), task->variants->name, 
@@ -7442,13 +8811,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute task!");
+        log_run.error("Illegal dummy context execute task!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute task call performed in "
+        log_task.error("Illegal execute task call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7456,7 +8825,7 @@ namespace LegionRuntime {
       }
       Future result = task->initialize_task(ctx, task_id, indexes, regions, arg,
                             predicate, id, tag, check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new single task with unique id %lld "
+      log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
                       "address space %d",
                       task->get_unique_task_id(), task->variants->name, 
@@ -7497,13 +8866,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute index space!");
+        log_run.error("Illegal dummy context execute index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute index space call performed in "
+        log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7512,7 +8881,7 @@ namespace LegionRuntime {
       FutureMap result = task->initialize_task(ctx, task_id, domain, indexes,
                                 regions, global_arg, arg_map, predicate,
                                 must_parallelism, id, tag, check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new index space task with unique id "
+      log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
                   task->get_unique_task_id(), task->variants->name, 
@@ -7558,13 +8927,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context execute index space!");
+        log_run.error("Illegal dummy context execute index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal execute index space call performed in "
+        log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7574,7 +8943,7 @@ namespace LegionRuntime {
                             regions, global_arg, arg_map, reduction, 
                             initial_value, predicate, must_parallelism,
                             id, tag, check_privileges);
-      log_task(LEVEL_DEBUG,"Registering new index space task with unique id "
+      log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
                   task->get_unique_task_id(), task->variants->name, 
@@ -7604,7 +8973,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (" IDFMT 
+      log_run.debug("Registering a map operation for region (" IDFMT 
                            ",%x,%x) in task %s (ID %lld)",
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
@@ -7619,7 +8988,7 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" IDFMT 
+        log_run.error("Attempted an inline mapping of region (" IDFMT 
                             ",%x,%x) that conflicts with mapped region (" 
                             IDFMT ",%x,%x) at index %d of parent task %s "
                             "(ID %lld) that would ultimately result in "
@@ -7640,7 +9009,7 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+        log_run.error("Attempted an inline mapping of region (" 
                             IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
@@ -7676,7 +9045,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a map operation for region (" 
+      log_run.debug("Registering a map operation for region (" 
                             IDFMT ",%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id, 
@@ -7691,7 +9060,7 @@ namespace LegionRuntime {
                                                inline_conflict);
       if (parent_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+        log_run.error("Attempted an inline mapping of region (" 
                             IDFMT ",%x,%x) "
                             "that conflicts with mapped region (" 
                             IDFMT ",%x,%x) at "
@@ -7713,7 +9082,7 @@ namespace LegionRuntime {
       }
       if (inline_conflict)
       {
-        log_run(LEVEL_ERROR,"Attempted an inline mapping of region (" 
+        log_run.error("Attempted an inline mapping of region (" 
                             IDFMT ",%x,%x) "
                             "that conflicts with previous inline mapping in "
                             "task %s (ID %lld) that would "
@@ -7762,13 +9131,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context remap region!");
+        log_run.error("Illegal dummy context remap region!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal remap operation performed in "
+        log_task.error("Illegal remap operation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7794,13 +9163,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context unmap region!");
+        log_run.error("Illegal dummy context unmap region!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal unmap operation performed in "
+        log_task.error("Illegal unmap operation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7820,6 +9189,213 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_field(Context ctx, LogicalRegion handle,
+                             LogicalRegion parent, FieldID fid,
+                             const void *value, size_t value_size,
+                             const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fid, 
+                          value, value_size, pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fid,
+                          value, value_size, pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, LogicalRegion handle,
+                              LogicalRegion parent,
+                              const std::set<FieldID> &fields,
+                              const void *value, size_t value_size,
+                              const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op();
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, handle, parent, fields, 
+                          value, value_size, pred, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, handle, parent, fields,
+                          value, value_size, pred, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op();
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_begin(proc,
+                                               ctx->get_unique_task_id(), 
+                                               mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_BEGIN_WAIT);
+#endif
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+#ifdef LEGION_LOGGING
+          LegionLogging::log_inline_wait_end(proc,
+                                             ctx->get_unique_task_id(),
+                                             mapped_event);
+#endif
+#ifdef LEGION_PROF
+          LegionProf::register_event(ctx->get_unique_task_id(),
+                                     PROF_END_WAIT);
+#endif
+        }
+#ifdef LEGION_LOGGING
+        else {
+          LegionLogging::log_inline_nowait(proc,
+                                           ctx->get_unique_task_id(),
+                                           mapped_event);
+        }
+#endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx, 
                                        const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -7828,20 +9404,20 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue copy operation!");
+        log_run.error("Illegal dummy context issue copy operation!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal copy operation call performed in "
+        log_task.error("Illegal copy operation call performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       copy_op->initialize(ctx, launcher, check_privileges);
-      log_run(LEVEL_DEBUG, "Registering a copy operation in task %s "
+      log_run.debug("Registering a copy operation in task %s "
                            "(ID %lld)",
                            ctx->variants->name, ctx->get_unique_task_id());
 #else
@@ -7928,14 +9504,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create predicate!");
+        log_run.error("Illegal dummy context create predicate!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
       if (f.impl == NULL)
       {
-        log_run(LEVEL_ERROR,"Illegal predicate creation performed on "
+        log_run.error("Illegal predicate creation performed on "
                             "empty future inside of task %s (ID %lld).",
                             ctx->variants->name, ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -7949,7 +9525,7 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal predicate creation performed in "
+        log_task.error("Illegal predicate creation performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -7982,7 +9558,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create predicate not!");
+        log_run.error("Illegal dummy context create predicate not!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -7993,7 +9569,7 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal NOT predicate creation in "
+        log_task.error("Illegal NOT predicate creation in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8027,7 +9603,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create predicate and!");
+        log_run.error("Illegal dummy context create predicate and!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -8038,7 +9614,7 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal AND predicate creation in "
+        log_task.error("Illegal AND predicate creation in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8072,7 +9648,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create predicate or!");
+        log_run.error("Illegal dummy context create predicate or!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
@@ -8083,7 +9659,7 @@ namespace LegionRuntime {
       assert(proc_managers.find(proc) != proc_managers.end());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal OR predicate creation in "
+        log_task.error("Illegal OR predicate creation in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8157,11 +9733,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create phase barrier!");
+        log_run.error("Illegal dummy context create phase barrier!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Creating phase barrier in task %s (ID %lld)",
+      log_run.debug("Creating phase barrier in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       Barrier result = Barrier::create_barrier(arrivals);
@@ -8178,11 +9754,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy phase barrier!");
+        log_run.error("Illegal dummy context destroy phase barrier!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Destroying phase barrier in task %s (ID %lld)",
+      log_run.debug("Destroying phase barrier in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       ctx->destroy_user_barrier(pb.phase_barrier);
@@ -8195,11 +9771,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context advance phase barrier!");
+        log_run.error("Illegal dummy context advance phase barrier!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Advancing phase barrier in task %s (ID %lld)",
+      log_run.debug("Advancing phase barrier in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       Barrier bar = pb.phase_barrier;
@@ -8221,11 +9797,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context create dynamic collective!");
+        log_run.error("Illegal dummy context create dynamic collective!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Creating dynamic collective in task %s (ID %lld)",
+      log_run.debug("Creating dynamic collective in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       Barrier result = Barrier::create_barrier(arrivals, redop, 
@@ -8243,12 +9819,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context destroy "
+        log_run.error("Illegal dummy context destroy "
                             "dynamic collective!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Destroying dynamic collective in task %s (ID %lld)",
+      log_run.debug("Destroying dynamic collective in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       ctx->destroy_user_barrier(dc.phase_barrier);
@@ -8263,11 +9839,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context arrive dynamic collective!");
+        log_run.error("Illegal dummy context arrive dynamic collective!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Arrive dynamic collective in task %s (ID %lld)",
+      log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       dc.phase_barrier.arrive(count, Event::NO_EVENT, buffer, size);
@@ -8282,12 +9858,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context defer dynamic "
+        log_run.error("Illegal dummy context defer dynamic "
                             "collective arrival!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Defer dynamic collective arrival in "
+      log_run.debug("Defer dynamic collective arrival in "
                           "task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
@@ -8302,12 +9878,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context get dynamic "
+        log_run.error("Illegal dummy context get dynamic "
                             "collective result!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Get dynamic collective result in task %s (ID %lld)",
+      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       DynamicCollectiveOp *collective = get_available_dynamic_collective_op();
@@ -8336,12 +9912,12 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context advance dynamic "
+        log_run.error("Illegal dummy context advance dynamic "
                             "collective!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Advancing dynamic collective in task %s (ID %lld)",
+      log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
 #endif
       Barrier bar = dc.phase_barrier;
@@ -8360,15 +9936,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue acquire!");
+        log_run.error("Illegal dummy context issue acquire!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Issuing an acquire operation in task %s (ID %lld)",
+      log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal acquire operation performed in leaf task"
+        log_task.error("Illegal acquire operation performed in leaf task"
                               "%s (ID %lld)",
                               ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8459,15 +10035,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue release!");
+        log_run.error("Illegal dummy context issue release!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Issuing a release operation in task %s (ID %lld)",
+      log_run.debug("Issuing a release operation in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal release operation performed in leaf task"
+        log_task.error("Illegal release operation performed in leaf task"
                              "%s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8558,15 +10134,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue mapping fence!");
+        log_run.error("Illegal dummy context issue mapping fence!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Issuing a mapping fence in task %s (ID %lld)",
+      log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal legion mapping fence call in leaf task "
+        log_task.error("Illegal legion mapping fence call in leaf task "
                              "%s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8597,15 +10173,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue execution fence!");
+        log_run.error("Illegal dummy context issue execution fence!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Issuing an execution fence in task %s (ID %lld)",
+      log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal Legion execution fence call in leaf "
+        log_task.error("Illegal Legion execution fence call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8635,15 +10211,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context begin trace!");
+        log_run.error("Illegal dummy context begin trace!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Beginning a trace in task %s (ID %lld)",
+      log_run.debug("Beginning a trace in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal Legion begin trace call in leaf "
+        log_task.error("Illegal Legion begin trace call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8664,15 +10240,15 @@ namespace LegionRuntime {
  #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context end trace!");
+        log_run.error("Illegal dummy context end trace!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Ending a trace in task %s (ID %lld)",
+      log_run.debug("Ending a trace in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal Legion end trace call in leaf "
+        log_task.error("Illegal Legion end trace call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8694,15 +10270,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue frame!");
+        log_run.error("Illegal dummy context issue frame!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Issuing a frame in task %s (ID %lld)",
+      log_run.debug("Issuing a frame in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal Legion end trace call in leaf "
+        log_task.error("Illegal Legion end trace call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8734,15 +10310,15 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context issue must epoch!");
+        log_run.error("Illegal dummy context issue must epoch!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      log_run(LEVEL_DEBUG,"Executing a must epoch in task %s (ID %lld)",
+      log_run.debug("Executing a must epoch in task %s (ID %lld)",
                           ctx->variants->name, ctx->get_unique_task_id());
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal Legion execute must epoch call in leaf "
+        log_task.error("Illegal Legion execute must epoch call in leaf "
                              "task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -8836,7 +10412,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      log_run(LEVEL_DEBUG,"Getting a value for tunable variable %d in "
+      log_run.debug("Getting a value for tunable variable %d in "
                           "task %s (ID %lld)", tid, ctx->variants->name,
                           ctx->get_unique_task_id());
 #endif
@@ -8866,7 +10442,7 @@ namespace LegionRuntime {
           proc_managers.find(target);
         if (finder == proc_managers.end())
         {
-          log_run(LEVEL_ERROR,"Invalid processor " IDFMT " passed to "
+          log_run.error("Invalid processor " IDFMT " passed to "
                               "get mapper call.", target.id);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -8900,7 +10476,7 @@ namespace LegionRuntime {
     {
       if (forward_mpi_mapping.empty())
       {
-        log_run(LEVEL_ERROR,"Forward MPI mapping call not supported with "
+        log_run.error("Forward MPI mapping call not supported with "
                             "calling configure_MPI_interoperability during "
                             "start up");
 #ifdef DEBUG_HIGH_LEVEL
@@ -8917,7 +10493,7 @@ namespace LegionRuntime {
     {
       if (reverse_mpi_mapping.empty())
       {
-        log_run(LEVEL_ERROR,"Reverse MPI mapping call not supported with "
+        log_run.error("Reverse MPI mapping call not supported with "
                             "calling configure_MPI_interoperability during "
                             "start up");
 #ifdef DEBUG_HIGH_LEVEL
@@ -8961,7 +10537,7 @@ namespace LegionRuntime {
     {
       if (pid == 0)
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ERROR: ProjectionID zero is reserved.\n");
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
 #endif
@@ -8973,7 +10549,7 @@ namespace LegionRuntime {
         projection_functors.find(pid);
       if (finder != projection_functors.end())
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID %d has already been used in "
+        log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
@@ -8991,7 +10567,7 @@ namespace LegionRuntime {
         projection_functors.find(pid);
       if (finder == projection_functors.end())
       {
-        log_run(LEVEL_WARNING,"Unable to find registered region projection "
+        log_run.warning("Unable to find registered region projection "
                               "ID %d. Please upgrade to using projection "
                               "functors!", pid);
         // Uncomment this once we deprecate the old projection functions
@@ -9140,13 +10716,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context allocate field!");
+        log_run.error("Illegal dummy context allocate field!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf() && !local)
       {
-        log_task(LEVEL_ERROR,"Illegal non-local field allocation performed "
+        log_task.error("Illegal non-local field allocation performed "
                              "in leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -9179,13 +10755,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context free field!");
+        log_run.error("Illegal dummy context free field!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal field destruction performed in "
+        log_task.error("Illegal field destruction performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -9219,13 +10795,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context allocate fields!");
+        log_run.error("Illegal dummy context allocate fields!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf() && !local)
       {
-        log_task(LEVEL_ERROR,"Illegal non-local field allocation performed "
+        log_task.error("Illegal non-local field allocation performed "
                              "in leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -9264,13 +10840,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run(LEVEL_ERROR,"Illegal dummy context free fields!");
+        log_run.error("Illegal dummy context free fields!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       if (ctx->is_leaf())
       {
-        log_task(LEVEL_ERROR,"Illegal field destruction performed in "
+        log_task.error("Illegal field destruction performed in "
                              "leaf task %s (ID %lld)",
                              ctx->variants->name, ctx->get_unique_task_id());
         assert(false);
@@ -9653,6 +11229,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_request(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_space_request(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_return(AddressSpaceID target,
+                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_space_return(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_node(AddressSpaceID target, 
                                             Serializer &rez)
     //--------------------------------------------------------------------------
@@ -9661,10 +11253,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_request(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_partition_request(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_return(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_index_partition_return(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_field_space_node(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_request(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_field_space_request(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_field_space_return(AddressSpaceID target,
+                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_field_space_return(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10202,6 +11826,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_node_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_node_return(derez); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_index_partition_node(Deserializer &derez,
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -10210,11 +11849,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_return(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_field_space_node(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_node_creation(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_node_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_field_space_return(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_node_return(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -10779,12 +12448,7 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
       LegionProf::register_event(0/*unique id*/, PROF_BEGIN_SCHEDULER);
 #endif
-      log_run(LEVEL_DEBUG,"Running scheduler on processor " IDFMT "", proc.id);
-#ifdef DYNAMIC_TESTS
-      // If we're doing dynamic tests, do them first
-      if (Runtime::dynamic_independence_tests)
-        perform_dynamic_independence_tests();
-#endif
+      log_run.debug("Running scheduler on processor " IDFMT "", proc.id);
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
 #ifdef TRACE_ALLOCATION
@@ -11372,7 +13036,7 @@ namespace LegionRuntime {
 #if 0
       if (total_contexts > MAX_CONTEXTS)
       {
-        log_run(LEVEL_ERROR,"ERROR: Maximum number of allowed contexts %d "
+        log_run.error("ERROR: Maximum number of allowed contexts %d "
                             "exceeded when initializing task %s (UID %lld). "
                             "Please change 'MAX_CONTEXTS' at top "
                             "of legion_config.h and recompile. It is also "
@@ -11671,7 +13335,7 @@ namespace LegionRuntime {
     void Runtime::initiate_runtime_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      log_run(LEVEL_SPEW,"Computation has terminated. "
+      log_run.spew("Computation has terminated. "
                          "Shutting down the Legion runtime...");
       // Tell all the processor managers that there is a pending shutdown
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
@@ -12230,6 +13894,69 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    PendingPartitionOp* Runtime::get_available_pending_partition_op(void)
+    //--------------------------------------------------------------------------
+    {
+      PendingPartitionOp *result = NULL;
+      {
+        AutoLock p_lock(pending_partition_op_lock);
+        if (!available_pending_partition_ops.empty())
+        {
+          result = available_pending_partition_ops.front();
+          available_pending_partition_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<PendingPartitionOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DependentPartitionOp* Runtime::get_available_dependent_partition_op(void)
+    //--------------------------------------------------------------------------
+    {
+      DependentPartitionOp *result = NULL;
+      {
+        AutoLock p_lock(dependent_partition_op_lock);
+        if (!available_dependent_partition_ops.empty())
+        {
+          result = available_dependent_partition_ops.front();
+          available_dependent_partition_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<DependentPartitionOp>(this);
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FillOp* Runtime::get_available_fill_op(void)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *result = NULL;
+      {
+        AutoLock f_lock(fill_op_lock);
+        if (!available_fill_ops.empty())
+        {
+          result = available_fill_ops.front();
+          available_fill_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<FillOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -12457,6 +14184,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_pending_partition_op(PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(pending_partition_op_lock);
+      available_pending_partition_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_dependent_partition_op(DependentPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(dependent_partition_op_lock);
+      available_dependent_partition_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_fill_op(FillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      available_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
     RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid)
     //--------------------------------------------------------------------------
     {
@@ -12481,16 +14232,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_unique_partition_id(void)
+    IndexSpaceID Runtime::get_unique_index_space_id(void)
     //--------------------------------------------------------------------------
     {
-      IndexPartition result = __sync_fetch_and_add(&unique_partition_id,
-                                                   runtime_stride);
+      IndexSpaceID result = __sync_fetch_and_add(&unique_index_space_id,
+                                                 runtime_stride);
 #ifdef DEBUG_HIGH_LEVEL
       // check for overflow
       // If we have overflow on the number of partitions created
       // then we are really in a bad place.
-      assert(result <= unique_partition_id); 
+      assert(result <= unique_index_space_id); 
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartitionID Runtime::get_unique_index_partition_id(void)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartitionID result = __sync_fetch_and_add(&unique_index_partition_id,
+                                                     runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      // If we have overflow on the number of partitions created
+      // then we are really in a bad place.
+      assert(result <= unique_index_partition_id); 
 #endif
       return result;
     }
@@ -12511,16 +14277,31 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeID Runtime::get_unique_tree_id(void)
+    IndexTreeID Runtime::get_unique_index_tree_id(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeID result = __sync_fetch_and_add(&unique_tree_id,
+      IndexTreeID result = __sync_fetch_and_add(&unique_index_tree_id,
+                                                runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      // If we have overflow on the number of region trees
+      // created then we are really in a bad place.
+      assert(result <= unique_index_tree_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeID Runtime::get_unique_region_tree_id(void)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeID result = __sync_fetch_and_add(&unique_region_tree_id,
                                                  runtime_stride);
 #ifdef DEBUG_HIGH_LEVEL
       // check for overflow
       // If we have overflow on the number of region trees
       // created then we are really in a bad place.
-      assert(result <= unique_tree_id);
+      assert(result <= unique_region_tree_id);
 #endif
       return result;
     }
@@ -12647,15 +14428,6 @@ namespace LegionRuntime {
       return result;
     }
 
-#ifdef DYNAMIC_TESTS
-    //--------------------------------------------------------------------------
-    bool Runtime::perform_dynamic_independence_tests(void)
-    //--------------------------------------------------------------------------
-    {
-      return forest->perform_dynamic_tests(superscalar_width);
-    }
-#endif
-
 #ifdef TRACE_ALLOCATION 
     //--------------------------------------------------------------------------
     void Runtime::trace_allocation(AllocationType type, size_t size, int elems)
@@ -12699,7 +14471,7 @@ namespace LegionRuntime {
         // Skip anything that hasn't changed
         if (it->second.diff_allocations == 0)
           continue;
-        log_allocation(LEVEL_INFO,"%s on %d: "
+        log_allocation.info("%s on %d: "
             "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
@@ -12707,7 +14479,7 @@ namespace LegionRuntime {
         it->second.diff_allocations = 0;
         it->second.diff_bytes = 0;
       }
-      log_allocation(LEVEL_INFO," ");
+      log_allocation.info(" ");
     }
 
     //--------------------------------------------------------------------------
@@ -12766,6 +14538,8 @@ namespace LegionRuntime {
           return "Reduction View";
         case COMPOSITE_VIEW_ALLOC:
           return "Composite View";
+        case FILL_VIEW_ALLOC:
+          return "Fill View";
         case INDIVIDUAL_TASK_ALLOC:
           return "Individual Task";
         case POINT_TASK_ALLOC:
@@ -12810,6 +14584,12 @@ namespace LegionRuntime {
           return "Trace Complete Op";
         case MUST_EPOCH_OP_ALLOC:
           return "Must Epoch Op";
+        case PENDING_PARTITION_OP_ALLOC:
+          return "Pending Partition Op";
+        case DEPENDENT_PARTITION_OP_ALLOC:
+          return "Dependent Partition Op";
+        case FILL_OP_ALLOC:
+          return "Fill Op";
         case MESSAGE_BUFFER_ALLOC:
           return "Message Buffer";
         case EXECUTING_CHILD_ALLOC:
@@ -13165,6 +14945,7 @@ namespace LegionRuntime {
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
     /*static*/ bool Runtime::unsafe_launch = false;
+    /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ unsigned Runtime::shutdown_counter = 0;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
@@ -13172,9 +14953,6 @@ namespace LegionRuntime {
     /*static*/ UserEvent Runtime::mpi_rank_event = UserEvent::NO_USER_EVENT;
 #ifdef INORDER_EXECUTION
     /*static*/ bool Runtime::program_order_execution = true;
-#endif
-#ifdef DYNAMIC_TESTS
-    /*static*/ bool Runtime::dynamic_independence_tests = true;
 #endif
 #ifdef DEBUG_HIGH_LEVEL
     /*static*/ bool Runtime::logging_region_tree_state = false;
@@ -13278,6 +15056,7 @@ namespace LegionRuntime {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
+        dynamic_independence_tests = true;
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
@@ -13288,9 +15067,6 @@ namespace LegionRuntime {
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
-#endif
-#ifdef DYNAMIC_TESTS
-        dynamic_independence_tests = true;
 #endif
 #ifdef LEGION_PROF
         num_profiling_nodes = -1;
@@ -13324,10 +15100,8 @@ namespace LegionRuntime {
           INT_ARG("-hl:message",max_message_size);
           INT_ARG("-hl:filter", max_filter_size);
           INT_ARG("-hl:epoch", gc_epoch_size);
-#ifdef DYNAMIC_TESTS
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
-#endif
 #ifdef DEBUG_HIGH_LEVEL
           BOOL_ARG("-hl:tree",logging_region_tree_state);
           BOOL_ARG("-hl:verbose",verbose_logging);
@@ -13338,13 +15112,13 @@ namespace LegionRuntime {
 #else
           if (!strcmp(argv[i],"-hl:tree"))
           {
-            log_run(LEVEL_WARNING,"WARNING: Region tree state logging is "
+            log_run.warning("WARNING: Region tree state logging is "
                           "disabled.  To enable region tree state logging "
                                                   "compile in debug mode.");
           }
           if (!strcmp(argv[i],"-hl:disjointness"))
           {
-            log_run(LEVEL_WARNING,"WARNING: Disjointness verification for "
+            log_run.warning("WARNING: Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
@@ -13357,7 +15131,7 @@ namespace LegionRuntime {
 #else
           if (!strcmp(argv[i],"-hl:prof"))
           {
-            log_run(LEVEL_WARNING,"WARNING: Legion Prof is disabled.  The "
+            log_run.warning("WARNING: Legion Prof is disabled.  The "
                                   "-hl:prof flag will be ignored.  Recompile "
                                   "with the -DLEGION_PROF flag to enable "
                                   "profiling.");
@@ -13378,11 +15152,11 @@ namespace LegionRuntime {
 #endif
       if (Runtime::record_registration)
       {
-        log_run(LEVEL_PRINT,"High-level runtime initialization task "
+        log_run.print("High-level runtime initialization task "
                             "has low-level ID %d", INIT_FUNC_ID);
-        log_run(LEVEL_PRINT,"High-level runtime shutdown task has "
+        log_run.print("High-level runtime shutdown task has "
                             "low-level ID %d", SHUTDOWN_FUNC_ID);
-        log_run(LEVEL_PRINT,"Runtime meta-task has low-level ID %d", 
+        log_run.print("Runtime meta-task has low-level ID %d", 
                             HLR_TASK_ID);
         std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
           variant_table = Runtime::get_collection_table(); 
@@ -13395,7 +15169,7 @@ namespace LegionRuntime {
                 const_iterator it = collection->variants.begin(); it != 
                 collection->variants.end(); it++)
           {
-            log_run(LEVEL_PRINT,"Task variant %s (ID %ld) is mapped to "
+            log_run.print("Task variant %s (ID %ld) is mapped to "
                                 "low-level task ID %d", collection->name, 
                                 it->first, it->second.low_id);
           }
@@ -13443,7 +15217,7 @@ namespace LegionRuntime {
     {
       if (redop_id == 0)
       {
-        log_run(LEVEL_ERROR,"ERROR: ReductionOpID zero is reserved.");
+        log_run.error("ERROR: ReductionOpID zero is reserved.");
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -13454,7 +15228,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       if (red_table.find(redop_id) == red_table.end())
       {
-        log_run(LEVEL_ERROR,"Invalid ReductionOpID %d",redop_id);
+        log_run.error("Invalid ReductionOpID %d",redop_id);
         assert(false);
         exit(ERROR_INVALID_REDOP_ID);
       }
@@ -13504,7 +15278,7 @@ namespace LegionRuntime {
     {
       if (handle == 0)
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ERROR: ProjectionID zero is reserved.\n");
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
 #endif
@@ -13514,7 +15288,7 @@ namespace LegionRuntime {
                           Runtime::get_region_projection_table();
       if (proj_table.find(handle) != proj_table.end())
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID %d has already been used in "
+        log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n",handle);
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
@@ -13548,7 +15322,7 @@ namespace LegionRuntime {
     {
       if (handle == 0)
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ERROR: ProjectionID zero is reserved.\n");
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
 #endif
@@ -13558,7 +15332,7 @@ namespace LegionRuntime {
                               Runtime::get_partition_projection_table();
       if (proj_table.find(handle) != proj_table.end())
       {
-        log_run(LEVEL_ERROR,"ERROR: ProjectionID %d has already been used in "
+        log_run.error("ERROR: ProjectionID %d has already been used in "
                             "the partition projection table\n",handle);
 #ifdef DEBUG_HIGH_LEVEl
         assert(false);
@@ -13629,7 +15403,7 @@ namespace LegionRuntime {
       {
         if (options.leaf && options.inner)
         {
-          log_run(LEVEL_ERROR,"Task variant %s (ID %d) is not permitted to "
+          log_run.error("Task variant %s (ID %d) is not permitted to "
                               "be both inner and leaf tasks simultaneously.",
                               name, uid);
 #ifdef DEBUG_HIGH_LEVEL
@@ -13658,7 +15432,7 @@ namespace LegionRuntime {
       {
         if (table[uid]->idempotent != options.idempotent)
         {
-          log_run(LEVEL_ERROR,"Tasks of variant %s have different idempotent "
+          log_run.error("Tasks of variant %s have different idempotent "
                               "options.  All tasks of the same variant must "
                               "all be either idempotent or non-idempotent.",
                               table[uid]->name);
@@ -13669,7 +15443,7 @@ namespace LegionRuntime {
         }
         if (table[uid]->return_size != return_size)
         {
-          log_run(LEVEL_ERROR,"Tasks of variant %s have different return "
+          log_run.error("Tasks of variant %s have different return "
                               "type sizes of %ld and %ld.  All variants "
                               "must have the same return type size.",
                               table[uid]->name, table[uid]->return_size,
@@ -13682,13 +15456,13 @@ namespace LegionRuntime {
         if ((name != NULL) && 
             (strcmp(table[uid]->name,name) != 0))
         {
-          log_run(LEVEL_WARNING,"WARNING: name mismatch between variants of "
+          log_run.warning("WARNING: name mismatch between variants of "
                                 "task %d.  Differing names: %s %s",
                                 uid, table[uid]->name, name);
         }
         if ((vid != AUTO_GENERATE_ID) && table[uid]->has_variant(vid))
         {
-          log_run(LEVEL_WARNING,"WARNING: Task variant collection for task %s "
+          log_run.warning("WARNING: Task variant collection for task %s "
                                 "(ID %d) already has variant %d.  It will be "
                                 "overwritten.", table[uid]->name, uid, 
                                 unsigned(vid)/*dumb compiler warnings*/);
@@ -13756,7 +15530,7 @@ namespace LegionRuntime {
         finder = task_table.find(tid);
       if (finder == task_table.end())
       {
-        log_run(LEVEL_ERROR,"Unable to find entry for Task ID %d in "
+        log_run.error("Unable to find entry for Task ID %d in "
                             "the task collection table.  Did you forget "
                             "to register a task?", tid);
 #ifdef DEBUG_HIGH_LEVEL
@@ -13776,7 +15550,7 @@ namespace LegionRuntime {
       PartitionProjectionTable::const_iterator finder = table.find(pid);
       if (finder == table.end())
       {
-        log_run(LEVEL_ERROR,"Unable to find registered partition "
+        log_run.error("Unable to find registered partition "
                             "projection ID %d", pid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -13795,7 +15569,7 @@ namespace LegionRuntime {
       RegionProjectionTable::const_iterator finder = table.find(pid);
       if (finder == table.end())
       {
-        log_run(LEVEL_ERROR,"Unable to find registered region projection "
+        log_run.error("Unable to find registered region projection "
                             "ID %d", pid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -13816,7 +15590,7 @@ namespace LegionRuntime {
                                                         table.find(fid);
       if (finder == table.end())
       {
-        log_run(LEVEL_ERROR,"Unable to find inline function with with "
+        log_run.error("Unable to find inline function with with "
                             "inline function ID %d", fid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -13957,7 +15731,7 @@ namespace LegionRuntime {
       {
         if (table.find(idx) != table.end())
         {
-          log_run(LEVEL_ERROR,"Task ID %d is reserved for high-level runtime "
+          log_run.error("Task ID %d is reserved for high-level runtime "
                               "tasks",idx);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -14144,7 +15918,7 @@ namespace LegionRuntime {
         if (separate_runtime_instances)
         {
 #ifdef TRACE_ALLOCATION
-          log_run(LEVEL_ERROR,"Memory tracing not supported with "
+          log_run.error("Memory tracing not supported with "
                               "separate runtime instances.");
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -14161,7 +15935,7 @@ namespace LegionRuntime {
             Processor::Kind k = it->kind();
             if (k == Processor::UTIL_PROC)
             {
-              log_run(LEVEL_ERROR,"Separate runtime instances are not "
+              log_run.error("Separate runtime instances are not "
                                   "supported when running with explicit "
                                   "utility processors");
 #ifdef DEBUG_HIGH_LEVEL
@@ -14216,7 +15990,7 @@ namespace LegionRuntime {
         }
         if (local_procs.size() > MAX_NUM_PROCS)
         {
-          log_run(LEVEL_ERROR,"Maximum number of local processors %ld exceeds "
+          log_run.error("Maximum number of local processors %ld exceeds "
                               "compile time maximum of %d.  Change the value "
                               "in legion_config.h and recompile.",
                               local_procs.size(), MAX_NUM_PROCS);
@@ -14533,6 +16307,36 @@ namespace LegionRuntime {
               delete margs->future;
             // Finally tell the runtime we have one less top level task
             rt->decrement_outstanding_top_level_tasks();
+            break;
+          }
+        case HLR_DISJOINTNESS_TASK_ID:
+          {
+            RegionTreeForest::DisjointnessArgs *dargs = 
+              (RegionTreeForest::DisjointnessArgs*)args;
+            Runtime *runtime = Runtime::get_runtime(p);
+            runtime->forest->compute_partition_disjointness(dargs->handle,
+                                                            dargs->ready);
+            break;
+          }
+        case HLR_PART_INDEPENDENCE_TASK_ID:
+          {
+            IndexSpaceNode::DynamicIndependenceArgs *dargs = 
+              (IndexSpaceNode::DynamicIndependenceArgs*)args;
+            IndexSpaceNode::handle_disjointness_test(
+                dargs->parent, dargs->left, dargs->right);
+            break;
+          }
+        case HLR_SPACE_INDEPENDENCE_TASK_ID:
+          {
+            IndexPartNode::DynamicIndependenceArgs *dargs = 
+              (IndexPartNode::DynamicIndependenceArgs*)args;
+            IndexPartNode::handle_disjointness_test(
+                dargs->parent, dargs->left, dargs->right);
+            break;
+          }
+        case HLR_PENDING_CHILD_TASK_ID:
+          {
+            IndexPartNode::handle_pending_child_task(args);
             break;
           }
         default:

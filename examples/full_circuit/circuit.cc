@@ -69,7 +69,7 @@ void top_level_task(const Task *task,
 		     wires_per_piece, pct_wire_in_piece, random_seed,
 		     steps, sync, perform_checks, dump_values);
 
-    log_circuit(LEVEL_PRINT,"circuit settings: loops=%d pieces=%d nodes/piece=%d "
+    log_circuit.print("circuit settings: loops=%d pieces=%d nodes/piece=%d "
                             "wires/piece=%d pct_in_piece=%d seed=%d",
        num_loops, num_pieces, nodes_per_piece, wires_per_piece,
        pct_wire_in_piece, random_seed);
@@ -171,7 +171,7 @@ void top_level_task(const Task *task,
     double gflops = (1e-9*operations)/sim_time;
     printf("GFLOPS = %7.3f GFLOPS\n", gflops);
   }
-  log_circuit(LEVEL_PRINT,"simulation complete - destroying regions");
+  log_circuit.print("simulation complete - destroying regions");
 
   if (dump_values)
   {
@@ -188,7 +188,7 @@ void top_level_task(const Task *task,
     RegionAccessor<AccessorType::Generic, float> fa_wire_voltages[WIRE_SEGMENTS-1];
     for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
       fa_wire_voltages[i] = wires.get_field_accessor(FID_WIRE_VOLTAGE+i).typeify<float>();
-    IndexIterator itr(circuit.all_wires.get_index_space());
+    IndexIterator itr(runtime, ctx, circuit.all_wires.get_index_space());
     while (itr.has_next())
     {
       ptr_t wire_ptr = itr.next();
@@ -411,7 +411,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
                         int wires_per_piece, int pct_wire_in_piece, int random_seed,
 			int steps)
 {
-  log_circuit(LEVEL_PRINT,"Initializing circuit simulation...");
+  log_circuit.print("Initializing circuit simulation...");
   // inline map physical instances for the nodes and wire regions
   RegionRequirement wires_req(ckt.all_wires, READ_WRITE, EXCLUSIVE, ckt.all_wires);
   wires_req.add_field(FID_IN_PTR);
@@ -470,7 +470,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     node_allocator.alloc(num_pieces * nodes_per_piece);
   }
   {
-    IndexIterator itr(ckt.all_nodes.get_index_space());
+    IndexIterator itr(runtime, ctx, ckt.all_nodes.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < nodes_per_piece; i++)
@@ -525,7 +525,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     wire_allocator.alloc(num_pieces * wires_per_piece);
   }
   {
-    IndexIterator itr(ckt.all_wires.get_index_space());
+    IndexIterator itr(runtime, ctx, ckt.all_wires.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < wires_per_piece; i++)
@@ -580,7 +580,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 
   // Second pass: make some random fraction of the private nodes shared
   {
-    IndexIterator itr(ckt.all_nodes.get_index_space()); 
+    IndexIterator itr(runtime, ctx, ckt.all_nodes.get_index_space()); 
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < nodes_per_piece; i++)
@@ -603,7 +603,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   }
   // Second pass (part 2): go through the wires and update the locations
   {
-    IndexIterator itr(ckt.all_wires.get_index_space());
+    IndexIterator itr(runtime, ctx, ckt.all_wires.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < wires_per_piece; i++)
@@ -691,7 +691,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   delete [] first_wires;
   delete [] first_nodes;
 
-  log_circuit(LEVEL_PRINT,"Finished initializing simulation...");
+  log_circuit.print("Finished initializing simulation...");
 
   return result;
 }

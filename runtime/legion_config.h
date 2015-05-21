@@ -289,6 +289,9 @@ typedef enum legion_error_t {
   ERROR_INVALID_SEMANTIC_TAG = 122,
   ERROR_DUMMY_CONTEXT_OPERATION = 123,
   ERROR_INVALID_CONTEXT_CONFIGURATION = 124,
+  ERROR_INDEX_TREE_MISMATCH = 125,
+  ERROR_INDEX_PARTITION_ANCESTOR = 126,
+  ERROR_INVALID_PENDING_CHILD = 127,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -326,11 +329,23 @@ typedef enum legion_region_flags_t {
   NO_ACCESS_FLAG  = 0x00000002,
 } legion_region_flags_T;
 
+typedef enum legion_index_space_kind_t {
+  UNSTRUCTURED_KIND,
+  SPARSE_ARRAY_KIND,
+  DENSE_ARRAY_KIND,
+} legion_index_space_kind_t;
+
 typedef enum legion_handle_type_t {
   SINGULAR, // a single logical region
   PART_PROJECTION, // projection from a partition
   REG_PROJECTION, // projection from a region
 } legion_handle_type_t;
+
+typedef enum legion_partition_kind_t {
+  DISJOINT_KIND,
+  ALIASED_KIND,
+  COMPUTE_KIND,
+} legion_partition_kind_t;
 
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,
@@ -357,12 +372,14 @@ typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
 typedef unsigned int legion_color_t;
-typedef unsigned int legion_index_partition_t;
 typedef unsigned int legion_field_id_t;
 typedef unsigned int legion_trace_id_t;
 typedef unsigned int legion_mapper_id_t;
 typedef unsigned int legion_context_id_t;
 typedef unsigned int legion_instance_id_t;
+typedef unsigned int legion_index_space_id_t;
+typedef unsigned int legion_index_partition_id_t;
+typedef unsigned int legion_index_tree_id_t;
 typedef unsigned int legion_field_space_id_t;
 typedef unsigned int legion_generation_id_t;
 typedef unsigned int legion_type_handle;

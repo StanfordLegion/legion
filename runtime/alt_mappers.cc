@@ -31,14 +31,14 @@ namespace LegionRuntime {
       : DefaultMapper(m,rt,local)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Initializing the debug mapper on processor %x",local_proc.id);
+      log_debug.spew("Initializing the debug mapper on processor %x",local_proc.id);
     }
 
     //--------------------------------------------------------------------------------------------
     bool DebugMapper::spawn_child_task(const Task *task)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Spawn child task %s (ID %d) in debug mapper on processor %x",
+      log_debug.spew("Spawn child task %s (ID %d) in debug mapper on processor %x",
           task->variants->name, task->task_id, local_proc.id);
       // Still need to be spawned so we can choose a processor
       return true; 
@@ -48,7 +48,7 @@ namespace LegionRuntime {
     Processor DebugMapper::target_task_steal(const std::set<Processor> &blacklist)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Target task steal in debug mapper on processor %x",local_proc.id);
+      log_debug.spew("Target task steal in debug mapper on processor %x",local_proc.id);
       // Don't perform any stealing
       return Processor::NO_PROC; 
     }
@@ -58,7 +58,7 @@ namespace LegionRuntime {
                                                           std::set<const Task*> &to_steal)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Permit task steal in debug mapper on processor %x",local_proc.id);
+      log_debug.spew("Permit task steal in debug mapper on processor %x",local_proc.id);
       // Do nothing
     }
 
@@ -72,7 +72,7 @@ namespace LegionRuntime {
                                       bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Map task region in debug mapper for region (%x,%x,%d) of task %s (ID %d) "
+      log_debug.spew("Map task region in debug mapper for region (%x,%x,%d) of task %s (ID %d) "
           "(unique id %d) on processor %x",req.region.get_index_space().id,req.region.get_field_space().get_id(),
           req.region.get_tree_id(), task->variants->name,
           task->task_id, task->get_unique_task_id(), local_proc.id);
@@ -96,7 +96,7 @@ namespace LegionRuntime {
                                         bool &create_one)
     //--------------------------------------------------------------------------------------------
     {
-      log_debug(LEVEL_SPEW,"Rank copy targets in debug mapper for task %s (ID %d) (unique id %d) "
+      log_debug.spew("Rank copy targets in debug mapper for task %s (ID %d) (unique id %d) "
           "on processor %x", task->variants->name, task->task_id, task->get_unique_task_id(), local_proc.id);
       // Always map things into the last memory in our stack
       std::vector<Memory> memory_stack;
@@ -123,7 +123,7 @@ namespace LegionRuntime {
       : DefaultMapper(m,rt,local)
     //--------------------------------------------------------------------------------------------
     {
-      log_shared(LEVEL_SPEW,"Initializing the shared mapper on processor %x",local_proc.id);
+      log_shared.spew("Initializing the shared mapper on processor %x",local_proc.id);
       // Find the one memory that is shared by all the processors and report an
       // error if none could be found.
       const std::set<Memory> &all_mems = m->get_all_memories();
@@ -144,7 +144,7 @@ namespace LegionRuntime {
       }
       if (common_memories.empty())
       {
-        log_shared(LEVEL_ERROR,"Shared mapper unable to find common memory for all processors!  Exiting...");
+        log_shared.error("Shared mapper unable to find common memory for all processors!  Exiting...");
         exit(1);
       }
       else
@@ -196,14 +196,14 @@ namespace LegionRuntime {
       : DefaultMapper(m,rt,local)
     //--------------------------------------------------------------------------------------------
     {
-      log_sequoia(LEVEL_SPEW,"Initializing the sequoia mapper on processor %x",local_proc.id);
+      log_sequoia.spew("Initializing the sequoia mapper on processor %x",local_proc.id);
     }
 
     //--------------------------------------------------------------------------------------------
     bool SequoiaMapper::spawn_child_task(const Task *task)
     //--------------------------------------------------------------------------------------------
     {
-      log_sequoia(LEVEL_SPEW,"Spawn child task in sequoia mapper on processor %x", local_proc.id);
+      log_sequoia.spew("Spawn child task in sequoia mapper on processor %x", local_proc.id);
       // Need to be able to select target processor
       return true;
     }
@@ -218,7 +218,7 @@ namespace LegionRuntime {
                                         bool &enable_WAR_optimization)
     //--------------------------------------------------------------------------------------------
     {
-      log_sequoia(LEVEL_SPEW,"Map task region in sequoia mapper for region (%x,%x,%d) of task %s (ID %d) "
+      log_sequoia.spew("Map task region in sequoia mapper for region (%x,%x,%d) of task %s (ID %d) "
           "(unique id %d) on processor %x",req.region.get_index_space().id, req.region.get_field_space().get_id(), 
           req.region.get_tree_id(), task->variants->name,
           task->task_id, task->get_unique_task_id(), local_proc.id);
@@ -230,7 +230,7 @@ namespace LegionRuntime {
                               (machine->get_processor_kind(target) == Processor::LOC_PROC));
       if (current_instances.empty())
       {
-        log_sequoia(LEVEL_DEBUG,"No prior instances for region (%x,%x,%d) on processor %x",
+        log_sequoia.debug("No prior instances for region (%x,%x,%d) on processor %x",
             req.region.get_index_space().id, req.region.get_field_space().get_id(),
             req.region.get_tree_id(), local_proc.id);
         target_ranking.push_back(memory_stack.back());
@@ -247,7 +247,7 @@ namespace LegionRuntime {
             break;
           }
         }
-        log_sequoia(LEVEL_DEBUG,"Closest instance for region (%x,%x,%d) is memory %d on processor %x",
+        log_sequoia.debug("Closest instance for region (%x,%x,%d) is memory %d on processor %x",
             req.region.get_index_space().id,req.region.get_field_space().get_id(),
             req.region.get_tree_id(), memory_stack[closest_idx].id,local_proc.id);
         // Now make the ranking from one closer to the end of the memory stack
@@ -274,7 +274,7 @@ namespace LegionRuntime {
                                           bool &create_one)
     //--------------------------------------------------------------------------------------------
     {
-      log_sequoia(LEVEL_SPEW,"Rank copy targets in sequoia mapper for task %s (ID %d) (unique id %d) "
+      log_sequoia.spew("Rank copy targets in sequoia mapper for task %s (ID %d) (unique id %d) "
           "on processor %x", task->variants->name, task->task_id, task->get_unique_task_id(), local_proc.id);
       // This is also Sequoia-like creation of instances.  Find the least common denominator
       // in our stack and pick that memory followed by any memories after it back to the global memory

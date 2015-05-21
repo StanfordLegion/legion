@@ -151,8 +151,8 @@ namespace LegionRuntime {
             else
               logger->start_block("BEFORE ANALYZING PARTITION (%d,%d,%d) "
                         "index %d of %s (UID %lld) in context %d mask %s",
-                req->partition.index_partition, req->partition.field_space.id, 
-                req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
           else if (pre_map)
           {
@@ -164,8 +164,8 @@ namespace LegionRuntime {
             else
               logger->start_block("BEFORE PRE-MAPPING PARTITION (%d,%d,%d) "
                       "index %d of %s (UID %lld) in context %d mask %s",
-                req->partition.index_partition, req->partition.field_space.id, 
-                req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
           else
           {
@@ -194,8 +194,8 @@ namespace LegionRuntime {
             else
               logger->start_block("AFTER ANALYZING PARTITION (%d,%d,%d) "
                         "index %d of %s (UID %lld) in context %d mask %s",
-                req->partition.index_partition, req->partition.field_space.id, 
-                req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
           else if (pre_map)
           {
@@ -207,8 +207,8 @@ namespace LegionRuntime {
             else
               logger->start_block("AFTER PRE-MAPPING PARTITION (%d,%d,%d) "
                       "index %d of %s (UID %lld) in context %d mask %s",
-                  req->partition.index_partition, req->partition.field_space.id, 
-                  req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
           else
           {

@@ -206,7 +206,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
   var piece_node_ptrs : &&c.legion_ptr_t =
     [&&c.legion_ptr_t](c.malloc(conf.num_pieces * 8))
   do
-    var itr = c.legion_index_iterator_create(all_nodes_ispace)
+    var itr = c.legion_index_iterator_create(runtime, ctx, all_nodes_ispace)
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(private_node_map, n)
       piece_node_ptrs[n] =
@@ -271,7 +271,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
     c.legion_index_allocator_destroy(wire_allocator)
   end
   do
-    var itr = c.legion_index_iterator_create(all_wires_ispace)
+    var itr = c.legion_index_iterator_create(runtime, ctx, all_wires_ispace)
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(ghost_node_map, n)
       for i = 0, conf.wires_per_piece do
@@ -330,7 +330,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
   end
   -- Second pass: make some random fraction of the private nodes shared
   do
-    var itr = c.legion_index_iterator_create(all_nodes_ispace)
+    var itr = c.legion_index_iterator_create(runtime, ctx, all_nodes_ispace)
     for n = 0, conf.num_pieces do
       c.legion_coloring_ensure_color(shared_node_map, n)
       for i = 0, conf.nodes_per_piece do

@@ -289,30 +289,6 @@ fspace side(rz : region(zone),
   cqe2 :   vec2,         -- ??????????
 }
 
-fspace mesh(rz : region(zone),
-            rp : region(point),
-            rs : region(side(wild, wild, wild, wild))) {
-  rzp : region(zone),
-  rpp : region(point),
-  rpg : region(point),
-  rps : region(point),
-  rsp : region(side(rzp, rpp, rpg, rsp)),
-
-  -- Coloring
-  mcolor : int64,          -- mesh piece color
-
-  -- Index bounds for C++ kernels
-  zstart : int64,          -- zone start index
-  zend : int64,            -- zone end index (exclusive)
-  sstart : int64,          -- side start index
-  send : int64,            -- side end index (exclusive)
-}
-where
-  rzp <= rz, rpp <= rp, rpg <= rp, rps <= rp,
-  rpp * rpg, rpp * rps,
-  rsp <= rs
-end
-
 -- #####################################
 -- ## Initialization
 -- #################
@@ -1046,82 +1022,6 @@ local function accessor_generic_get_base_pointer(field_type)
   end
 end
 
-terra foreign_sum_point_force(
-  rz_physical : c.legion_physical_region_t[1],
-  rz_fields : c.legion_field_id_t[1],
-  rpp_physical : c.legion_physical_region_t[2],
-  rpp_fields : c.legion_field_id_t[2],
-  rpg_physical : c.legion_physical_region_t[2],
-  rpg_fields : c.legion_field_id_t[2],
-  rs_physical : c.legion_physical_region_t[8],
-  rs_fields : c.legion_field_id_t[8])
-
-  var accessor_znump = c.legion_physical_region_get_field_accessor_generic(
-    rz_physical[0], rz_fields[0])
-  var znump = [accessor_generic_get_base_pointer(uint8)](accessor_znump)
-
-  var accessor_pf_x = c.legion_physical_region_get_field_accessor_generic(
-    rpp_physical[0], rpp_fields[0])
-  var pf_x = [accessor_generic_get_base_pointer(double)](accessor_pf_x)
-  var accessor_pf_y = c.legion_physical_region_get_field_accessor_generic(
-    rpp_physical[1], rpp_fields[1])
-  var pf_y = [accessor_generic_get_base_pointer(double)](accessor_pf_y)
-
-  do
-    var accessor_rpg_pf_x = c.legion_physical_region_get_accessor_generic(
-      rpg_physical[0])
-    var rpg_pf_x = [accessor_generic_get_base_pointer(double)](accessor_pf_x)
-    var accessor_rpg_pf_y = c.legion_physical_region_get_accessor_generic(
-      rpg_physical[1])
-    var rpg_pf_y = [accessor_generic_get_base_pointer(double)](accessor_pf_y)
-
-    legionlib.assert(pf_x == rpg_pf_x, "base pointers don't match")
-    legionlib.assert(pf_y == rpg_pf_y, "base pointers don't match")
-  end
-
-  var accessor_mapsz = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[0], rs_fields[0])
-  var mapsz = [accessor_generic_get_base_pointer(uint32)](accessor_mapsz)
-  var accessor_mapsp1 = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[1], rs_fields[1])
-  var mapsp1 = [accessor_generic_get_base_pointer(uint32)](accessor_mapsp1)
-  var accessor_mapss3 = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[3], rs_fields[3])
-  var mapss3 = [accessor_generic_get_base_pointer(uint32)](accessor_mapss3)
-
-  var accessor_sft_x = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[4], rs_fields[4])
-  var sft_x = [accessor_generic_get_base_pointer(double)](accessor_sft_x)
-  var accessor_sft_y = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[5], rs_fields[5])
-  var sft_y = [accessor_generic_get_base_pointer(double)](accessor_sft_y)
-  var accessor_sfq_x = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[6], rs_fields[6])
-  var sfq_x = [accessor_generic_get_base_pointer(double)](accessor_sfq_x)
-  var accessor_sfq_y = c.legion_physical_region_get_field_accessor_generic(
-    rs_physical[7], rs_fields[7])
-  var sfq_y = [accessor_generic_get_base_pointer(double)](accessor_sfq_y)
-
-  var rs_iterator = c.legion_index_iterator_create(
-    c.legion_physical_region_get_logical_region(rs_physical[0]).index_space)
-  while c.legion_index_iterator_has_next(rs_iterator) do
-    var span_size : c.size_t = 0
-    var span_start = c.legion_index_iterator_next_span(rs_iterator, &span_size, -1).value
-
-    for span_i = 0, span_size do
-      var s = span_start + span_i
-      var p1 = mapsp1[s]
-      var s3 = mapss3[s]
-
-      var f_x = (sfq_x[s] + sft_x[s]) - (sfq_x[s3] + sft_x[s3])
-      var f_y = (sfq_y[s] + sft_y[s]) - (sfq_y[s3] + sft_y[s3])
-
-      pf_x[p1] = pf_x[p1] + f_x
-      pf_y[p1] = pf_x[p1] + f_y
-    end
-  end
-end
-
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
@@ -1134,11 +1034,11 @@ do
   if not enable then return end
 
   if use_foreign then
-    foreign_sum_point_force(
-      __physical(rz), __fields(rz),
-      __physical(rpp), __fields(rpp),
-      __physical(rpg), __fields(rpg),
-      __physical(rs), __fields(rs))
+    -- foreign_sum_point_force(
+    --   __physical(rz), __fields(rz),
+    --   __physical(rpp), __fields(rpp),
+    --   __physical(rpg), __fields(rpg),
+    --   __physical(rs), __fields(rs))
   else
     for s in rs do
       var p1 = s.mapsp1
@@ -1477,10 +1377,9 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rp_all_shared_p : partition(disjoint, rp_all_ghost),
               rs_all : region(side(wild, wild, wild, wild)),
               rs_all_p : partition(disjoint, rs_all),
-              rm_all : region(mesh(rz_all, rp_all, rs_all)),
               conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all, rm_all),
+  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
   writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
@@ -1735,10 +1634,9 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rp_all_shared_p : partition(disjoint, rp_all_ghost),
                 rs_all : region(side(wild, wild, wild, wild)),
                 rs_all_p : partition(disjoint, rs_all),
-                rm_all : region(mesh(rz_all, rp_all, rs_all)),
                 conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all, rm_all),
+  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
   writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
@@ -1807,7 +1705,7 @@ do
              rp_all_private, rp_all_private_p,
              rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
              rs_all, rs_all_p,
-             rm_all, conf_warmup)
+             conf_warmup)
   end
 end
 
@@ -2129,8 +2027,6 @@ terra read_input(runtime : c.legion_runtime_t,
                  rp_fields : c.legion_field_id_t[17],
                  rs_physical : c.legion_physical_region_t[34],
                  rs_fields : c.legion_field_id_t[34],
-                 rm_physical : c.legion_physical_region_t[20],
-                 rm_fields : c.legion_field_id_t[20],
                  conf : config)
 
   var color_words : c.size_t = cmath.ceil(conf.npieces/64.0)
@@ -2222,13 +2118,6 @@ terra read_input(runtime : c.legion_runtime_t,
     c.legion_index_allocator_destroy(rs_alloc)
   end
 
-  do
-    var rm_ispace = c.legion_physical_region_get_logical_region(rm_physical[0]).index_space
-    var rm_alloc = c.legion_index_allocator_create(runtime, ctx, rm_ispace)
-    legionlib.assert(c.legion_index_allocator_alloc(rm_alloc, conf.npieces).value == 0, "rm_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rm_alloc)
-  end
-
   -- Write mesh data into regions
   do
     var rz_znump = c.legion_physical_region_get_field_accessor_array(
@@ -2316,18 +2205,6 @@ terra read_input(runtime : c.legion_runtime_t,
     c.legion_accessor_array_destroy(rs_mapsp2_index)
     c.legion_accessor_array_destroy(rs_mapss3)
     c.legion_accessor_array_destroy(rs_mapss4)
-  end
-
-  do
-    var rm_mcolor = c.legion_physical_region_get_field_accessor_array(
-      rm_physical[15], rm_fields[15])
-
-    for i = 0, conf.npieces do
-      var p = c.legion_ptr_t { value = i }
-      @[&int64](c.legion_accessor_array_ref(rm_mcolor, p)) = i
-    end
-
-    c.legion_accessor_array_destroy(rm_mcolor)
   end
 
   -- Create colorings
@@ -2653,14 +2530,12 @@ task test()
   var rz_all = region(zone, conf.nz)
   var rp_all = region(point, conf.np)
   var rs_all = region(side(wild, wild, wild, wild), conf.ns)
-  var rm_all = region(mesh(rz_all, rp_all, rs_all), conf.npieces)
 
   var colorings = read_input(
     __runtime(), __context(),
     __physical(rz_all), __fields(rz_all),
     __physical(rp_all), __fields(rp_all),
     __physical(rs_all), __fields(rs_all),
-    __physical(rm_all), __fields(rm_all),
     conf)
 
   -- Partition zones into disjoint pieces.
@@ -2687,35 +2562,13 @@ task test()
   -- Partition sides into disjoint pieces by zone.
   var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
-  -- Stuff regions into mesh pieces.
-  for m in rm_all do
-    var zones = rz_all_p[m.mcolor]
-    var private = rp_all_private_p[m.mcolor]
-    var ghost = rp_all_ghost_p[m.mcolor]
-    var shared = rp_all_shared_p[m.mcolor]
-    var sides = rs_all_p[m.mcolor]
-
-    @m = [ mesh(rz_all, rp_all, rs_all) ]({
-      rzp = zones,
-      rpp = private,
-      rpg = ghost,
-      rps = shared,
-      rsp = sides,
-      mcolor = m.mcolor,
-      zstart = m.zstart,
-      zend = m.zend,
-      sstart = m.sstart,
-      send = m.send
-    })
-  end
-
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   initialize(rz_all, rz_all_p,
              rp_all,
              rp_all_private, rp_all_private_p,
              rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
              rs_all, rs_all_p,
-             rm_all, conf)
+             conf)
   -- Hack: Force main task to wait for initialization to finish.
   do
     var _ = 0
@@ -2732,7 +2585,7 @@ task test()
            rp_all_private, rp_all_private_p,
            rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
            rs_all, rs_all_p,
-           rm_all, conf)
+           conf)
   -- Hack: Force main task to wait for simulation to finish.
   do
     var _ = 0

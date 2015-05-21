@@ -211,14 +211,14 @@ class Memory(object):
 
 
 class IndexSpaceNode(object):
-    def __init__(self, state, uid, color, parent):
+    def __init__(self, state, uid, point, parent):
         self.state = state
         self.uid = uid
         self.parent = parent
         self.instances = dict()
         self.children = dict()
         if parent <> None:
-            parent.add_child(color, self)
+            parent.add_child(point, self)
             self.depth = parent.depth + 1
             # Also check to see if the parent has any instances for which
             # we need to instantiate this tree
@@ -237,9 +237,9 @@ class IndexSpaceNode(object):
             child.instantiate(region_node, field_node, tid)
         return region_node
 
-    def add_child(self, color, child):
-        assert color not in self.children
-        self.children[color] = child 
+    def add_child(self, point, child):
+        assert point not in self.children
+        self.children[point] = child 
 
     def get_instance(self, tid):
         assert tid in self.instances
@@ -282,7 +282,7 @@ class IndexSpaceNode(object):
             child.print_graph(printer)
 
 class IndexPartNode(object):
-    def __init__(self, state, uid, disjoint, color, parent):
+    def __init__(self, state, uid, disjoint, point, parent):
         self.state = state
         self.uid = uid
         self.disjoint = disjoint
@@ -290,7 +290,7 @@ class IndexPartNode(object):
         self.instances = dict()
         self.children = dict()
         assert parent <> None
-        parent.add_child(color, self)
+        parent.add_child(point, self)
         self.depth = parent.depth + 1
         # Also need to instaitate any instances from the parent
         for tid,pinst in parent.instances.iteritems():
@@ -306,9 +306,9 @@ class IndexPartNode(object):
             child.instantiate(part_node, field_node, tid)
         return part_node
 
-    def add_child(self, color, child):
-        assert color not in self.children
-        self.children[color] = child
+    def add_child(self, point, child):
+        assert point not in self.children
+        self.children[point] = child
 
     def is_region(self):
         return False
@@ -869,6 +869,14 @@ class SingleTask(object):
                         # Check to see if they are still aliased
                         req1 = inst1.get_requirement(dep.idx1)
                         req2 = inst2.get_requirement(dep.idx2)
+                        def is_empty_inter_close_op(op):
+                            return isinstance(op, Close) and \
+                                    op.is_inter_close_op and \
+                                    op.get_instance(0) == None
+                        if is_empty_inter_close_op(inst1) or \
+                                is_empty_inter_close_op(inst2):
+                            # this is an InterCloseOp that uses no physical instance
+                            continue
                         # If the second requirement is a reduction, there is no need to
                         # have a dataflow dependence since we can make a separate 
                         # reduction instance
@@ -993,9 +1001,6 @@ class SingleTask(object):
                                 traverser.visited = dict()
                                 # TODO: support virtual mappings
                                 dst_inst = inst2.get_instance(dep.idx2)
-                                if dst_inst == None and isinstance(inst2, Close):
-                                    # this is an InterCloseOp
-                                    continue
                                 dst_field = f
                                 # a hack for copy operations
                                 if (isinstance(inst2, CopyOp) or \
@@ -2422,6 +2427,8 @@ class Point(object):
             first = False
         return result
 
+    def __hash__(self):
+        return hash(self.to_simple_string())
 
 class EventGraphTraverser(object):
     def __init__(self, forwards, implicit, use_gen, generation, 
@@ -2908,11 +2915,17 @@ class State(object):
         self.index_space_nodes[uid].set_name(name)
         return True
 
-    def add_index_partition(self, pid, uid, disjoint, color):
+    def add_index_partition(self, pid, uid, disjoint, dim, v1, v2, v3):
         assert uid not in self.index_part_nodes
         if pid not in self.index_space_nodes:
             return False
-        self.index_part_nodes[uid] = IndexPartNode(self, uid, disjoint, color, 
+        point = Point(0, dim)
+        point.add_value(v1)
+        if dim > 1:
+            point.add_value(v2)
+            if dim > 2:
+                point.add_value(v3)
+        self.index_part_nodes[uid] = IndexPartNode(self, uid, disjoint, point,
                                                     self.index_space_nodes[pid])
         return True
 
@@ -2921,11 +2934,17 @@ class State(object):
         self.index_part_nodes[uid].set_name(name)
         return True
 
-    def add_index_subspace(self, pid, uid, color):
+    def add_index_subspace(self, pid, uid, dim, v1, v2, v3):
         assert uid not in self.index_space_nodes
         if pid not in self.index_part_nodes:
             return False
-        self.index_space_nodes[uid] = IndexSpaceNode(self, uid, color, 
+        point = Point(0, dim)
+        point.add_value(v1)
+        if dim > 1:
+            point.add_value(v2)
+            if dim > 2:
+                point.add_value(v3)
+        self.index_space_nodes[uid] = IndexSpaceNode(self, uid, point,
                                               self.index_part_nodes[pid])
         return True
 
@@ -3168,14 +3187,19 @@ class State(object):
     def add_copy_events(self, srcman, dstman, index, field, tree,
                         startid, startgen, termid, termgen, redop):
         if srcman not in self.instances:
+            print "srcman " + str(srcman) + " is missing"
             return False
         if dstman not in self.instances:
+            print "dstman " + str(dstman) + " is missing"
             return False
         if index not in self.index_space_nodes:
+            print "index " + str(index) + " is missing"
             return False
         if field not in self.field_space_nodes:
+            print "field " + str(field) + " is missing"
             return False
         if tree not in self.region_trees:
+            print "tree " + str(tree) + " is missing"
             return False
         e1 = self.get_event_from_id(startid,startgen)
         e2 = self.get_event_from_id(termid,termgen)

@@ -73,7 +73,9 @@ namespace LegionRuntime {
     typedef ::legion_coherence_property_t CoherenceProperty;
     typedef ::legion_region_flags_t RegionFlags;
     typedef ::legion_handle_type_t HandleType;
+    typedef ::legion_partition_kind_t PartitionKind;
     typedef ::legion_dependence_type_t DependenceType;
+    typedef ::legion_index_space_kind_t IndexSpaceKind;
 
     enum OpenState {
       NOT_OPEN            = 0,
@@ -122,6 +124,10 @@ namespace LegionRuntime {
       HLR_CONTRIBUTE_COLLECTIVE_ID,
       HLR_CHECK_STATE_ID,
       HLR_MAPPER_TASK_ID,
+      HLR_DISJOINTNESS_TASK_ID,
+      HLR_PART_INDEPENDENCE_TASK_ID,
+      HLR_SPACE_INDEPENDENCE_TASK_ID,
+      HLR_PENDING_CHILD_TASK_ID,
     };
 
     // Forward declarations for user level objects
@@ -206,6 +212,9 @@ namespace LegionRuntime {
     class AndPredOp;
     class OrPredOp;
     class MustEpochOp;
+    class PendingPartitionOp;
+    class DependentPartitionOp;
+    class FillOp;
     class TaskOp;
 
     // legion_tasks.h
@@ -254,9 +263,11 @@ namespace LegionRuntime {
     class InstanceManager;
     class InstanceKey;
     class InstanceView;
+    class DeferredView;
     class MaterializedView;
     class CompositeView;
     class CompositeNode;
+    class FillView;
     class MappingRef;
     class InstanceRef;
     class InnerTaskView;
@@ -284,6 +295,9 @@ namespace LegionRuntime {
     struct CloseInfo;
 
     // legion_utilities.h
+    struct RegionUsage;
+    class AutoLock;
+    class ColorPoint;
     class Serializer;
     class Deserializer;
     template<typename T> class Fraction;
@@ -309,7 +323,6 @@ namespace LegionRuntime {
     typedef LowLevel::Machine Machine;
     typedef LowLevel::Domain Domain;
     typedef LowLevel::DomainPoint DomainPoint;
-    typedef LowLevel::IndexSpace IndexSpace;
     typedef LowLevel::IndexSpaceAllocator IndexSpaceAllocator;
     typedef LowLevel::RegionInstance PhysicalInstance;
     typedef LowLevel::Memory Memory;
@@ -324,15 +337,18 @@ namespace LegionRuntime {
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
+    typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
     typedef ::legion_color_t Color;
-    typedef ::legion_index_partition_t IndexPartition;
     typedef ::legion_field_id_t FieldID;
     typedef ::legion_trace_id_t TraceID;
     typedef ::legion_mapper_id_t MapperID;
     typedef ::legion_context_id_t ContextID;
     typedef ::legion_instance_id_t InstanceID;
+    typedef ::legion_index_space_id_t IndexSpaceID;
+    typedef ::legion_index_partition_id_t IndexPartitionID;
+    typedef ::legion_index_tree_id_t IndexTreeID;
     typedef ::legion_field_space_id_t FieldSpaceID;
     typedef ::legion_generation_id_t GenerationID;
     typedef ::legion_type_handle TypeHandle;
@@ -351,6 +367,9 @@ namespace LegionRuntime {
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
     typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
+    typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
+    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine machine, 
         HighLevelRuntime *rt, const std::set<Processor> &local_procs);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
@@ -508,6 +527,9 @@ namespace LegionRuntime {
     friend class AndPredOp;                       \
     friend class OrPredOp;                        \
     friend class MustEpochOp;                     \
+    friend class PendingPartitionOp;              \
+    friend class DependentPartitionOp;            \
+    friend class FillOp;                          \
     friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \
@@ -524,10 +546,12 @@ namespace LegionRuntime {
     friend class PartitionNode;                   \
     friend class LogicalView;                     \
     friend class InstanceView;                    \
+    friend class DeferredView;                    \
     friend class ReductionView;                   \
     friend class MaterializedView;                \
     friend class CompositeView;                   \
     friend class CompositeNode;                   \
+    friend class FillView;                        \
     friend class LayoutDescription;               \
     friend class PhysicalManager;                 \
     friend class InstanceManager;                 \
@@ -536,7 +560,8 @@ namespace LegionRuntime {
     friend class FoldReductionManager;            \
     friend class TreeStateLogger;                 \
     friend class BindingLib::Utility;             \
-    friend class CObjectWrapper;
+    friend class CObjectWrapper;                  \
+    friend class StateDirectory;
 
     // Timing events
     enum {

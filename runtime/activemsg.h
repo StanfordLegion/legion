@@ -19,6 +19,7 @@
 #ifndef ACTIVEMSG_H
 #define ACTIVEMSG_H
 
+#include <assert.h>
 #include <stddef.h>
 #include <vector>
 

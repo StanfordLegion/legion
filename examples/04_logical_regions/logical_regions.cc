@@ -65,13 +65,13 @@ void top_level_task(const Task *task,
   // interested in learning more.  Here we create an unstructured
   // index space that will store at most 1024 elements.
   IndexSpace unstructured_is = runtime->create_index_space(ctx, 1024); 
-  printf("Created unstructured index space %x\n", unstructured_is.id);
+  printf("Created unstructured index space %x\n", unstructured_is.get_id());
   // We create structured index spaces from Rects which we
   // convert to Domains (recall example 02).
   Rect<1> rect(Point<1>(0),Point<1>(1023));
   IndexSpace structured_is = runtime->create_index_space(ctx, 
                                           Domain::from_rect<1>(rect));
-  printf("Created structured index space %x\n", structured_is.id);
+  printf("Created structured index space %x\n", structured_is.get_id());
   // Structured index spaces by default already have all their
   // points allocated and they cannot be allocated or deallocated.
   // Unstructured index spaces must have their elements allocated
@@ -139,13 +139,13 @@ void top_level_task(const Task *task,
   LogicalRegion unstructured_lr = 
     runtime->create_logical_region(ctx, unstructured_is, fs);
   printf("Created unstructured logical region (%x,%x,%x)\n",
-      unstructured_lr.get_index_space().id, 
+      unstructured_lr.get_index_space().get_id(), 
       unstructured_lr.get_field_space().get_id(),
       unstructured_lr.get_tree_id());
   LogicalRegion structured_lr = 
     runtime->create_logical_region(ctx, structured_is, fs);
   printf("Created structured logical region (%x,%x,%x)\n",
-      structured_lr.get_index_space().id, 
+      structured_lr.get_index_space().get_id(), 
       structured_lr.get_field_space().get_id(),
       structured_lr.get_tree_id());
 

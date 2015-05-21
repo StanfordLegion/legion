@@ -19,6 +19,7 @@
 
 #include "legion.h"
 #include "region_tree.h"
+#include "legion_utilities.h"
 #include "legion_allocation.h"
 
 namespace LegionRuntime {
@@ -137,6 +138,8 @@ namespace LegionRuntime {
       // This is a special helper method for tracing which
       // needs to know explicitly about close operations
       virtual bool is_close_op(void) const { return false; }
+      // Determine if this operation is a partition operation
+      virtual bool is_partition_op(void) const { return false; }
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -700,13 +703,13 @@ namespace LegionRuntime {
       InterCloseOp& operator=(const InterCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<Color> &targets, 
-                      bool leave_open, int next_child, LegionTrace *trace,
-                      int close_idx, const FieldMask &close_mask,
-                      Operation *create_op);
+                      const std::set<ColorPoint> &targets, 
+                      bool leave_open, const ColorPoint &next_child, 
+                      LegionTrace *trace, int close_idx, 
+                      const FieldMask &close_mask, Operation *create_op);
     public:
       const RegionRequirement& get_region_requirement(void) const;
-      const std::set<Color>& get_target_children(void) const;
+      const std::set<ColorPoint>& get_target_children(void) const;
     public:
       void record_trace_dependence(Operation *target, GenerationID target_gen,
                                    int target_idx, int source_idx, 
@@ -719,9 +722,9 @@ namespace LegionRuntime {
     public:
       virtual bool trigger_execution(void);
     protected:
-      std::set<Color> target_children;
+      std::set<ColorPoint> target_children;
       bool leave_open;
-      int next_child;
+      ColorPoint next_child;
       unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing
@@ -1222,6 +1225,305 @@ namespace LegionRuntime {
       static void handle_launch_task(const void *args);
     private:
       MustEpochOp *const owner;
+    };
+
+    /**
+     * \class PendingPartitionOp
+     * Pending partition operations are ones that must be deferred
+     * in order to move the overhead of computing them off the 
+     * application cores. In many cases deferring them is also
+     * necessary to avoid possible application deadlock with
+     * other pending partitions.
+     */
+    class PendingPartitionOp : public Operation {
+    public:
+      static const AllocationType alloc_type = PENDING_PARTITION_OP_ALLOC;
+    protected:
+      // Track pending partition operations as thunks
+      class PendingPartitionThunk {
+      public:
+        virtual ~PendingPartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest) = 0;
+      };
+      class EqualPartitionThunk : public PendingPartitionThunk {
+      public:
+        EqualPartitionThunk(IndexPartition id, size_t g)
+          : pid(id), granularity(g) { }
+        virtual ~EqualPartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_equal_partition(pid, granularity); }
+      protected:
+        IndexPartition pid;
+        size_t granularity;
+      };
+      class WeightedPartitionThunk : public PendingPartitionThunk {
+      public:
+        WeightedPartitionThunk(IndexPartition id, size_t g, 
+                               const std::map<DomainPoint,int> &w)
+          : pid(id), weights(w), granularity(g) { }
+        virtual ~WeightedPartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_weighted_partition(pid, granularity, weights); }
+      protected:
+        IndexPartition pid;
+        std::map<DomainPoint,int> weights;
+        size_t granularity;
+      };
+      class UnionPartitionThunk : public PendingPartitionThunk {
+      public:
+        UnionPartitionThunk(IndexPartition id, 
+                            IndexPartition h1, IndexPartition h2)
+          : pid(id), handle1(h1), handle2(h2) { }
+        virtual ~UnionPartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_partition_by_union(pid, handle1, handle2); }
+      protected:
+        IndexPartition pid;
+        IndexPartition handle1;
+        IndexPartition handle2;
+      };
+      class IntersectionPartitionThunk : public PendingPartitionThunk {
+      public:
+        IntersectionPartitionThunk(IndexPartition id, 
+                            IndexPartition h1, IndexPartition h2)
+          : pid(id), handle1(h1), handle2(h2) { }
+        virtual ~IntersectionPartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_partition_by_intersection(pid, handle1, 
+                                                          handle2); }
+      protected:
+        IndexPartition pid;
+        IndexPartition handle1;
+        IndexPartition handle2;
+      };
+      class DifferencePartitionThunk : public PendingPartitionThunk {
+      public:
+        DifferencePartitionThunk(IndexPartition id, 
+                            IndexPartition h1, IndexPartition h2)
+          : pid(id), handle1(h1), handle2(h2) { }
+        virtual ~DifferencePartitionThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_partition_by_difference(pid, handle1, 
+                                                        handle2); }
+      protected:
+        IndexPartition pid;
+        IndexPartition handle1;
+        IndexPartition handle2;
+      };
+      class CrossProductThunk : public PendingPartitionThunk {
+      public:
+        CrossProductThunk(IndexPartition b, IndexPartition s,
+                          std::map<DomainPoint,IndexPartition> &h)
+          : base(b), source(s), handles(h) { }
+        virtual ~CrossProductThunk(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->create_cross_product_partitions(base, source, 
+                                                         handles); }
+      protected:
+        IndexPartition base;
+        IndexPartition source;
+        std::map<DomainPoint,IndexPartition> handles;
+      };
+      class ComputePendingSpace : public PendingPartitionThunk {
+      public:
+        ComputePendingSpace(IndexSpace t, bool is,
+                            const std::vector<IndexSpace> &h)
+          : is_union(is), is_partition(false), target(t), handles(h) { }
+        ComputePendingSpace(IndexSpace t, bool is, IndexPartition h)
+          : is_union(is), is_partition(true), target(t), handle(h) { }
+        virtual ~ComputePendingSpace(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { if (is_partition)
+            return forest->compute_pending_space(target, handle, is_union);
+          else
+            return forest->compute_pending_space(target, handles, is_union); }
+      protected:
+        bool is_union, is_partition;
+        IndexSpace target;
+        IndexPartition handle;
+        std::vector<IndexSpace> handles;
+      };
+      class ComputePendingDifference : public PendingPartitionThunk {
+      public:
+        ComputePendingDifference(IndexSpace t, IndexSpace i,
+                                 const std::vector<IndexSpace> &h)
+          : target(t), initial(i), handles(h) { }
+        virtual ~ComputePendingDifference(void) { }
+      public:
+        virtual Event perform(RegionTreeForest *forest)
+        { return forest->compute_pending_space(target, initial, handles); }
+      protected:
+        IndexSpace target, initial;
+        std::vector<IndexSpace> handles;
+      };
+    public:
+      PendingPartitionOp(Runtime *rt);
+      PendingPartitionOp(const PendingPartitionOp &rhs);
+      virtual ~PendingPartitionOp(void);
+    public:
+      PendingPartitionOp& operator=(const PendingPartitionOp &rhs);
+    public:
+      void initialize_equal_partition(SingleTask *ctx,
+                                      IndexPartition pid, size_t granularity);
+      void initialize_weighted_partition(SingleTask *ctx,
+                                         IndexPartition pid, size_t granularity,
+                                      const std::map<DomainPoint,int> &weights);
+      void initialize_union_partition(SingleTask *ctx,
+                                      IndexPartition pid, 
+                                      IndexPartition handle1,
+                                      IndexPartition handle2);
+      void initialize_intersection_partition(SingleTask *ctx,
+                                             IndexPartition pid, 
+                                             IndexPartition handle1,
+                                             IndexPartition handle2);
+      void initialize_difference_partition(SingleTask *ctx,
+                                           IndexPartition pid, 
+                                           IndexPartition handle1,
+                                           IndexPartition handle2);
+      void initialize_cross_product(SingleTask *ctx,
+                                    IndexPartition base, IndexPartition source,
+                                std::map<DomainPoint,IndexPartition> &handles);
+      void initialize_index_space_union(SingleTask *ctx, IndexSpace target, 
+                                        const std::vector<IndexSpace> &handles);
+      void initialize_index_space_union(SingleTask *ctx, IndexSpace target, 
+                                        IndexPartition handle);
+      void initialize_index_space_intersection(SingleTask *ctx, 
+                                               IndexSpace target,
+                                        const std::vector<IndexSpace> &handles);
+      void initialize_index_space_intersection(SingleTask *ctx,
+                                              IndexSpace target,
+                                              IndexPartition handle);
+      void initialize_index_space_difference(SingleTask *ctx, 
+                                             IndexSpace target, 
+                                             IndexSpace initial,
+                                        const std::vector<IndexSpace> &handles);
+      inline Event get_handle_ready(void) const { return handle_ready; }
+    public:
+      virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
+      virtual bool is_partition_op(void) const { return true; } 
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    protected:
+      UserEvent handle_ready;
+      PendingPartitionThunk *thunk;
+    };
+
+    /**
+     * \class DependentPartitionOp
+     * An operation for creating different kinds of partitions
+     * which are dependent on mapping a region in order to compute
+     * the resulting partition.
+     */
+    class DependentPartitionOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
+    public:
+      enum PartOpKind {
+        BY_FIELD,
+        BY_IMAGE,
+        BY_PREIMAGE,
+      };
+    public:
+      DependentPartitionOp(Runtime *rt);
+      DependentPartitionOp(const DependentPartitionOp &rhs);
+      virtual ~DependentPartitionOp(void);
+    public:
+      DependentPartitionOp& operator=(const DependentPartitionOp &rhs);
+    public:
+      void initialize_by_field(SingleTask *ctx, IndexPartition pid,
+                               LogicalRegion handle, LogicalRegion parent,
+                               const Domain &color_space, FieldID fid); 
+      void initialize_by_image(SingleTask *ctx, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               const Domain &color_space);
+      void initialize_by_preimage(SingleTask *ctx, IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               const Domain &color_space);
+      const RegionRequirement& get_requirement(void) const;
+      inline Event get_handle_ready(void) const { return handle_ready; }
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void deferred_complete(void);
+      virtual unsigned find_parent_index(unsigned idx);
+      virtual bool is_partition_op(void) const { return true; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    protected:
+      void compute_parent_index(void);
+    protected:
+      UserEvent handle_ready;
+      PartOpKind partition_kind;
+      RegionRequirement requirement;
+      IndexPartition partition_handle;
+      Domain color_space;
+      IndexPartition projection; /* for pre-image only*/
+      RegionTreePath privilege_path;
+      unsigned parent_req_index;
+    };
+
+    /**
+     * \class FillOp
+     * Fill operations are used to initialize a field to a
+     * specific value for a particular logical region.
+     */
+    class FillOp : public SpeculativeOp {
+    public:
+      static const AllocationType alloc_type = FILL_OP_ALLOC;
+    public:
+      FillOp(Runtime *rt);
+      FillOp(const FillOp &rhs);
+      virtual ~FillOp(void);
+    public:
+      FillOp& operator=(const FillOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, FieldID fid,
+                      const void *ptr, size_t size,
+                      const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, LogicalRegion handle,
+                      LogicalRegion parent, 
+                      const std::set<FieldID> &fields,
+                      const void *ptr, size_t size,
+                      const Predicate &pred, bool check_privileges);
+      inline const RegionRequirement& get_requirement(void) const 
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual void resolve_true(void);
+      virtual void resolve_false(void);
+      virtual bool speculate(bool &value);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      void check_fill_privilege(void);
+      void compute_parent_index(void);
+    protected:
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      RegionTreePath mapping_path;
+      unsigned parent_req_index;
+      void *value;
+      size_t value_size;
     };
 
   }; //namespace HighLevel

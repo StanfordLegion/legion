@@ -117,8 +117,17 @@ extern "C" {
    * @see LegionRuntime::HighLevel::IndexSpace
    */
   typedef struct legion_index_space_t {
-    legion_lowlevel_id_t id;
+    legion_index_space_id_t id;
+    legion_index_tree_id_t tid;
   } legion_index_space_t;
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexPartition
+   */
+  typedef struct legion_index_partition_t {
+    legion_index_partition_id_t id;
+    legion_index_tree_id_t tid;
+  } legion_index_partition_t;
 
   /**
    * @see LegionRuntime::HighLevel::IndexAllocator
@@ -1835,7 +1844,9 @@ extern "C" {
    * @see LegionRuntime::HighLevel::IndexIterator::IndexIterator()
    */
   legion_index_iterator_t
-  legion_index_iterator_create(legion_index_space_t handle);
+  legion_index_iterator_create(legion_runtime_t runtime,
+                               legion_context_t context,
+                               legion_index_space_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.

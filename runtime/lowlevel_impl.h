@@ -132,33 +132,33 @@ namespace LegionRuntime {
     public:
       AutoHSLLock(gasnet_hsl_t &mutex) : mutexp(&mutex), held(true)
       { 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
 	gasnet_hsl_lock(mutexp); 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
+	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
       AutoHSLLock(gasnet_hsl_t *_mutexp) : mutexp(_mutexp), held(true)
       { 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
 	gasnet_hsl_lock(mutexp); 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
+	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
       AutoHSLLock(GASNetHSL &mutex) : mutexp(&mutex.mutex), held(true)
       { 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK IN %p", mutexp);
+	log_mutex.spew("MUTEX LOCK IN %p", mutexp);
 	//printf("[%d] MUTEX LOCK IN %p\n", gasnet_mynode(), mutexp);
 	gasnet_hsl_lock(mutexp); 
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK HELD %p", mutexp);
+	log_mutex.spew("MUTEX LOCK HELD %p", mutexp);
 	//printf("[%d] MUTEX LOCK HELD %p\n", gasnet_mynode(), mutexp);
       }
       ~AutoHSLLock(void) 
       {
 	if(held)
 	  gasnet_hsl_unlock(mutexp);
-	log_mutex(LEVEL_SPEW, "MUTEX LOCK OUT %p", mutexp);
+	log_mutex.spew("MUTEX LOCK OUT %p", mutexp);
 	//printf("[%d] MUTEX LOCK OUT %p\n", gasnet_mynode(), mutexp);
       }
       void release(void)
@@ -1186,7 +1186,10 @@ namespace LegionRuntime {
 	MKIND_GPUFB,   // GPU framebuffer memory (accessible via cudaMemcpy)
 #endif
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
-        MKIND_DISK,    // disk memory accessible by owner node
+	MKIND_DISK,    // disk memory accessible by owner node
+#ifdef USE_HDF
+	MKIND_HDF      // HDF memory accessible by owner node
+#endif
       };
 
       Impl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Kind _lowlevel_kind);
@@ -1359,6 +1362,71 @@ namespace LegionRuntime {
       int fd; // file descriptor
       std::string file;  // file name
     };
+
+#ifdef USE_HDF
+    class HDFMemory : public Memory::Impl {
+    public:
+      static const size_t ALIGNMENT = 256;
+
+      HDFMemory(Memory _me);
+
+      virtual ~HDFMemory(void);
+
+      virtual RegionInstance create_instance(IndexSpace is,
+                                             const int *linearization_bits,
+                                             size_t bytes_needed,
+                                             size_t block_size,
+                                             size_t element_size,
+                                             const std::vector<size_t>& field_sizes,
+                                             ReductionOpID redopid,
+                                             off_t list_size,
+                                             RegionInstance parent_inst);
+
+      RegionInstance create_instance(IndexSpace is,
+                                     const int *linearization_bits,
+                                     size_t bytes_needed,
+                                     size_t block_size,
+                                     size_t element_size,
+                                     const std::vector<size_t>& field_sizes,
+                                     ReductionOpID redopid,
+                                     off_t list_size,
+                                     RegionInstance parent_inst,
+                                     std::string file,
+                                     const std::vector<std::string>& path_names,
+                                     Domain domain);
+
+      virtual void destroy_instance(RegionInstance i,
+                                    bool local_destroy);
+
+      virtual off_t alloc_bytes(size_t size);
+
+      virtual void free_bytes(off_t offset, size_t size);
+
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+      void get_bytes(IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size);
+
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+      void put_bytes(IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size);
+
+      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
+                                       size_t count, const void *entry_buffer);
+
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+      virtual int get_home_node(off_t offset, size_t size);
+
+    public:
+      struct HDFMetadata {
+        int lo[3];
+        hsize_t dims[3];
+        int ndims;
+        hid_t type_id;
+        hid_t file_id;
+        std::vector<hid_t> dataset_ids;
+        std::vector<hid_t> datatype_ids;
+      };
+      std::vector<HDFMetadata*> hdf_metadata;
+    };
+#endif
 
     class MetadataBase {
     public:
