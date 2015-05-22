@@ -817,8 +817,7 @@ namespace LegionRuntime {
         public:
           virtual bool event_triggered(void) {
             target->signal_proc();
-            // Don't delete since we are on the stack
-            return false;
+            return true;
           }
           virtual void print_info(FILE *f) {
             fprintf(f,"Preempt waiter");
@@ -2154,8 +2153,10 @@ namespace LegionRuntime {
 
     void ProcessorImpl::preempt(EventImpl *event, EventImpl::EventGeneration needed)
     {
-      PreemptWaiter waiter(this);
-      event->add_waiter(needed, &waiter);
+      // Put a preempt waiter to on the list of waiters to make
+      // sure that this thread is awake when the event actually triggers
+      PreemptWaiter *waiter = new PreemptWaiter(this);
+      event->add_waiter(needed, waiter);
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // have to hold the lock here when testing this
       // so we don't accidentally miss a wake-up when
