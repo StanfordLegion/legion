@@ -90,8 +90,8 @@ LuaMapperWrapper::LuaMapperWrapper(const char* qualified_mapper_name_,
   lua_getglobal(L, "LuaMapperWrapper");
   lua_pushlightuserdata(L, this);
   lua_pushstring(L, mapper_name.c_str());
-  lua_push_opaque_object(L, machine_);
-  lua_push_opaque_object(L, runtime_);
+  lua_push_opaque_object<CObjectWrapper>(L, machine_);
+  lua_push_opaque_object<CObjectWrapper>(L, runtime_);
   lua_pushlightuserdata(L, &local_proc_);
   CHECK_LUA(lua_pcall(L, 6, 0, 0));
 
@@ -135,9 +135,9 @@ void LuaMapperWrapper::slice_domain(const Task *task, const Domain &domain,
 
   // call wrapper method in Lua
   lua_getglobal(L, "LuaMapperWrapper");
-  lua_push_opaque_object(L, task_);
+  lua_push_opaque_object<CObjectWrapper>(L, task_);
   lua_pushlightuserdata(L, &domain_);
-  lua_push_opaque_object<vector_legion_domain_split_t, ObjectWrapper>(L, slices_);
+  lua_push_opaque_object<ObjectWrapper, vector_legion_domain_split_t>(L, slices_);
   CHECK_LUA(lua_pcall(L, 4, 1, 0));
 
   // handle return value
@@ -169,7 +169,7 @@ bool LuaMapperWrapper::map_task(Task *task)
 
   // call wrapper method in Lua
   lua_getglobal(L, "LuaMapperWrapper");
-  lua_push_opaque_object(L, task_);
+  lua_push_opaque_object<CObjectWrapper>(L, task_);
   CHECK_LUA(lua_pcall(L, 2, 1, 0));
 
   // handle return value
@@ -202,7 +202,7 @@ bool LuaMapperWrapper::map_inline(Inline *inline_operation)
 
   // call wrapper method in Lua
   lua_getglobal(L, "LuaMapperWrapper");
-  lua_push_opaque_object(L, inline_);
+  lua_push_opaque_object<CObjectWrapper>(L, inline_);
   CHECK_LUA(lua_pcall(L, 2, 1, 0));
 
   // handle return value
@@ -236,7 +236,7 @@ void LuaMapperWrapper::notify_mapping_failed(const Mappable *mappable)
 
   // call wrapper method in Lua
   lua_getglobal(L, "LuaMapperWrapper");
-  lua_push_opaque_object(L, mappable_);
+  lua_push_opaque_object<CObjectWrapper>(L, mappable_);
   CHECK_LUA(lua_pcall(L, 2, 1, 0));
 
   // handle return value

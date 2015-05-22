@@ -18,7 +18,7 @@
 
 #include "legion_c_util.h"
 
-template<typename T, typename W = LegionRuntime::HighLevel::CObjectWrapper>
+template< typename W, typename T>
 void lua_push_opaque_object(lua_State* L, T obj)
 {
   void* ptr = W::unwrap(obj);
@@ -35,7 +35,7 @@ void lua_push_opaque_object_array(lua_State* L, T* objs, unsigned num_objs)
   lua_newtable(L);
   for(unsigned i = 0; i < num_objs; ++i)
   {
-    lua_push_opaque_object(L, objs[i]);
+    lua_push_opaque_object<LegionRuntime::HighLevel::CObjectWrapper>(L, objs[i]);
     lua_pushinteger(L, i + 1);
     lua_insert(L, -2);
     lua_settable(L, -3);

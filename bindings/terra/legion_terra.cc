@@ -250,8 +250,8 @@ void lua_registration_callback_wrapper(legion_machine_t machine,
   lua_getglobal(L, "lua_registration_callback_wrapper_in_lua");
   lua_pushstring(L, script_file.c_str());
   lua_pushstring(L, callback_name.c_str());
-  lua_push_opaque_object(L, machine);
-  lua_push_opaque_object(L, runtime);
+  lua_push_opaque_object<CObjectWrapper>(L, machine);
+  lua_push_opaque_object<CObjectWrapper>(L, runtime);
   lua_pushlightuserdata(L, (void*)local_procs);
   lua_pushinteger(L, num_local_procs);
 
@@ -287,10 +287,10 @@ void lua_task_wrapper_void(legion_task_t _task,
   lua_getglobal(L, "lua_void_task_wrapper_in_lua");
   lua_pushstring(L, script_file.c_str());
   lua_pushstring(L, task_name.c_str());
-  lua_push_opaque_object(L, _task);
+  lua_push_opaque_object<CObjectWrapper>(L, _task);
   lua_push_opaque_object_array(L, _regions, _num_regions);
-  lua_push_opaque_object(L, _ctx);
-  lua_push_opaque_object(L, _runtime);
+  lua_push_opaque_object<CObjectWrapper>(L, _ctx);
+  lua_push_opaque_object<CObjectWrapper>(L, _runtime);
 
 #ifdef PROF_BINDING
   double ts_mid = LegionRuntime::TimeStamp::get_current_time_in_micros();
@@ -341,10 +341,10 @@ legion_task_result_t lua_task_wrapper(legion_task_t _task,
   lua_pushstring(L, script_file.c_str());
   lua_pushstring(L, return_type_name.c_str());
   lua_pushstring(L, task_name.c_str());
-  lua_push_opaque_object(L, _task);
+  lua_push_opaque_object<CObjectWrapper>(L, _task);
   lua_push_opaque_object_array(L, _regions, _num_regions);
-  lua_push_opaque_object(L, _ctx);
-  lua_push_opaque_object(L, _runtime);
+  lua_push_opaque_object<CObjectWrapper>(L, _ctx);
+  lua_push_opaque_object<CObjectWrapper>(L, _runtime);
 
 #ifdef PROF_BINDING
   double ts_mid = LegionRuntime::TimeStamp::get_current_time_in_micros();
