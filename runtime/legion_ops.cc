@@ -1104,7 +1104,7 @@ namespace LegionRuntime {
     {
       bool need_trigger;
       bool remove_reference;
-      GenerationID task_gen;
+      GenerationID task_gen = 0;  // initialization to make gcc happy
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
