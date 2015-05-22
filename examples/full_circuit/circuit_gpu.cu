@@ -70,7 +70,7 @@ float find_node_voltage(const RegionAccessor<AT,float> &pvt,
     case GHOST_PTR:
       return ghost.read(ptr);
     default:
-      assert(false);
+      break; // assert(false);
   }
   return 0.f;
 }
@@ -290,7 +290,7 @@ void reduce_local(const RegionAccessor<AT1, float> &pvt,
       ghost.reduce(ptr, value);
       break;
     default:
-      assert(false); // should never make it here
+      break; // assert(false); // should never make it here
   }
 }
 
