@@ -2622,14 +2622,20 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    local tid = cudalib.nvvm_read_ptx_sreg_tid_x
+    -- wrap for-loop body as a terra function
+    local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
+    local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
+    local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
     local base = terralib.newsymbol(uint32, "base")
+    local count = terralib.newsymbol(c.size_t, "count")
     local ptr_init = quote
+      var tid = [base] + (threadIdX() + blockIdX() * blockDimX())
       var [symbol] = [symbol.type]{
         __ptr = c.legion_ptr_t {
-          value = [base] + tid()
+          value = tid
         }
       }
+      if tid >= [count] + [base] then return end
     end
     local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
     local undefined =
@@ -2637,29 +2643,27 @@ function codegen.stat_for_list(cx, node)
     local args = terralib.newlist()
     for symbol, _ in pairs(undefined) do args:insert(symbol) end
     args:insert(base)
+    args:insert(count)
     local terra kernel([args])
       [ptr_init];
       [block]
     end
 
-    local count = terralib.newsymbol(c.size_t, "count")
-    local load_ptx, module_ptr, module_name = cudahelper.codegen_ptx_load(kernel)
-    local get_function, fn = cudahelper.codegen_get_function(module_ptr, module_name)
-    local kernel_call = cudahelper.codegen_kernel_call(fn, count, args)
+    local task = cx.task_meta
+
+    -- register the function for JIT compiling PTX
+    local kernel_id = task:addcudakernel(kernel)
+
+    -- kernel launch
+    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args)
 
     return quote
       do
         [actions];
-        [load_ptx];
-        [get_function];
         while iterator_has_next([it]) do
           var [count] : c.size_t = 0
           var [base] = iterator_next_span([it], &[count], -1).value
-          -- launch CUDA kernel here
-          for i = 0, count do
-            -- call CUDA kernel here
-            [kernel_call]
-          end
+          [kernel_call]
         end
         [cleanup_actions]
       end
@@ -3287,6 +3291,8 @@ end
 function codegen.stat_task(cx, node)
   local task = node.prototype
   task:setcuda(node.cuda)
+  -- we temporaily turn off generating two task versions for cuda tasks
+  if node.cuda then node.region_divergence = false end
   std.register_task(task)
 
   task:set_config_options(node.config_options)

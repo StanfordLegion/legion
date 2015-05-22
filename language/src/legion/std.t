@@ -16,6 +16,7 @@
 
 local config = require("legion/config")
 local log = require("legion/log")
+local cudahelper = require("legion/cudahelper")
 
 local std = {}
 
@@ -1868,6 +1869,21 @@ function task:setcuda(cuda)
   self.cuda = cuda
 end
 
+local global_kernel_id = 1
+function task:addcudakernel(kernel)
+  if rawget(self, "cudakernels") == nil then
+    self.cudakernels = {}
+  end
+  local kernel_id = global_kernel_id
+  local kernel_name = self.name .. "_cuda" .. tostring(kernel_id)
+  self.cudakernels[kernel_id] = {
+    name = kernel_name,
+    kernel = kernel,
+  }
+  global_kernel_id = global_kernel_id + 1
+  return kernel_id
+end
+
 function task:gettype()
   assert(rawget(self, "type") ~= nil)
   return self.type
@@ -1937,6 +1953,10 @@ end
 
 function task:getcuda()
   return self.cuda
+end
+
+function task:getcudakernels()
+  return self.cudakernels
 end
 
 function task:printpretty()
@@ -2238,6 +2258,17 @@ function std.start(main_task)
         [task:getdefinition()])
       end
     end)
+  if terralib.cudacompile then
+    tasks:map(function(task)
+      if task:getcuda() then
+        local kernels = task:getcudakernels()
+        if kernels ~= nil then
+          print("JIT compiling CUDA kernels in task " .. task.name)
+          cudahelper.jit_compile_kernels_and_register(kernels)
+        end
+      end
+    end)
+  end
 
   local reduction_registrations = terralib.newlist()
   for _, op in ipairs(reduction_ops) do

@@ -212,6 +212,7 @@ namespace LegionRuntime {
       // Helper methods for intercepting CUDA calls
       static GPUProcessor* find_local_gpu(void);
       static void** register_fat_binary(void *fat_bin);
+      static void** register_cuda_binary(void *cubin, size_t cubinSize);
       static void unregister_fat_binary(void **fat_bin);
       static void register_var(void **fat_bin, char *host_var,
                                char *device_addr, const char *device_name,
