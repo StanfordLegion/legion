@@ -185,7 +185,7 @@ namespace Realm {
 	while(*p && (*p == ',')) p++;
       }
       if(!found) {
-	printf("'%s' not in '%s'\n", n, cats_enabled);
+	//printf("'%s' not in '%s'\n", n, cats_enabled);
 	return;
       }
     }
