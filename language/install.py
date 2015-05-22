@@ -107,7 +107,7 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, terra_dir, debug, general_llr, gasnet):
+def install_bindings(bindings_dir, terra_dir, debug, general_llr, cuda, gasnet):
     luajit_dir = os.path.join(terra_dir, 'build', 'LuaJIT-2.0.3')
     env = dict(os.environ.items() + [
         ('LUAJIT_DIR', luajit_dir),                         # for bindings
@@ -117,7 +117,7 @@ def install_bindings(bindings_dir, terra_dir, debug, general_llr, gasnet):
     flags = (
         ['DEBUG=%s' % (1 if debug else 0),
          'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
-         'USE_CUDA=0',
+         'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
          ] +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
@@ -170,10 +170,16 @@ def install():
     parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
         help = 'Build Legion with GASNet.')
+    parser.add_argument(
+        '--cuda', dest = 'cuda', action = 'store_true', required = False,
+        help = 'Build Legion with CUDA.')
     args = parser.parse_args()
 
     if args.gasnet and not args.general_llr:
         raise Exception('General LLR is required for GASNet.')
+
+    if args.cuda and not args.general_llr:
+        raise Exception('General LLR is required for CUDA.')
 
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
@@ -186,7 +192,7 @@ def install():
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, terra_dir, args.debug,
-                     args.general_llr, args.gasnet)
+                     args.general_llr, args.cuda, args.gasnet)
 
 if __name__ == '__main__':
     install()
