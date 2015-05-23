@@ -775,6 +775,9 @@ namespace LegionRuntime {
         SEND_COMPOSITE_VIEW,
         SEND_BACK_COMPOSITE_VIEW,
         SEND_COMPOSITE_UPDATE,
+        SEND_FILL_VIEW,
+        SEND_BACK_FILL_VIEW,
+        SEND_FILL_UPDATE,
         SEND_REDUCTION_VIEW,
         SEND_REDUCTION_UPDATE,
         SEND_BACK_REDUCTION_VIEW,
@@ -864,6 +867,9 @@ namespace LegionRuntime {
       void send_composite_view(Serializer &rez, bool flush);
       void send_composite_update(Serializer &rez, bool flush);
       void send_back_composite_view(Serializer &rez, bool flush);
+      void send_fill_view(Serializer &rez, bool flush);
+      void send_back_fill_view(Serializer &rez, bool flush);
+      void send_fill_update(Serializer &rez, bool flush);
       void send_reduction_view(Serializer &rez, bool flush);
       void send_reduction_update(Serializer &rez, bool flush);
       void send_back_reduction_view(Serializer &rez, bool flush);
@@ -1538,6 +1544,9 @@ namespace LegionRuntime {
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_composite_update(AddressSpaceID target, Serializer &rez);
       void send_back_composite_view(AddressSpaceID target, Serializer &rez);
+      void send_fill_view(AddressSpaceID target, Serializer &rez);
+      void send_back_fill_view(AddressSpaceID target, Serializer &rez);
+      void send_fill_update(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_back_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -1633,6 +1642,10 @@ namespace LegionRuntime {
                                         AddressSpaceID source);
       void handle_send_back_composite_view(Deserializer &derez,
                                            AddressSpaceID source);
+      void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
+      void handle_send_back_fill_view(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_send_fill_update(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_reduction_update(Deserializer &derez,

@@ -3832,6 +3832,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MessageManager::send_fill_view(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FILL_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_back_fill_view(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_BACK_FILL_VIEW, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void MessageManager::send_fill_update(Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      package_message(rez, SEND_FILL_UPDATE, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void MessageManager::send_reduction_view(Serializer &rez, bool flush)
     //--------------------------------------------------------------------------
     {
@@ -4416,6 +4437,21 @@ namespace LegionRuntime {
             {
               runtime->handle_send_composite_update(derez, 
                                                     remote_address_space);
+              break;
+            }
+          case SEND_FILL_VIEW:
+            {
+              runtime->handle_send_fill_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_BACK_FILL_VIEW:
+            {
+              runtime->handle_send_back_fill_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_FILL_UPDATE:
+            {
+              runtime->handle_send_fill_update(derez, remote_address_space);
               break;
             }
           case SEND_REDUCTION_VIEW:
@@ -11555,6 +11591,27 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_fill_view(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_back_fill_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_back_fill_view(rez, false/*flush*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_fill_update(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_fill_update(rez, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -12131,6 +12188,30 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CompositeView::handle_send_composite_update(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_fill_view(Deserializer &derez, 
+                                        AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FillView::handle_send_fill_view(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_back_fill_view(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FillView::handle_send_back_fill_view(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_fill_update(Deserializer &derez, 
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FillView::handle_fill_update(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

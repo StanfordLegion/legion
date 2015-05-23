@@ -4101,6 +4101,19 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez);
     public:
+      void unpack_fill_view(Deserializer &derez, AddressSpaceID source,
+                            bool send_back, bool need_lock);
+    public:
+      static void handle_send_fill_view(RegionTreeForest *context, 
+                                        Deserializer &derez,
+                                        AddressSpaceID source);
+      static void handle_send_back_fill_view(RegionTreeForest *context,
+                                             Deserializer &derez,
+                                             AddressSpaceID source);
+      static void handle_fill_update(RegionTreeForest *context,
+                                     Deserializer &derez,
+                                     AddressSpaceID source);
+    public:
       FillView *const parent;
     protected:
       const void *value;

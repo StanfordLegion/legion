@@ -24545,18 +24545,56 @@ namespace LegionRuntime {
                                std::set<PhysicalManager*> &needed_managers) 
     //--------------------------------------------------------------------------
     {
-
+      AutoLock v_lock(view_lock);
+      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
+      for (LegionMap<ReductionView*,ReduceInfo>::aligned::const_iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        FieldMask overlap = it->second.valid_fields & send_mask;
+        if (!overlap)
+          continue;
+        send_reductions[it->first] = overlap;
+      }
+      if (!send_reductions.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_did);
+          rez.serialize<size_t>(send_reductions.size());
+          pack_valid_reductions(rez, send_mask, target, needed_views,
+                                needed_managers, send_reductions);
+        }
+        context->runtime->send_fill_update(target, rez);
+      }
     }
 
     //--------------------------------------------------------------------------
     void FillView::send_view_preamble(Serializer &rez, DistributedID parent_did,
                                       DistributedID manager_did, 
-                                      DistributedID did,
+                                      DistributedID _did,
                                       DistributedID remote_did,
                                       const FieldMask &send_mask)
     //--------------------------------------------------------------------------
     {
-
+      rez.serialize(_did);
+      rez.serialize(remote_did);
+      rez.serialize(parent_did);
+      rez.serialize(context->runtime->address_space);
+      if (logical_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        RegionNode *reg_node = logical_node->as_region_node();
+        rez.serialize(reg_node->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false);
+        PartitionNode *part_node = logical_node->as_partition_node();
+        rez.serialize(part_node->handle);
+      }
+      rez.serialize(value_size);  
+      rez.serialize(value, value_size);
     }
     
     //--------------------------------------------------------------------------
@@ -24564,11 +24602,27 @@ namespace LegionRuntime {
                                            DistributedID parent_did,
                                            DistributedID manager_did,
                                            DistributedID new_owner_did,
-                                           DistributedID did,
+                                           DistributedID _did,
                                            const FieldMask &send_mask)
     //--------------------------------------------------------------------------
     {
-
+      rez.serialize(new_owner_did);
+      rez.serialize(_did);
+      rez.serialize(parent_did);
+      if (logical_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        RegionNode *reg_node = logical_node->as_region_node();
+        rez.serialize(reg_node->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false);
+        PartitionNode *part_node = logical_node->as_partition_node();
+        rez.serialize(part_node->handle);
+      }
+      rez.serialize(value_size);  
+      rez.serialize(value, value_size);
     }
 
     //--------------------------------------------------------------------------
@@ -24578,14 +24632,27 @@ namespace LegionRuntime {
                                std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
-
+      RezCheck z(rez);
+      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;    
+      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        FieldMask overlap = it->second.valid_fields & pack_mask;
+        if (!overlap)
+          continue;
+        send_reductions[it->first] = overlap;
+      }
+      rez.serialize<size_t>(send_reductions.size());
+      if (!send_reductions.empty())
+        pack_valid_reductions(rez, pack_mask & reduction_mask, target,
+                              needed_views, needed_managers, send_reductions);
     }
 
     //--------------------------------------------------------------------------
     void FillView::send_packed_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-
+      context->runtime->send_fill_view(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -24593,7 +24660,206 @@ namespace LegionRuntime {
                                          Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      context->runtime->send_back_fill_view(target, rez);
+    }
 
+    //--------------------------------------------------------------------------
+    void FillView::unpack_fill_view(Deserializer &derez, AddressSpaceID source,
+                                    bool send_back, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        Event lock_event = view_lock.acquire(0, true/*exclusive*/);
+        lock_event.wait(true/*block*/);
+      }
+      DerezCheck z(derez);
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      unpack_valid_reductions(derez, num_reductions, 
+                              logical_node->column_source, source);
+      if (need_lock)
+        view_lock.release();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FillView::handle_send_fill_view(RegionTreeForest *context,
+                                                    Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedID owner_did;
+      derez.deserialize(owner_did);
+      DistributedID parent_did;
+      derez.deserialize(parent_did);
+      AddressSpaceID owner_addr;
+      derez.deserialize(owner_addr);
+      bool is_region;
+      derez.deserialize<bool>(is_region);
+      RegionTreeNode *logical_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        logical_node = context->get_node(handle);
+      }
+      else 
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        logical_node = context->get_node(handle);
+      }
+      size_t value_size;
+      derez.deserialize(value_size);
+      void *value = malloc(value_size);
+      memcpy(value, derez.get_current_pointer(), value_size);
+      derez.advance_pointer(value_size);
+      FillView *parent = NULL;
+      if (parent_did != did)
+      {
+        InstanceView *temp = context->find_view(parent_did)->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(temp != NULL);
+        assert(temp->is_deferred_view());
+        assert(!temp->as_deferred_view()->is_composite_view());
+#endif
+        parent = temp->as_deferred_view()->as_fill_view();
+      }
+      FillView *result;
+      bool need_lock = false;
+      if (parent != NULL)
+      {
+        ColorPoint view_color = logical_node->get_color();
+        result = legion_new<FillView>(context, did, owner_addr, owner_did,
+                                      logical_node, value, value_size,
+                                      true/*owner*/, parent);
+        if (!parent->add_subview(result, view_color))
+        {
+          result->set_no_free_did();
+          // We always add resource references when did != owner_did
+          if (result->remove_resource_reference())
+            legion_delete(result);
+          result = parent->get_subview(view_color)->
+                    as_deferred_view()->as_fill_view();
+          result->add_alias_did(did);
+          need_lock = true;
+        }
+      }
+      else
+      {
+        result = legion_new<FillView>(context, did, owner_addr, owner_did,
+                                      logical_node, value, value_size,
+                                      true/*owner*/);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->unpack_fill_view(derez, source, false/*send back*/, need_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FillView::handle_send_back_fill_view(
+          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedID sender_did;
+      derez.deserialize(sender_did);
+      DistributedID parent_did;
+      derez.deserialize(parent_did);
+      bool is_region;
+      derez.deserialize<bool>(is_region);
+      RegionTreeNode *logical_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        logical_node = context->get_node(handle);
+      }
+      else 
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        logical_node = context->get_node(handle);
+      }
+      size_t value_size;
+      derez.deserialize(value_size);
+      void *value = malloc(value_size);
+      memcpy(value, derez.get_current_pointer(), value_size);
+      derez.advance_pointer(value_size);
+      FillView *parent = NULL;
+      if (parent_did != did)
+      {
+        InstanceView *temp = context->find_view(parent_did)->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(temp != NULL);
+        assert(temp->is_deferred_view());
+        assert(!temp->as_deferred_view()->is_composite_view());
+#endif
+        parent = temp->as_deferred_view()->as_fill_view();
+      }
+      FillView *result;
+      bool need_lock = false;
+      if (parent != NULL)
+      {
+        ColorPoint view_color = logical_node->get_color();
+        result = legion_new<FillView>(context, did, 
+                                      context->runtime->address_space,
+                                      did, logical_node, value, 
+                                      value_size, true/*owner*/, parent);
+        if (!parent->add_subview(result, view_color))
+        {
+          result->set_no_free_did();
+          legion_delete(result);
+          result = parent->get_subview(view_color)->
+                    as_deferred_view()->as_fill_view();
+          result->add_alias_did(did);
+          need_lock = true;
+        }
+      }
+      else
+      {
+        result = legion_new<FillView>(context, did,
+                                      context->runtime->address_space,
+                                      did, logical_node, value,
+                                      value_size, true/*owner*/);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      // Add the sender as a subscriber
+      result->add_subscriber(source, sender_did);
+      // Add a remote reference held by the view that sent this back
+      result->add_remote_reference();
+      // Unpack the rest of the state
+      result->unpack_fill_view(derez, source, true/*send back*/, need_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FillView::handle_fill_update(RegionTreeForest *context,
+                                                 Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      InstanceView *temp = context->find_view(did)->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(temp != NULL);
+      assert(temp->is_deferred_view());
+      assert(!temp->as_deferred_view()->is_composite_view());
+#endif
+      FillView *view = temp->as_deferred_view()->as_fill_view();
+      FieldSpaceNode *field_node = view->logical_node->column_source;
+      view->unpack_valid_reductions(derez, num_reductions, field_node, source);
     }
         
     /////////////////////////////////////////////////////////////
