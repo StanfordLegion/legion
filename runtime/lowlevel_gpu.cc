@@ -218,6 +218,13 @@ namespace LegionRuntime {
                   (const char*)fatbin_args->filename_or_fatbins) );
           }
         }
+        const std::map<void*,void**> &deferred_cubins = get_deferred_cubins();
+        for (std::map<void*,void**>::const_iterator it = deferred_cubins.begin();
+              it != deferred_cubins.end(); it++)
+        {
+          ModuleInfo &info = modules[it->second];
+          CHECK_CU( cuModuleLoadData(&(info.module), it->first) );
+        }
         const std::deque<DeferredFunction> &deferred_functions = get_deferred_functions();
         for (std::deque<DeferredFunction>::const_iterator it = deferred_functions.begin();
               it != deferred_functions.end(); it++)
@@ -494,22 +501,31 @@ namespace LegionRuntime {
       void check_for_complete_tasks(void)
       {
         // Need to hold the lock when checking this
-        AutoHSLLock a(mutex);
-        for (unsigned idx = 0; idx < pending_tasks.size(); idx++)
+        std::deque<GPUJob*> to_finish;
         {
-          std::deque<GPUJob*> &pending_stream = pending_tasks[idx];
-          while (!pending_stream.empty())
+          AutoHSLLock a(mutex);
+          for (unsigned idx = 0; idx < pending_tasks.size(); idx++)
           {
-            GPUJob *next = pending_stream.front();
-            if (next->is_finished())
+            std::deque<GPUJob*> &pending_stream = pending_tasks[idx];
+            while (!pending_stream.empty())
             {
-              next->finish_job();
-              delete next;
-              pending_stream.pop_front();
+              GPUJob *next = pending_stream.front();
+              if (next->is_finished())
+              {
+                to_finish.push_back(next);
+                pending_stream.pop_front();
+              }
+              else // If the first one wasn't done, the others won't be either
+                break; 
             }
-            else
-              break; // If the first one wasn't done, the others won't be either
           }
+        }
+        // Now do the trigger while not holding the lock
+        for (std::deque<GPUJob*>::const_iterator it = 
+              to_finish.begin(); it != to_finish.end(); it++)
+        {
+          (*it)->finish_job();
+          delete (*it);
         }
       }
 
@@ -686,6 +702,7 @@ namespace LegionRuntime {
     public:
       // Our helper cuda calls
       void** register_fat_binary(void *fat_bin);
+      void** register_cuda_binary(void *cubin);
       void unregister_fat_binary(void **fat_bin);
       void register_var(void **fat_bin, char *host_var, const char *device_name,
                         bool ext, int size, bool constant, bool global);
@@ -757,9 +774,11 @@ namespace LegionRuntime {
         bool global;
       };
       static std::map<void*,void**>& get_deferred_modules(void);
+      static std::map<void*,void**>& get_deferred_cubins(void);
       static std::deque<DeferredFunction>& get_deferred_functions(void);
       static std::deque<DeferredVariable>& get_deferred_variables(void);
       static void** defer_module_load(void *fat_bin);
+      static void** defer_cubin_load(void *cubin);
       static void defer_function_load(void **fat_bin, const char *host_fun,
                                       const char *device_fun);
       static void defer_variable_load(void **fat_bin, char *host_var,
@@ -1924,6 +1943,12 @@ namespace LegionRuntime {
       return deferred_modules;
     }
 
+    /*static*/ std::map<void*,void**>& GPUProcessor::Internal::get_deferred_cubins(void)
+    {
+      static std::map<void*,void**> deferred_cubins;
+      return deferred_cubins;
+    }
+
     /*static*/ std::deque<GPUProcessor::Internal::DeferredFunction>&
                                       GPUProcessor::Internal::get_deferred_functions(void)
     {
@@ -1957,12 +1982,32 @@ namespace LegionRuntime {
       return handle;
     }
 
+    void** GPUProcessor::Internal::register_cuda_binary(void *cubin)
+    {
+      void **handle = (void**)malloc(sizeof(void**));
+      *handle = cubin;
+      ModuleInfo &info = modules[handle];
+      CHECK_CU( cuModuleLoadData(&(info.module), cubin) );
+      // add this to the list of local modules to be created during this task
+      task_modules.insert(handle);
+      return handle;
+    }
+
     /*static*/ void** GPUProcessor::Internal::defer_module_load(void *fat_bin)
     {
       void **handle = (void**)malloc(sizeof(void**));
       *handle = fat_bin;
       // Assume we don't need a lock here because all this is sequential
       get_deferred_modules()[fat_bin] = handle;
+      return handle;
+    }
+
+    /*static*/ void** GPUProcessor::Internal::defer_cubin_load(void *cubin)
+    {
+      void **handle = (void**)malloc(sizeof(void**));
+      *handle = cubin;
+      // Assume we don't need a lock here because all this is sequential
+      get_deferred_cubins()[cubin] = handle;
       return handle;
     }
 
@@ -1973,6 +2018,18 @@ namespace LegionRuntime {
       if (local == NULL)
         return GPUProcessor::Internal::defer_module_load(fat_bin);
       return local->internal->register_fat_binary(fat_bin);
+    }
+
+    /*static*/ void** GPUProcessor::register_cuda_binary(void *cubin,
+                                                         size_t cubinSize)
+    {
+      void* cubinCopy = malloc(cubinSize);
+      memcpy(cubinCopy, cubin, cubinSize);
+      GPUProcessor *local = find_local_gpu();
+      // Ignore anything that goes on during start-up
+      if (local == NULL)
+        return GPUProcessor::Internal::defer_cubin_load(cubinCopy);
+      return local->internal->register_cuda_binary(cubinCopy);
     }
 
     void GPUProcessor::Internal::unregister_fat_binary(void **fat_bin)
@@ -2404,6 +2461,13 @@ namespace LegionRuntime {
 extern "C" void** __cudaRegisterFatBinary(void *fat_bin)
 {
   return LegionRuntime::LowLevel::GPUProcessor::register_fat_binary(fat_bin);
+}
+
+// this is not really a part of CUDA runtime API but used by the regent compiler
+extern "C" void** __cudaRegisterCudaBinary(void *cubin, size_t cubinSize)
+{
+  return LegionRuntime::LowLevel::GPUProcessor::register_cuda_binary(cubin,
+                                                                     cubinSize);
 }
 
 extern "C" void __cudaUnregisterFatBinary(void **fat_bin)

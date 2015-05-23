@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "pennant.h"
+#include "circuit.h"
 
 #include <algorithm>
 #include <cassert>

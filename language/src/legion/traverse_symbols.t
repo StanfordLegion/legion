@@ -114,7 +114,6 @@ function traverse_symbols.expr(defined, undefined, node)
     local code = codegen(node)
     local actions = code.actions
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
-    traverse_symbols.expr(defined, undefined, node.value)
 
   elseif node:is(ast.typed.ExprIndexAccess) then
     traverse_symbols.expr(defined, undefined, node.value)
@@ -184,6 +183,21 @@ function traverse_symbols.terra_stat(defined, undefined, stat)
       traverse_symbols.terra_expr(defined, undefined, rh)
     end)
 
+  elseif stat:is "apply" then
+
+  elseif stat:is "if" then
+    stat.branches:map(function(branch)
+      traverse_symbols.terra_stat(defined, undefined, branch)
+    end)
+    traverse_symbols.terra_stat(defined, undefined, stat.orelse)
+
+  elseif stat:is "ifbranch" then
+    traverse_symbols.terra_stat(defined, undefined, stat.body)
+    traverse_symbols.terra_expr(defined, undefined, stat.condition)
+
+  elseif stat:is "block" then
+    traverse_symbols.terra_stat(defined, undefined, stat.body)
+
   else
     assert(false, "unsupported terra statement")
   end
@@ -197,6 +211,13 @@ function traverse_symbols.terra_expr(defined, undefined, exp)
 
   elseif exp:is "index" or exp:is "select" then
     traverse_symbols.terra_expr(defined, undefined, exp.value)
+
+  elseif exp:is "operator" then
+    exp.operands:map(function(operand)
+      traverse_symbols.terra_expr(defined, undefined, operand)
+    end)
+
+  elseif exp:is "constant" then
 
   else
     assert(false, "unsupported terra expression")

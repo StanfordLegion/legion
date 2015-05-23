@@ -21,6 +21,7 @@
 
 #include <assert.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <vector>
 
 enum { PAYLOAD_NONE, // no payload in packet
