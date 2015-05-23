@@ -3009,6 +3009,8 @@ namespace LegionRuntime {
       virtual void notify_valid(void);
       virtual void notify_invalid(void) = 0;
       virtual void notify_new_remote(AddressSpaceID sid);
+      virtual DistributedID send_manager(AddressSpaceID target, 
+                               std::set<PhysicalManager*> &needed_managers) = 0;
     public:
       inline PhysicalInstance get_instance(void) const
       {
@@ -3065,7 +3067,7 @@ namespace LegionRuntime {
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      DistributedID send_manager(AddressSpaceID target, 
+      virtual DistributedID send_manager(AddressSpaceID target, 
                                  std::set<PhysicalManager*> &needed_managers);
       static void handle_send_manager(RegionTreeForest *context, 
                                       AddressSpaceID source,
@@ -3148,7 +3150,7 @@ namespace LegionRuntime {
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
     public:
-      DistributedID send_manager(AddressSpaceID target, 
+      virtual DistributedID send_manager(AddressSpaceID target, 
                         std::set<PhysicalManager*> &needed_managers);
     public:
       static void handle_send_manager(RegionTreeForest *context,
@@ -3267,7 +3269,10 @@ namespace LegionRuntime {
       virtual bool is_reduction_view(void) const = 0;
       virtual InstanceView* as_instance_view(void) const = 0;
       virtual ReductionView* as_reduction_view(void) const = 0;
+      virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
+      virtual bool has_parent(void) const = 0;
+      virtual LogicalView* get_parent(void) const = 0;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -3298,6 +3303,37 @@ namespace LegionRuntime {
                                         Deserializer &derez,
                                         AddressSpaceID source);
     public:
+      DistributedID send_state(AddressSpaceID target,
+                               const FieldMask &send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      DistributedID send_back_state(AddressSpaceID target,
+                                    const FieldMask &send_mask,
+                                   std::set<PhysicalManager*> &needed_managers);
+    protected:
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) = 0; 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask) = 0;
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask) = 0;
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez) = 0;
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez) = 0;
+    public:
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
     protected:
@@ -3323,7 +3359,10 @@ namespace LegionRuntime {
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+      virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
+      virtual bool has_parent(void) const = 0;
+      virtual LogicalView* get_parent(void) const = 0;
       virtual bool is_persistent(void) const = 0;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -3363,13 +3402,28 @@ namespace LegionRuntime {
       virtual bool has_war_dependence(const RegionUsage &usage, 
                                       const FieldMask &user_mask) = 0;
     public:
-      virtual DistributedID send_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                            std::set<PhysicalManager*> &needed_managers) = 0;
-      virtual DistributedID send_back_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
-                            std::set<PhysicalManager*> &needed_managers) = 0;
+                               std::set<PhysicalManager*> &needed_managers) = 0; 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask) = 0;
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask) = 0;
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez) = 0;
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez) = 0;
     public:
       void add_alias_did(DistributedID did);
     public:
@@ -3427,7 +3481,10 @@ namespace LegionRuntime {
     public:
       void accumulate_events(std::set<Event> &all_events);
     public:
-      virtual PhysicalManager* get_manager(void) const;
+      virtual bool has_manager(void) const { return true; }
+      virtual PhysicalManager* get_manager(void) const { return manager; }
+      virtual bool has_parent(void) const { return (parent != NULL); }
+      virtual LogicalView* get_parent(void) const { return parent; }
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -3475,22 +3532,33 @@ namespace LegionRuntime {
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      virtual DistributedID send_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                            std::set<PhysicalManager*> &needed_managers);
-      virtual DistributedID send_back_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
-                            std::set<PhysicalManager*> &needed_managers);
+                               std::set<PhysicalManager*> &needed_managers); 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask);
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask);
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez);
+      virtual void send_back_packed_view(AddressSpaceID target,Serializer &rez);
     public:
       virtual bool is_persistent(void) const;
       void make_persistent(void);
     protected:
-      void pack_materialized_view(Serializer &rez);
       void unpack_materialized_view(Deserializer &derez, 
                                     AddressSpaceID source, bool need_lock);
-      void send_updates(DistributedID remote_did, AddressSpaceID target,
-                        const FieldMask &update_mask);
       void process_updates(Deserializer &derez, AddressSpaceID source);
     public:
       static void handle_send_materialized_view(RegionTreeForest *context, 
@@ -3550,14 +3618,30 @@ namespace LegionRuntime {
      */
     class DeferredView : public InstanceView {
     public:
+      struct ReduceInfo {
+      public:
+        ReduceInfo(void) { }
+        ReduceInfo(const FieldMask &valid, const Domain &dom)
+          : valid_fields(valid) { intersections.insert(dom); }
+        ReduceInfo(const FieldMask &valid, 
+                   const std::set<Domain> &inters)
+          : valid_fields(valid), intersections(inters) { }
+      public:
+        FieldMask valid_fields;
+        std::set<Domain> intersections;
+      };
+    public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, DistributedID own_did,
                    RegionTreeNode *node);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
+      virtual bool has_manager(void) const { return false; }
       virtual PhysicalManager* get_manager(void) const
       { assert(false); return NULL; }
+      virtual bool has_parent(void) const = 0;
+      virtual LogicalView* get_parent(void) const = 0;
       // Deferred views are never persistent
       virtual bool is_persistent(void) const { return false; }
     public:
@@ -3611,8 +3695,18 @@ namespace LegionRuntime {
                                       const FieldMask &user_mask)
         { assert(false); return false; }
     public:
-      virtual void update_reduction_views(ReductionView *view, 
-                                          const FieldMask &valid_mask) = 0;
+      void update_reduction_views(ReductionView *view, 
+                                  const FieldMask &valid_mask,
+                                  bool update_parent = true);
+    protected:
+      void update_reduction_views_above(ReductionView *view,
+                                        const FieldMask &valid_mask,
+                                        DeferredView *from_child);
+      void update_local_reduction_views(ReductionView *view,
+                                        const FieldMask &valid_mask);
+      virtual void update_child_reduction_views(ReductionView *view,
+                                                const FieldMask &valid_mask,
+                                                DeferredView *skip = NULL) = 0;
     public:
       virtual void issue_deferred_copies(const MappableInfo &info,
                                          MaterializedView *dst,
@@ -3647,13 +3741,41 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions) = 0;
     public:
-      virtual DistributedID send_state(AddressSpaceID target,
-                                       const FieldMask &send_mask,
-               LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                       std::set<PhysicalManager*> &needed_managers) = 0;
-      virtual DistributedID send_back_state(AddressSpaceID target,
-                                            const FieldMask &send_mask,
-                       std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) = 0; 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask) = 0;
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask) = 0;
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) = 0;
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez) = 0;
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez) = 0;
+    public:
+      void pack_valid_reductions(Serializer &rez, const FieldMask &update_mask,
+                                 AddressSpaceID target, 
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                 std::set<PhysicalManager*> &needed_managers,
+                 LegionMap<ReductionView*,FieldMask>::aligned &send_reductions);
+      void unpack_valid_reductions(Deserializer &derez, size_t num_reductions,
+                                   FieldSpaceNode *field_node, 
+                                   AddressSpaceID source);
+    protected:
+      // Track the set of reduction views which need to be applied here
+      FieldMask reduction_mask;
+      LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
     };
 
     /**
@@ -3664,20 +3786,7 @@ namespace LegionRuntime {
      */
     class CompositeView : public DeferredView {
     public:
-      static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC;
-    public:
-      struct ReduceInfo {
-      public:
-        ReduceInfo(void) { }
-        ReduceInfo(const FieldMask &valid, const Domain &dom)
-          : valid_fields(valid) { intersections.insert(dom); }
-        ReduceInfo(const FieldMask &valid, 
-                   const std::set<Domain> &inters)
-          : valid_fields(valid), intersections(inters) { }
-      public:
-        FieldMask valid_fields;
-        std::set<Domain> intersections;
-      };
+      static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
@@ -3689,6 +3798,9 @@ namespace LegionRuntime {
       CompositeView& operator=(const CompositeView &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      virtual bool has_parent(void) const { return (parent != NULL); }
+      virtual LogicalView* get_parent(void) const { return parent; }
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
@@ -3722,17 +3834,33 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
-      virtual DistributedID send_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                          std::set<PhysicalManager*> &needed_managers);
-      virtual DistributedID send_back_state(AddressSpaceID target,
-                            const FieldMask &send_mask,
-                            std::set<PhysicalManager*> &needed_managers);
+                               std::set<PhysicalManager*> &needed_managers); 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask);
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask);
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez);
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez);
     public:
       void add_root(CompositeNode *root, const FieldMask &valid);
-      virtual void update_reduction_views(ReductionView *view, 
-                                          const FieldMask &valid_mask);
+      virtual void update_child_reduction_views(ReductionView *view,
+                                                const FieldMask &valid_mask,
+                                                DeferredView *skip = NULL);
     public:
       virtual void issue_deferred_copies(const MappableInfo &info,
                                          MaterializedView *dst,
@@ -3758,19 +3886,9 @@ namespace LegionRuntime {
                             const FieldMask &event_mask,
                     const LegionMap<Event,FieldMask>::aligned &preconditions,
                             std::set<Event> &event_set);
-    public:
-      void pack_composite_view(Serializer &rez, bool send_back,
-                               AddressSpaceID target,
-                               const FieldMask &pack_mask,
-                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                               std::set<PhysicalManager*> &needed_managers);
-      void unpack_composite_view(Deserializer &derez, 
-                                 AddressSpaceID source,
+    protected:
+      void unpack_composite_view(Deserializer &derez, AddressSpaceID source,
                                  bool send_back, bool need_lock);
-      void send_updates(DistributedID remote_did, AddressSpaceID target, 
-                        FieldMask send_mask, 
-                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                        std::set<PhysicalManager*> &needed_managers);
     public:
       static void handle_send_composite_view(RegionTreeForest *context, 
                                              Deserializer &derez,
@@ -3789,9 +3907,6 @@ namespace LegionRuntime {
       // Keep track of the roots and their field masks
       // There is exactly one root for every field
       LegionMap<CompositeNode*,FieldMask>::aligned roots;
-      // Track the set of reductions which need to be applied here
-      FieldMask reduction_mask;
-      LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
       // Keep track of all the child views
       std::map<ColorPoint,CompositeView*> children;
       // Keep track of which fields have been sent remotely
@@ -3901,11 +4016,15 @@ namespace LegionRuntime {
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, DistributedID own_did,
                RegionTreeNode *node, const void *value, 
-               size_t value_size, bool value_owner = true);
+               size_t value_size, bool value_owner = true,
+               FillView *parent = NULL);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:
       FillView& operator=(const FillView &rhs);
+    public:
+      virtual bool has_parent(void) const { return (parent != NULL); }
+      virtual LogicalView* get_parent(void) const { return parent; }
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
@@ -3920,9 +4039,11 @@ namespace LegionRuntime {
       virtual bool has_parent_view(void) const;
       virtual InstanceView* get_parent_view(void) const;
       virtual InstanceView* get_subview(const ColorPoint &c);
+      bool add_subview(FillView *view, const ColorPoint &c);
     public:
-      virtual void update_reduction_views(ReductionView *view, 
-                                          const FieldMask &valid_mask);
+      virtual void update_child_reduction_views(ReductionView *view,
+                                                const FieldMask &valid_mask,
+                                                DeferredView *skip = NULL);
     public:
       virtual void issue_deferred_copies(const MappableInfo &info,
                                          MaterializedView *dst,
@@ -3957,21 +4078,37 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
-      virtual DistributedID send_state(AddressSpaceID target,
-                                       const FieldMask &send_mask,
-                     LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers);
-      virtual DistributedID send_back_state(AddressSpaceID target,
-                                            const FieldMask &send_mask,
-                                 std::set<PhysicalManager*> &needed_managers);
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers); 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask);
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask);
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers);
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez);
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez);
+    public:
+      FillView *const parent;
     protected:
       const void *value;
       size_t value_size;
       bool  value_owner;
     protected:
-      // Track the set of reductions which need to be applied here
-      //FieldMask reduction_mask;
-      //LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
+      // Keep track of the child views
+      std::map<ColorPoint,FillView*> children;
     };
 
     /**
@@ -4009,7 +4146,11 @@ namespace LegionRuntime {
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+      virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
+      virtual bool has_parent(void) const { return false; }
+      virtual LogicalView* get_parent(void) const 
+        { assert(false); return NULL; } 
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
@@ -4033,18 +4174,31 @@ namespace LegionRuntime {
       virtual void process_send_back_user(AddressSpaceID source,
                                           PhysicalUser &user);
     public:
-      DistributedID send_state(AddressSpaceID target,
-                               const FieldMask &send_mask,
+      virtual void send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers); 
+      virtual void send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask);
+      virtual void send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask);
+      virtual void pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                std::set<PhysicalManager*> &needed_managers);
-      DistributedID send_back_state(AddressSpaceID target,
-                                    const FieldMask &send_mask,
-                               std::set<PhysicalManager*> &needed_managers);
+      virtual void send_packed_view(AddressSpaceID target, Serializer &rez);
+      virtual void send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez);
     public:
       void pack_reduction_view(Serializer &rez);
       void unpack_reduction_view(Deserializer &derez, AddressSpaceID source);
-      void send_updates(DistributedID remote_did, AddressSpaceID target,
-                        const FieldMask &update_mask);
       void process_updates(Deserializer &derez, AddressSpaceID source);
     public:
       static void handle_send_reduction_view(RegionTreeForest *context,

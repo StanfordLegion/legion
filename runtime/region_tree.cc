@@ -16274,6 +16274,10 @@ namespace LegionRuntime {
       {
         deferred_view->add_valid_reference();
         release_physical_state(state);
+        // If this is a fill view, we either need to make a new physical
+        // instance or apply it to all the existing physical instances
+        if (!deferred_view->is_composite_view())
+          assert(false); // TODO: implement this
         deferred_view->find_field_descriptors(user, fid_idx, proc, 
                                                field_data, preconditions);
         if (deferred_view->remove_valid_reference())
@@ -19785,6 +19789,184 @@ namespace LegionRuntime {
 
       LogicalView *target_view = ctx->find_view(did);
       target_view->process_send_back_user(source, user);
+    } 
+
+    //--------------------------------------------------------------------------
+    DistributedID LogicalView::send_state(AddressSpaceID target,
+                                          const FieldMask &send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                 std::set<PhysicalManager*> &needed_managers)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator needed_finder = 
+        needed_views.find(this);
+      if (needed_finder == needed_views.end())
+      {
+        needed_views[this] = send_mask;
+        // Always add a remote reference
+        add_remote_reference();
+        DistributedID parent_did = did;
+        if (has_parent())
+          parent_did = get_parent()->send_state(target, send_mask,
+                                                needed_views, needed_managers);
+        // Send the manager if it hasn't been sent
+        DistributedID manager_did = 0;
+        if (has_manager())
+          manager_did = get_manager()->send_manager(target, needed_managers);
+        // Now see if we need to send ourselves
+        DistributedID result = did;
+        {
+          AutoLock gc(gc_lock,1,false/*exclusive*/);
+          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
+            subscribers.find(target);
+          if (finder != subscribers.end())
+            result = finder->second;
+        }
+        // If we already have a remote version, send any updates
+        // and then we are done
+        if (result != did)
+        {
+          send_updates(result, target, send_mask, 
+                       needed_views, needed_managers); 
+          return result;
+        }
+        // Otherwise if we make it here, we need to pack ourselves up
+        // and send ourselves to another node
+        Serializer rez;
+        DistributedID remote_did = 
+          context->runtime->get_available_distributed_id();
+        // If we don't have a parent save our did as the
+        // parent did which will tell the unpack task
+        // that there is no parent
+        if (!has_parent())
+          parent_did = remote_did;
+        // Now pack up all the data, this has to be done
+        // atomically to make sure that no one can add any
+        // users while we are doing it, or tries to send
+        // users to subscribers before we've actually sent
+        // the subscriber.
+        bool lost_race = false;
+        {
+          AutoLock v_lock(view_lock);
+          {
+            AutoLock gc(gc_lock,1,false/*exclusive*/);
+            std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
+              subscribers.find(target);
+            if (finder != subscribers.end())
+            {
+              result = finder->second;
+              lost_race = true;
+            }
+            else
+              result = remote_did;
+          }
+          if (!lost_race)
+          {
+            {
+              RezCheck z(rez);
+              send_view_preamble(rez, parent_did, manager_did, 
+                                 did, remote_did, send_mask);
+              pack_view(rez, false/*send back*/, target, send_mask,
+                        needed_views, needed_managers);
+            }
+            // Before sending the message, update the subscribers
+            add_subscriber(target, result); 
+            // Now send the message
+            send_packed_view(target, rez);
+          }
+        }
+        if (lost_race)
+        {
+          // Free the distributed ID
+          context->runtime->free_distributed_id(remote_did);
+          // Send the update
+          send_updates(result, target, send_mask, 
+                       needed_views, needed_managers); 
+        }
+        return result;
+      }
+      else
+      {
+        DistributedID result;
+        // Return the distributed ID of the view on the remote node
+        {
+          AutoLock gc(gc_lock,1,false/*exclusive*/);
+          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
+            subscribers.find(target);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != subscribers.end());
+#endif
+          result = finder->second;
+        }
+        FieldMask diff_mask = send_mask - needed_finder->second;
+        if (!!diff_mask)
+        {
+          send_updates(result, target, diff_mask, 
+                       needed_views, needed_managers);
+          needed_finder->second |= diff_mask;
+        }
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedID LogicalView::send_back_state(AddressSpaceID target,
+                                               const FieldMask &send_mask,
+                                    std::set<PhysicalManager*> &needed_managers)
+    //--------------------------------------------------------------------------
+    {
+      if (owner_addr != target)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        // If we're not remote and we need to be sent back
+        // then we better be the owner
+        assert(owner_did == did);
+#endif
+        DistributedID parent_did = did;
+        if (has_parent())
+          parent_did = get_parent()->send_back_state(target, send_mask, 
+                                                     needed_managers);
+        DistributedID manager_did = 0;
+        if (has_manager())
+          manager_did = get_manager()->send_manager(target, needed_managers);
+        DistributedID new_owner_did = 
+          context->runtime->get_available_distributed_id();
+        if (!has_parent())
+          parent_did = new_owner_did;
+        // Need to hold the view lock when doing this so we
+        // ensure that everything gets sent back properly
+        bool return_new_did = false;
+        {
+          AutoLock v_lock(view_lock);
+          // Recheck again here to avoid a race condition
+          if (owner_addr != target)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              LegionMap<LogicalView*,FieldMask>::aligned dummy_views;
+              send_back_view_preamble(rez, parent_did, manager_did,
+                                      new_owner_did, did, send_mask);
+              pack_view(rez, true/*send back*/, target, send_mask, 
+                        dummy_views, needed_managers);
+            }
+            // Before sending the message add resource reference
+            // that will be held by the new owner
+            add_resource_reference();
+            // Add a remote reference that we hold on what we sent back
+            add_held_remote_reference();
+            send_back_packed_view(target, rez);
+            // Update our owner proc and did
+            owner_addr = target;
+            owner_did = new_owner_did;
+          }
+          else
+            return_new_did = true;
+        }
+        if (return_new_did)
+          context->runtime->free_distributed_id(new_owner_did);
+      }
+      return owner_did;
     }
 
     /////////////////////////////////////////////////////////////
@@ -19879,7 +20061,7 @@ namespace LegionRuntime {
       // Add a remote reference held by the view that sent this back
       child_view->add_remote_reference();
     }
-
+ 
     /////////////////////////////////////////////////////////////
     // MaterializedView 
     /////////////////////////////////////////////////////////////
@@ -20209,13 +20391,6 @@ namespace LegionRuntime {
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       all_events.insert(event_references.begin(),event_references.end());
     } 
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* MaterializedView::get_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return manager;
-    }
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user(ReductionOpID redop, Event copy_term,
@@ -21305,198 +21480,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID MaterializedView::send_state(AddressSpaceID target,
-                                               const FieldMask &send_mask,
-                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already packed this view then we are done with it
-      // and everything above it
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator needed_finder = 
-        needed_views.find(this);
-      if (needed_finder == needed_views.end())
-      {
-        // Add ourselves to the needed views
-        needed_views[this] = send_mask;
-        // Always add a remote reference
-        add_remote_reference();
-        DistributedID parent_did = did;
-        if (parent != NULL)
-          parent_did = parent->send_state(target, send_mask, 
-                                          needed_views,needed_managers);
-        // Send the manager if it hasn't been sent and get it's ID
-        DistributedID manager_did = 
-          manager->send_manager(target, needed_managers);
-        // Now see if we need to send ourselves
-        DistributedID result = did;
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-          // If we already have a remote view, we're done
-          if (finder != subscribers.end())
-            result = finder->second;
-        }
-        if (result != did)
-        {
-          // We already have a remote view so send the update
-          send_updates(result, target, send_mask);
-          return result;
-        }
-        // Otherwise if we make it here, we need to pack ourselves up
-        // and send outselves to another node
-        Serializer rez;
-        DistributedID remote_did = 
-          context->runtime->get_available_distributed_id();
-        // If we don't have a parent save our did 
-        // as the parent did which will tell the unpack
-        // task that there is no parent
-        if (parent == NULL)
-          parent_did = remote_did;
-        // Now pack up all the data, this has to be done
-        // atomically to make sure that no one can add any
-        // users while we are doing it, or tries to send
-        // users to subscribers before we've actually sent
-        // the subscriber.
-        bool lost_race = false;
-        {
-          AutoLock v_lock(view_lock);
-          // Check again to make sure we didn't lose the race
-          {
-            AutoLock gc(gc_lock,1,false/*exclusive*/);
-            std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-              subscribers.find(target);
-            if (finder != subscribers.end())
-            {
-              lost_race = true;
-              result = finder->second;
-            }
-            else
-              result = remote_did;
-          }
-          if (!lost_race)
-          {
-            {
-              RezCheck z(rez);
-              rez.serialize(remote_did);
-              // Our processor and did as the owner
-              rez.serialize(context->runtime->address_space);
-              rez.serialize(did);
-              rez.serialize(parent_did);
-              rez.serialize(manager_did);
-              rez.serialize(logical_node->get_color());
-              rez.serialize(depth);
-              pack_materialized_view(rez);
-            }
-            // Before sending the message, update the subscribers
-            add_subscriber(target, result);
-            // Now send the message
-            context->runtime->send_materialized_view(target, rez);
-          }
-        }
-        if (lost_race)
-        {
-          // Return the distributed ID
-          context->runtime->free_distributed_id(remote_did);
-          // Send the message
-          send_updates(result, target, send_mask);
-        }
-        return result;
-      }
-      else
-      {
-        // Return the distributed ID of the view on the remote node
-        DistributedID result;
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != subscribers.end());
-#endif
-          result = finder->second;
-        }
-        // See if we need to send an update
-        FieldMask diff_mask = send_mask - needed_finder->second;
-        if (!!diff_mask)
-        {
-          send_updates(result, target, diff_mask);
-          // Update the mask with the fields we've sent
-          needed_finder->second |= diff_mask;
-        }
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedID MaterializedView::send_back_state(AddressSpaceID target,
-                                                    const FieldMask &send_mask,
-                                    std::set<PhysicalManager*> &needed_managers)
-    //--------------------------------------------------------------------------
-    {
-      if (owner_addr != target)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        // If we're not remote and we need to be sent back
-        // then we better be the owner
-        assert(owner_did == did);
-#endif
-        DistributedID parent_did = did;
-        if (parent != NULL)
-          parent_did = parent->send_back_state(target, send_mask, 
-                                               needed_managers);
-        DistributedID manager_did = 
-          manager->send_manager(target, needed_managers);
-        DistributedID new_owner_did = 
-          context->runtime->get_available_distributed_id();
-        if (parent == NULL)
-          parent_did = new_owner_did;
-        // Need to hold the view lock when doing this so we
-        // ensure that everything gets sent back properly
-        bool return_new_did = false;
-        {
-          AutoLock v_lock(view_lock);
-          // Recheck again here to avoid a race condition
-          if (owner_addr == target)
-          {
-            return_new_did = true; 
-          }
-          else
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(new_owner_did);
-              rez.serialize(parent_did);
-              rez.serialize(manager_did);
-              // Save our information so we can be added as a subscriber
-              rez.serialize(did);
-              rez.serialize(owner_addr);
-              rez.serialize(logical_node->get_color());
-              rez.serialize(depth);
-              pack_materialized_view(rez);
-            }
-            // Before sending the message add resource reference that
-            // will be held by the new owner
-            add_resource_reference();
-            // Add a remote reference that we hold on what we sent back
-            add_held_remote_reference();
-            context->runtime->send_back_materialized_view(target, rez);
-            // Update our owner proc and did
-            owner_addr = target;
-            owner_did = new_owner_did;
-          }
-        }
-        if (return_new_did)
-          context->runtime->free_distributed_id(new_owner_did);
-      }
-      // Otherwise we're already remote from the target and therefore
-      // all of our parents are also already remote so we are done
-      return owner_did;
-    }
-
-    //--------------------------------------------------------------------------
     bool MaterializedView::is_persistent(void) const
     //--------------------------------------------------------------------------
     {
@@ -21511,7 +21494,46 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::pack_materialized_view(Serializer &rez)
+    void MaterializedView::send_view_preamble(Serializer &rez, 
+                                              DistributedID parent_did,
+                                              DistributedID manager_did, 
+                                              DistributedID _did,
+                                              DistributedID remote_did,
+                                              const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(remote_did);
+      rez.serialize(context->runtime->address_space);
+      rez.serialize(_did);
+      rez.serialize(parent_did);
+      rez.serialize(manager_did);
+      rez.serialize(logical_node->get_color());
+      rez.serialize(depth);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::send_back_view_preamble(Serializer &rez, 
+                                                   DistributedID parent_did,
+                                                   DistributedID manager_did,
+                                                   DistributedID new_owner_did,
+                                                   DistributedID _did,
+                                                   const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(new_owner_did);
+      rez.serialize(parent_did);
+      rez.serialize(manager_did);
+      rez.serialize(_did);
+      rez.serialize(owner_addr);
+      rez.serialize(logical_node->get_color());
+      rez.serialize(depth);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                    std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
       // view_lock held from callers
@@ -21550,6 +21572,22 @@ namespace LegionRuntime {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::send_packed_view(AddressSpaceID target, 
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      context->runtime->send_materialized_view(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::send_back_packed_view(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      context->runtime->send_back_materialized_view(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -21647,7 +21685,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void MaterializedView::send_updates(DistributedID remote_did,
                                         AddressSpaceID target,
-                                        const FieldMask &update_mask)
+                                        FieldMask update_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                    std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -22056,6 +22096,14 @@ namespace LegionRuntime {
     DeferredView::~DeferredView(void)
     //--------------------------------------------------------------------------
     {
+      // Remove resource references on our valid reductions
+      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        if (it->first->remove_resource_reference())
+          legion_delete(it->first);
+      }
+      valid_reductions.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -22064,6 +22112,161 @@ namespace LegionRuntime {
     {
       assert(false);
       return InstanceRef();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::update_reduction_views(ReductionView *view,
+                                              const FieldMask &valid,
+                                              bool update_parent /*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      // First if we have a parent, we have to update its valid reduciton views
+      if (update_parent && has_parent_view())
+      {
+        DeferredView *parent_view = get_parent_view()->as_deferred_view();
+        parent_view->update_reduction_views_above(view, valid, this);
+      }
+      if ((logical_node == view->logical_node) ||  
+          logical_node->intersects_with(view->logical_node))
+      {
+        // If it intersects, then we need to update our local reductions
+        // and then also update any child reductions
+        update_local_reduction_views(view, valid);
+        update_child_reduction_views(view, valid);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::update_reduction_views_above(ReductionView *view,
+                                                    const FieldMask &valid,
+                                                    DeferredView *from_child)
+    //--------------------------------------------------------------------------
+    {
+      // Keep going up if necessary
+      if (has_parent_view())
+      {
+        DeferredView *parent_view = get_parent_view()->as_deferred_view();
+        parent_view->update_reduction_views_above(view, valid, this);
+      }
+      if ((logical_node == view->logical_node) ||
+          logical_node->intersects_with(view->logical_node))
+      {
+        update_local_reduction_views(view, valid);
+        update_child_reduction_views(view, valid, from_child);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::update_local_reduction_views(ReductionView *view,
+                                                    const FieldMask &valid_mask)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the easy case
+      if (logical_node == view->logical_node)
+      {
+        std::map<ReductionView*,ReduceInfo>::iterator finder = 
+          valid_reductions.find(view);
+        if (finder == valid_reductions.end())
+        {
+          view->add_resource_reference();
+          view->add_valid_reference();
+          if (logical_node->has_component_domains())
+            valid_reductions[view] = ReduceInfo(valid_mask, 
+                                         logical_node->get_component_domains());
+          else
+            valid_reductions[view] = ReduceInfo(valid_mask, 
+                                                    logical_node->get_domain());
+        }
+        else
+          finder->second.valid_fields |= valid_mask;
+        // Always update the reduction mask
+        reduction_mask |= valid_mask;
+      }
+      else
+      {
+        // Otherwise if we are here we know we intersect
+        // so compute the intersection
+        std::map<ReductionView*,ReduceInfo>::iterator finder = 
+          valid_reductions.find(view);
+        if (finder == valid_reductions.end())
+        {
+          view->add_resource_reference();
+          view->add_valid_reference();
+          valid_reductions[view] = ReduceInfo(valid_mask, 
+                    logical_node->get_intersection_domains(view->logical_node));
+        }
+        else
+          finder->second.valid_fields |= valid_mask;
+        // Always update the reduction mask
+        reduction_mask |= valid_mask;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::pack_valid_reductions(Serializer &rez, 
+                                             const FieldMask &update_mask,
+                                             AddressSpaceID target,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                    std::set<PhysicalManager*> &needed_managers,
+                  LegionMap<ReductionView*,FieldMask>::aligned &send_reductions)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(update_mask);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it = 
+            send_reductions.begin(); it != send_reductions.end(); it++)
+      {
+        std::map<ReductionView*,ReduceInfo>::iterator finder = 
+          valid_reductions.find(it->first);
+        DistributedID red_did = 
+          it->first->send_state(target, it->second,
+                                needed_views, needed_managers);
+        rez.serialize(red_did);
+        rez.serialize(it->second);
+        rez.serialize<size_t>(finder->second.intersections.size());
+        for (std::set<Domain>::const_iterator dit = 
+              finder->second.intersections.begin(); dit !=
+              finder->second.intersections.end(); dit++)
+        {
+          rez.serialize(*dit);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::unpack_valid_reductions(Deserializer &derez, 
+                                               size_t num_reductions,
+                                               FieldSpaceNode *field_node,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask reduction_update;
+      derez.deserialize(reduction_update);
+      field_node->transform_field_mask(reduction_update, source);
+      reduction_mask |= reduction_update;
+      for (unsigned idx = 0; idx < num_reductions; idx++)
+      {
+        DistributedID red_did;
+        derez.deserialize(red_did);
+        LogicalView *log_view = context->find_view(red_did); 
+#ifdef DEBUG_HIGH_LEVEL
+        assert(log_view != NULL);
+        assert(log_view->is_reduction_view());
+#endif
+        ReductionView *red_view = log_view->as_reduction_view();
+        ReduceInfo &red_info = valid_reductions[red_view];
+        FieldMask red_update;
+        derez.deserialize(red_update);
+        field_node->transform_field_mask(red_update, source);
+        red_info.valid_fields |= red_update;
+        size_t num_domains;
+        derez.deserialize(num_domains);
+        for (unsigned i = 0; i < num_domains; i++)
+        {
+          Domain dom;
+          derez.deserialize(dom);
+          red_info.intersections.insert(dom);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -22109,15 +22312,7 @@ namespace LegionRuntime {
         if (it->first->remove_reference())
           legion_delete(it->first);
       }
-      roots.clear();
-      // Remove resource references on our valid reductions
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        if (it->first->remove_resource_reference())
-          legion_delete(it->first);
-      }
-      valid_reductions.clear();
+      roots.clear(); 
     }
 
     //--------------------------------------------------------------------------
@@ -22266,52 +22461,46 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::update_reduction_views(ReductionView *view,
-                                               const FieldMask &valid)
+    void CompositeView::update_child_reduction_views(ReductionView *view,
+                                                    const FieldMask &valid_mask,
+                                                    DeferredView *to_skip)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!(valid - valid_mask));
-#endif
-      // Also need to update any parent or child views
-      // Handle a special case that occurs when flushing reductions
-      if (logical_node == view->logical_node)
+      // Make a copy of the child views and update them
+      std::map<ColorPoint,CompositeView*> to_handle;
       {
-        std::map<ReductionView*,ReduceInfo>::iterator finder = 
-          valid_reductions.find(view);
-        if (finder == valid_reductions.end())
-        {
-          view->add_resource_reference();
-          view->add_valid_reference();
-          if (logical_node->has_component_domains())
-            valid_reductions[view] = ReduceInfo(valid, 
-                                         logical_node->get_component_domains());
-          else
-            valid_reductions[view] = ReduceInfo(valid, 
-                                                    logical_node->get_domain());
-        }
-        else
-          finder->second.valid_fields |= valid;
-        // Always update the reduction mask
-        reduction_mask |= valid;
-        return;
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        to_handle = children;
       }
-      // See if we have an intersection with the reduction and if so save it 
-      if (logical_node->intersects_with(view->logical_node))
+      std::set<ColorPoint> handled;
+      // Keep iterating until we've handled all the children
+      while (!to_handle.empty())
       {
-        std::map<ReductionView*,ReduceInfo>::iterator finder = 
-          valid_reductions.find(view);
-        if (finder == valid_reductions.end())
+        for (std::map<ColorPoint,CompositeView*>::const_iterator it = 
+              to_handle.begin(); it != to_handle.end(); it++)
         {
-          view->add_resource_reference();
-          view->add_valid_reference();
-          valid_reductions[view] = ReduceInfo(valid, 
-                    logical_node->get_intersection_domains(view->logical_node));
+#ifdef DEBUG_HIGH_LEVEL
+          assert(handled.find(it->first) == handled.end());
+#endif
+          handled.insert(it->first);
+          if (it->second == to_skip)
+            continue;
+          it->second->update_reduction_views(view, valid_mask, false/*parent*/);
         }
-        else
-          finder->second.valid_fields |= valid;
-        // Always update the reduction mask
-        reduction_mask |= valid;
+        to_handle.clear();
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(handled.size() <= children.size());
+#endif
+        if (handled.size() == children.size())
+          break;
+        // Otherwise figure out what additional children to handle
+        for (std::map<ColorPoint,CompositeView*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          if (handled.find(it->first) == handled.end())
+            to_handle.insert(*it);
+        }
       }
     }
 
@@ -22465,220 +22654,20 @@ namespace LegionRuntime {
       assert(false);
       return false;
     }
-
+    
     //--------------------------------------------------------------------------
-    DistributedID CompositeView::send_state(AddressSpaceID target,
-                                            const FieldMask &send_mask,
-                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers)
+    void CompositeView::send_packed_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!(send_mask - valid_mask));
-#endif
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator needed_finder = 
-        needed_views.find(this);
-      if (needed_finder == needed_views.end())
-      {
-        needed_views[this] = send_mask;
-        // Always add a remote reference
-        add_remote_reference();
-        DistributedID parent_did = did;
-        if (parent != NULL)
-        {
-          // We never need to actually send any state here
-          FieldMask empty_mask;
-          parent_did = parent->send_state(target, empty_mask,
-                                          needed_views, needed_managers);
-        }
-        // Now see if we need to send ourselves
-        DistributedID result = did;
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-          if (finder != subscribers.end())
-            result = finder->second;
-        }
-        // If we already have a remote version, send any updates
-        // and then we are done
-        if (result != did)
-        {
-          send_updates(result, target, send_mask, 
-                       needed_views, needed_managers); 
-          return result;
-        }
-        // Otherwise if we make it here, we need to pack ourselves up
-        // and send ourselves to another node
-        Serializer rez;
-        DistributedID remote_did = 
-          context->runtime->get_available_distributed_id();
-        // If we don't have a parent save our did as the
-        // parent did which will tell the unpack task
-        // that there is no parent
-        if (parent == NULL)
-          parent_did = remote_did;
-        // Now pack up all the data, this has to be done
-        // atomically to make sure that no one can add any
-        // users while we are doing it, or tries to send
-        // users to subscribers before we've actually sent
-        // the subscriber.
-        bool lost_race = false;
-        {
-          AutoLock v_lock(view_lock);
-          {
-            AutoLock gc(gc_lock,1,false/*exclusive*/);
-            std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-              subscribers.find(target);
-            if (finder != subscribers.end())
-            {
-              result = finder->second;
-              lost_race = true;
-            }
-            else
-              result = remote_did;
-          }
-          if (!lost_race)
-          {
-            {
-              RezCheck z(rez);
-              rez.serialize(remote_did);
-              rez.serialize(did);
-              rez.serialize(parent_did);
-              // Our processor as the owner
-              rez.serialize(context->runtime->address_space);
-              rez.serialize(send_mask);
-              if (logical_node->is_region())
-              {
-                rez.serialize<bool>(true);
-                RegionNode *reg_node = logical_node->as_region_node();
-                rez.serialize(reg_node->handle);
-              }
-              else
-              {
-                rez.serialize<bool>(false);
-                PartitionNode *part_node = logical_node->as_partition_node();
-                rez.serialize(part_node->handle);
-              }
-              pack_composite_view(rez, false/*send back*/, target, send_mask,
-                                  needed_views, needed_managers);
-            }
-            // Before sending the message, update the subscribers
-            add_subscriber(target, result);
-            // Also record the state that we sent
-            remote_state[target] = send_mask;
-            // Now send the message
-            context->runtime->send_composite_view(target, rez);
-          }
-        }
-        if (lost_race)
-        {
-          // Free the distributed ID
-          context->runtime->free_distributed_id(remote_did);
-          // Sen the update
-          send_updates(result, target, send_mask, 
-                       needed_views, needed_managers); 
-        }
-        return result;
-      }
-      else
-      {
-        DistributedID result;
-        // Return the distributed ID of the view on the remote node
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != subscribers.end());
-#endif
-          result = finder->second;
-        }
-        FieldMask diff_mask = send_mask - needed_finder->second;
-        if (!!diff_mask)
-        {
-          send_updates(result, target, diff_mask, 
-                       needed_views, needed_managers);
-          needed_finder->second |= diff_mask;
-        }
-        return result;
-      }
+      context->runtime->send_composite_view(target, rez);
     }
 
     //--------------------------------------------------------------------------
-    DistributedID CompositeView::send_back_state(AddressSpaceID target,
-                                                 const FieldMask &send_mask,
-                                    std::set<PhysicalManager*> &needed_managers)
+    void CompositeView::send_back_packed_view(AddressSpaceID target,
+                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!(send_mask - valid_mask));
-#endif
-      if (owner_addr != target)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        // If we're not remote and we need to be sent back
-        // then we better be the owner
-        assert(owner_did == did);
-#endif
-        DistributedID parent_did = did;
-        if (parent != NULL)
-          parent_did = parent->send_back_state(target, send_mask, 
-                                               needed_managers);
-        DistributedID new_owner_did = 
-          context->runtime->get_available_distributed_id();
-        // Need to hold the view lock when doing this so we
-        // ensure that everything gets sent back properly
-        bool return_new_did = false;
-        {
-          AutoLock v_lock(view_lock);
-          // Recheck again here to avoid a race condition
-          if (owner_addr == target)
-          {
-            return_new_did = true;
-          }
-          else
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(new_owner_did);
-              // Save our information so we can be added as a subscriber
-              rez.serialize(did);
-              rez.serialize(parent_did);
-              rez.serialize(owner_addr);
-              rez.serialize(send_mask);
-              if (logical_node->is_region())
-              {
-                rez.serialize<bool>(true);
-                RegionNode *reg_node = logical_node->as_region_node();
-                rez.serialize(reg_node->handle);
-              }
-              else
-              {
-                rez.serialize<bool>(false);
-                PartitionNode *part_node = logical_node->as_partition_node();
-                rez.serialize(part_node->handle);
-              }
-              LegionMap<LogicalView*,FieldMask>::aligned dummy_views;
-              pack_composite_view(rez, true/*send back*/, target, send_mask,
-                                  dummy_views, needed_managers);
-            }
-            // Before sending the message add resource reference
-            // that will be held by the new owner
-            add_resource_reference();
-            // Add a remote reference that we hold on what we sent back
-            add_held_remote_reference();
-            context->runtime->send_back_composite_view(target, rez);
-            // Update our owner proc and did
-            owner_addr = target;
-            owner_did = new_owner_did;
-          }
-        }
-        if (return_new_did)
-          context->runtime->free_distributed_id(new_owner_did);
-      }
-      return owner_did;
+      context->runtime->send_back_composite_view(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -22925,9 +22914,64 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::pack_composite_view(Serializer &rez, bool send_back,
-                                            AddressSpaceID target,
-                                            const FieldMask &pack_mask,
+    void CompositeView::send_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did, 
+                                           DistributedID _did,
+                                           DistributedID remote_did,
+                                           const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(remote_did);
+      rez.serialize(_did);
+      rez.serialize(parent_did);
+      rez.serialize(context->runtime->address_space);
+      rez.serialize(send_mask);
+      if (logical_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        RegionNode *reg_node = logical_node->as_region_node();
+        rez.serialize(reg_node->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false);
+        PartitionNode *part_node = logical_node->as_partition_node();
+        rez.serialize(part_node->handle);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::send_back_view_preamble(Serializer &rez,
+                                                DistributedID parent_did,
+                                                DistributedID manager_did,
+                                                DistributedID new_owner_did,
+                                                DistributedID _did,
+                                                const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(new_owner_did);
+      rez.serialize(_did);
+      rez.serialize(parent_did);
+      rez.serialize(owner_addr);
+      rez.serialize(send_mask);
+      if (logical_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        RegionNode *reg_node = logical_node->as_region_node();
+        rez.serialize(reg_node->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false);
+        PartitionNode *part_node = logical_node->as_partition_node();
+        rez.serialize(part_node->handle);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
                                  std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
@@ -22986,28 +23030,15 @@ namespace LegionRuntime {
       }
       rez.serialize<size_t>(send_reductions.size());
       if (!send_reductions.empty())
-      {
-        FieldMask send_reduction_mask = reduction_mask & pack_mask;
-        rez.serialize(send_reduction_mask);
-        for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it = 
-              send_reductions.begin(); it != send_reductions.end(); it++)
-        {
-          std::map<ReductionView*,ReduceInfo>::iterator finder = 
-            valid_reductions.find(it->first);
-          DistributedID red_did = 
-            it->first->send_state(target, it->second,
-                                  needed_views, needed_managers);
-          rez.serialize(red_did);
-          rez.serialize(it->second);
-          rez.serialize<size_t>(finder->second.intersections.size());
-          for (std::set<Domain>::const_iterator dit = 
-                finder->second.intersections.begin(); dit !=
-                finder->second.intersections.end(); dit++)
-          {
-            rez.serialize(*dit);
-          }
-        }
-      }
+        pack_valid_reductions(rez, pack_mask & reduction_mask, target,
+                              needed_views, needed_managers, send_reductions);
+      // Also record which fields we sent the state that we sent
+      LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+        remote_state.find(target);
+      if (finder != remote_state.end())
+        finder->second |= pack_mask;
+      else
+        remote_state[target] = pack_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -23053,36 +23084,7 @@ namespace LegionRuntime {
       size_t num_reductions;
       derez.deserialize(num_reductions);
       if (num_reductions > 0)
-      {
-        FieldMask reduction_update;
-        derez.deserialize(reduction_update);
-        field_node->transform_field_mask(reduction_update, source);
-        reduction_mask |= reduction_update;
-        for (unsigned idx = 0; idx < num_reductions; idx++)
-        {
-          DistributedID red_did;
-          derez.deserialize(red_did);
-          LogicalView *log_view = context->find_view(red_did); 
-#ifdef DEBUG_HIGH_LEVEL
-          assert(log_view != NULL);
-          assert(log_view->is_reduction_view());
-#endif
-          ReductionView *red_view = log_view->as_reduction_view();
-          ReduceInfo &red_info = valid_reductions[red_view];
-          FieldMask red_update;
-          derez.deserialize(red_update);
-          field_node->transform_field_mask(red_update, source);
-          red_info.valid_fields |= red_update;
-          size_t num_domains;
-          derez.deserialize(num_domains);
-          for (unsigned i = 0; i < num_domains; i++)
-          {
-            Domain dom;
-            derez.deserialize(dom);
-            red_info.intersections.insert(dom);
-          }
-        }
-      }
+        unpack_valid_reductions(derez, num_reductions, field_node, source);
       if (need_lock)
         view_lock.release();
     }
@@ -23095,26 +23097,48 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      std::map<AddressSpaceID,FieldMask>::iterator finder = 
+      // Figure out which fields we need to send in full and
+      // which ones we can send partially
+      std::map<AddressSpaceID,FieldMask>::const_iterator finder = 
         remote_state.find(target);
+      FieldMask update_mask;
+      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
       // Update our send mask and then mark that we sent any needed fields
       if (finder != remote_state.end())
       {
         send_mask -= finder->second;
-        finder->second |= send_mask;
+        update_mask = send_mask & finder->second;
+        // Count how many updates we will have
+        if (!!update_mask)
+        {
+          for (LegionMap<ReductionView*,ReduceInfo>::aligned::const_iterator 
+                it = valid_reductions.begin(); 
+                it != valid_reductions.end(); it++)
+          {
+            FieldMask overlap = it->second.valid_fields & update_mask;
+            if (!overlap)
+              continue;
+            send_reductions[it->first] = overlap;
+          }
+        }
       }
-      else
-        remote_state[target] = send_mask;
       // If we have any field data to send, do that now
-      if (!!send_mask)
+      if (!!send_mask || !send_reductions.empty())
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(remote_did);
           rez.serialize(send_mask);
-          pack_composite_view(rez, false/*send back*/, target, send_mask,
-                              needed_views, needed_managers);
+          rez.serialize<size_t>(send_reductions.size());
+          if (!!send_mask)
+          {
+            pack_view(rez, false/*send back*/, target, 
+                      send_mask, needed_views, needed_managers);
+          }
+          if (!send_reductions.empty())
+            pack_valid_reductions(rez, update_mask, target, needed_views, 
+                                  needed_managers, send_reductions);
         }
         context->runtime->send_composite_update(target, rez);
       }
@@ -23291,6 +23315,8 @@ namespace LegionRuntime {
       derez.deserialize(did);
       FieldMask valid_mask;
       derez.deserialize(valid_mask);
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
       // Transform below
       LogicalView *log_view = context->find_view(did);
 #ifdef DEBUG_HIGH_LEVEL
@@ -23304,10 +23330,16 @@ namespace LegionRuntime {
       CompositeView *view = 
         inst_view->as_deferred_view()->as_composite_view();
       FieldSpaceNode *field_node = view->logical_node->column_source;
-      field_node->transform_field_mask(valid_mask, source);
-      view->update_valid_mask(valid_mask);
-      view->unpack_composite_view(derez, source, 
-                                  false/*send back*/, true/*need lock*/);
+      if (!!valid_mask)
+      {
+        field_node->transform_field_mask(valid_mask, source);
+        view->update_valid_mask(valid_mask);
+        view->unpack_composite_view(derez, source, 
+                                    false/*send back*/, true/*need lock*/);
+      }
+      if (num_reductions > 0)
+        view->unpack_valid_reductions(derez, num_reductions, 
+                                      field_node, source);
     }
 
     /////////////////////////////////////////////////////////////
@@ -24220,8 +24252,8 @@ namespace LegionRuntime {
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, DistributedID owner_did,
                        RegionTreeNode *node, const void *val,
-                       size_t val_size, bool val_owner)
-      : DeferredView(ctx, did, owner_proc, owner_did, node),
+                       size_t val_size, bool val_owner, FillView *par)
+      : DeferredView(ctx, did, owner_proc, owner_did, node), parent(par),
         value(val), value_size(val_size), value_owner(val_owner)
     //--------------------------------------------------------------------------
     {
@@ -24229,7 +24261,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL)
+      : DeferredView(NULL, 0, 0, 0, NULL), parent(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -24258,60 +24290,189 @@ namespace LegionRuntime {
     void FillView::notify_activate(void)
     //--------------------------------------------------------------------------
     {
+      // Add a gc reference to our parent if we have one
+      if (parent != NULL)
+        parent->add_gc_reference();
 
+      // Add gc references to all our reduction views
+      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        it->first->add_gc_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
     void FillView::garbage_collect(void)
     //--------------------------------------------------------------------------
     {
+      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        // No need to check for deletion since we hold resource refs
+        it->first->remove_gc_reference();
+      }
 
+      if ((parent != NULL) && parent->remove_gc_reference())
+        legion_delete(parent);
     }
     
     //--------------------------------------------------------------------------
     void FillView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-
+      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        it->first->add_valid_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
     void FillView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-
+      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        // No need to check for deletion conditions since we hold resource refs
+        it->first->remove_valid_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
     bool FillView::has_parent_view(void) const
     //--------------------------------------------------------------------------
     {
-
-      return false;
+      return (parent != NULL);
     }
 
     //--------------------------------------------------------------------------
     InstanceView* FillView::get_parent_view(void) const
     //--------------------------------------------------------------------------
     {
-
-      return NULL;
+      return parent;
     }
 
     //--------------------------------------------------------------------------
     InstanceView* FillView::get_subview(const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
-
-      return NULL;
+      // See if we already have this child
+      {
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        std::map<ColorPoint,FillView*>::const_iterator finder = 
+                                                            children.find(c);
+        if (finder != children.end())
+          return finder->second;
+      }
+      DistributedID child_did =
+        context->runtime->get_available_distributed_id();
+      DistributedID child_own_did = child_did;
+      if (did != owner_did)
+        child_own_did = context->runtime->get_available_distributed_id();
+      RegionTreeNode *child_node = logical_node->get_tree_child(c);
+      FillView *child_view = legion_new<FillView>(context, child_did,
+                                                  owner_addr, child_own_did,
+                                                  child_node, value, 
+                                                  value_size, false/*own*/,
+                                                  this/*parent*/);
+      child_view->add_resource_reference();
+      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
+            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      {
+        child_view->update_reduction_views(it->first, it->second.valid_fields);
+      }
+      // Retake the lock and try and add the child, see if someone else added
+      // the child in the meantime
+      {
+        AutoLock v_lock(view_lock);
+        std::map<ColorPoint,FillView*>::const_iterator finder = 
+                                                          children.find(c);
+        if (finder != children.end())
+        {
+          if (child_view->remove_resource_reference())
+            legion_delete(child_view);
+          return finder->second;
+        }
+        children[c] = child_view;
+      }
+      if (child_did != child_own_did)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(owner_did);
+          rez.serialize(c);
+          rez.serialize(child_own_did);
+          rez.serialize(child_did);
+        }
+        // Add a held remote reference
+        child_view->add_held_remote_reference();
+        // Now notify the owner that it has a remote subscriber
+        context->runtime->send_subscriber(owner_addr, rez);
+      }
+      return child_view;
     }
 
     //--------------------------------------------------------------------------
-    void FillView::update_reduction_views(ReductionView *view,
-                                          const FieldMask &valid_mask)
+    bool FillView::add_subview(FillView *view, const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
+      bool added = true;
+      {
+        AutoLock v_lock(view_lock);
+        if (children.find(c) == children.end())
+          children[c] = view;
+        else
+          added = false;
+      }
+      if (added)
+        view->add_resource_reference();
+      return added;
+    }
 
+    //--------------------------------------------------------------------------
+    void FillView::update_child_reduction_views(ReductionView *view,
+                                                const FieldMask &valid_mask,
+                                                DeferredView *to_skip/*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ColorPoint,FillView*> to_handle;
+      {
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        to_handle = children;
+      }
+      std::set<ColorPoint> handled;
+      // Keep iterating until we've handled all the children
+      while (!to_handle.empty())
+      {
+        for (std::map<ColorPoint,FillView*>::const_iterator it = 
+              to_handle.begin(); it != to_handle.end(); it++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(handled.find(it->first) == handled.end());
+#endif
+          handled.insert(it->first);
+          if (it->second == to_skip)
+            continue;
+          it->second->update_reduction_views(view, valid_mask, false/*parent*/);
+        }
+        to_handle.clear();
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(handled.size() <= children.size());
+#endif
+        if (handled.size() == children.size())
+          break;
+        // Otherwise figure out what additional children to handle
+        for (std::map<ColorPoint,FillView*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          if (handled.find(it->first) == handled.end())
+            to_handle.insert(*it);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -24356,7 +24517,8 @@ namespace LegionRuntime {
                                           std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-
+      // We should never get here
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -24371,31 +24533,69 @@ namespace LegionRuntime {
                                        std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
-
+      // We should never get here
+      assert(false);
       return false;
     }
     
     //--------------------------------------------------------------------------
-    DistributedID FillView::send_state(AddressSpaceID target,
-                                       const FieldMask &send_mask,
-                     LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers)
+    void FillView::send_updates(DistributedID remote_did, 
+                                AddressSpaceID target, FieldMask send_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers) 
     //--------------------------------------------------------------------------
     {
 
-      return 0;
     }
-    
+
     //--------------------------------------------------------------------------
-    DistributedID FillView::send_back_state(AddressSpaceID target,
-                                            const FieldMask &send_mask,
-                                 std::set<PhysicalManager*> &needed_managers)
+    void FillView::send_view_preamble(Serializer &rez, DistributedID parent_did,
+                                      DistributedID manager_did, 
+                                      DistributedID did,
+                                      DistributedID remote_did,
+                                      const FieldMask &send_mask)
     //--------------------------------------------------------------------------
     {
 
-      return 0;
     }
     
+    //--------------------------------------------------------------------------
+    void FillView::send_back_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did,
+                                           DistributedID new_owner_did,
+                                           DistributedID did,
+                                           const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                               std::set<PhysicalManager*> &needed_managers)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::send_packed_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::send_back_packed_view(AddressSpaceID target,
+                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+        
     /////////////////////////////////////////////////////////////
     // ReductionView 
     /////////////////////////////////////////////////////////////
@@ -25049,169 +25249,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID ReductionView::send_state(AddressSpaceID target,
-                                            const FieldMask &send_mask,
+    void ReductionView::send_view_preamble(Serializer &rez, 
+                                           DistributedID parent_did,
+                                           DistributedID manager_did, 
+                                           DistributedID _did,
+                                           DistributedID remote_did,
+                                           const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(remote_did);
+      rez.serialize(context->runtime->address_space);
+      rez.serialize(_did);
+      rez.serialize(manager_did);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::send_back_view_preamble(Serializer &rez, 
+                                                DistributedID parent_did,
+                                                DistributedID manager_did,
+                                                DistributedID new_owner_did,
+                                                DistributedID _did,
+                                                const FieldMask &send_mask)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(new_owner_did);
+      rez.serialize(manager_did);
+      rez.serialize(_did);
+      rez.serialize(owner_addr);
+    }
+ 
+    //--------------------------------------------------------------------------
+    void ReductionView::pack_view(Serializer &rez, bool send_back,
+                             AddressSpaceID target, const FieldMask &pack_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<LogicalView*,FieldMask>::aligned::iterator needed_finder = 
-        needed_views.find(this);
-      if (needed_finder == needed_views.end())
-      {
-        needed_views[this] = send_mask;
-        // always add a remote reference
-        add_remote_reference();
-        DistributedID manager_did = 
-          manager->send_manager(target, needed_managers);
-        DistributedID result = did;
-        // Now see if we need to send ourselves
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-          // If we already have a remote subscriber, then we are done
-          if (finder != subscribers.end())
-            result = finder->second;
-        }
-        if (result != did)
-        {
-          // We already have a remote view so send the update
-          send_updates(result, target, send_mask);
-        }
-        // Otherwise we need to send a copy remotely
-        Serializer rez;
-        DistributedID remote_did = 
-          context->runtime->get_available_distributed_id();
-        bool lost_race = false;
-        {
-          AutoLock v_lock(view_lock);
-          // Check again to see if we lost the race
-          {
-            AutoLock gc(gc_lock,1,false/*exclusive*/);
-            std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-              subscribers.find(target);
-            if (finder != subscribers.end())
-            {
-              result = finder->second;
-              lost_race = true;
-            }
-            else
-              result = remote_did;
-          }
-          if (!lost_race)
-          {
-            {
-              RezCheck z(rez);
-              rez.serialize(result);
-              // Our processor and did as the owner
-              rez.serialize(context->runtime->address_space);
-              rez.serialize(did);
-              rez.serialize(manager_did);
-              pack_reduction_view(rez);
-            }
-            // Before sending the message update the subscribers
-            add_subscriber(target, result);
-            context->runtime->send_reduction_view(target, rez);
-          }
-        }
-        if (lost_race)
-        {
-          // Return the distributed id
-          context->runtime->free_distributed_id(remote_did);
-          // Send the update
-          send_updates(result, target, send_mask);
-        }
-        return result;
-      }
-      else
-      {
-        // Otherwise there is nothing to do since we've already
-        // been registered
-        DistributedID result;
-        {
-          AutoLock gc(gc_lock,1,false/*exclusive*/);
-          std::map<AddressSpaceID,DistributedID>::const_iterator finder = 
-            subscribers.find(target);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != subscribers.end());
-#endif
-          result = finder->second;
-        }
-        FieldMask diff_mask = send_mask - needed_finder->second;
-        if (!!diff_mask)
-        {
-          send_updates(result, target, diff_mask);
-          needed_finder->second |= diff_mask;
-        }
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedID ReductionView::send_back_state(AddressSpaceID target,
-                                                 const FieldMask &send_mask,
-                                    std::set<PhysicalManager*> &needed_managers)
-    //--------------------------------------------------------------------------
-    {
-      if (owner_addr != target)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        // If we're not remote and we need to be sent back
-        // then we better be the owner
-        assert(owner_did == did);
-#endif
-        DistributedID manager_did = 
-          manager->send_manager(target, needed_managers);
-        DistributedID new_owner_did = 
-          context->runtime->get_available_distributed_id();
-        bool return_new_did = false;
-        {
-          AutoLock v_lock(view_lock);
-          // Check again here to avoid the a race condition
-          if (owner_addr == target)
-          {
-            return_new_did = true;
-          }
-          else
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(new_owner_did);
-              rez.serialize(manager_did);
-              // Save our information so we can be added as a subscriber
-              rez.serialize(did);
-              rez.serialize(owner_addr);
-              pack_reduction_view(rez);
-            }
-            // Before sending the message add resource reference that
-            // will be held by the new owner on this view
-            add_resource_reference();
-            // Add a held remote reference on what we sent back
-            add_held_remote_reference();
-            context->runtime->send_back_reduction_view(target, rez);
-            // Update our owner proc and did
-            owner_addr = target;
-            owner_did = new_owner_did;
-          }
-        }
-        if (return_new_did)
-          context->runtime->free_distributed_id(new_owner_did);
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      else
-      {
-        // We better be holding some remote references
-        // to guarantee that the owner is still there.
-        assert(held_remote_references > 0);
-      }
-#endif
-      return owner_did;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::pack_reduction_view(Serializer &rez)
+                               std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
       // view lock held from callers
@@ -25234,6 +25305,21 @@ namespace LegionRuntime {
         rez.serialize(it->term_event);
         rez.serialize(it->child);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::send_packed_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      context->runtime->send_reduction_view(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::send_back_packed_view(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      context->runtime->send_back_reduction_view(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -25288,7 +25374,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void ReductionView::send_updates(DistributedID remote_did, 
                                      AddressSpaceID target,
-                                     const FieldMask &update_mask)
+                                     FieldMask update_mask,
+                       LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
+                                    std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
