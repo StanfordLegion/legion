@@ -1336,6 +1336,10 @@ namespace LegionRuntime {
 	unsigned offset, size;
       };
 
+      Event fill(const std::vector<CopySrcDstField> &dsts,
+                 const void *fill_value, size_t fill_value_size,
+                 Event wait_on = Event::NO_EVENT) const;
+
       Event copy(RegionInstance src_inst, RegionInstance dst_inst,
 		 size_t elem_size, Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;

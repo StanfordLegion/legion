@@ -3793,6 +3793,15 @@ namespace LegionRuntime {
       dma_queue = 0;
       terminate_flag = false;
     }
+
+    Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
+                       const void *fill_value, size_t fill_value_size,
+                       Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return Event::NO_EVENT;
+    }
     
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
 		       size_t elem_size, Event wait_on,

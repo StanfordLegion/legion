@@ -2961,6 +2961,36 @@ namespace LegionRuntime {
       pthread_mutex_t mutex;
     };
 
+    class FillOperation : public DMAOperation {
+    public:
+      FillOperation(const std::vector<Domain::CopySrcDstField> &_dsts,
+                    const void *value, size_t size, 
+                    const Domain &dom, EventImpl *_done_event)
+        : dsts(_dsts), fill_value_size(size), domain(dom), done_event(_done_event)
+      {
+        fill_value = malloc(fill_value_size);
+        memcpy(fill_value, value, fill_value_size);
+      }
+      virtual ~FillOperation(void)
+      {
+        free(fill_value);
+      }
+
+      virtual void perform(void);
+
+      virtual void print_info(FILE *f) {
+        Event e = done_event->get_event();
+        fprintf(f,"deferred fill: after=" IDFMT "/%d\n",
+                e.id, e.gen+1);
+      }
+    protected:
+      std::vector<Domain::CopySrcDstField> dsts;
+      void *fill_value;
+      size_t fill_value_size;
+      Domain domain;
+      EventImpl *done_event;
+    };
+
     class ComputeIndexSpaces : public DMAOperation {
     public:
       ComputeIndexSpaces(const std::vector<IndexSpace::BinaryOpDescriptor> &p,
@@ -3159,6 +3189,10 @@ namespace LegionRuntime {
         void create_subspaces_by_preimage(const std::vector<FieldDataDescriptor> &field_data,
                                           const std::map<IndexSpace,IndexSpace> &subspaces);
 
+        static Event fill(const std::vector<Domain::CopySrcDstField> &dsts,
+                          const void *fill_value, size_t fill_value_size,
+                          Event wait_on, const Domain &domain);
+
         static Event copy(RegionInstance src_inst, RegionInstance dst_inst,
 		   size_t elem_size, const Domain domain, Event wait_on = Event::NO_EVENT,
 		   ReductionOpID redop_id = 0, bool red_fold = false);
@@ -3311,6 +3345,8 @@ namespace LegionRuntime {
         size_t get_block_size(void) const { return block_size; }
         size_t* get_cur_entry(void) { return &cur_entry; }
         const DomainLinearization& get_linearization(void) const { return linearization; }
+        void fill_field(unsigned offset, unsigned size, const void *fill_value,
+                        size_t fill_value_size, const Domain &domain);
     private:
 	char *base_ptr;	
 	size_t elmt_size;
@@ -3704,6 +3740,24 @@ namespace LegionRuntime {
 	 	(field_start * block_size) +
 		(within_block * field_size) +
 		within_field);
+      }
+    }
+
+    void RegionInstance::Impl::fill_field(unsigned fill_offset, unsigned fill_size, 
+                                          const void *fill_value, size_t fill_value_size,
+                                          const Domain &domain)
+    {
+      assert(fill_size == fill_value_size);
+      size_t field_start = 0, field_size = 0, within_field = 0;
+      size_t bytes = find_field(get_field_sizes(), fill_offset, fill_size,
+                                field_start, field_size, within_field);
+      assert(bytes == fill_size);
+      for (Domain::DomainPointIterator itr(domain); itr; itr++)
+      {
+        int index = linearization.get_image(itr.p);
+        void *raw_addr = get_address(index, field_start,
+                                     field_size, within_field);
+        memcpy(raw_addr, fill_value, fill_value_size);
       }
     }
 
@@ -4224,6 +4278,15 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       IndexSpace::Impl *r = Runtime::Impl::get_runtime()->get_metadata_impl(*this);
       return r->get_element_mask();
+    }
+
+    Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
+                       const void *fill_value, size_t fill_value_size,
+                       Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      return IndexSpace::Impl::fill(dsts, fill_value, fill_value_size,
+                                    wait_on, *this);
     }
 
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst, size_t elem_size,
@@ -5198,6 +5261,19 @@ namespace LegionRuntime {
       done_event->trigger();
     }
 
+    void FillOperation::perform(void)
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      for (std::vector<Domain::CopySrcDstField>::const_iterator it = 
+            dsts.begin(); it != dsts.end(); it++)
+      {
+        RegionInstance::Impl *impl = rt->get_instance_impl(it->inst); 
+        impl->fill_field(it->offset, it->size, fill_value,
+                         fill_value_size, domain);
+      }
+      done_event->trigger();
+    }
+
     void ComputeIndexSpaces::perform(void)
     {
       Runtime::Impl *rt = Runtime::Impl::get_runtime();
@@ -5360,6 +5436,25 @@ namespace LegionRuntime {
       Event e = done_event->get_event();
       fprintf(f,"deferred create subspaces by preimage: after=" IDFMT "/%d\n",
               e.id, e.gen+1);
+    }
+
+    /*static*/
+    Event IndexSpace::Impl::fill(const std::vector<Domain::CopySrcDstField> &dsts,
+                                 const void *fill_value, size_t fill_value_size,
+                                 Event wait_on, const Domain &domain)
+    {
+      Runtime::Impl *rt = Runtime::Impl::get_runtime();
+      EventImpl *done_event = rt->get_free_event();
+      Event result = done_event->get_event();
+      FillOperation *op = new FillOperation(dsts, fill_value, fill_value_size,
+                                            domain, done_event);
+      if (wait_on.exists()) {
+        EventImpl *event_impl = rt->get_event_impl(wait_on);
+        event_impl->add_waiter(wait_on.gen, op);
+      } else {
+        Runtime::Impl::get_dma_queue()->enqueue_dma(op);
+      }
+      return result;
     }
 
     /*static*/
