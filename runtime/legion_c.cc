@@ -315,6 +315,28 @@ legion_index_space_get_domain(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, handle));
 }
 
+void
+legion_index_space_attach_name(legion_runtime_t runtime_,
+                               legion_index_space_t handle_,
+                               const char *name)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_index_space_retrieve_name(legion_runtime_t runtime_,
+                                 legion_index_space_t handle_,
+                                 const char **result)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
+}
+
 //------------------------------------------------------------------------
 // Index Partition Operations
 //------------------------------------------------------------------------

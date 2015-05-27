@@ -541,6 +541,22 @@ extern "C" {
                              legion_context_t ctx,
                              legion_index_space_t handle);
 
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::attach_name()
+   */
+  void
+  legion_index_space_attach_name(legion_runtime_t runtime,
+                                 legion_index_space_t handle,
+                                 const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::retrieve_name()
+   */
+  void
+  legion_index_space_retrieve_name(legion_runtime_t runtime,
+                                   legion_index_space_t handle,
+                                   const char **result);
+
   // -----------------------------------------------------------------------
   // Index Partition Operations
   // -----------------------------------------------------------------------
