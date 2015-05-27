@@ -661,6 +661,10 @@ end
 function type_check.expr_region(cx, node)
   local size = type_check.expr(cx, node.size)
   local size_type = std.check_read(cx, size)
+  if not std.validate_implicit_cast(size_type, int) then
+    log.error(node, "type mismatch in argument 2: expected " .. tostring(int) ..
+                " but got " .. tostring(size_type))
+  end
 
   local region = node.expr_type
   std.add_privilege(cx, "reads", region, std.newtuple())
