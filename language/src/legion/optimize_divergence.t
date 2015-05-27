@@ -182,6 +182,9 @@ function analyze_region_divergence.expr(cx, node)
   elseif node:is(ast.typed.ExprStaticCast) then
     return analyze_region_divergence.expr_static_cast(cx, node)
 
+  elseif node:is(ast.typed.ExprIspace) then
+    return
+
   elseif node:is(ast.typed.ExprRegion) then
     return
 

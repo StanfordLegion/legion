@@ -61,6 +61,10 @@ end
 
 -- Language Definition
 
+-- Note: Keywords marked "reserved for future use" are usually marked
+-- as such to indicate that those words are exposed as builtin types,
+-- and reserved in case types are ever inducted into the main
+-- language.
 local language = {
   name = "legion",
   entrypoints = {
@@ -78,18 +82,23 @@ local language = {
     "__runtime",
     "__inline",
     "__cuda",
+    "aliased", -- reserved for future use
     "cross_product",
+    "disjoint", -- reserved for future use
     "dynamic_cast",
     "isnull",
+    "ispace",
     "max",
     "min",
     "new",
     "null",
     "partition",
+    "ptr", -- reserved for future use
     "reads",
     "reduces",
     "region",
     "static_cast",
+    "wild", -- reserved for future use
     "where",
     "writes",
   },

@@ -658,6 +658,53 @@ function type_check.expr_static_cast(cx, node)
   }
 end
 
+function type_check.expr_ispace(cx, node)
+  local index_type = node.index_type
+  local actual_index_type = index_type
+  if std.type_eq(index_type, opaque) then
+    actual_index_type = int
+  end
+
+  local lower_bound = type_check.expr(cx, node.lower_bound)
+  local lower_bound_type = std.check_read(cx, lower_bound)
+  local upper_bound = node.upper_bound and type_check.expr(cx, node.upper_bound)
+  local upper_bound_type = node.upper_bound and std.check_read(cx, upper_bound)
+
+  if not (std.type_eq(index_type, opaque) or std.type_eq(index_type, int)) then
+    log.error(node, "type mismatch in argument 1: expected " ..
+                tostring(opaque) .. " or " .. tostring(int) ..
+                " but got " .. tostring(index_type))
+  end
+  if std.type_eq(index_type, opaque) and node.upper_bound then
+    log.error(node, "opaque ispace expected 2 arguments but got 3")
+  end
+  if not std.type_eq(index_type, opaque) and not node.upper_bound then
+    log.error(node, "non-opaque ispace expected 3 arguments but got 2")
+  end
+  if not std.validate_implicit_cast(lower_bound_type, actual_index_type) then
+    log.error(node, "type mismatch in argument 2: expected " ..
+                tostring(actual_index_type) ..
+                " but got " .. tostring(lower_bound_type))
+  end
+  if node.upper_bound and
+    not std.validate_implicit_cast(upper_bound_type, actual_index_type)
+  then
+    log.error(node, "type mismatch in argument 3: expected " ..
+                tostring(actual_index_type) ..
+                " but got " .. tostring(upper_bound_type))
+  end
+
+  local ispace = node.expr_type
+
+  return ast.typed.ExprIspace {
+    index_type = node.index_type,
+    lower_bound = lower_bound,
+    upper_bound = upper_bound,
+    expr_type = ispace,
+    span = node.span,
+  }
+end
+
 function type_check.expr_region(cx, node)
   local size = type_check.expr(cx, node.size)
   local size_type = std.check_read(cx, size)
@@ -928,6 +975,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.ExprStaticCast) then
     return type_check.expr_static_cast(cx, node)
+
+  elseif node:is(ast.specialized.ExprIspace) then
+    return type_check.expr_ispace(cx, node)
 
   elseif node:is(ast.specialized.ExprRegion) then
     return type_check.expr_region(cx, node)

@@ -496,6 +496,10 @@ end
 -- ## Type Helpers
 -- #################
 
+function std.is_ispace(t)
+  return terralib.types.istype(t) and rawget(t, "is_ispace")
+end
+
 function std.is_region(t)
   return terralib.types.istype(t) and rawget(t, "is_region")
 end
@@ -1176,6 +1180,86 @@ end
 -- #####################################
 -- ## Types
 -- #################
+
+function std.ispace(index_type)
+  assert(terralib.types.istype(index_type),
+         "Ispace type requires index type")
+
+  local st = terralib.types.newstruct("ispace")
+
+  st.is_ispace = true
+  st.index_type = index_type
+
+  function st.metamethods.__getentries(st)
+    local entries = terralib.newlist({
+        { "impl", c.legion_index_space_t },
+    })
+    return entries
+  end
+
+  -- Ispace types can have an optional partition. This is used by
+  -- cross_product to enable patterns like prod[i][j]. Of course, the
+  -- ispace can have other partitions as well. This is simply used as
+  -- the default partition when attempting to access something out of
+  -- a ispace.
+  function st:set_default_partition(partition)
+    local previous_default = rawget(self, "partition")
+    if previous_default and previous_default ~= partition then
+      assert(false, "Ispace type can only have one default partition")
+    end
+    if not std.is_partition(partition) then
+      assert(false, "Ispace type requires default partition to be a partition")
+    end
+    if partition:parent_ispace() ~= self then
+      assert(false, "Ispace type requires default partition to be a partition of self")
+    end
+    self.partition = partition
+  end
+
+  function st:has_default_partition()
+    return rawget(self, "partition")
+  end
+
+  function st:default_partition()
+    local partition = rawget(self, "partition")
+    if not partition then
+      assert(false, "Ispace type has no default partition")
+    end
+    return partition
+  end
+
+  -- Methods for the partition API:
+  function st:is_disjoint()
+    return self:default_partition():is_disjoint()
+  end
+
+  function st:parent_ispace()
+    return self
+  end
+
+  function st:subispace_constant(i)
+    return self:default_partition():subispace_constant(i)
+  end
+
+  function st:subispaces_constant()
+    return self:default_partition():subispaces_constant()
+  end
+
+  function st:subispace_dynamic(i)
+    return self:default_partition():subispace_dynamic(i)
+  end
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_ispace(from) and std.is_ispace(to))
+    return `([to] { impl = [expr].impl })
+  end
+
+  function st.metamethods.__typename(st)
+    return "ispace(" .. tostring(st.index_type) .. ")"
+  end
+
+  return st
+end
 
 function std.region(element_type)
   assert(terralib.types.istype(element_type),

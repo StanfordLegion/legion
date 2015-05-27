@@ -171,6 +171,12 @@ function analyze_leaf.expr(cx, node)
   elseif node:is(ast.typed.ExprStaticCast) then
     return analyze_leaf.expr_static_cast(cx, node)
 
+  elseif node:is(ast.typed.ExprIspace) then
+    return false
+
+  elseif node:is(ast.typed.ExprIspace) then
+    return false
+
   elseif node:is(ast.typed.ExprRegion) then
     return false
 
@@ -404,6 +410,11 @@ function analyze_inner.expr_static_cast(cx, node)
   return analyze_inner.expr(cx, node.value)
 end
 
+function analyze_inner.expr_ispace(cx, node)
+  return analyze_inner.expr(cx, node.lower_bound) and
+    node.upper_bound and analyze_inner.expr(cx, node.upper_bound)
+end
+
 function analyze_inner.expr_region(cx, node)
   return analyze_inner.expr(cx, node.size)
 end
@@ -496,6 +507,12 @@ function analyze_inner.expr(cx, node)
 
   elseif node:is(ast.typed.ExprStaticCast) then
     return analyze_inner.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.ExprIspace) then
+    return analyze_inner.expr_ispace(cx, node)
+
+  elseif node:is(ast.typed.ExprIspace) then
+    return analyze_inner.expr_ispace(cx, node)
 
   elseif node:is(ast.typed.ExprRegion) then
     return analyze_inner.expr_region(cx, node)

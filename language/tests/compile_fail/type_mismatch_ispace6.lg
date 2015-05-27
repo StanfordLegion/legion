@@ -12,23 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+-- fails-with:
+-- type_mismatch_ispace6.lg:23: type mismatch in argument 3: expected int32 but got bool
+--   var r = ispace(int, 0, true)
+--                ^
 
-local std = require("legion/std")
+import "legion"
 
-local builtins = {}
-
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
-
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
-
-return builtins
+task f()
+  var r = ispace(int, 0, true)
+end
+f:compile()

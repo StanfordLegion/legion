@@ -326,6 +326,24 @@ function parser.expr_simple(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("ispace") then
+    p:expect("(")
+    local index_type_expr = p:luaexpr()
+    p:expect(",")
+    local lower_bound = p:expr()
+    local upper_bound = false
+    if not p:matches(")") then
+      p:expect(",")
+      upper_bound = p:expr()
+    end
+    p:expect(")")
+    return ast.unspecialized.ExprIspace {
+      index_type_expr = index_type_expr,
+      lower_bound = lower_bound,
+      upper_bound = upper_bound,
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("region") then
     p:expect("(")
     local element_type_expr = p:luaexpr()

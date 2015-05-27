@@ -12,23 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Builtins
+import "legion"
 
-local std = require("legion/std")
+task f(is : ispace(opaque))
+end
 
-local builtins = {}
-
--- Builtins consists of a list of which will be stuffed into the
--- global scope of any legion program (i.e. they need not be accessed
--- via std).
-
-builtins.ispace = std.ispace
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
-builtins.partition = std.partition
-builtins.cross_product = std.cross_product
-builtins.ptr = std.ptr
-builtins.wild = std.wild
-
-return builtins
+task main()
+  var is0 = ispace(opaque, 5)
+  var is1 = ispace(opaque, [uint](5))
+  -- f(is0)
+  -- f(is1)
+end
+legionlib.start(main)

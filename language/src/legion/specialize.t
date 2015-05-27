@@ -193,6 +193,11 @@ local function get_num_accessed_fields(node)
     if get_num_accessed_fields(node.value) > 1 then return false end
     return 1
 
+  elseif node:is(ast.unspecialized.ExprIspace) then
+    if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.size) > 1 then return false end
+    return 1
+
   elseif node:is(ast.unspecialized.ExprRegion) then
     if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
@@ -501,6 +506,18 @@ function specialize.expr_static_cast(cx, node)
   }
 end
 
+function specialize.expr_ispace(cx, node)
+  local index_type = node.index_type_expr(cx.env:env())
+  local expr_type = std.ispace(index_type)
+  return ast.specialized.ExprIspace {
+    index_type = index_type,
+    lower_bound = specialize.expr(cx, node.lower_bound),
+    upper_bound = node.upper_bound and specialize.expr(cx, node.upper_bound),
+    expr_type = expr_type,
+    span = node.span,
+  }
+end
+
 function specialize.expr_region(cx, node)
   local element_type = node.element_type_expr(cx.env:env())
   local expr_type = std.region(element_type)
@@ -630,6 +647,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.ExprStaticCast) then
     return specialize.expr_static_cast(cx, node)
+
+  elseif node:is(ast.unspecialized.ExprIspace) then
+    return specialize.expr_ispace(cx, node)
 
   elseif node:is(ast.unspecialized.ExprRegion) then
     return specialize.expr_region(cx, node)

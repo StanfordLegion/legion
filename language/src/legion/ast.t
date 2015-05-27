@@ -198,6 +198,8 @@ ast.unspecialized("ExprNew", {"pointer_type_expr", "span"})
 ast.unspecialized("ExprNull", {"pointer_type_expr", "span"})
 ast.unspecialized("ExprDynamicCast", {"type_expr", "value", "span"})
 ast.unspecialized("ExprStaticCast", {"type_expr", "value", "span"})
+ast.unspecialized("ExprIspace", {"index_type_expr", "lower_bound",
+                                 "upper_bound", "span"})
 ast.unspecialized("ExprRegion", {"element_type_expr", "size", "span"})
 ast.unspecialized("ExprPartition", {"disjointness_expr", "region_type_expr",
                                     "coloring", "span"})
@@ -263,6 +265,8 @@ ast.specialized("ExprNew", {"pointer_type", "region", "span"})
 ast.specialized("ExprNull", {"pointer_type", "span"})
 ast.specialized("ExprDynamicCast", {"value", "expr_type", "span"})
 ast.specialized("ExprStaticCast", {"value", "expr_type", "span"})
+ast.specialized("ExprIspace", {"index_type", "lower_bound", "upper_bound",
+                               "expr_type", "span"})
 ast.specialized("ExprRegion", {"element_type", "size", "expr_type", "span"})
 ast.specialized("ExprPartition", {"disjointness", "region",
                                   "coloring", "expr_type", "span"})
@@ -323,6 +327,8 @@ ast.typed("ExprNew", {"pointer_type", "region", "expr_type", "span"})
 ast.typed("ExprNull", {"pointer_type", "expr_type", "span"})
 ast.typed("ExprDynamicCast", {"value", "expr_type", "span"})
 ast.typed("ExprStaticCast", {"value", "parent_region_map", "expr_type", "span"})
+ast.typed("ExprIspace", {"index_type", "lower_bound", "upper_bound",
+                         "expr_type", "span"})
 ast.typed("ExprRegion", {"element_type", "size", "expr_type", "span"})
 ast.typed("ExprPartition", {"disjointness", "region",
                             "coloring", "expr_type", "span"})

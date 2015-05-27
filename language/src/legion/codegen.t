@@ -1929,6 +1929,29 @@ function codegen.expr_static_cast(cx, node)
   return values.value(expr.once_only(actions, result), expr_type)
 end
 
+function codegen.expr_ispace(cx, node)
+  local index_type = node.index_type
+  assert(std.type_eq(index_type, opaque))
+  local lower_bound = codegen.expr(cx, node.lower_bound):read(cx)
+  local upper_bound = node.upper_bound and codegen.expr(cx, node.upper_bound):read(cx)
+  local ispace_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lower_bound.actions];
+    [node.upper_bound and upper_bound.actions or (quote end)];
+    [emit_debuginfo(node)]
+  end
+
+  local i = terralib.newsymbol(ispace_type, "i")
+  actions = quote
+    [actions]
+    var capacity = [lower_bound.value]
+    var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
+    var [i] = [ispace_type]{ impl = [is] }
+  end
+
+  return values.value(expr.just(actions, i), ispace_type)
+end
+
 function codegen.expr_region(cx, node)
   local element_type = node.element_type
   local size = codegen.expr(cx, node.size):read(cx)
@@ -2451,6 +2474,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.ExprStaticCast) then
     return codegen.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.ExprIspace) then
+    return codegen.expr_ispace(cx, node)
 
   elseif node:is(ast.typed.ExprRegion) then
     return codegen.expr_region(cx, node)
@@ -3021,7 +3047,12 @@ function codegen.stat_var(cx, node)
   if #rhs > 0 then
     local decls = terralib.newlist()
     for i, lh in ipairs(lhs) do
-      if node.values[i]:is(ast.typed.ExprRegion) then
+      if node.values[i]:is(ast.typed.ExprIspace) then
+        actions = quote
+          [actions]
+          c.legion_index_space_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
+        end
+      elseif node.values[i]:is(ast.typed.ExprRegion) then
         actions = quote
           [actions]
           c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])

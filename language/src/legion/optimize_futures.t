@@ -139,6 +139,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.ExprStaticCast) then
     return nil
 
+  elseif node:is(ast.typed.ExprIspace) then
+    return nil
+
   elseif node:is(ast.typed.ExprRegion) then
     return nil
 
@@ -494,6 +497,16 @@ function optimize_futures.expr_static_cast(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_ispace(cx, node)
+  local lower_bound = concretize(optimize_futures.expr(cx, node.lower_bound))
+  local upper_bound = node.upper_bound and
+    concretize(optimize_futures.expr(cx, node.upper_bound))
+  return node {
+    lower_bound = lower_bound,
+    upper_bound = upper_bound,
+  }
+end
+
 function optimize_futures.expr_region(cx, node)
   local size = concretize(optimize_futures.expr(cx, node.size))
   return node { size = size }
@@ -609,6 +622,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.ExprStaticCast) then
     return optimize_futures.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.ExprIspace) then
+    return optimize_futures.expr_ispace(cx, node)
 
   elseif node:is(ast.typed.ExprRegion) then
     return optimize_futures.expr_region(cx, node)
