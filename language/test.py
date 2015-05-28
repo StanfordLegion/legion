@@ -142,6 +142,8 @@ def run_all_tests(thread_count, verbose):
         for test_path in test_paths:
             results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, verbose, test_path)))
 
+    thread_pool.close()
+
     test_counters = OrderedDict()
     for test_name, test_fn, test_dirs in tests:
         test_counter = Counter()
@@ -165,6 +167,8 @@ def run_all_tests(thread_count, verbose):
                 raise Exception('Unexpected test outcome %s' % outcome)
     except KeyboardInterrupt:
         raise
+
+    thread_pool.join()
 
     global_counter = Counter()
     for test_counter in test_counters.itervalues():
