@@ -8212,12 +8212,12 @@ namespace LegionRuntime {
       // Note that the forest takes ownership of the value buffer
       runtime->forest->fill_fields(physical_ctx, requirement,
                                    value, value_size);
-      complete_mapping();
-      complete_execution();
       // Clear value and value size since the forest ended up 
       // taking ownership of them
       value = NULL;
       value_size = 0;
+      complete_mapping();
+      complete_execution();
       // This should never fail
       return true;
     }
