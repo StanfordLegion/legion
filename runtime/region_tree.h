@@ -1876,17 +1876,17 @@ namespace LegionRuntime {
     };
 
     /**
-     * \struct PreconditionSet
+     * \struct EventSet 
      * A helper class for building sets of fields with 
      * a common set of preconditions for doing copies.
      */
-    struct PreconditionSet {
+    struct EventSet {
     public:
-      PreconditionSet(void) { }
-      PreconditionSet(const FieldMask &m)
-        : pre_mask(m) { }
+      EventSet(void) { }
+      EventSet(const FieldMask &m)
+        : set_mask(m) { }
     public:
-      FieldMask pre_mask;
+      FieldMask set_mask;
       std::set<Event> preconditions;
     };
 
@@ -2059,9 +2059,9 @@ namespace LegionRuntime {
                            LegionMap<Event,FieldMask>::aligned &postconditions,
                                        CopyTracker *tracker = NULL);
       // Note this function can mutate the preconditions set
-      static void compute_precondition_sets(FieldMask update_mask,
+      static void compute_event_sets(FieldMask update_mask,
           const LegionMap<Event,FieldMask>::aligned &preconditions,
-          LegionList<PreconditionSet>::aligned &precondition_sets);
+          LegionList<EventSet>::aligned &event_sets);
       Event perform_copy_operation(Event precondition,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -3278,10 +3278,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc) = 0;
+                                 const FieldMask &mask, bool reading) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
@@ -3369,10 +3367,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc) = 0;
+                                 const FieldMask &mask, bool reading) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
@@ -3490,10 +3486,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc);
+                                 const FieldMask &mask, bool reading);
+      virtual InstanceRef add_user(PhysicalUser &user);
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
@@ -3618,17 +3612,17 @@ namespace LegionRuntime {
      */
     class DeferredView : public InstanceView {
     public:
-      struct ReduceInfo {
+      struct ReductionEpoch {
       public:
-        ReduceInfo(void) { }
-        ReduceInfo(const FieldMask &valid, const Domain &dom)
-          : valid_fields(valid) { intersections.insert(dom); }
-        ReduceInfo(const FieldMask &valid, 
-                   const std::set<Domain> &inters)
-          : valid_fields(valid), intersections(inters) { }
+        ReductionEpoch(void)
+          : redop(0) { }
+        ReductionEpoch(ReductionView *v, ReductionOpID r, const FieldMask &m)
+          : valid_fields(m), redop(r) { views.insert(v); }
       public:
         FieldMask valid_fields;
-        std::set<Domain> intersections;
+        ReductionOpID redop;
+        std::set<ReductionView*> views;
+        NodeSet remote_nodes;
       };
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
@@ -3651,9 +3645,9 @@ namespace LegionRuntime {
                       LegionMap<Event,FieldMask>::aligned &preconditions)
         { assert(false); }
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) { assert(false); }
-      virtual InstanceRef add_user(PhysicalUser &user, Processor exec_proc);
+                                 const FieldMask &mask, bool reading)
+                                 { assert(false); }
+      virtual InstanceRef add_user(PhysicalUser &user);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &reduce_mask,
                              std::vector<Domain::CopySrcDstField> &src_fields)
         { assert(false); return false; }
@@ -3707,6 +3701,22 @@ namespace LegionRuntime {
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL) = 0;
+      void flush_reductions(const MappableInfo &info,
+                            MaterializedView *dst,
+                            const FieldMask &reduce_mask,
+                            LegionMap<Event,FieldMask>::aligned &conditions);
+      void flush_reductions_across(const MappableInfo &info,
+                                   MaterializedView *dst,
+                                   FieldID src_field, FieldID dst_field,
+                                   Event dst_precondition,
+                                   std::set<Event> &conditions);
+      void find_component_domains(ReductionView *reduction_view,
+                                  std::set<Domain> &component_domains);
+    protected:
+      void activate_deferred(void);
+      void garbage_collect_deferred(void);
+      void validate_deferred(void);
+      void invalidate_deferred(void);
     public:
       virtual void issue_deferred_copies(const MappableInfo &info,
                                          MaterializedView *dst,
@@ -3764,18 +3774,18 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez) = 0;
     public:
-      void pack_valid_reductions(Serializer &rez, const FieldMask &update_mask,
+      bool pack_valid_reductions(Serializer &rez, const FieldMask &update_mask,
                                  AddressSpaceID target, 
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers,
-                 LegionMap<ReductionView*,FieldMask>::aligned &send_reductions);
-      void unpack_valid_reductions(Deserializer &derez, size_t num_reductions,
-                                   FieldSpaceNode *field_node, 
-                                   AddressSpaceID source);
+                                 std::set<PhysicalManager*> &needed_managers);
+      void unpack_valid_reductions(Deserializer &derez, FieldSpaceNode *field_node, 
+                                   AddressSpaceID source, bool need_lock);
     protected:
       // Track the set of reduction views which need to be applied here
       FieldMask reduction_mask;
-      LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
+      // We need to keep these in order because there may be multiple
+      // generations of reductions applied to this instance
+      LegionDeque<ReductionEpoch>::aligned reduction_epochs;
     };
 
     /**
@@ -3880,12 +3890,6 @@ namespace LegionRuntime {
                                                 FieldID dst_field,
                                                 Event precondition,
                                          std::set<Event> &postconditions);
-    protected:
-      void flush_reductions(const MappableInfo &info,
-                            MaterializedView *dst,
-                            const FieldMask &event_mask,
-                    const LegionMap<Event,FieldMask>::aligned &preconditions,
-                            std::set<Event> &event_set);
     protected:
       void unpack_composite_view(Deserializer &derez, AddressSpaceID source,
                                  bool send_back, bool need_lock);
@@ -4143,16 +4147,14 @@ namespace LegionRuntime {
     public:
       void perform_reduction(LogicalView *target, const FieldMask &copy_mask, 
                              Processor local_proc, CopyTracker *tracker = NULL);
-      Event perform_composite_reduction(MaterializedView *target,
+      Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
-                                        Processor local_proc,
                                         const std::set<Event> &preconditions,
                                         const std::set<Domain> &reduce_domains);
-      Event perform_composite_across_reduction(MaterializedView *target,
-                                               FieldID dst_field,
-                                               FieldID src_field,
-                                               unsigned src_index,
-                                               Processor local_proc,
+      Event perform_deferred_across_reduction(MaterializedView *target,
+                                              FieldID dst_field,
+                                              FieldID src_field,
+                                              unsigned src_index,
                                        const std::set<Event> &preconditions,
                                        const std::set<Domain> &reduce_domains);
     public:
@@ -4169,10 +4171,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc);
+                                 const FieldMask &mask, bool reading);
+      virtual InstanceRef add_user(PhysicalUser &user);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
     public:

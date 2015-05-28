@@ -2124,6 +2124,7 @@ namespace LegionRuntime {
         bool found = false;
         // Iterate through the instances and see if we can find
         // a materialized views for the source field
+        std::set<Event> local_results;
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               sit = src_instances.begin(); sit != src_instances.end(); sit++)
         {
@@ -2151,11 +2152,10 @@ namespace LegionRuntime {
             // Register the users of the post condition
             FieldMask local_src; local_src.set_bit(src_index);
             sit->first->add_copy_user(0/*redop*/, copy_post,
-                                      local_src, true/*reading*/,
-                                      info.local_proc);
+                                      local_src, true/*reading*/);
             // No need to register a user for the destination because
             // we've already mapped it.
-            result_events.insert(copy_post);
+            local_results.insert(copy_post);
             found = true;
             break;
           }
@@ -2172,7 +2172,7 @@ namespace LegionRuntime {
               it->first->issue_deferred_copies_across(info, dst_view,
                                           src_req.instance_fields[idx],
                                           dst_req.instance_fields[idx],
-                                          precondition, result_events);
+                                          precondition, local_results);
               found = true;
               break;
             }
@@ -2180,6 +2180,22 @@ namespace LegionRuntime {
         }
         // If we still didn't find it then there are no valid
         // instances for the data yet so we're done anyway
+        // Now register a result user if necessary
+        if (!local_results.empty())
+        {
+          Event result = Event::merge_events(local_results);
+          if (result.exists())
+          {
+            // Register a user on the destination
+            unsigned dst_index = src_node->column_source->get_field_index(
+                                              dst_req.instance_fields[idx]);
+            FieldMask local_dst; local_dst.set_bit(dst_index);
+            dst_view->add_copy_user(0/*redop*/, result,
+                                    local_dst, false/*reading*/);
+            // Add the event to the result events
+            result_events.insert(result);
+          }
+        }
       }
       Event result = Event::merge_events(result_events);
 #ifdef DEBUG_PERF
@@ -13925,8 +13941,7 @@ namespace LegionRuntime {
               postconditions.begin(); it != postconditions.end(); it++)
         {
           dst->add_copy_user(0/*redop*/, it->first, 
-                             it->second, false/*reading*/,
-                             info.local_proc);
+                             it->second, false/*reading*/);
         }
       }
       // If we still have fields that need to be updated and there
@@ -14141,17 +14156,16 @@ namespace LegionRuntime {
       // Now let's build maximal sets of fields which have
       // identical event preconditions. Use a list so our
       // iterators remain valid under insertion and push back
-      LegionList<PreconditionSet>::aligned precondition_sets;
-      compute_precondition_sets(update_mask, preconditions, 
-                                precondition_sets);
+      LegionList<EventSet>::aligned precondition_sets;
+      compute_event_sets(update_mask, preconditions, precondition_sets);
       // Now that we have our precondition sets, it's time
       // to issue the distinct copies to the low-level runtime
       // Issue a copy for each of the different precondition sets
-      for (LegionList<PreconditionSet>::aligned::iterator pit = 
+      for (LegionList<EventSet>::aligned::iterator pit = 
             precondition_sets.begin(); pit != 
             precondition_sets.end(); pit++)
       {
-        PreconditionSet &pre_set = *pit;
+        EventSet &pre_set = *pit;
         // Build the src and dst fields vectors
         std::vector<Domain::CopySrcDstField> src_fields;
         std::vector<Domain::CopySrcDstField> dst_fields;
@@ -14159,7 +14173,7 @@ namespace LegionRuntime {
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
         {
-          FieldMask op_mask = pre_set.pre_mask & it->second;
+          FieldMask op_mask = pre_set.set_mask & it->second;
           if (!!op_mask)
           {
             it->first->copy_from(op_mask, src_fields);
@@ -14218,10 +14232,9 @@ namespace LegionRuntime {
                 it = update_views.begin(); it != update_views.end(); it++)
           {
             it->first->add_copy_user(0/*redop*/, copy_post,
-                                     it->second, true/*reading*/,
-                                     info.local_proc);
+                                     it->second, true/*reading*/);
           }
-          postconditions[copy_post] = pre_set.pre_mask;
+          postconditions[copy_post] = pre_set.set_mask;
         }
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
         IndexSpace copy_index_space =
@@ -14268,10 +14281,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::compute_precondition_sets(
-                      FieldMask update_mask, 
+    /*static*/ void RegionTreeNode::compute_event_sets(FieldMask update_mask, 
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
-                      LegionList<PreconditionSet>::aligned &precondition_sets)
+                      LegionList<EventSet>::aligned &precondition_sets)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<Event,FieldMask>::aligned::const_iterator pit = 
@@ -14283,17 +14295,17 @@ namespace LegionRuntime {
         update_mask -= pit->second;
         FieldMask remaining = pit->second;
         // Insert this event into the precondition sets 
-        for (LegionList<PreconditionSet>::aligned::iterator it = 
+        for (LegionList<EventSet>::aligned::iterator it = 
               precondition_sets.begin(); it != precondition_sets.end(); it++)
         {
           // Easy case, check for equality
-          if (remaining == it->pre_mask)
+          if (remaining == it->set_mask)
           {
             it->preconditions.insert(pit->first);
             inserted = true;
             break;
           }
-          FieldMask overlap = remaining & it->pre_mask;
+          FieldMask overlap = remaining & it->set_mask;
           // Easy case, they are disjoint so keep going
           if (!overlap)
             continue;
@@ -14302,16 +14314,16 @@ namespace LegionRuntime {
           if (overlap == remaining)
           {
             // Leave the existing set and make it the difference 
-            it->pre_mask -= overlap;
-            precondition_sets.push_back(PreconditionSet(overlap));
-            PreconditionSet &last = precondition_sets.back();
+            it->set_mask -= overlap;
+            precondition_sets.push_back(EventSet(overlap));
+            EventSet &last = precondition_sets.back();
             last.preconditions = it->preconditions;
             last.preconditions.insert(pit->first);
             inserted = true;
             break;
           }
           // Moderate case, we dominate the existing set
-          if (overlap == it->pre_mask)
+          if (overlap == it->set_mask)
           {
             // Add ourselves to the existing set and then
             // keep going for the remaining fields
@@ -14324,9 +14336,9 @@ namespace LegionRuntime {
           // distinct sets of fields, keep left one in
           // place and reduce scope, add new one at the
           // end for overlap, continue iterating for right one
-          it->pre_mask -= overlap;
+          it->set_mask -= overlap;
           const std::set<Event> &temp_preconditions = it->preconditions;
-          it = precondition_sets.insert(it, PreconditionSet(overlap));
+          it = precondition_sets.insert(it, EventSet(overlap));
           it->preconditions = temp_preconditions;
           it->preconditions.insert(pit->first);
           remaining -= overlap;
@@ -14334,8 +14346,8 @@ namespace LegionRuntime {
         }
         if (!inserted)
         {
-          precondition_sets.push_back(PreconditionSet(remaining));
-          PreconditionSet &last = precondition_sets.back();
+          precondition_sets.push_back(EventSet(remaining));
+          EventSet &last = precondition_sets.back();
           last.preconditions.insert(pit->first);
         }
       }
@@ -14344,7 +14356,7 @@ namespace LegionRuntime {
       // Put it on the front because it is the copy with
       // no preconditions so it can start right away!
       if (!!update_mask)
-        precondition_sets.push_front(PreconditionSet(update_mask));
+        precondition_sets.push_front(EventSet(update_mask));
     }
 
     //--------------------------------------------------------------------------
@@ -16101,7 +16113,7 @@ namespace LegionRuntime {
         flush_reductions(user.field_mask,
                          info.req.redop, info);
         // Now add ourselves as a user of this region
-        return new_view->add_user(user, info.local_proc);
+        return new_view->add_user(user);
       }
       else
       {
@@ -16121,7 +16133,7 @@ namespace LegionRuntime {
         // Release our hold on the state
         release_physical_state(state);
         // Now we can add ourselves as a user of this region
-        return new_view->add_user(user, info.local_proc);
+        return new_view->add_user(user);
       }
     }
 
@@ -16136,14 +16148,14 @@ namespace LegionRuntime {
       {
         ReductionView *view = new_view->as_reduction_view();
         update_reduction_views(state, user.field_mask, view);
-        view->add_user(user, local_proc);
+        view->add_user(user);
       }
       else
       {
         InstanceView *view = new_view->as_instance_view();
         update_valid_views(state, user.field_mask, 
                            HAS_WRITE(user.usage), view);
-        view->add_user(user, local_proc);
+        view->add_user(user);
       }
       release_physical_state(state);
       return InstanceRef(Event::NO_EVENT, new_view);
@@ -16164,7 +16176,7 @@ namespace LegionRuntime {
         ReductionCloser closer(info.ctx, target_view, 
                                user.field_mask, info.local_proc);
         visit_node(&closer);
-        InstanceRef result = target_view->add_user(user, info.local_proc);
+        InstanceRef result = target_view->add_user(user);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
@@ -16215,7 +16227,7 @@ namespace LegionRuntime {
         flush_reductions(user.field_mask,
                          info.req.redop, info);
         // Get the resulting instance reference
-        InstanceRef result = target_view->add_user(user, info.local_proc);
+        InstanceRef result = target_view->add_user(user);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
@@ -16251,7 +16263,7 @@ namespace LegionRuntime {
             field_data.push_back(FieldDataDescriptor());
             view->set_descriptor(field_data.back(), fid_idx);
             // Register ourselves as user of this instance
-            InstanceRef ref = view->add_user(user, proc);  
+            InstanceRef ref = view->add_user(user);  
             Event ready_event = ref.get_ready_event();
             if (ready_event.exists())
               preconditions.insert(ready_event);
@@ -20394,8 +20406,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user(ReductionOpID redop, Event copy_term,
-                                     const FieldMask &copy_mask, bool reading,
-                                     Processor exec_proc)
+                                     const FieldMask &copy_mask, bool reading)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -20432,8 +20443,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef MaterializedView::add_user(PhysicalUser &user, 
-                                           Processor exec_proc)
+    InstanceRef MaterializedView::add_user(PhysicalUser &user) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -22097,17 +22107,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Remove resource references on our valid reductions
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      for (std::deque<ReductionEpoch>::iterator rit = reduction_epochs.begin();
+            rit != reduction_epochs.end(); rit++)
       {
-        if (it->first->remove_resource_reference())
-          legion_delete(it->first);
+        ReductionEpoch &epoch = *rit;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          if ((*it)->remove_resource_reference())
+            legion_delete(*it);
+        }
       }
-      valid_reductions.clear();
+      reduction_epochs.clear();
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef DeferredView::add_user(PhysicalUser &user, Processor exec_proc)
+    InstanceRef DeferredView::add_user(PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -22161,112 +22176,324 @@ namespace LegionRuntime {
                                                     const FieldMask &valid_mask)
     //--------------------------------------------------------------------------
     {
-      // Handle the easy case
-      if (logical_node == view->logical_node)
+      // We can do this before taking the lock
+      ReductionOpID redop = view->get_redop();
+      bool added = false;
+      AutoLock v_lock(view_lock);
+      // Iterate backwards and add to the first epoch that matches
+      for (std::deque<ReductionEpoch>::reverse_iterator it = 
+            reduction_epochs.rbegin(); it != reduction_epochs.rend(); it++)
       {
-        std::map<ReductionView*,ReduceInfo>::iterator finder = 
-          valid_reductions.find(view);
-        if (finder == valid_reductions.end())
+        if (redop != it->redop)
+          continue;
+        if (valid_mask * it->valid_fields)
+          continue;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(valid_mask == it->valid_fields);
+#endif
+        if (it->views.find(view) == it->views.end())
         {
           view->add_resource_reference();
           view->add_valid_reference();
-          if (logical_node->has_component_domains())
-            valid_reductions[view] = ReduceInfo(valid_mask, 
-                                         logical_node->get_component_domains());
-          else
-            valid_reductions[view] = ReduceInfo(valid_mask, 
-                                                    logical_node->get_domain());
+          it->views.insert(view);
         }
-        else
-          finder->second.valid_fields |= valid_mask;
-        // Always update the reduction mask
-        reduction_mask |= valid_mask;
+        added = true;
+        // Clear the set since it has been updated
+        it->remote_nodes.clear();
+        break;
       }
-      else
+      if (!added)
       {
-        // Otherwise if we are here we know we intersect
-        // so compute the intersection
-        std::map<ReductionView*,ReduceInfo>::iterator finder = 
-          valid_reductions.find(view);
-        if (finder == valid_reductions.end())
-        {
-          view->add_resource_reference();
-          view->add_valid_reference();
-          valid_reductions[view] = ReduceInfo(valid_mask, 
-                    logical_node->get_intersection_domains(view->logical_node));
-        }
-        else
-          finder->second.valid_fields |= valid_mask;
-        // Always update the reduction mask
-        reduction_mask |= valid_mask;
+        view->add_resource_reference();
+        view->add_valid_reference();
+        reduction_epochs.push_back(ReductionEpoch(view, redop, valid_mask));
       }
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::pack_valid_reductions(Serializer &rez, 
+    void DeferredView::flush_reductions(const MappableInfo &info,
+                                        MaterializedView *dst,
+                                        const FieldMask &reduce_mask,
+                                LegionMap<Event,FieldMask>::aligned &conditions)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over all the reduction epochs and issue reductions
+      std::deque<ReductionEpoch> to_issue;  
+      {
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        for (std::deque<ReductionEpoch>::const_iterator it = 
+              reduction_epochs.begin(); it != reduction_epochs.end(); it++)
+        {
+          if (reduce_mask * it->valid_fields)
+            continue;
+          to_issue.push_back(*it);
+        }
+      }
+      for (std::deque<ReductionEpoch>::const_iterator rit = 
+            to_issue.begin(); rit != to_issue.end(); rit++)
+      {
+        const ReductionEpoch &epoch = *rit; 
+        // Compute the per-field preconditions
+        std::set<Event> preconditions;
+        for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+              conditions.begin(); it != conditions.end(); it++)
+        {
+          if (it->second * epoch.valid_fields)
+            continue;
+          preconditions.insert(it->first);
+        }
+        // Now issue the reductions from all the views
+        std::set<Event> postconditions;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          std::set<Domain> component_domains;
+          find_component_domains(*it, component_domains);
+          Event result = (*it)->perform_deferred_reduction(dst,
+                                  epoch.valid_fields, preconditions,
+                                  component_domains);
+          if (result.exists())
+            postconditions.insert(result);
+        }
+        // Merge the post-conditions together and add them to results
+        Event result = Event::merge_events(postconditions);
+        if (result.exists())
+          conditions[result] = epoch.valid_fields;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::flush_reductions_across(const MappableInfo &info,
+                                               MaterializedView *dst,
+                                               FieldID src_field, 
+                                               FieldID dst_field,
+                                               Event dst_precondition,
+                                               std::set<Event> &conditions)
+    //--------------------------------------------------------------------------
+    {
+      // Find the reductions to perform
+      unsigned src_index = 
+        logical_node->column_source->get_field_index(src_field);
+      std::deque<ReductionEpoch> to_issue;
+      {
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        for (std::deque<ReductionEpoch>::const_iterator it = 
+              reduction_epochs.begin(); it != reduction_epochs.end(); it++)
+        {
+          if (it->valid_fields.is_set(src_index))
+            to_issue.push_back(*it);
+        }
+      }
+      if (!to_issue.empty())
+      {
+        std::set<Event> preconditions = conditions;
+        preconditions.insert(dst_precondition);
+        for (std::deque<ReductionEpoch>::const_iterator rit = 
+              to_issue.begin(); rit != to_issue.end(); rit++)
+        {
+          const ReductionEpoch &epoch = *rit;
+          std::set<Event> postconditions;
+          for (std::set<ReductionView*>::const_iterator it = 
+                epoch.views.begin(); it != epoch.views.end(); it++)
+          {
+            // Get the domains for this reduction view
+            std::set<Domain> component_domains;
+            find_component_domains(*it, component_domains);
+            Event result = (*it)->perform_deferred_across_reduction(dst,
+                                            dst_field, src_field, src_index,
+                                            preconditions, component_domains);
+            if (result.exists())
+              postconditions.insert(result);
+          }
+          // Merge the postconditions
+          Event result = Event::merge_events(postconditions);
+          if (result.exists())
+          {
+            conditions.insert(result);
+            preconditions.insert(result);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::find_component_domains(ReductionView *reduction_view,
+                                            std::set<Domain> &component_domains)
+    //--------------------------------------------------------------------------
+    {
+      if (logical_node == reduction_view->logical_node)
+      {
+        if (logical_node->has_component_domains())
+          component_domains = logical_node->get_component_domains();
+        else
+          component_domains.insert(logical_node->get_domain());
+      }
+      else
+        component_domains = 
+          logical_node->get_intersection_domains(reduction_view->logical_node);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::activate_deferred(void)
+    //--------------------------------------------------------------------------
+    {
+      // Add gc references to all our reduction views
+      // Have to hold the lock when accessing this data structure 
+      AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+      for (std::deque<ReductionEpoch>::const_iterator rit = 
+            reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+      {
+        const ReductionEpoch &epoch = *rit;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          (*it)->add_gc_reference();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::garbage_collect_deferred(void)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock when accessing the reduction views
+      AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+      for (std::deque<ReductionEpoch>::const_iterator rit = 
+            reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+      {
+        const ReductionEpoch &epoch = *rit;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          // No need to check for deletion condition since we hold resource refs
+          (*it)->remove_gc_reference();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::validate_deferred(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+      for (std::deque<ReductionEpoch>::const_iterator rit = 
+            reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+      {
+        const ReductionEpoch &epoch = *rit;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          (*it)->add_valid_reference();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DeferredView::invalidate_deferred(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+      for (std::deque<ReductionEpoch>::const_iterator rit = 
+            reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+      {
+        const ReductionEpoch &epoch = *rit;
+        for (std::set<ReductionView*>::const_iterator it = 
+              epoch.views.begin(); it != epoch.views.end(); it++)
+        {
+          // No need to check for deletion condition since we hold resource refs
+          (*it)->remove_valid_reference();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeferredView::pack_valid_reductions(Serializer &rez, 
                                              const FieldMask &update_mask,
                                              AddressSpaceID target,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                    std::set<PhysicalManager*> &needed_managers,
-                  LegionMap<ReductionView*,FieldMask>::aligned &send_reductions)
+                                    std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(update_mask);
-      for (LegionMap<ReductionView*,FieldMask>::aligned::iterator it = 
-            send_reductions.begin(); it != send_reductions.end(); it++)
+      // Iterate over the epochs and figure out how many we need to send
+      size_t send_count = 0;
+      for (LegionDeque<ReductionEpoch>::aligned::const_iterator it = 
+            reduction_epochs.begin(); it != reduction_epochs.end(); it++)
       {
-        std::map<ReductionView*,ReduceInfo>::iterator finder = 
-          valid_reductions.find(it->first);
-        DistributedID red_did = 
-          it->first->send_state(target, it->second,
-                                needed_views, needed_managers);
-        rez.serialize(red_did);
-        rez.serialize(it->second);
-        rez.serialize<size_t>(finder->second.intersections.size());
-        for (std::set<Domain>::const_iterator dit = 
-              finder->second.intersections.begin(); dit !=
-              finder->second.intersections.end(); dit++)
+        if (update_mask * it->valid_fields)
+          continue;
+        if (it->remote_nodes.contains(target))
+          continue;
+        send_count++;
+      }
+      rez.serialize<size_t>(send_count);
+      if (send_count > 0)
+      {
+        for (unsigned idx = 0; idx < reduction_epochs.size(); idx++)
         {
-          rez.serialize(*dit);
+          const ReductionEpoch &epoch = reduction_epochs[idx];
+          rez.serialize(idx);
+          rez.serialize(epoch.valid_fields);
+          rez.serialize<size_t>(epoch.views.size());
+          for (std::set<ReductionView*>::const_iterator it = 
+                epoch.views.begin(); it != epoch.views.end(); it++)
+          {
+            DistributedID red_did = (*it)->send_state(target, 
+                    epoch.valid_fields, needed_views, needed_managers);
+            rez.serialize(red_did);
+          }
         }
       }
+      return (send_count > 0);
     }
 
     //--------------------------------------------------------------------------
     void DeferredView::unpack_valid_reductions(Deserializer &derez, 
-                                               size_t num_reductions,
                                                FieldSpaceNode *field_node,
-                                               AddressSpaceID source)
+                                               AddressSpaceID source,
+                                               bool need_lock)
     //--------------------------------------------------------------------------
     {
-      FieldMask reduction_update;
-      derez.deserialize(reduction_update);
-      field_node->transform_field_mask(reduction_update, source);
-      reduction_mask |= reduction_update;
-      for (unsigned idx = 0; idx < num_reductions; idx++)
+      if (need_lock)
       {
-        DistributedID red_did;
-        derez.deserialize(red_did);
-        LogicalView *log_view = context->find_view(red_did); 
-#ifdef DEBUG_HIGH_LEVEL
-        assert(log_view != NULL);
-        assert(log_view->is_reduction_view());
-#endif
-        ReductionView *red_view = log_view->as_reduction_view();
-        ReduceInfo &red_info = valid_reductions[red_view];
-        FieldMask red_update;
-        derez.deserialize(red_update);
-        field_node->transform_field_mask(red_update, source);
-        red_info.valid_fields |= red_update;
-        size_t num_domains;
-        derez.deserialize(num_domains);
-        for (unsigned i = 0; i < num_domains; i++)
+        Event lock_event = view_lock.acquire(0, true/*exclusive*/);
+        lock_event.wait(true/*block*/);
+      }
+      size_t epoch_count;
+      derez.deserialize(epoch_count);
+      for (unsigned idx = 0; idx < epoch_count; idx++)
+      {
+        unsigned epoch_idx;
+        derez.deserialize(epoch_idx);
+        if (epoch_idx >= reduction_epochs.size())
+          reduction_epochs.resize(epoch_idx+1);
+        ReductionEpoch &epoch = reduction_epochs[epoch_idx];
+        epoch.remote_nodes.add(source);
+        derez.deserialize(epoch.valid_fields);
+        field_node->transform_field_mask(epoch.valid_fields, source);
+        size_t num_views;
+        derez.deserialize<size_t>(num_views);
+        for (unsigned i = 0; i < num_views; i++)
         {
-          Domain dom;
-          derez.deserialize(dom);
-          red_info.intersections.insert(dom);
+          DistributedID red_did;
+          derez.deserialize(red_did);
+          LogicalView *log_view = context->find_view(red_did); 
+#ifdef DEBUG_HIGH_LEVEL
+          assert(log_view != NULL);
+          assert(log_view->is_reduction_view());
+#endif
+          ReductionView *red_view = log_view->as_reduction_view();
+          if (epoch.views.find(red_view) == epoch.views.end())
+          {
+            red_view->add_resource_reference();
+            red_view->add_valid_reference();
+            epoch.views.insert(red_view);
+          }
+          if (i == 0)
+            epoch.redop = red_view->get_redop();
         }
       }
+      if (need_lock)
+        view_lock.release();
     }
 
     /////////////////////////////////////////////////////////////
@@ -22346,12 +22573,7 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->add_gc_reference();
 
-      // Add gc references to all our reduction views
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        it->first->add_gc_reference();
-      }
+      activate_deferred();
 
       // If we are the top level view, add gc references to all our instances
       if (parent == NULL)
@@ -22361,7 +22583,7 @@ namespace LegionRuntime {
         {
           it->first->add_gc_references();
         }
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -22377,15 +22599,10 @@ namespace LegionRuntime {
         }
       }
 
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        // No need to check for deletion condition since we hold resource refs
-        it->first->remove_gc_reference(); 
-      }
+      garbage_collect_deferred();
 
       if ((parent != NULL) && parent->remove_gc_reference())
-        legion_delete(parent);
+        legion_delete(parent); 
     }
 
     //--------------------------------------------------------------------------
@@ -22397,11 +22614,7 @@ namespace LegionRuntime {
       {
         it->first->add_valid_references();
       }
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        it->first->add_valid_reference();
-      }
+      validate_deferred(); 
     }
 
     //--------------------------------------------------------------------------
@@ -22413,12 +22626,7 @@ namespace LegionRuntime {
       {
         it->first->remove_valid_references();
       }
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        // No need to check for deletion conditions since we hold resource refs
-        it->first->remove_valid_reference();
-      }
+      invalidate_deferred(); 
     }
 
     //--------------------------------------------------------------------------
@@ -22531,11 +22739,7 @@ namespace LegionRuntime {
         it->first->find_bounding_roots(child_view, it->second); 
       }
       child_view->add_resource_reference();
-      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        child_view->update_reduction_views(it->first, it->second.valid_fields);
-      }
+
       // Retake the lock and try and add the child, see if
       // someone else added the child in the meantime
       {
@@ -22550,6 +22754,18 @@ namespace LegionRuntime {
           return finder->second;
         }
         children[c] = child_view;
+        // Update the subviews
+        for (std::deque<ReductionEpoch>::const_iterator rit = 
+              reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+        {
+          const ReductionEpoch &epoch = *rit;
+          for (std::set<ReductionView*>::const_iterator it = 
+                epoch.views.begin(); it != epoch.views.end(); it++)
+          {
+            child_view->update_reduction_views(*it, epoch.valid_fields,
+                                               false/*update parent*/);
+          }
+        }
       }
       if (child_did != child_own_did)
       {
@@ -22702,39 +22918,34 @@ namespace LegionRuntime {
         accumulate_mask |= overlap;
 #endif
       }
+      // Now that we've issued all our copies, flush any reductions
+      FieldMask reduce_overlap = reduction_mask & copy_mask;
+      if (!!reduce_overlap)
+        flush_reductions(info, dst, reduce_overlap, postconditions); 
       // Fun trick here, use the precondition set routine to get the
       // sets of fields which all have the same precondition events
-      LegionList<PreconditionSet>::aligned postcondition_sets;
-      RegionTreeNode::compute_precondition_sets(copy_mask,
-                                                postconditions,
-                                                postcondition_sets);
+      LegionList<EventSet>::aligned postcondition_sets;
+      RegionTreeNode::compute_event_sets(copy_mask, postconditions,
+                                         postcondition_sets);
       // Now add all the post conditions for each of the
       // writes for fields with the same set of post condition events
-      for (LegionList<PreconditionSet>::aligned::iterator pit = 
+      for (LegionList<EventSet>::aligned::iterator pit = 
             postcondition_sets.begin(); pit !=
             postcondition_sets.end(); pit++)
       {
-        PreconditionSet &post_set = *pit;
-        // Go through and issue any reductions for this set
-        if (!valid_reductions.empty())
-        {
-          FieldMask reduce_overlap = reduction_mask & post_set.pre_mask;
-          if (!!reduce_overlap)
-          {
-            flush_reductions(info, dst, reduce_overlap,
-                             preconditions, post_set.preconditions);
-          }
-        }
-        // If the set is empty, then we can skip it
+        EventSet &post_set = *pit;
+        // Don't need to record anything if empty
         if (post_set.preconditions.empty())
           continue;
         // Compute the merge event
         Event postcondition = Event::merge_events(post_set.preconditions);
-        dst->add_copy_user(0/*redop*/, postcondition,
-                           post_set.pre_mask, false/*reading*/,
-                           info.local_proc);
-        if (tracker != NULL)
-          tracker->add_copy_event(postcondition);
+        if (postcondition.exists())
+        {
+          dst->add_copy_user(0/*redop*/, postcondition,
+                             post_set.set_mask, false/*reading*/);
+          if (tracker != NULL)
+            tracker->add_copy_event(postcondition);
+        }
       }
     }
 
@@ -22767,44 +22978,10 @@ namespace LegionRuntime {
         accumulate_mask |= overlap;
 #endif
       }
-      // Fun trick here, use the precondition set routine to get the
-      // sets of fields which all have the same precondition events
-      LegionList<PreconditionSet>::aligned postcondition_sets;
-      RegionTreeNode::compute_precondition_sets(copy_mask,
-                                                local_postconditions,
-                                                postcondition_sets);
-      // Now add all the post conditions for each of the
-      // writes for fields with the same set of post condition events
-      for (LegionList<PreconditionSet>::aligned::iterator pit = 
-            postcondition_sets.begin(); pit !=
-            postcondition_sets.end(); pit++)
-      {
-        PreconditionSet &post_set = *pit;
-        // Go through and issue any reductions for this set
-        if (!valid_reductions.empty())
-        {
-          FieldMask reduce_overlap = reduction_mask & post_set.pre_mask;
-          if (!!reduce_overlap)
-          {
-            flush_reductions(info, dst, reduce_overlap,
-                             preconditions, post_set.preconditions);
-          }
-        }
-        // If the set is empty, then we can skip it
-        if (post_set.preconditions.empty())
-          continue;
-        // Compute the merge event
-        Event postcondition = Event::merge_events(post_set.preconditions);
-        if (postcondition.exists())
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(postconditions.find(postcondition) == postconditions.end());
-#endif
-          postconditions[postcondition] = post_set.pre_mask;
-          if (tracker != NULL)
-            tracker->add_copy_event(postcondition);
-        }
-      }
+      FieldMask reduce_overlap = reduction_mask & copy_mask;
+      // Finally see if we have any reductions to flush
+      if (!!reduce_overlap)
+        flush_reductions(info, dst, reduce_overlap, postconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -22821,6 +22998,8 @@ namespace LegionRuntime {
       std::set<Event> preconditions;
       // This includes the destination precondition
       preconditions.insert(precondition);
+      // Keep track of the local postconditions
+      std::set<Event> local_postconditions;
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             roots.begin(); it != roots.end(); it++)
       {
@@ -22828,89 +23007,22 @@ namespace LegionRuntime {
         {
           it->first->issue_across_copies(info, dst, src_index, src_field, 
                                          dst_field, true/*need field*/,
-                                         preconditions, postconditions);
+                                         preconditions, local_postconditions);
           // We know there is at most one root here so
           // once we find it then we are done
           break;
         }
       }
-      if (!valid_reductions.empty() && reduction_mask.is_set(src_index))
+      if (!reduction_epochs.empty() && reduction_mask.is_set(src_index))
       {
-        std::set<Event> reduce_preconditions = postconditions;
-        reduce_preconditions.insert(precondition);
-        FieldMask reduce_mask; reduce_mask.set_bit(src_index);
-        for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
-              valid_reductions.begin(); it != valid_reductions.end(); it++)
-        {
-          Event result = 
-            it->first->perform_composite_across_reduction(dst, dst_field,
-                                                          src_field, src_index,
-                                                          info.local_proc,
-                                                          reduce_preconditions,
-                                                      it->second.intersections);
-          if (result.exists())
-            postconditions.insert(result);
-        }
+        // Merge our local postconditions to generate a new precondition
+        Event local_postcondition = Event::merge_events(local_postconditions);
+        flush_reductions_across(info, dst, src_field, dst_field,
+                                local_postcondition, postconditions);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::flush_reductions(const MappableInfo &info,
-                                         MaterializedView *dst,
-                                         const FieldMask &event_mask,
-                       const LegionMap<Event,FieldMask>::aligned &preconditions,
-                                         std::set<Event> &event_set)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!(event_mask - valid_mask));
-#endif
-      // Get the set of reductions that need to be issued for the
-      // fields in this precondition set
-      LegionMap<ReductionView*,FieldMask>::aligned overlap_reductions;
-      FieldMask overlap_mask;
-      for (std::map<ReductionView*,ReduceInfo>::const_iterator it =
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        FieldMask overlap = it->second.valid_fields & event_mask;
-        if (!overlap)
-          continue;
-        overlap_reductions[it->first] = overlap; 
-        overlap_mask |= overlap;
-      }
-      if (!overlap_reductions.empty())
-      {
-        // Compute the preconditions for these fields
-        // Make sure that all the events in the event_set are
-        // included in the reduction preconditions because they
-        // are copies are also writing to the fields.
-        std::set<Event> reduce_preconditions = event_set;
-        for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-              preconditions.begin(); it != preconditions.end(); it++)
-        {
-          if (it->second * overlap_mask)
-            continue;
-          reduce_preconditions.insert(it->first);
-        }
-        // Now issue all of the reductions to the target
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              overlap_reductions.begin(); it != 
-              overlap_reductions.end(); it++)
-        {
-          std::map<ReductionView*,ReduceInfo>::const_iterator finder =
-            valid_reductions.find(it->first);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != valid_reductions.end());
-#endif
-          Event result = it->first->perform_composite_reduction(dst, 
-                                          it->second, info.local_proc, 
-                                          reduce_preconditions, 
-                                          finder->second.intersections);
-          // Add the result to the set of post conditions
-          if (result.exists())
-            event_set.insert(result);
-        }
-      }
+      else // Otherwise we can just add locally
+        postconditions.insert(local_postconditions.begin(),
+                              local_postconditions.end());
     }
 
     //--------------------------------------------------------------------------
@@ -23019,19 +23131,8 @@ namespace LegionRuntime {
         rez.serialize(it->second);
       }
       // Now send any reduction views
-      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
-      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        FieldMask overlap = it->second.valid_fields & pack_mask;
-        if (!overlap)
-          continue;
-        send_reductions[it->first] = overlap;
-      }
-      rez.serialize<size_t>(send_reductions.size());
-      if (!send_reductions.empty())
-        pack_valid_reductions(rez, pack_mask & reduction_mask, target,
-                              needed_views, needed_managers, send_reductions);
+      pack_valid_reductions(rez, pack_mask, target, 
+                            needed_views, needed_managers);
       // Also record which fields we sent the state that we sent
       LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
         remote_state.find(target);
@@ -23081,10 +23182,8 @@ namespace LegionRuntime {
         derez.deserialize(root_mask);
         field_node->transform_field_mask(root_mask, source);
       }
-      size_t num_reductions;
-      derez.deserialize(num_reductions);
-      if (num_reductions > 0)
-        unpack_valid_reductions(derez, num_reductions, field_node, source);
+      // Unpack any reduction updates
+      unpack_valid_reductions(derez, field_node, source, false/*need lock*/);
       if (need_lock)
         view_lock.release();
     }
@@ -23096,51 +23195,53 @@ namespace LegionRuntime {
                                  std::set<PhysicalManager*> &needed_managers)
     //--------------------------------------------------------------------------
     {
-      AutoLock v_lock(view_lock);
-      // Figure out which fields we need to send in full and
-      // which ones we can send partially
-      std::map<AddressSpaceID,FieldMask>::const_iterator finder = 
-        remote_state.find(target);
       FieldMask update_mask;
-      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
-      // Update our send mask and then mark that we sent any needed fields
-      if (finder != remote_state.end())
       {
-        send_mask -= finder->second;
-        update_mask = send_mask & finder->second;
-        // Count how many updates we will have
-        if (!!update_mask)
+        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
+        // Figure out which fields we need to send in full and
+        // which ones we can send partially
+        std::map<AddressSpaceID,FieldMask>::const_iterator finder = 
+          remote_state.find(target);
+        LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
+        // Update our send mask and then mark that we sent any needed fields
+        if (finder != remote_state.end())
         {
-          for (LegionMap<ReductionView*,ReduceInfo>::aligned::const_iterator 
-                it = valid_reductions.begin(); 
-                it != valid_reductions.end(); it++)
-          {
-            FieldMask overlap = it->second.valid_fields & update_mask;
-            if (!overlap)
-              continue;
-            send_reductions[it->first] = overlap;
-          }
+          send_mask -= finder->second;
+          update_mask = send_mask & finder->second;
         }
       }
       // If we have any field data to send, do that now
-      if (!!send_mask || !send_reductions.empty())
+      if (!!send_mask || !!update_mask)
       {
+        // Hold the lock when doing the packing 
+        AutoLock v_lock(view_lock);
         Serializer rez;
+        bool do_send = false;
+        bool has_update = !!update_mask;
         {
           RezCheck z(rez);
           rez.serialize(remote_did);
           rez.serialize(send_mask);
-          rez.serialize<size_t>(send_reductions.size());
+          rez.serialize<bool>(has_update);
           if (!!send_mask)
           {
+            
             pack_view(rez, false/*send back*/, target, 
                       send_mask, needed_views, needed_managers);
+            do_send = true;
           }
-          if (!send_reductions.empty())
-            pack_valid_reductions(rez, update_mask, target, needed_views, 
-                                  needed_managers, send_reductions);
+          if (has_update)
+          {
+            has_update = 
+              pack_valid_reductions(rez, update_mask, target, 
+                                    needed_views, needed_managers);
+            if (!do_send)
+              do_send = has_update;
+          }
         }
-        context->runtime->send_composite_update(target, rez);
+        // Only send the update if necessary
+        if (do_send)
+          context->runtime->send_composite_update(target, rez);
       }
     }
 
@@ -23315,8 +23416,8 @@ namespace LegionRuntime {
       derez.deserialize(did);
       FieldMask valid_mask;
       derez.deserialize(valid_mask);
-      size_t num_reductions;
-      derez.deserialize(num_reductions);
+      bool has_update;
+      derez.deserialize(has_update);
       // Transform below
       LogicalView *log_view = context->find_view(did);
 #ifdef DEBUG_HIGH_LEVEL
@@ -23337,9 +23438,9 @@ namespace LegionRuntime {
         view->unpack_composite_view(derez, source, 
                                     false/*send back*/, true/*need lock*/);
       }
-      if (num_reductions > 0)
-        view->unpack_valid_reductions(derez, num_reductions, 
-                                      field_node, source);
+      if (has_update)
+        view->unpack_valid_reductions(derez, field_node, 
+                                      source, true/*need lock*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -23730,8 +23831,7 @@ namespace LegionRuntime {
               // Only need to record the source user as the destination
               // user will be recorded by the copy across operation
               src->add_copy_user(0/*redop*/, copy_post,
-                                 src_mask, true/*reading*/,
-                                 info.local_proc);
+                                 src_mask, true/*reading*/);
               // Also add the event to the dst_preconditions and 
               // our post conditions
               dst_preconditions.insert(copy_post);
@@ -23990,7 +24090,7 @@ namespace LegionRuntime {
               
             field_data.back().index_space = remaining_space;
             // Register ourselves as a user of this instance
-            InstanceRef ref = view->add_user(user, local_proc);
+            InstanceRef ref = view->add_user(user);
             Event ready_event = Event::merge_events(ref.get_ready_event(),
                                                     remaining_precondition);
             if (ready_event.exists())
@@ -24294,24 +24394,14 @@ namespace LegionRuntime {
       if (parent != NULL)
         parent->add_gc_reference();
 
-      // Add gc references to all our reduction views
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        it->first->add_gc_reference();
-      }
+      activate_deferred();
     }
 
     //--------------------------------------------------------------------------
     void FillView::garbage_collect(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        // No need to check for deletion since we hold resource refs
-        it->first->remove_gc_reference();
-      }
+      garbage_collect_deferred();
 
       if ((parent != NULL) && parent->remove_gc_reference())
         legion_delete(parent);
@@ -24321,23 +24411,14 @@ namespace LegionRuntime {
     void FillView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        it->first->add_valid_reference();
-      }
+      validate_deferred();
     }
 
     //--------------------------------------------------------------------------
     void FillView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ReductionView*,ReduceInfo>::iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        // No need to check for deletion conditions since we hold resource refs
-        it->first->remove_valid_reference();
-      }
+      invalidate_deferred();
     }
 
     //--------------------------------------------------------------------------
@@ -24378,11 +24459,6 @@ namespace LegionRuntime {
                                                   value_size, false/*own*/,
                                                   this/*parent*/);
       child_view->add_resource_reference();
-      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        child_view->update_reduction_views(it->first, it->second.valid_fields);
-      }
       // Retake the lock and try and add the child, see if someone else added
       // the child in the meantime
       {
@@ -24396,6 +24472,18 @@ namespace LegionRuntime {
           return finder->second;
         }
         children[c] = child_view;
+        // Update the subviews
+        for (std::deque<ReductionEpoch>::const_iterator rit = 
+              reduction_epochs.begin(); rit != reduction_epochs.end(); rit++)
+        {
+          const ReductionEpoch &epoch = *rit;
+          for (std::set<ReductionView*>::const_iterator it = 
+                epoch.views.begin(); it != epoch.views.end(); it++)
+          {
+            child_view->update_reduction_views(*it, epoch.valid_fields,
+                                               false/*update parent*/);
+          }
+        }
       }
       if (child_did != child_own_did)
       {
@@ -24482,7 +24570,104 @@ namespace LegionRuntime {
                                          CopyTracker *tracker)
     //--------------------------------------------------------------------------
     {
-
+      LegionMap<Event,FieldMask>::aligned preconditions;
+      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                   copy_mask, preconditions);
+      // Compute the precondition sets
+      LegionList<EventSet>::aligned precondition_sets;
+      RegionTreeNode::compute_event_sets(copy_mask, preconditions,
+                                         precondition_sets);
+      // Iterate over the precondition sets
+      for (LegionList<EventSet>::aligned::iterator pit = 
+            precondition_sets.begin(); pit !=
+            precondition_sets.end(); pit++)
+      {
+        EventSet &pre_set = *pit;
+        // Build the src and dst fields vectors
+        std::vector<Domain::CopySrcDstField> dst_fields;
+        dst->copy_to(pre_set.set_mask, dst_fields);
+        Event fill_pre = Event::merge_events(pre_set.preconditions);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+        if (!fill_pre.exists())
+        {
+          UserEvent new_fill_pre = UserEvent::create_user_event();
+          new_fill_pre.trigger();
+          fill_pre = new_fill_pre;
+        }
+#endif
+#ifdef LEGION_LOGGING
+        LegionLogging::log_event_dependences(
+            Processor::get_executing_processor(), 
+            pre_set.preconditions, fill_pre);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
+#endif
+        // Issue the fill commands
+        Event fill_post;
+        if (dst->logical_node->has_component_domains())
+        {
+          std::set<Event> post_events; 
+          const std::set<Domain> &fill_domains = 
+            dst->logical_node->get_component_domains();
+          for (std::set<Domain>::const_iterator it = fill_domains.begin();
+                it != fill_domains.end(); it++)
+          {
+            post_events.insert(it->fill(dst_fields, value, 
+                                        value_size, fill_pre));
+          }
+          fill_post = Event::merge_events(post_events);
+        }
+        else
+        {
+          const Domain &dom = dst->logical_node->get_domain();
+          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+        }
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+        if (!fill_post.exists())
+        {
+          UserEvent new_fill_post = UserEvent::create_user_event();
+          new_fill_post.trigger();
+          fill_post = new_fill_post;
+        }
+#endif
+        // Now see if there are any reductions to apply
+        FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
+        if (!!reduce_overlap)
+        {
+          // See if we have any reductions to flush
+          LegionMap<Event,FieldMask>::aligned reduce_conditions;
+          if (fill_post.exists())
+            reduce_conditions[fill_post] = pre_set.set_mask;
+          flush_reductions(info, dst, reduce_overlap, reduce_conditions);
+          // Sort out the post-conditions into different groups 
+          LegionList<EventSet>::aligned postcondition_sets;
+          RegionTreeNode::compute_event_sets(pre_set.set_mask, 
+                                             reduce_conditions,
+                                             postcondition_sets);
+          // Add each of the different postconditions separately
+          for (LegionList<EventSet>::aligned::iterator it = 
+               postcondition_sets.begin(); it !=
+               postcondition_sets.end(); it++)
+          {
+            Event reduce_post = Event::merge_events(it->preconditions);
+            if (reduce_post.exists())
+            {
+              if (tracker != NULL)
+                tracker->add_copy_event(reduce_post);
+              dst->add_copy_user(0/*redop*/, reduce_post,
+                                 it->set_mask, false/*reading*/);
+            }
+          }
+        }
+        else if (fill_post.exists())
+        {
+          if (tracker != NULL)
+            tracker->add_copy_event(fill_post);
+          dst->add_copy_user(0/*redop*/, fill_post, 
+                             pre_set.set_mask, false/*reading*/);
+        }
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -24494,7 +24679,69 @@ namespace LegionRuntime {
                                          CopyTracker *tracker)
     //--------------------------------------------------------------------------
     {
-
+      // Do the same thing as above, but no need to add ourselves as user
+      // or compute the destination preconditions as they are already included
+      LegionList<EventSet>::aligned precondition_sets;
+      RegionTreeNode::compute_event_sets(copy_mask, preconditions,
+                                         precondition_sets);
+      // Iterate over the precondition sets
+      for (LegionList<EventSet>::aligned::iterator pit = 
+            precondition_sets.begin(); pit !=
+            precondition_sets.end(); pit++)
+      {
+        EventSet &pre_set = *pit;
+        // Build the src and dst fields vectors
+        std::vector<Domain::CopySrcDstField> dst_fields;
+        dst->copy_to(pre_set.set_mask, dst_fields);
+        Event fill_pre = Event::merge_events(pre_set.preconditions);
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+        if (!fill_pre.exists())
+        {
+          UserEvent new_fill_pre = UserEvent::create_user_event();
+          new_fill_pre.trigger();
+          fill_pre = new_fill_pre;
+        }
+#endif
+#ifdef LEGION_LOGGING
+        LegionLogging::log_event_dependences(
+            Processor::get_executing_processor(), 
+            pre_set.preconditions, fill_pre);
+#endif
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
+#endif
+        // Issue the fill commands
+        Event fill_post;
+        if (dst->logical_node->has_component_domains())
+        {
+          std::set<Event> post_events; 
+          const std::set<Domain> &fill_domains = 
+            dst->logical_node->get_component_domains();
+          for (std::set<Domain>::const_iterator it = fill_domains.begin();
+                it != fill_domains.end(); it++)
+          {
+            post_events.insert(it->fill(dst_fields, value, 
+                                        value_size, fill_pre));
+          }
+          fill_post = Event::merge_events(post_events);
+        }
+        else
+        {
+          const Domain &dom = dst->logical_node->get_domain();
+          fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
+        }
+#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+        if (!fill_post.exists())
+        {
+          UserEvent new_fill_post = UserEvent::create_user_event();
+          new_fill_post.trigger();
+          fill_post = new_fill_post;
+        }
+#endif
+        FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
+        if (!!reduce_overlap)
+          flush_reductions(info, dst, reduce_overlap, postconditions);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -24506,7 +24753,26 @@ namespace LegionRuntime {
                                           std::set<Event> &postconditions)
     //--------------------------------------------------------------------------
     {
-
+      std::vector<Domain::CopySrcDstField> dst_fields;   
+      dst->copy_field(dst_field, dst_fields);
+      // Issue the copy to the low-level runtime and get back the event
+      std::set<Event> post_events;
+      const std::set<Domain> &overlap_domains = 
+        logical_node->get_intersection_domains(dst->logical_node);
+      for (std::set<Domain>::const_iterator it = overlap_domains.begin();
+            it != overlap_domains.end(); it++)
+      {
+        post_events.insert(it->fill(dst_fields, value, 
+                                    value_size, precondition));
+      }
+      Event post_event = Event::merge_events(post_events); 
+      // If we're going to issue a reduction then we can just flush reductions
+      // and the precondition will translate naturally
+      if (!!reduction_mask)
+        flush_reductions_across(info, dst, src_field, dst_field,
+                                post_event, postconditions);
+      else
+        postconditions.insert(post_event);
     }
 
     //--------------------------------------------------------------------------
@@ -24545,27 +24811,19 @@ namespace LegionRuntime {
                                std::set<PhysicalManager*> &needed_managers) 
     //--------------------------------------------------------------------------
     {
-      AutoLock v_lock(view_lock);
-      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;
-      for (LegionMap<ReductionView*,ReduceInfo>::aligned::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
+      FieldMask reduce_overlap = send_mask & reduction_mask;
+      if (!!reduce_overlap)
       {
-        FieldMask overlap = it->second.valid_fields & send_mask;
-        if (!overlap)
-          continue;
-        send_reductions[it->first] = overlap;
-      }
-      if (!send_reductions.empty())
-      {
+        bool do_send;
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(remote_did);
-          rez.serialize<size_t>(send_reductions.size());
-          pack_valid_reductions(rez, send_mask, target, needed_views,
-                                needed_managers, send_reductions);
+          do_send = pack_valid_reductions(rez, reduce_overlap, target,
+                                          needed_views, needed_managers);
         }
-        context->runtime->send_fill_update(target, rez);
+        if (do_send)
+          context->runtime->send_fill_update(target, rez);
       }
     }
 
@@ -24633,19 +24891,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
-      LegionMap<ReductionView*,FieldMask>::aligned send_reductions;    
-      for (std::map<ReductionView*,ReduceInfo>::const_iterator it = 
-            valid_reductions.begin(); it != valid_reductions.end(); it++)
-      {
-        FieldMask overlap = it->second.valid_fields & pack_mask;
-        if (!overlap)
-          continue;
-        send_reductions[it->first] = overlap;
-      }
-      rez.serialize<size_t>(send_reductions.size());
-      if (!send_reductions.empty())
-        pack_valid_reductions(rez, pack_mask & reduction_mask, target,
-                              needed_views, needed_managers, send_reductions);
+      pack_valid_reductions(rez, pack_mask & reduction_mask, target,
+                            needed_views, needed_managers);
     }
 
     //--------------------------------------------------------------------------
@@ -24674,10 +24921,8 @@ namespace LegionRuntime {
         lock_event.wait(true/*block*/);
       }
       DerezCheck z(derez);
-      size_t num_reductions;
-      derez.deserialize(num_reductions);
-      unpack_valid_reductions(derez, num_reductions, 
-                              logical_node->column_source, source);
+      unpack_valid_reductions(derez, logical_node->column_source, 
+                              source, false/*need lock*/);
       if (need_lock)
         view_lock.release();
     }
@@ -24849,8 +25094,6 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      size_t num_reductions;
-      derez.deserialize(num_reductions);
       InstanceView *temp = context->find_view(did)->as_instance_view();
 #ifdef DEBUG_HIGH_LEVEL
       assert(temp != NULL);
@@ -24859,7 +25102,8 @@ namespace LegionRuntime {
 #endif
       FillView *view = temp->as_deferred_view()->as_fill_view();
       FieldSpaceNode *field_node = view->logical_node->column_source;
-      view->unpack_valid_reductions(derez, num_reductions, field_node, source);
+      view->unpack_valid_reductions(derez, field_node, 
+                                    source, true/*need lock*/);
     }
         
     /////////////////////////////////////////////////////////////
@@ -24991,9 +25235,9 @@ namespace LegionRuntime {
       }
 #endif
       target->add_copy_user(manager->redop, reduce_post,
-                            reduce_mask, false/*reading*/, local_proc);
+                            reduce_mask, false/*reading*/);
       this->add_copy_user(manager->redop, reduce_post,
-                          reduce_mask, true/*reading*/, local_proc);
+                          reduce_mask, true/*reading*/);
       if (tracker != NULL)
         tracker->add_copy_event(reduce_post);
 #ifdef LEGION_LOGGING
@@ -25027,10 +25271,9 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    Event ReductionView::perform_composite_reduction(MaterializedView *target,
-                                                     const FieldMask &red_mask,
-                                                     Processor local_proc,
-                                                     const std::set<Event> &pre,
+    Event ReductionView::perform_deferred_reduction(MaterializedView *target,
+                                                    const FieldMask &red_mask,
+                                                    const std::set<Event> &pre,
                                          const std::set<Domain> &reduce_domains)
     //--------------------------------------------------------------------------
     {
@@ -25082,7 +25325,7 @@ namespace LegionRuntime {
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post,
-                    red_mask, true/*reading*/, local_proc);
+                    red_mask, true/*reading*/);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
@@ -25124,9 +25367,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Event ReductionView::perform_composite_across_reduction(
-        MaterializedView *target, FieldID dst_field, FieldID src_field,
-                              unsigned src_index, Processor local_proc, 
+    Event ReductionView::perform_deferred_across_reduction(
+                              MaterializedView *target, FieldID dst_field, 
+                              FieldID src_field, unsigned src_index, 
                               const std::set<Event> &preconds,
                               const std::set<Domain> &reduce_domains)
     //--------------------------------------------------------------------------
@@ -25181,7 +25424,7 @@ namespace LegionRuntime {
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post,
-                    red_mask, true/*reading*/, local_proc);
+                    red_mask, true/*reading*/);
 #if defined(LEGION_SPY) || defined(LEGION_LOGGING)
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
@@ -25290,8 +25533,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void ReductionView::add_copy_user(ReductionOpID redop, Event copy_term,
-                                      const FieldMask &mask, bool reading,
-                                      Processor exec_proc)
+                                      const FieldMask &mask, bool reading)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -25326,7 +25568,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef ReductionView::add_user(PhysicalUser &user, Processor exec_proc)
+    InstanceRef ReductionView::add_user(PhysicalUser &user)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
