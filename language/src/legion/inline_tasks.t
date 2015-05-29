@@ -312,6 +312,16 @@ local function find_self_recursion(prototype, node)
 end
 
 local function check_valid_inline_task(task)
+  task.params:map(function(param)
+    local ty = param.param_type
+    if std.is_ispace(ty) or std.is_region(ty) or
+      std.is_partition(ty) or std.is_cross_product(ty) or
+      std.is_ptr(ty) or std.is_ref(ty) or std.is_rawref(ty) or
+      std.is_future(ty) or std.is_unpack_result(ty) then
+      log.error(param, "inline tasks cannot have a parameter of type " .. tostring(ty))
+    end
+  end)
+
   local body = task.body
   local num_returns = count_returns(body)
   if num_returns > 1 then
