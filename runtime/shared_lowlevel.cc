@@ -812,22 +812,26 @@ namespace LegionRuntime {
         class PreemptWaiter : public EventWaiter {
         public:
           PreemptWaiter(ProcessorImpl *t)
-            : target(t) { }
+            : target(t), triggered(false) { }
           virtual ~PreemptWaiter(void) { }
         public:
           virtual bool event_triggered(void) {
-            target->signal_proc();
-            return true;
+            target->signal_proc(this);
+            return false;
           }
           virtual void print_info(FILE *f) {
             fprintf(f,"Preempt waiter");
           }
+        public:
+          inline bool has_triggered(void) const { return triggered; }
+          inline void trigger(void) { triggered = true; }
         protected:
           ProcessorImpl *target;
+          bool triggered;
         };
     public:
         void enqueue_task(TaskDesc *task, Event wait_on);
-        void signal_proc(void);
+        void signal_proc(PreemptWaiter *waiter);
     protected:
         void add_to_ready_queue(TaskDesc *desc);
     public:
@@ -2013,9 +2017,12 @@ namespace LegionRuntime {
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
-    void ProcessorImpl::signal_proc(void)
+    void ProcessorImpl::signal_proc(PreemptWaiter *waiter)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      // Tell the waiter that the event triggered
+      waiter->trigger();
+      // Then signal any threads to wake up
       PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
@@ -2155,13 +2162,13 @@ namespace LegionRuntime {
     {
       // Put a preempt waiter to on the list of waiters to make
       // sure that this thread is awake when the event actually triggers
-      PreemptWaiter *waiter = new PreemptWaiter(this);
-      event->add_waiter(needed, waiter);
+      PreemptWaiter waiter(this);
+      event->add_waiter(needed, &waiter);
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // have to hold the lock here when testing this
       // so we don't accidentally miss a wake-up when
       // going to sleep.
-      while (!(event->has_triggered(needed)))
+      while (!waiter.has_triggered())
       {
         // Don't permit shutdowns since there is still a task waiting
         execute_task(false);
