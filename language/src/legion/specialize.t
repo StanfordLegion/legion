@@ -1006,6 +1006,7 @@ end
 function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
+  proto:setinline(node.inline)
   cx.env:insert(node, node.name, proto)
   cx = cx:new_local_scope()
 

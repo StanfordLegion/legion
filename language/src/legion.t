@@ -27,6 +27,7 @@ local specialize = require("legion/specialize")
 local std = require("legion/std")
 local type_check = require("legion/type_check")
 local vectorize_loops = require("legion/vectorize_loops")
+local inline_tasks = require("legion/inline_tasks")
 
 -- Add Language Builtins to Global Environment
 
@@ -52,6 +53,7 @@ function compile(lex)
     if std.config["inlines"] then ast = optimize_inlines.entry(ast) end
     if std.config["leaf"] then ast = optimize_config_options.entry(ast) end
     if std.config["no-dynamic-branches"] then ast = optimize_divergence.entry(ast) end
+    if std.config["task-inlines"] then ast = inline_tasks.entry(ast) end
     if std.config["vectorize"] then ast = vectorize_loops.entry(ast) end
     ast = codegen.entry(ast)
     return ast

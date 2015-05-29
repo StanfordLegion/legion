@@ -1,0 +1,350 @@
+-- Copyright 2015 Stanford University
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
+-- Regent Task Inliner
+
+local ast = require("legion/ast")
+local std = require("legion/std")
+local log = require("legion/log")
+local symbol_table = require("legion/symbol_table")
+
+local inline_tasks = {}
+
+local context = {}
+context.__index = context
+
+function context:new_local_scope()
+  local cx = {
+    env = self.env:new_local_scope(),
+  }
+  setmetatable(cx, context)
+  return cx
+end
+
+function context:new_global_scope(env)
+  local cx = {
+    env = symbol_table.new_global_scope(env),
+  }
+  setmetatable(cx, context)
+  return cx
+end
+
+local global_env = context:new_global_scope({})
+
+function expr_id(sym, node)
+  return ast.typed.ExprID {
+    value = sym,
+    expr_type = std.rawref(&sym.type),
+    span = node.span,
+  }
+end
+
+local function make_block(stats, span)
+  return ast.typed.StatBlock {
+    block = ast.typed.Block {
+      stats = stats,
+      span = span,
+    },
+    span = span,
+  }
+end
+
+function stat_var(lhs, rhs, node)
+  local symbols = terralib.newlist()
+  local types = terralib.newlist()
+  local values = terralib.newlist()
+
+  symbols:insert(lhs)
+  types:insert(lhs.type)
+  if rhs then values:insert(rhs) end
+  return ast.typed.StatVar {
+    symbols = symbols,
+    types = types,
+    values = values,
+    span = node.span,
+  }
+end
+
+function stat_asgn(lh, rh, node)
+  local lhs = terralib.newlist()
+  local rhs = terralib.newlist()
+
+  lhs:insert(lh)
+  rhs:insert(rh)
+  return ast.typed.StatAssignment {
+    lhs = lhs,
+    rhs = rhs,
+    span = node.span,
+  }
+end
+
+function inline_tasks.expr(cx, node)
+  if node:is(ast.typed.ExprCall) then
+    local stats = terralib.newlist()
+    if type(node.fn.value) ~= "table" or not std.is_task(node.fn.value) then
+      return stats, node
+    end
+
+    local task = node.fn.value
+    local task_ast = task:getast()
+    if not task_ast then return stats, node end
+
+    local args = node.args:map(function(arg)
+      local new_stats, new_node = inline_tasks.expr(cx, arg)
+      stats:insertall(new_stats)
+      return new_node
+    end)
+    local params = task_ast.params:map(function(param) return param.symbol end)
+    local param_types = params:map(function(param) return param.type end)
+    local task_body = task_ast.body
+    local return_var = terralib.newsymbol(task_ast.return_type)
+    local return_var_expr = expr_id(return_var, node)
+
+    stats:insert(stat_var(return_var, nil, node))
+    local new_block
+    do
+      local stats = terralib.newlist()
+      stats:insert(ast.typed.StatVar {
+        symbols = params,
+        types = param_types,
+        values = args,
+        span = node.span
+      })
+      stats:insertall(task_body.stats)
+      if stats[#stats]:is(ast.typed.StatReturn) then
+        local num_stats = #stats
+        local return_stat = stats[num_stats]
+        stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
+      end
+      new_block = make_block(stats, node.span)
+    end
+    stats:insert(new_block)
+
+    return stats, return_var_expr
+
+  else
+    local stats = terralib.newlist()
+    local fields = {}
+    local ctor = rawget(node, "node_type")
+
+    for _, k in ipairs(ctor.expected_fields) do
+      local field = node[k]
+      if type(field) ~= "table" then
+        fields[k] = field
+      else
+        local node_type = tostring(rawget(field, "node_type"))
+
+        if node_type and string.find(node_type, ".Expr") then
+          local new_stats, new_node = inline_tasks.expr(cx, field)
+          stats:insertall(new_stats)
+          fields[k] = new_node
+
+        else
+          fields[k] = field
+        end
+      end
+    end
+
+    return stats, ctor(fields)
+  end
+end
+
+function inline_tasks.block(cx, node)
+  local stats = terralib.newlist()
+  node.stats:map(function(node)
+    local new_stats, new_node = inline_tasks.stat(cx, node)
+    stats:insertall(new_stats)
+    stats:insert(new_node)
+  end)
+  return node { stats = stats }
+end
+
+function inline_tasks.stat(cx, node)
+  local stats = terralib.newlist()
+  local fields = {}
+  local ctor = rawget(node, "node_type")
+
+  for _, k in ipairs(ctor.expected_fields) do
+    local field = node[k]
+    if type(field) ~= "table" then
+      fields[k] = field
+    else
+      local node_type = tostring(rawget(field, "node_type"))
+      if node_type and string.find(node_type, ".Stat") then
+        local new_stats, new_node = inline_tasks.stat(cx, field)
+        stats:insertall(new_stats)
+        fields[k] = field
+
+      elseif node_type and string.find(node_type, ".Expr") then
+        local new_stats, new_node = inline_tasks.expr(cx, field)
+        stats:insertall(new_stats)
+        fields[k] = new_node
+
+      elseif node_type and string.find(node_type, ".Block") then
+        local new_node = inline_tasks.block(cx, field)
+        fields[k] = new_node
+
+      elseif node_type and string.find(node_type, ".Span") then
+        fields[k] = field
+
+      elseif terralib.islist(field) then
+        fields[k] = field:map(function(field)
+          if type(field) ~= "table" then
+            return field
+          else
+            local node_type = tostring(rawget(field, "node_type"))
+            if node_type and string.find(node_type, ".Stat") then
+              local new_stats, new_node = inline_tasks.stat(cx, field)
+              stats:insertall(new_stats)
+              return new_node
+
+            elseif node_type and string.find(node_type, ".Expr") then
+              local new_stats, new_node = inline_tasks.expr(cx, field)
+              stats:insertall(new_stats)
+              return new_node
+
+            else
+              return field
+            end
+          end
+        end)
+
+      else
+        fields[k] = field
+      end
+    end
+  end
+
+  local node = ctor(fields)
+  return stats, node
+end
+
+function inline_tasks.stat_task(cx, node)
+  return node {
+    body = inline_tasks.block(cx, node.body)
+  }
+end
+
+local function count_returns(node)
+  local num_returns = 0
+  local ctor = rawget(node, "node_type")
+
+  if node:is(ast.typed.StatReturn) then num_returns = 1 end
+
+  for _, k in ipairs(ctor.expected_fields) do
+    local field = node[k]
+    if type(field) == "table" then
+      local node_type = tostring(rawget(field, "node_type"))
+      if node_type and string.find(node_type, ".Stat") then
+        num_returns = num_returns + count_returns(field)
+
+      elseif node_type and string.find(node_type, ".Block") then
+        field.stats:map(function(node)
+          num_returns = num_returns + count_returns(node)
+        end)
+
+      elseif terralib.islist(field) then
+        field:map(function(field)
+          if type(field) == "table" then
+            local node_type = tostring(rawget(field, "node_type"))
+            if node_type and string.find(node_type, ".Stat") then
+              num_returns = num_returns + count_returns(field)
+            end
+          end
+        end)
+      end
+    end
+  end
+
+  return num_returns
+end
+
+local function find_self_recursion(prototype, node)
+  local ctor = rawget(node, "node_type")
+
+  if node:is(ast.typed.ExprCall) and node.fn.value == prototype then
+    return true
+  end
+
+  for _, k in ipairs(ctor.expected_fields) do
+    local field = node[k]
+    if type(field) == "table" then
+      local node_type = tostring(rawget(field, "node_type"))
+      if node_type and
+        (string.find(node_type, ".Stat") or string.find(node_type, ".Expr")) then
+        if find_self_recursion(prototype, field) then return true end
+
+      elseif node_type and string.find(node_type, ".Block") then
+        local recursion_found = false
+        field.stats:map(function(field)
+          recursion_found = recursion_found or find_self_recursion(prototype, field)
+        end)
+        if recursion_found then return true end
+
+      elseif terralib.islist(field) then
+        local recursion_found = false
+        field:map(function(field)
+          if type(field) == "table" then
+            local node_type = tostring(rawget(field, "node_type"))
+            if node_type and
+              (string.find(node_type, ".Stat") or string.find(node_type, ".Expr"))  then
+              recursion_found = recursion_found or find_self_recursion(prototype, field)
+            end
+          end
+        end)
+        if recursion_found then return true end
+      end
+    end
+  end
+
+  return false
+end
+
+local function check_valid_inline_task(task)
+  local body = task.body
+  local num_returns = count_returns(body)
+  if num_returns > 1 then
+    log.error(task, "inline tasks cannot have multiple return statements")
+  end
+  if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.StatReturn) then
+    log.error(task, "the return statement in an inline task should be the last statement")
+  end
+
+  if find_self_recursion(task.prototype, body) then
+    log.error(task, "inline tasks cannot be recursive")
+  end
+end
+
+function inline_tasks.stat_top(cx, node)
+  if node:is(ast.typed.StatTask) then
+    if node.inline then check_valid_inline_task(node) end
+    local new_node = inline_tasks.stat_task(cx, node)
+    if node.inline then new_node.prototype:setast(new_node) end
+    return new_node
+
+  elseif node:is(ast.typed.StatFspace) then
+    return node
+
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+
+end
+
+function inline_tasks.entry(node)
+  local cx = context:new_global_scope({})
+  return inline_tasks.stat_top(cx, node)
+end
+
+return inline_tasks
