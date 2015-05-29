@@ -24,7 +24,7 @@ local c = legionlib.c
 task f(x : region(int), p : partition(disjoint, x)) end
 
 task g()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var rc = c.legion_coloring_create()
   var p = partition(aliased, r, rc)
   c.legion_coloring_destroy(rc)

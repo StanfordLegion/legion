@@ -200,7 +200,7 @@ ast.unspecialized("ExprDynamicCast", {"type_expr", "value", "span"})
 ast.unspecialized("ExprStaticCast", {"type_expr", "value", "span"})
 ast.unspecialized("ExprIspace", {"index_type_expr", "extent",
                                  "start", "span"})
-ast.unspecialized("ExprRegion", {"element_type_expr", "size", "span"})
+ast.unspecialized("ExprRegion", {"ispace", "fspace_type_expr", "span"})
 ast.unspecialized("ExprPartition", {"disjointness_expr", "region_type_expr",
                                     "coloring", "span"})
 ast.unspecialized("ExprCrossProduct", {"lhs_type_expr", "rhs_type_expr",
@@ -267,7 +267,7 @@ ast.specialized("ExprDynamicCast", {"value", "expr_type", "span"})
 ast.specialized("ExprStaticCast", {"value", "expr_type", "span"})
 ast.specialized("ExprIspace", {"index_type", "extent", "start",
                                "expr_type", "span"})
-ast.specialized("ExprRegion", {"element_type", "size", "expr_type", "span"})
+ast.specialized("ExprRegion", {"ispace", "ispace_symbol", "fspace_type", "expr_type", "span"})
 ast.specialized("ExprPartition", {"disjointness", "region",
                                   "coloring", "expr_type", "span"})
 ast.specialized("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})
@@ -329,7 +329,7 @@ ast.typed("ExprDynamicCast", {"value", "expr_type", "span"})
 ast.typed("ExprStaticCast", {"value", "parent_region_map", "expr_type", "span"})
 ast.typed("ExprIspace", {"index_type", "extent", "start",
                          "expr_type", "span"})
-ast.typed("ExprRegion", {"element_type", "size", "expr_type", "span"})
+ast.typed("ExprRegion", {"ispace", "fspace_type", "expr_type", "span"})
 ast.typed("ExprPartition", {"disjointness", "region",
                             "coloring", "expr_type", "span"})
 ast.typed("ExprCrossProduct", {"lhs", "rhs", "expr_type", "span"})

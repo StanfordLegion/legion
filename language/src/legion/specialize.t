@@ -194,12 +194,12 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.ExprIspace) then
-    if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.ExprRegion) then
-    if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
@@ -523,11 +523,19 @@ function specialize.expr_ispace(cx, node)
 end
 
 function specialize.expr_region(cx, node)
-  local element_type = node.element_type_expr(cx.env:env())
-  local expr_type = std.region(element_type)
+  local ispace = specialize.expr(cx, node.ispace)
+  local ispace_symbol
+  if ispace:is(ast.specialized.ExprID) then
+    ispace_symbol = ispace.value
+  else
+    ispace_symbol = terralib.newsymbol()
+  end
+  local fspace_type = node.fspace_type_expr(cx.env:env())
+  local expr_type = std.region(ispace_symbol, fspace_type)
   return ast.specialized.ExprRegion {
-    element_type = element_type,
-    size = specialize.expr(cx, node.size),
+    ispace = ispace,
+    ispace_symbol = ispace_symbol,
+    fspace_type = fspace_type,
     expr_type = expr_type,
     span = node.span,
   }

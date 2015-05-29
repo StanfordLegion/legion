@@ -83,8 +83,8 @@ do
 end
 
 task main()
-  var r = region(int64, 5)
-  var s = region(fs, 12)
+  var r = region(ispace(iptr, 5), int64)
+  var s = region(ispace(iptr, 12), fs)
   var x = new(ptr(int64, r))
   var y = new(ptr(fs, s))
 

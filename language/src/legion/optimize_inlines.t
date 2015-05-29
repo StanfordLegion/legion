@@ -66,7 +66,7 @@ function uses(cx, region_type, polarity)
       rhs = other_region_type,
       op = "*"
     }
-    if std.type_maybe_eq(region_type.element_type, other_region_type.element_type) and
+    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint)
     then
       usage[other_region_type] = polarity
@@ -224,7 +224,7 @@ function analyze_usage.expr_ispace(cx, node)
 end
 
 function analyze_usage.expr_region(cx, node)
-  return analyze_usage.expr(cx, node.size)
+  return analyze_usage.expr(cx, node.ispace)
 end
 
 function analyze_usage.expr_partition(cx, node)

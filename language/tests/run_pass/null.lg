@@ -15,7 +15,7 @@
 import "legion"
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var x = null(ptr(int, r))
   legionlib.assert(isnull(x), "test failed")
 end

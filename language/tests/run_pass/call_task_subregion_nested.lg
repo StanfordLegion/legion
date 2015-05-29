@@ -25,7 +25,7 @@ where reads(r), writes(r) do
 end
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var rc = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc, 0)
   var p_disjoint = partition(disjoint, r, rc)

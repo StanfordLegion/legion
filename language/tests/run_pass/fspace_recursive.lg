@@ -31,7 +31,7 @@ where reads(d) do
 end
 
 task top() : int
-  var g = region(list(g), 5)
+  var g = region(ispace(iptr, 5), list(g))
   var h = new(ptr(list(g), g))
   @h = { data = 5, next = h }
   return deep(g, h)

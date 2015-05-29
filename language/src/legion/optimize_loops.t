@@ -81,7 +81,7 @@ function analyze_noninterference_previous(cx, task, region_type,
       op = "*"
     }
 
-    if std.type_maybe_eq(region_type.element_type, other_region_type.element_type) and
+    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
       not check_privilege_noninterference(cx, task, region_type, other_region_type, mapping)
     then

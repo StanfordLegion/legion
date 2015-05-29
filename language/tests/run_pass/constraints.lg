@@ -27,7 +27,7 @@ fspace assert_disjoint {
 } where x * y end
 
 task main()
-  var t = region(int, 5)
+  var t = region(ispace(iptr, 5), int)
   var colors = c.legion_coloring_create()
   c.legion_coloring_ensure_color(colors, 0)
   c.legion_coloring_ensure_color(colors, 1)

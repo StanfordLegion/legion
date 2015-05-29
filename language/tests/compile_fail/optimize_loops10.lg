@@ -81,7 +81,7 @@ end
 
 task main()
   var n = 5
-  var r = region(int, n)
+  var r = region(ispace(iptr, n), int)
   var rc = c.legion_coloring_create()
   for i = 0, n do
     c.legion_coloring_ensure_color(rc, i)

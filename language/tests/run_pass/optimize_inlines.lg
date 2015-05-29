@@ -31,7 +31,7 @@ where reads(r), writes(r) do
 end
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var x = new(ptr(int, r))
   @x = 3
   f(r, x)

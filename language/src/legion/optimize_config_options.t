@@ -416,7 +416,7 @@ function analyze_inner.expr_ispace(cx, node)
 end
 
 function analyze_inner.expr_region(cx, node)
-  return analyze_inner.expr(cx, node.size)
+  return analyze_inner.expr(cx, node.ispace)
 end
 
 function analyze_inner.expr_partition(cx, node)

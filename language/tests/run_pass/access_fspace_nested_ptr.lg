@@ -34,9 +34,9 @@ where reads(u, v, w) do
 end
 
 task g()
-  var m = region(subsubspace, 5)
-  var n = region(subspace(m), 5)
-  var o = region(space(m, n), 5)
+  var m = region(ispace(iptr, 5), subsubspace)
+  var n = region(ispace(iptr, 5), subspace(m))
+  var o = region(ispace(iptr, 5), space(m, n))
   var p = new(ptr(subsubspace, m))
   var q = new(ptr(subspace(m), n))
   var r = new(ptr(space(m, n), o))

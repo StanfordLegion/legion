@@ -22,8 +22,8 @@ import "legion"
 task f(x : region(int), y : region(int), z : ptr(int, y)) end
 
 task g()
-  var r = region(int, 5)
-  var s = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
+  var s = region(ispace(iptr, 5), int)
   var t = new(ptr(int, r))
   f(r, s, t)
 end

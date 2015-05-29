@@ -29,7 +29,7 @@ where reads(s) do
 end
 
 task g() : int
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
 
   var rc = c.legion_coloring_create()
   var n = 5

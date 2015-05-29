@@ -17,6 +17,8 @@ import "legion"
 -- This is a hacky version of SAXPY written for unstructured regions
 -- rather than arrays.
 
+local int1d = index_type(int, "int1d")
+
 terra abs(a : double) : double
   if a < 0 then
     return -a
@@ -26,16 +28,16 @@ terra abs(a : double) : double
 end
 
 function index_to_ptr(ptr_type)
-  return terra(index : uint)
+  return terra(index : int)
     return [ptr_type] { __ptr = [legionlib.c.legion_ptr_t] { value = index } }
   end
 end
 
-task saxpy(n : uint, x: region(float), y: region(float), a: float)
+task saxpy(n : int, x: region(float), y: region(float), a: float)
 where
   reads(x, y), writes(y)
 do
-  for i : uint = 0, n do
+  for i = 0, n do
     var px = [index_to_ptr(ptr(float, x))](i)
     var py = [index_to_ptr(ptr(float, y))](i)
 
@@ -43,15 +45,15 @@ do
   end
 end
 
-task test(n: uint)
-  var x = region(float, n)
-  var y = region(float, n)
+task test(n: int)
+  var x = region(ispace(int1d, n), float)
+  var y = region(ispace(int1d, n), float)
   for i = 0, n do
     var px = new(ptr(float, x))
     var py = new(ptr(float, y))
   end
 
-  for i : uint = 0, n do
+  for i = 0, n do
     var px = [index_to_ptr(ptr(float, x))](i)
     var py = [index_to_ptr(ptr(float, y))](i)
 
@@ -61,7 +63,7 @@ task test(n: uint)
 
   saxpy(n, x, y, float(0.5))
 
-  for i : uint = 0, n do
+  for i = 0, n do
     var py = [index_to_ptr(ptr(float, y))](i)
 
     assert(abs(@py - 0.5) < 0.00001)
@@ -69,7 +71,7 @@ task test(n: uint)
 end
 
 task main()
-  test([uint](10))
-  test([uint](20))
+  test(10)
+  test(20)
 end
 legionlib.start(main)

@@ -1320,7 +1320,7 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
       local arg_type = arg_types[i]
       local param_type = param_types[i]
 
-      local field_paths, _ = std.flatten_struct_fields(param_type.element_type)
+      local field_paths, _ = std.flatten_struct_fields(param_type.fspace_type)
       for _, field_path in pairs(field_paths) do
         local arg_field_id = cx:region(arg_type):field_id(field_path)
         local param_field_id = param_field_ids[param_field_id_i]
@@ -1968,11 +1968,11 @@ function codegen.expr_ispace(cx, node)
 end
 
 function codegen.expr_region(cx, node)
-  local element_type = node.element_type
-  local size = codegen.expr(cx, node.size):read(cx)
+  local fspace_type = node.fspace_type
+  local ispace = codegen.expr(cx, node.ispace):read(cx)
   local region_type = std.as_read(node.expr_type)
   local actions = quote
-    [size.actions];
+    [ispace.actions];
     [emit_debuginfo(node)]
   end
 
@@ -1986,7 +1986,7 @@ function codegen.expr_region(cx, node)
   local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
-  local field_paths, field_types = std.flatten_struct_fields(element_type)
+  local field_paths, field_types = std.flatten_struct_fields(fspace_type)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id = 100
   local field_ids = field_paths:map(
@@ -2017,8 +2017,8 @@ function codegen.expr_region(cx, node)
 
   actions = quote
     [actions]
-    var capacity = [size.value]
-    var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
+    var capacity = [ispace.value]
+    var is = [ispace.value].impl
     var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
@@ -3376,7 +3376,7 @@ function codegen.stat_task(cx, node)
   local param_field_ids = terralib.newlist()
   for _, region in ipairs(param_regions) do
     local field_paths, field_types =
-      std.flatten_struct_fields(region.element_type)
+      std.flatten_struct_fields(region.fspace_type)
     local field_ids = field_paths:map(
       function(field_path)
         return terralib.newsymbol("field_" .. field_path:hash())
@@ -3510,7 +3510,7 @@ function codegen.stat_task(cx, node)
         privileges, privilege_field_paths)
 
       local field_paths, field_types =
-        std.flatten_struct_fields(region_type.element_type)
+        std.flatten_struct_fields(region_type.fspace_type)
       local field_ids_by_field_path = {}
       for _, field_path in ipairs(field_paths) do
         field_ids_by_field_path[field_path:hash()] = param_field_ids[param_field_id_i]

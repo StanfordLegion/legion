@@ -21,7 +21,7 @@ fspace s(a : region(int)) {
 } where b <= a end
 
 task f()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var rc = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)
@@ -31,7 +31,7 @@ task f()
 end
 
 task g()
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var rc = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc, 0)
   var p = partition(disjoint, r, rc)

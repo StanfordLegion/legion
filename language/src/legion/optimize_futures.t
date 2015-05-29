@@ -508,8 +508,8 @@ function optimize_futures.expr_ispace(cx, node)
 end
 
 function optimize_futures.expr_region(cx, node)
-  local size = concretize(optimize_futures.expr(cx, node.size))
-  return node { size = size }
+  local ispace = concretize(optimize_futures.expr(cx, node.ispace))
+  return node { ispace = ispace }
 end
 
 function optimize_futures.expr_partition(cx, node)

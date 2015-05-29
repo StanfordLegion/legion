@@ -20,7 +20,7 @@ where reads(r) do
 end
 
 task g() : int
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var s = r
   var x = new(ptr(int, s))
   @x = 7

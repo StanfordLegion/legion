@@ -2527,9 +2527,9 @@ task test()
 
   var conf : config = read_config()
 
-  var rz_all = region(zone, conf.nz)
-  var rp_all = region(point, conf.np)
-  var rs_all = region(side(wild, wild, wild, wild), conf.ns)
+  var rz_all = region(ispace(iptr, conf.nz), zone)
+  var rp_all = region(ispace(iptr, conf.np), point)
+  var rs_all = region(ispace(iptr, conf.ns), side(wild, wild, wild, wild))
 
   var colorings = read_input(
     __runtime(), __context(),

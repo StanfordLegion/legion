@@ -835,8 +835,8 @@ task toplevel()
   var num_circuit_nodes = conf.num_pieces * conf.nodes_per_piece
   var num_circuit_wires = conf.num_pieces * conf.wires_per_piece
 
-  var all_nodes = region(node, num_circuit_nodes)
-  var all_wires = region(wire(wild, wild, wild), num_circuit_wires)
+  var all_nodes = region(ispace(iptr, num_circuit_nodes), node)
+  var all_wires = region(ispace(iptr, num_circuit_wires), wire(wild, wild, wild))
 
   var colorings =
     load_circuit(__runtime(), __context(),

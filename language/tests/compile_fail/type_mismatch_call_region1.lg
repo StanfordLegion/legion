@@ -22,8 +22,8 @@ import "legion"
 task f(x : region(double), y : region(int)) end
 
 task g()
-  var r = region(int, 5)
-  var s = region(double, 5)
+  var r = region(ispace(iptr, 5), int)
+  var s = region(ispace(iptr, 5), double)
   f(r, s)
 end
 

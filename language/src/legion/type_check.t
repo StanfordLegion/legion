@@ -522,7 +522,7 @@ function type_check.expr_raw_fields(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type.element_type)
+  local field_paths, _ = std.flatten_struct_fields(region_type.fspace_type)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
     if std.check_any_privilege(cx, region_type, field_path) then
@@ -543,7 +543,7 @@ function type_check.expr_raw_physical(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type.element_type)
+  local field_paths, _ = std.flatten_struct_fields(region_type.fspace_type)
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
     if std.check_any_privilege(cx, region_type, field_path) then
@@ -684,12 +684,19 @@ function type_check.expr_ispace(cx, node)
 end
 
 function type_check.expr_region(cx, node)
-  local size = type_check.expr(cx, node.size)
-  local size_type = std.check_read(cx, size)
-  if not std.validate_implicit_cast(size_type, int) then
-    log.error(node, "type mismatch in argument 2: expected " .. tostring(int) ..
-                " but got " .. tostring(size_type))
+  local ispace = type_check.expr(cx, node.ispace)
+  local ispace_type = std.check_read(cx, ispace)
+  if not std.is_ispace(ispace_type) then
+    log.error(node, "type mismatch in argument 1: expected an ispace but got " .. tostring(ispace_type))
   end
+
+  -- Hack: Stuff the ispace type back into the ispace symbol so it is
+  -- accessible to the region type.
+  local ispace_symbol = node.ispace_symbol
+  if not ispace_symbol.type then
+    ispace_symbol.type = ispace_type
+  end
+  assert(std.type_eq(ispace_symbol.type, ispace_type))
 
   local region = node.expr_type
   std.add_privilege(cx, "reads", region, std.newtuple())
@@ -700,15 +707,15 @@ function type_check.expr_region(cx, node)
     assert(not std.type_eq(region, other_region))
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
-    if std.type_maybe_eq(region.element_type, other_region.element_type) then
+    if std.type_maybe_eq(region.fspace_type, other_region.fspace_type) then
       std.add_constraint(cx, region, other_region, "*", true)
     end
   end
   cx:intern_region(region)
 
   return ast.typed.ExprRegion {
-    element_type = node.element_type,
-    size = size,
+    ispace = ispace,
+    fspace_type = node.fspace_type,
     expr_type = region,
     span = node.span,
   }
@@ -1085,7 +1092,7 @@ function type_check.stat_for_list(cx, node)
     else
       region = terralib.newsymbol(value_type)
     end
-    var_type = std.ptr(value_type.element_type, region)
+    var_type = std.ptr(value_type.fspace_type, region)
   end
   if not std.is_ptr(var_type) then
     log.error(node, "iterator for loop expected pointer type, got " .. tostring(var_type))

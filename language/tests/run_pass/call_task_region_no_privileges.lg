@@ -27,7 +27,7 @@ task g(r : region(int)) : int
 end
 
 task h() : int
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var x0 = new(ptr(int, r))
   var x1 = new(ptr(int, r))
   var x2 = new(ptr(int, r))

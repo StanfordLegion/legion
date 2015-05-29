@@ -427,7 +427,7 @@ function std.find_task_privileges(region_type, privileges)
   local grouped_field_paths = terralib.newlist()
   local grouped_field_types = terralib.newlist()
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type.element_type)
+  local field_paths, field_types = std.flatten_struct_fields(region_type.fspace_type)
 
   local privilege_index = {}
   local privilege_next_index = 1
@@ -668,7 +668,7 @@ local function add_type(symbols, type)
     end
   elseif std.is_region(type) then
     -- FIXME: Would prefer to not get errors at all here.
-    pcall(function() add_type(symbols, type.element_type) end)
+    pcall(function() add_type(symbols, type.fspace_type) end)
   end
 end
 
@@ -769,9 +769,9 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if not check(param_type.element_type, arg_type.element_type, mapping) then
-        local element_type = std.type_sub(param_type.element_type, mapping)
-        local param_as_arg_type = std.region(element_type)
+      if not check(param_type.fspace_type, arg_type.fspace_type, mapping) then
+        local fspace_type = std.type_sub(param_type.fspace_type, mapping)
+        local param_as_arg_type = std.region(fspace_type)
         log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
@@ -875,8 +875,8 @@ function std.validate_fields(fields, constraints, params, args)
     local new_type
     if std.is_region(old_type) then
       mapping[old_symbol] = new_symbol
-      local new_element_type = std.type_sub(old_type.element_type, mapping)
-      new_type = std.region(new_element_type)
+      local new_fspace_type = std.type_sub(old_type.fspace_type, mapping)
+      new_type = std.region(new_fspace_type)
     else
       new_type = std.type_sub(old_type, mapping)
     end
@@ -969,8 +969,8 @@ function std.unpack_fields(fs, symbols)
     local new_type
     if std.is_region(old_type) then
       mapping[old_symbol] = new_symbol
-      local element_type = std.type_sub(old_type.element_type, mapping)
-      new_type = std.region(element_type)
+      local fspace_type = std.type_sub(old_type.fspace_type, mapping)
+      new_type = std.region(fspace_type)
     else
       new_type = std.type_sub(old_type, mapping)
     end
@@ -1263,7 +1263,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
                     tostring(i+1) .. ", got " .. tostring(bound))
       end
       if std.is_region(bound) and
-        not (std.type_eq(bound.element_type, self.points_to_type) or
+        not (std.type_eq(bound.fspace_type, self.points_to_type) or
                std.is_unpack_result(self.points_to_type))
       then
         log.error(nil, tostring(self.index_type) .. " expected region(" ..
@@ -1442,9 +1442,16 @@ function std.ispace(index_type)
   return st
 end
 
-function std.region(element_type)
-  assert(terralib.types.istype(element_type),
-         "Region type requires element type")
+function std.region(ispace_symbol, fspace_type)
+  if fspace_type == nil then
+    fspace_type = ispace_symbol
+    ispace_symbol = terralib.newsymbol(std.ispace(std.iptr))
+  end
+
+  assert(terralib.issymbol(ispace_symbol),
+         "Region type requires ispace")
+  assert(terralib.types.istype(fspace_type),
+         "Region type requires fspace type")
 
   local st = terralib.types.newstruct("region")
   st.entries = terralib.newlist({
@@ -1452,7 +1459,16 @@ function std.region(element_type)
   })
 
   st.is_region = true
-  st.element_type = element_type
+  st.ispace_symbol = ispace_symbol
+  st.fspace_type = fspace_type
+
+  function st:ispace()
+    local ispace = self.ispace_symbol.type
+    assert(terralib.types.istype(ispace) and
+             std.is_ispace(ispace),
+           "Parition type requires ispace")
+    return ispace
+  end
 
   -- Region types can have an optional partition. This is used by
   -- cross_product to enable patterns like prod[i][j]. Of course, the
@@ -1512,7 +1528,7 @@ function std.region(element_type)
   end
 
   function st.metamethods.__typename(st)
-    return "region(" .. tostring(st.element_type) .. ")"
+    return "region(" .. tostring(st.fspace_type) .. ")"
   end
 
   return st
@@ -1562,13 +1578,13 @@ function std.partition(disjointness, region)
 
   function st:subregion_constant(i)
     if not self.subregions[i] then
-      self.subregions[i] = std.region(self:parent_region().element_type)
+      self.subregions[i] = std.region(self:parent_region().fspace_type)
     end
     return self.subregions[i]
   end
 
   function st:subregion_dynamic()
-    return std.region(self:parent_region().element_type)
+    return std.region(self:parent_region().fspace_type)
   end
 
   function st:force_cast(from, to, expr)
@@ -1734,7 +1750,7 @@ std.ptr = terralib.memoize(function(points_to_type, ...)
         log.error(nil, "ptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end
-      if not (std.type_eq(region.element_type, points_to_type) or
+      if not (std.type_eq(region.fspace_type, points_to_type) or
                 std.is_unpack_result(points_to_type))
       then
         log.error(nil, "ptr expected region(" .. tostring(points_to_type) ..
@@ -1818,7 +1834,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
         log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region.type))
       end
-      if not std.type_eq(region.element_type, points_to_type) then
+      if not std.type_eq(region.fspace_type, points_to_type) then
         log.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))

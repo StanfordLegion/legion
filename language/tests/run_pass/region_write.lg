@@ -20,7 +20,7 @@ where writes(r) do
 end
 
 task f() : int
-  var r = region(int, 5)
+  var r = region(ispace(iptr, 5), int)
   var p = new(ptr(int, r))
   g(r, p)
   return @p

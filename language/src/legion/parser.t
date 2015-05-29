@@ -346,13 +346,13 @@ function parser.expr_simple(p)
 
   elseif p:nextif("region") then
     p:expect("(")
-    local element_type_expr = p:luaexpr()
+    local ispace = p:expr()
     p:expect(",")
-    local size = p:expr()
+    local fspace_type_expr = p:luaexpr()
     p:expect(")")
     return ast.unspecialized.ExprRegion {
-      element_type_expr = element_type_expr,
-      size = size,
+      ispace = ispace,
+      fspace_type_expr = fspace_type_expr,
       span = ast.span(start, p),
     }
 

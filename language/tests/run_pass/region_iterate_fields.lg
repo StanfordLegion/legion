@@ -19,7 +19,7 @@ fspace t {
 }
 
 task f() : int
-  var r = region(t, 10)
+  var r = region(ispace(iptr, 10), t)
 
   var p0 = new(ptr(t, r))
   var p1 = new(ptr(t, r))
