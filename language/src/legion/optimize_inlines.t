@@ -219,8 +219,8 @@ end
 
 function analyze_usage.expr_ispace(cx, node)
   return usage_meet(
-    analyze_usage.expr(cx, node.lower_bound),
-    node.upper_bound and analyze_usage.expr(cx, node.upper_bound))
+    analyze_usage.expr(cx, node.extent),
+    node.start and analyze_usage.expr(cx, node.start))
 end
 
 function analyze_usage.expr_region(cx, node)

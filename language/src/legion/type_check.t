@@ -660,42 +660,25 @@ end
 
 function type_check.expr_ispace(cx, node)
   local index_type = node.index_type
-  local actual_index_type = index_type
-  if std.type_eq(index_type, opaque) then
-    actual_index_type = int
-  end
+  local extent = type_check.expr(cx, node.extent)
+  local extent_type = std.check_read(cx, extent)
+  local start = node.start and type_check.expr(cx, node.start)
+  local start_type = node.start and std.check_read(cx, start)
 
-  local lower_bound = type_check.expr(cx, node.lower_bound)
-  local lower_bound_type = std.check_read(cx, lower_bound)
-  local upper_bound = node.upper_bound and type_check.expr(cx, node.upper_bound)
-  local upper_bound_type = node.upper_bound and std.check_read(cx, upper_bound)
-
-  if std.type_eq(index_type, std.iptr) and node.upper_bound then
-    log.error(node, "opaque ispace expected 2 arguments but got 3")
-  end
-  if not std.type_eq(index_type, std.iptr) and not node.upper_bound then
-    log.error(node, "non-opaque ispace expected 3 arguments but got 2")
-  end
-  if not std.validate_implicit_cast(lower_bound_type, actual_index_type) then
+  if not std.validate_implicit_cast(extent_type, index_type) then
     log.error(node, "type mismatch in argument 2: expected " ..
-                tostring(actual_index_type) ..
-                " but got " .. tostring(lower_bound_type))
+                tostring(index_type) .. " but got " .. tostring(extent_type))
   end
-  if node.upper_bound and
-    not std.validate_implicit_cast(upper_bound_type, actual_index_type)
-  then
+  if start_type and not std.validate_implicit_cast(start_type, index_type) then
     log.error(node, "type mismatch in argument 3: expected " ..
-                tostring(actual_index_type) ..
-                " but got " .. tostring(upper_bound_type))
+                tostring(index_type) .. " but got " .. tostring(start_type))
   end
-
-  local ispace = node.expr_type
 
   return ast.typed.ExprIspace {
-    index_type = node.index_type,
-    lower_bound = lower_bound,
-    upper_bound = upper_bound,
-    expr_type = ispace,
+    index_type = index_type,
+    extent = extent,
+    start = start,
+    expr_type = node.expr_type,
     span = node.span,
   }
 end

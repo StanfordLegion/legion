@@ -515,8 +515,8 @@ function specialize.expr_ispace(cx, node)
   local expr_type = std.ispace(index_type)
   return ast.specialized.ExprIspace {
     index_type = index_type,
-    lower_bound = specialize.expr(cx, node.lower_bound),
-    upper_bound = node.upper_bound and specialize.expr(cx, node.upper_bound),
+    extent = specialize.expr(cx, node.extent),
+    start = node.start and specialize.expr(cx, node.start),
     expr_type = expr_type,
     span = node.span,
   }

@@ -1931,24 +1931,24 @@ end
 
 function codegen.expr_ispace(cx, node)
   local index_type = node.index_type
-  local lower_bound = codegen.expr(cx, node.lower_bound):read(cx)
-  local upper_bound = node.upper_bound and codegen.expr(cx, node.upper_bound):read(cx)
+  local extent = codegen.expr(cx, node.extent):read(cx)
+  local start = node.start and codegen.expr(cx, node.start):read(cx)
   local ispace_type = std.as_read(node.expr_type)
   local actions = quote
-    [lower_bound.actions];
-    [node.upper_bound and upper_bound.actions or (quote end)];
+    [extent.actions];
+    [start and start.actions or (quote end)];
     [emit_debuginfo(node)]
   end
 
-  local lower_bound_value = `([lower_bound.value].__ptr)
+  local extent_value = `([extent.value].__ptr)
   if index_type:is_opaque() then
-    lower_bound_value = `([lower_bound.value].__ptr.value)
+    extent_value = `([extent.value].__ptr.value)
   end
 
   local i = terralib.newsymbol(ispace_type, "i")
   actions = quote
     [actions]
-    var capacity = [lower_bound_value]
+    var capacity = [extent_value]
     var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
     var [i] = [ispace_type]{ impl = [is] }
   end

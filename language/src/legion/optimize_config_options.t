@@ -411,8 +411,8 @@ function analyze_inner.expr_static_cast(cx, node)
 end
 
 function analyze_inner.expr_ispace(cx, node)
-  return analyze_inner.expr(cx, node.lower_bound) and
-    node.upper_bound and analyze_inner.expr(cx, node.upper_bound)
+  return analyze_inner.expr(cx, node.extent) and
+    node.start and analyze_inner.expr(cx, node.start)
 end
 
 function analyze_inner.expr_region(cx, node)

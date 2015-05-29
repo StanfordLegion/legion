@@ -498,12 +498,12 @@ function optimize_futures.expr_static_cast(cx, node)
 end
 
 function optimize_futures.expr_ispace(cx, node)
-  local lower_bound = concretize(optimize_futures.expr(cx, node.lower_bound))
-  local upper_bound = node.upper_bound and
-    concretize(optimize_futures.expr(cx, node.upper_bound))
+  local extent = concretize(optimize_futures.expr(cx, node.extent))
+  local start = node.start and
+    concretize(optimize_futures.expr(cx, node.start))
   return node {
-    lower_bound = lower_bound,
-    upper_bound = upper_bound,
+    extent = extent,
+    start = start,
   }
 end
 
