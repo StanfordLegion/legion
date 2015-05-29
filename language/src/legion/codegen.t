@@ -1932,6 +1932,7 @@ end
 function codegen.expr_ispace(cx, node)
   local index_type = node.index_type
   local extent = codegen.expr(cx, node.extent):read(cx)
+  local extent_type = std.as_read(node.extent.expr_type)
   local start = node.start and codegen.expr(cx, node.start):read(cx)
   local ispace_type = std.as_read(node.expr_type)
   local actions = quote
@@ -1940,18 +1941,28 @@ function codegen.expr_ispace(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local extent_value = `([extent.value].__ptr)
+  local extent_value = `([std.implicit_cast(extent_type, index_type, extent.value)].__ptr)
   if index_type:is_opaque() then
-    extent_value = `([extent.value].__ptr.value)
+    extent_value = `([extent_value].value)
+  end
+
+  local start_value = start and `([std.implicit_cast(start_type, index_type, start.value)].__ptr)
+  if index_type:is_opaque() then
+    start_value = start and `([start_value].value)
+  end
+  local check_start = quote end
+  if start then
+    check_start = quote legionlib.assert([start_value] == 0, "ispaces must start at 0 right now") end
   end
 
   local i = terralib.newsymbol(ispace_type, "i")
   actions = quote
     [actions]
-    var capacity = [extent_value]
-    var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
+    [check_start]
+    var is = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
     var [i] = [ispace_type]{ impl = [is] }
   end
+
 
   return values.value(expr.just(actions, i), ispace_type)
 end

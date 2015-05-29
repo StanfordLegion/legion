@@ -331,16 +331,16 @@ function parser.expr_simple(p)
     local index_type_expr = p:luaexpr()
     p:expect(",")
     local extent = p:expr()
-    local start_expr = false
+    local start_at = false
     if not p:matches(")") then
       p:expect(",")
-      start_expr = p:expr()
+      start_at = p:expr()
     end
     p:expect(")")
     return ast.unspecialized.ExprIspace {
       index_type_expr = index_type_expr,
       extent = extent,
-      start = start_expr,
+      start = start_at,
       span = ast.span(start, p),
     }
 

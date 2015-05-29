@@ -25,8 +25,8 @@ end
 g:compile()
 
 task main()
-  var is0 = ispace(iptr, [iptr](5))
-  var is1 = ispace(i1d, [i1d](3), [i1d](5))
+  var is0 = ispace(iptr, 5)
+  var is1 = ispace(i1d, 7, 0)
   -- f(is0)
   -- f(is1)
 end

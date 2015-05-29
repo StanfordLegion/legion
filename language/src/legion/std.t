@@ -912,6 +912,12 @@ end
 function std.validate_implicit_cast(from_type, to_type, mapping)
   if std.type_eq(from_type, to_type, mapping) then
     return true
+  elseif std.is_index_type(to_type) then
+    if to_type:is_opaque() and std.validate_implicit_cast(from_type, int) then
+      return true
+    elseif not to_type:is_opaque() and std.type_eq(from_type, to_type.base_type) then
+      return true
+    end
   end
 
   -- Ask the Terra compiler to kindly tell us the cast is valid.
@@ -1129,11 +1135,13 @@ function std.get_field_path(value_type, field_path)
 end
 
 function std.implicit_cast(from, to, expr)
-  assert(not (std.is_ref(from) or std.is_rawref(from)))
+   assert(not (std.is_ref(from) or std.is_rawref(from)))
   if std.is_region(to) or std.is_partition(to) or std.is_cross_product(to) or std.is_ptr(to) or
     std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
+  elseif std.is_index_type(to) then
+    return `([to](expr))
   else
     return quote var v : to = [expr] in v end
   end
