@@ -26,5 +26,4 @@ task g()
   var s = region(ispace(iptr, 5), double)
   f(r, s)
 end
-
-g()
+legionlib.start(g)

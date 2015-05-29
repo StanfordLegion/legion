@@ -343,7 +343,7 @@ function type_check.expr_call(cx, node)
     end
   end
   local expr_type = std.validate_args(
-    node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, true)
+    node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, false)
 
   if std.is_task(fn.value) then
     local mapping = {}

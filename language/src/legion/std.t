@@ -558,6 +558,17 @@ function std.type_sub(t, mapping)
       std.type_sub(t.points_to_type, mapping),
       unpack(t.points_to_region_symbols:map(
                function(region) return std.type_sub(region, mapping) end)))
+  elseif std.is_bounded_type(t) then
+    if t.points_to_type then
+      return t.index_type(
+        std.type_sub(t.points_to_type, mapping),
+        unpack(t.bounds_symbols:map(
+                 function(bound) return std.type_sub(bound, mapping) end)))
+    else
+      return t.index_type(
+        unpack(t.bounds_symbols:map(
+                 function(bound) return std.type_sub(bound, mapping) end)))
+    end
   elseif std.is_fspace_instance(t) then
     return t.fspace(unpack(t.args:map(
       function(arg) return std.type_sub(arg, mapping) end)))
@@ -598,6 +609,22 @@ function std.type_eq(a, b, mapping)
       end
     end
     return true
+  elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
+    if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
+      return false
+    end
+    local a_bounds = a:bounds()
+    local b_bounds = b:bounds()
+    if #a_bounds ~= #b_bounds then
+      return false
+    end
+    for i, a_region in ipairs(a_bounds) do
+      local b_region = b_bounds[i]
+      if not std.type_eq(a_region, b_region, mapping) then
+        return false
+      end
+    end
+    return true
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
     a.fspace == b.fspace
   then
@@ -625,6 +652,8 @@ function std.type_maybe_eq(a, b, mapping)
   if std.type_eq(a, b, mapping) then
     return true
   elseif std.is_ptr(a) and std.is_ptr(b) then
+    return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
+  elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
     a.fspace == b.fspace
@@ -661,6 +690,10 @@ local function add_type(symbols, type)
   if std.is_ptr(type) then
     for _, region in ipairs(type.points_to_region_symbols) do
       add_region_symbol(symbols, region)
+    end
+  elseif std.is_bounded_type(type) then
+    for _, bound in ipairs(type.bounds_symbols) do
+      add_region_symbol(symbols, bound)
     end
   elseif std.is_fspace_instance(type) then
     for _, arg in ipairs(type.args) do
@@ -726,6 +759,10 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
     log.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
 
+  -- FIXME: All of these calls are being done with the order backwards
+  -- for validate_implicit_cast, but everything breaks if I swap the
+  -- order. For the moment, the fix is to make validate_implicit_cast
+  -- symmetric as much as possible.
   local check
   if strict then
     check = std.type_eq
@@ -750,6 +787,32 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] == arg_type
     then
       -- Ok
+    elseif std.is_ispace(param_type) and std.is_ispace(arg_type) then
+      -- Check for previous mappings. This can happen if two
+      -- parameters are aliased to the same region.
+      if (mapping[param] or mapping[param_type]) and
+        not (mapping[param] == arg or mapping[param_type] == arg_type)
+      then
+        local param_as_arg_type = mapping[param_type]
+        for k, v in pairs(mapping) do
+          if terralib.issymbol(v) and v.type == mapping[param_type] then
+            param_as_arg_type = v
+          end
+        end
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg))
+      end
+
+      mapping[param] = arg
+      mapping[param_type] = arg_type
+      if not std.type_eq(param_type.index_type, arg_type.index_type, mapping) then
+        local index_type = std.type_sub(param_type.index_type, mapping)
+        local param_as_arg_type = std.region(index_type)
+        log.error(node, "type mismatch in argument " .. tostring(i) ..
+                    ": expected " .. tostring(param_as_arg_type) ..
+                    " but got " .. tostring(arg_type))
+      end
     elseif std.is_region(param_type) and std.is_region(arg_type) then
       -- Check for previous mappings. This can happen if two
       -- parameters are aliased to the same region.
@@ -769,7 +832,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
 
       mapping[param] = arg
       mapping[param_type] = arg_type
-      if not check(param_type.fspace_type, arg_type.fspace_type, mapping) then
+      if not std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping) then
         local fspace_type = std.type_sub(param_type.fspace_type, mapping)
         local param_as_arg_type = std.region(fspace_type)
         log.error(node, "type mismatch in argument " .. tostring(i) ..
@@ -916,6 +979,12 @@ function std.validate_implicit_cast(from_type, to_type, mapping)
     if to_type:is_opaque() and std.validate_implicit_cast(from_type, int) then
       return true
     elseif not to_type:is_opaque() and std.type_eq(from_type, to_type.base_type) then
+      return true
+    end
+  elseif std.is_index_type(from_type) then
+    if from_type:is_opaque() and std.validate_implicit_cast(to_type, int) then
+      return true
+    elseif not from_type:is_opaque() and std.type_eq(to_type, from_type.base_type) then
       return true
     end
   end
@@ -1136,8 +1205,9 @@ end
 
 function std.implicit_cast(from, to, expr)
    assert(not (std.is_ref(from) or std.is_rawref(from)))
-  if std.is_region(to) or std.is_partition(to) or std.is_cross_product(to) or std.is_ptr(to) or
-    std.is_fspace_instance(to)
+   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
+     std.is_cross_product(to) or std.is_ptr(to) or std.is_bounded_type(to) or
+     std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
   elseif std.is_index_type(to) then
@@ -1148,7 +1218,10 @@ function std.implicit_cast(from, to, expr)
 end
 
 function std.explicit_cast(from, to, expr)
-  if std.is_region(to) or std.is_ptr(to) or std.is_fspace_instance(to) then
+   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
+     std.is_cross_product(to) or std.is_ptr(to) or std.is_bounded_type(to) or
+     std.is_fspace_instance(to)
+   then
     return to:force_cast(from, to, expr)
   else
     return `([to](expr))
@@ -1363,7 +1436,6 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
--- FIXME: Temporary, **FOR TESTING ONLY** ################################
 std.iptr = std.index_type(opaque, "iptr")
 
 function std.ispace(index_type)

@@ -14,6 +14,10 @@
 
 import "legion"
 
+task g(x : int)
+  return x
+end
+
 task f()
   var i : int = 5
   var i32 : int32 = 5
@@ -34,6 +38,13 @@ task f()
   var x9 = i8 + i
   var xa = i16 + i8
   var xb = i8 + i16
+
+  g(i)
+  g(i32)
+  g(i16)
+  g(i8)
+  g(d)
+  g(f)
 end
 
 task main()
