@@ -15,7 +15,6 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include "buffer.h"
 #include "lowlevel.h"
 
 namespace LegionRuntime{
@@ -77,6 +76,49 @@ namespace LegionRuntime{
 
     static CopyPool<Copy_1D> copy_pool_1d(1000);
     static CopyPool<Copy_2D> copy_pool_2d(1000);
+
+    class Buffer {
+    public:
+      enum DimensionKind {
+        DIM_X, // first logical index space dimension
+        DIM_Y, // second logical index space dimension
+        DIM_Z, // ...
+        DIM_F, // field dimension
+        INNER_DIM_X, // inner dimension for tiling X
+        OUTER_DIM_X, // outer dimension for tiling X
+        INNER_DIM_Y, // ...
+        OUTER_DIM_Y,
+        INNER_DIM_Z,
+        OUTER_DIM_Z,
+        INNER_DIM_F,
+        OUTER_DIM_F,
+      };
+
+      enum MemoryKind {
+        MKIND_CPUMEM,
+        MKIND_GPUFB,
+        MKIND_DISK
+      };
+      // std::vector<size_t> field_ordering;
+      std::vector<size_t> field_sizes;
+      //std::vector<DimensionKind> dimension_ordering;
+      //std::vector<size_t> dim_size;
+      off_t alloc_offset;
+      bool is_ib;
+      int block_size, elmt_size;
+      //int inner_stride[3], outer_stride[3], inner_dim_size[3];
+
+      MemoryKind memory_kind;
+
+      DomainLinearization linearization;
+
+      // buffer size of this intermediate buffer.
+      // 0 indicates this buffer is large enough to hold
+      // entire data set.
+      // A number smaller than bytes_total means we need
+      // to reuse the buffer.
+      uint64_t buf_size;
+    };
 
     class Request {
     public:
@@ -162,6 +204,13 @@ namespace LegionRuntime{
       virtual ~XferDes() {};
 
       virtual long get_requests(Request** requests, long nr) = 0;
+
+      template<unsigned DIM>
+      bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
+                              Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
+                              Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dso,
+                              Rect<1> &irect, Rect<1> &orect,
+                              int &done, int &offset_idx, int &block_start, int &total, int available_slots);
 
 #ifdef USE_XFERDES_ITER
       virtual bool has_next_request() {

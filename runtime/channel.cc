@@ -41,6 +41,135 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
+      bool XferDes::simple_get_request(
+                    off_t &src_start, off_t &dst_start, size_t &nbytes,
+                    Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
+                    Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dso,
+                    Rect<1> &irect, Rect<1> &orect,
+                    int &done, int &offset_idx, int &block_start, int &total, int available_slots)
+      {
+        src_start = calc_mem_loc(src_buf->alloc_offset, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                 src_buf->elmt_size, src_buf->block_size, done + irect.lo);
+        dst_start = calc_mem_loc(dst_buf->alloc_offset, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                 dst_buf->elmt_size, dst_buf->block_size, done + orect.lo);
+        nbytes = 0;
+        bool scatter_src_ib = false, scatter_dst_ib = false;
+        while (true) {
+          // check to see if we can generate next request
+          int src_in_block = src_buf->block_size - (done + irect.lo) % src_buf->block_size;
+          int dst_in_block = dst_buf->block_size - (done + orect.lo) % dst_buf->block_size;
+          int todo = min((max_req_size - nbytes) / oas_vec[offset_idx].size, min(total - done, min(src_in_block, dst_in_block)));
+          // make sure we have source data ready
+          if (src_buf->is_ib) {
+            todo = min(todo, (src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+            scatter_src_ib = scatter_src_ib || scatter_ib(src_start, nbytes + todo * oas_vec[offset_idx].size, src_buf->buf_size);
+          }
+          // make sure there are enough space in destination
+          if (dst_buf->is_ib) {
+            todo = min(todo, (dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
+            scatter_dst_ib = scatter_dst_ib || scatter_ib(dst_start, nbytes + todo * oas_vec[offset_idx].size, dst_buf->buf_size);
+          }
+          if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
+          ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
+            break;
+          printf("min(%d, %d, %d)\n = ", (int)(max_req_size - nbytes) / oas_vec[offset_idx].size, total - done, min(src_in_block, dst_in_block));
+          printf("todo = %d, size = %d\n", todo, oas_vec[offset_idx].size);
+          nbytes += todo * oas_vec[offset_idx].size;
+          // see if we can batchmore
+          if (todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
+              && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
+              && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
+              && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
+            done = block_start;
+            offset_idx += 1;
+          }
+          else {
+            done += todo;
+            break;
+          }
+        }
+
+        if (((done + irect.lo) % src_buf->block_size == 0 && order == SRC_FIFO)
+          ||((done + orect.lo) % dst_buf->block_size == 0 && order == DST_FIFO)
+          || done == total) {
+          offset_idx ++;
+        }
+        if (offset_idx < oas_vec.size()) {
+          switch (order) {
+            case SRC_FIFO:
+              done = block_start - irect.lo;
+              break;
+            case DST_FIFO:
+              done = block_start - orect.lo;
+              break;
+            case ANY_ORDER:
+              assert(0);
+              break;
+            default:
+              assert(0);
+          }
+        }
+        else {
+          int new_block_start;
+          switch (order) {
+            case SRC_FIFO:
+              new_block_start = block_start + src_buf->block_size;
+              new_block_start = new_block_start - new_block_start % src_buf->block_size;
+              block_start = new_block_start;
+              done = block_start - irect.lo;
+              offset_idx = 0;
+              if (block_start > irect.hi) {
+                dso->step();
+                if (dso->any_left) {
+                  dsi->step();
+                  if (dsi->any_left) {
+                    free(dso);
+                    dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
+                  }
+                }
+                if (dso->any_left && dsi->any_left) {
+                  Rect<DIM> subrect_check;
+                  irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
+                  orect = dso->image;
+                  done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+                }
+              }
+              break;
+            case DST_FIFO:
+              new_block_start = block_start + dst_buf->block_size;
+              new_block_start = new_block_start - new_block_start % dst_buf->block_size;
+              block_start = new_block_start;
+              done = block_start - orect.lo;
+              offset_idx = 0;
+              if (block_start > orect.hi) {
+                dsi->step();
+                if (!dsi->any_left) {
+                  dso->step();
+                  if (dso->any_left) {
+                    free(dsi);
+                    dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
+                  }
+                }
+                if (dso->any_left && dsi->any_left) {
+                  Rect<DIM> subrect_check;
+                  orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
+                  irect = dsi->image;
+                  done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+                }
+              }
+              break;
+            case ANY_ORDER:
+              assert(0);
+              break;
+            default:
+              assert(0);
+          }
+        }
+
+        return (nbytes > 0);
+      }
+
+      template<unsigned DIM>
       MemcpyXferDes<DIM>::MemcpyXferDes(Channel* _channel,
                      bool has_pre_XferDes, bool has_next_XferDes,
                      Buffer* _src_buf, Buffer* _dst_buf,
@@ -105,131 +234,19 @@ namespace LegionRuntime {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && dsi && dso) {
-          off_t src_start = calc_mem_loc(src_buf->alloc_offset, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                         src_buf->elmt_size, src_buf->block_size, done + irect.lo);
-          off_t dst_start = calc_mem_loc(dst_buf->alloc_offset, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                         dst_buf->elmt_size, dst_buf->block_size, done + orect.lo);
-          size_t nbytes = 0;
-          bool scatter_src_ib = false, scatter_dst_ib = false;
-          while (true) {
-            // check to see if we can generate next request
-            int src_in_block = src_buf->block_size - (done + irect.lo) % src_buf->block_size;
-            int dst_in_block = dst_buf->block_size - (done + orect.lo) % dst_buf->block_size;
-            int todo = min((max_req_size - nbytes) / oas_vec[offset_idx].size, min(total - done, min(src_in_block, dst_in_block)));
-            // make sure we have source data ready
-            if (src_buf->is_ib) {
-              todo = min(todo, (src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
-              scatter_src_ib = scatter_src_ib || scatter_ib(src_start, nbytes + todo * oas_vec[offset_idx].size, src_buf->buf_size);
-            }
-            // make sure there are enough space in destination
-            if (dst_buf->is_ib) {
-              todo = min(todo, (dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
-              scatter_dst_ib = scatter_dst_ib || scatter_ib(dst_start, nbytes + todo * oas_vec[offset_idx].size, dst_buf->buf_size);
-            }
-            if((scatter_src_ib && scatter_dst_ib && (idx + 3 > nr || available_reqs.size() < 3))
-            ||((scatter_src_ib || scatter_dst_ib) && (idx + 2 > nr || available_reqs.size() < 2)))
-              break;
-            printf("min(%d, %d, %d)\n = ", (int)(max_req_size - nbytes) / oas_vec[offset_idx].size, total - done, min(src_in_block, dst_in_block));
-            printf("todo = %d, size = %d\n", todo, oas_vec[offset_idx].size);
-            nbytes += todo * oas_vec[offset_idx].size;
-            // see if we can batchmore
-            if (todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
-                && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
-                && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
-                && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
-              done = block_start;
-              offset_idx += 1;
-            }
-            else {
-              done += todo;
-              break;
-            }
-          }
-
-          if (((done + irect.lo) % src_buf->block_size == 0 && order == SRC_FIFO)
-            ||((done + orect.lo) % dst_buf->block_size == 0 && order == DST_FIFO)
-            || done == total) {
-            offset_idx ++;
-          }
-          if (offset_idx < oas_vec.size()) {
-            switch (order) {
-              case SRC_FIFO:
-                done = block_start - irect.lo;
-                break;
-              case DST_FIFO:
-                done = block_start - orect.lo;
-                break;
-              case ANY_ORDER:
-                assert(0);
-                break;
-              default:
-                assert(0);
-            }
-          }
-          else {
-            int new_block_start;
-            switch (order) {
-              case SRC_FIFO:
-                new_block_start = block_start + src_buf->block_size;
-                new_block_start = new_block_start - new_block_start % src_buf->block_size;
-                block_start = new_block_start;
-                done = block_start - irect.lo;
-                offset_idx = 0;
-                if (block_start > irect.hi) {
-                  dso->step();
-                  if (dso->any_left) {
-                    dsi->step();
-                    if (dsi->any_left) {
-                      free(dso);
-                      dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-                    }
-                  }
-                  if (dso->any_left && dsi->any_left) {
-                    Rect<DIM> subrect_check;
-                    irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-                    orect = dso->image;
-                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
-                  }
-                }
-                break;
-              case DST_FIFO:
-                new_block_start = block_start + dst_buf->block_size;
-                new_block_start = new_block_start - new_block_start % dst_buf->block_size;
-                block_start = new_block_start;
-                done = block_start - orect.lo;
-                offset_idx = 0;
-                if (block_start > orect.hi) {
-                  dsi->step();
-                  if (!dsi->any_left) {
-                    dso->step();
-                    if (dso->any_left) {
-                      free(dsi);
-                      dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
-                    }
-                  }
-                  if (dso->any_left && dsi->any_left) {
-                    Rect<DIM> subrect_check;
-                    orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-                    irect = dsi->image;
-                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
-                  }
-                }
-                break;
-              case ANY_ORDER:
-                assert(0);
-                break;
-              default:
-                assert(0);
-            }
-          }
-          if (nbytes == 0)
-            break;
+          off_t src_start, dst_start;
+          size_t nbytes;
+          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
           while (nbytes > 0) {
             size_t req_size = nbytes;
-            if (scatter_src_ib)
-              req_size = umin(req_size, src_buf->buf_size - src_start % src_buf->buf_size);
-            if (scatter_dst_ib)
-              req_size = umin(req_size, dst_buf->buf_size - dst_start % dst_buf->buf_size);
+            if (src_buf->is_ib) {
+              src_start = src_start % src_buf->buf_size;
+              req_size = umin(req_size, src_buf->buf_size - src_start);
+            }
+            if (dst_buf->is_ib) {
+              dst_start = dst_start % dst_buf->buf_size;
+              req_size = umin(req_size, dst_buf->buf_size - dst_start);
+            }
             mem_cpy_reqs[idx] = (MemcpyRequest*) available_reqs.front();
             available_reqs.pop();
             printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, nbytes);
@@ -237,7 +254,10 @@ namespace LegionRuntime {
             mem_cpy_reqs[idx]->is_write_done = false;
             mem_cpy_reqs[idx]->src_buf = (char*)(src_mem_base + src_start);
             mem_cpy_reqs[idx]->dst_buf = (char*)(dst_mem_base + dst_start);
-            mem_cpy_reqs[idx]->nbytes = nbytes;
+            mem_cpy_reqs[idx]->nbytes = req_size;
+            src_start += req_size; // here we don't have to mod src_buf->buf_size since it will be performed in next loop
+            dst_start += req_size; //
+            nbytes -= req_size;
             idx++;
           }
         }
