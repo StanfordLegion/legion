@@ -22,6 +22,8 @@ local builtins = {}
 -- global scope of any legion program (i.e. they need not be accessed
 -- via std).
 
+builtins.index_type = std.index_type
+builtins.iptr = std.iptr
 builtins.ispace = std.ispace
 builtins.region = std.region
 builtins.disjoint = std.disjoint

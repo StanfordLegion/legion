@@ -13,13 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_ispace3.lg:23: non-opaque ispace expected 3 arguments but got 2
---   var r = ispace(int, 5)
+-- type_mismatch_ispace3.lg:25: non-opaque ispace expected 3 arguments but got 2
+--   var r = ispace(int1d, int1d(5))
 --                ^
 
 import "legion"
 
+local int1d = index_type(int, "int1d")
+
 task f()
-  var r = ispace(int, 5)
+  var r = ispace(int1d, int1d(5))
 end
 f:compile()

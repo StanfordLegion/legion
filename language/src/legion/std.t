@@ -496,6 +496,14 @@ end
 -- ## Type Helpers
 -- #################
 
+function std.is_bounded_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_bounded_type")
+end
+
+function std.is_index_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_index_type")
+end
+
 function std.is_ispace(t)
   return terralib.types.istype(t) and rawget(t, "is_ispace")
 end
@@ -1181,21 +1189,186 @@ end
 -- ## Types
 -- #################
 
+local bounded_type = terralib.memoize(function(index_type, ...)
+  assert(std.is_index_type(index_type))
+  local bounds = terralib.newlist({...})
+  local points_to_type
+  if #bounds > 0 then
+    points_to_type = bounds[1]
+    if terralib.types.istype(points_to_type) then
+      bounds:remove(1)
+    end
+  end
+  if #bounds <= 0 then
+    error(tostring(index_type) .. " expected at least one ispace or region, got none")
+  end
+  for i, bound in ipairs(bounds) do
+    if not terralib.issymbol(bound) then
+      local offset = 0
+      if points_to_type then
+        offset = offset + 1
+      end
+      error(tostring(index_type) .. " expected a symbol as argument " ..
+              tostring(i+offset) .. ", got " .. tostring(bound))
+    end
+  end
+
+  local st = terralib.types.newstruct(tostring(index_type))
+  st.entries = terralib.newlist({
+      { "__ptr", index_type.impl_type },
+  })
+  if #bounds > 1 then
+    -- Find the smallest bitmask that will fit.
+    -- TODO: Would be nice to compress smaller than one byte.
+   local bitmask_type
+    if #bounds < bit.lshift(1, 8) - 1 then
+      bitmask_type = uint8
+    elseif #bounds < bit.lshift(1, 16) - 1 then
+      bitmask_type = uint16
+    elseif #bounds < bit.lshift(1, 32) - 1 then
+      bitmask_type = uint32
+    else
+      assert(false) -- really?
+    end
+    st.entries:insert({ "__index", bitmask_type })
+  end
+
+  st.is_bounded_type = true
+  st.index_type = index_type
+  st.points_to_type = points_to_type
+  st.bounds_symbols = bounds
+
+  function st:bounds()
+    local bounds = terralib.newlist()
+    local is_ispace = false
+    local is_region = false
+    for i, bound_symbol in ipairs(self.bounds_symbols) do
+      local bound = bound_symbol.type
+      if terralib.types.istype(bound) then
+        bound = std.as_read(bound)
+      end
+      if not (terralib.types.istype(bound) and
+              (std.is_ispace(bound) or std.is_region(bound)))
+      then
+        log.error(nil, tostring(self.index_type) ..
+                    " expected an ispace or region as argument " ..
+                    tostring(i+1) .. ", got " .. tostring(bound))
+      end
+      if std.is_region(bound) and
+        not (std.type_eq(bound.element_type, self.points_to_type) or
+               std.is_unpack_result(self.points_to_type))
+      then
+        log.error(nil, tostring(self.index_type) .. " expected region(" ..
+                    tostring(self.points_to_type) .. ") as argument " ..
+                    tostring(i+1) .. ", got " .. tostring(bound))
+      end
+      if std.is_ispace(bound) then is_ispace = true end
+      if std.is_region(bound) then is_region = true end
+      bounds:insert(bound)
+    end
+    if is_ispace and is_region then
+      log.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+    end
+    return bounds
+  end
+
+  st.metamethods.__eq = macro(function(a, b)
+      assert(std.is_bounded_type(a:gettype()) and std.is_bounded_type(b:gettype()))
+      assert(a.index_type == b.index_type)
+      return `(a.__ptr.value == b.__ptr.value)
+  end)
+
+  st.metamethods.__ne = macro(function(a, b)
+      assert(std.is_bounded_type(a:gettype()) and std.is_bounded_type(b:gettype()))
+      assert(a.index_type == b.index_type)
+      return `(a.__ptr.value ~= b.__ptr.value)
+  end)
+
+  function st:force_cast(from, to, expr)
+    assert(std.is_bounded_type(from) and std.is_bounded_type(to) and
+             (#(from:bounds()) > 1) == (#(to:bounds()) > 1))
+    if #(to:bounds()) == 1 then
+      return `([to]{ __ptr = [expr].__ptr })
+    else
+      return quote var x = [expr] in [to]{ __ptr = x.__ptr, __index = x.__index} end
+    end
+  end
+
+  function st.metamethods.__typename(st)
+    local bounds = st.bounds_symbols
+
+    return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+  end
+
+  return st
+end)
+
+-- Hack: Terra uses getmetatable() in terralib.types.istype(), so
+-- setting a custom metatable on a type requires some trickery. The
+-- approach used here is to define __metatable() to return the
+-- expected type metatable so that the object is recongized as a type.
+
+local index_type = {}
+for k, v in pairs(getmetatable(int)) do
+  index_type[k] = v
+end
+index_type.__call = bounded_type
+index_type.__metatable = getmetatable(int)
+
+function std.index_type(base_type, displayname)
+  assert(terralib.types.istype(base_type),
+         "Index type requires base type")
+  if not (std.type_eq(base_type, opaque) or std.type_eq(base_type, int)) then
+    assert(false, "Index type requires base type to be " .. tostring(opaque) ..
+             " or " .. tostring(int))
+  end
+
+  local impl_type = base_type
+  if std.type_eq(base_type, opaque) then
+    impl_type = c.legion_ptr_t
+  end
+
+  local st = terralib.types.newstruct(displayname)
+  st.entries = terralib.newlist({
+      { "__ptr", impl_type },
+  })
+
+  st.is_index_type = true
+  st.base_type = base_type
+  st.impl_type = impl_type
+
+  function st:is_opaque()
+    return std.type_eq(self.base_type, opaque)
+  end
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_index_type(to) then
+      if to:is_opaque() and std.validate_implicit_cast(from, int) then
+        return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
+      elseif not to:is_opaque() and std.type_eq(from, to.base_type) then
+        return `([to]{ __ptr = [expr] })
+      end
+    end
+    assert(false)
+  end
+
+  return setmetatable(st, index_type)
+end
+
+-- FIXME: Temporary, **FOR TESTING ONLY** ################################
+std.iptr = std.index_type(opaque, "iptr")
+
 function std.ispace(index_type)
-  assert(terralib.types.istype(index_type),
+  assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
          "Ispace type requires index type")
 
   local st = terralib.types.newstruct("ispace")
+  st.entries = terralib.newlist({
+      { "impl", c.legion_index_space_t },
+  })
 
   st.is_ispace = true
   st.index_type = index_type
-
-  function st.metamethods.__getentries(st)
-    local entries = terralib.newlist({
-        { "impl", c.legion_index_space_t },
-    })
-    return entries
-  end
 
   -- Ispace types can have an optional partition. This is used by
   -- cross_product to enable patterns like prod[i][j]. Of course, the
@@ -1266,16 +1439,12 @@ function std.region(element_type)
          "Region type requires element type")
 
   local st = terralib.types.newstruct("region")
+  st.entries = terralib.newlist({
+      { "impl", c.legion_logical_region_t },
+  })
 
   st.is_region = true
   st.element_type = element_type
-
-  function st.metamethods.__getentries(st)
-    local entries = terralib.newlist({
-        { "impl", c.legion_logical_region_t },
-    })
-    return entries
-  end
 
   -- Region types can have an optional partition. This is used by
   -- cross_product to enable patterns like prod[i][j]. Of course, the
@@ -1357,12 +1526,9 @@ function std.partition(disjointness, region)
   end
 
   local st = terralib.types.newstruct("partition")
-  function st.metamethods.__getentries()
-    local region = st:parent_region()
-    return terralib.newlist({
-        { "impl", c.legion_logical_partition_t },
-    })
-  end
+  st.entries = terralib.newlist({
+      { "impl", c.legion_logical_partition_t },
+  })
 
   st.is_partition = true
   st.disjointness = disjointness
@@ -1424,12 +1590,10 @@ function std.cross_product(lhs, rhs)
   end
 
   local st = terralib.types.newstruct("cross_product")
-  function st.metamethods.__getentries()
-    return terralib.newlist({
-        { "impl", c.legion_logical_partition_t },
-        { "product", c.legion_terra_index_cross_product_t },
-    })
-  end
+  st.entries = terralib.newlist({
+      { "impl", c.legion_logical_partition_t },
+      { "product", c.legion_terra_index_cross_product_t },
+  })
 
   st.is_cross_product = true
   st.lhs_partition_symbol = lhs

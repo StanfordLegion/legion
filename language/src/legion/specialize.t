@@ -508,6 +508,10 @@ end
 
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
+  if not std.is_index_type(index_type) then
+    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
+  end
+
   local expr_type = std.ispace(index_type)
   return ast.specialized.ExprIspace {
     index_type = index_type,

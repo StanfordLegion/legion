@@ -86,6 +86,7 @@ local language = {
     "cross_product",
     "disjoint", -- reserved for future use
     "dynamic_cast",
+    "index_type", -- reserved for future use
     "isnull",
     "ispace",
     "max",

@@ -14,12 +14,12 @@
 
 -- fails-with:
 -- type_mismatch_ispace2.lg:23: opaque ispace expected 2 arguments but got 3
---   var r = ispace(opaque, 0, 5)
+--   var r = ispace(iptr, iptr(0), iptr(5))
 --                ^
 
 import "legion"
 
 task f()
-  var r = ispace(opaque, 0, 5)
+  var r = ispace(iptr, iptr(0), iptr(5))
 end
 f:compile()

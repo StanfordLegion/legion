@@ -670,15 +670,15 @@ function type_check.expr_ispace(cx, node)
   local upper_bound = node.upper_bound and type_check.expr(cx, node.upper_bound)
   local upper_bound_type = node.upper_bound and std.check_read(cx, upper_bound)
 
-  if not (std.type_eq(index_type, opaque) or std.type_eq(index_type, int)) then
+  if not std.is_index_type(index_type) then
     log.error(node, "type mismatch in argument 1: expected " ..
                 tostring(opaque) .. " or " .. tostring(int) ..
                 " but got " .. tostring(index_type))
   end
-  if std.type_eq(index_type, opaque) and node.upper_bound then
+  if std.type_eq(index_type, std.iptr) and node.upper_bound then
     log.error(node, "opaque ispace expected 2 arguments but got 3")
   end
-  if not std.type_eq(index_type, opaque) and not node.upper_bound then
+  if not std.type_eq(index_type, std.iptr) and not node.upper_bound then
     log.error(node, "non-opaque ispace expected 3 arguments but got 2")
   end
   if not std.validate_implicit_cast(lower_bound_type, actual_index_type) then

@@ -13,13 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_ispace4.lg:23: type mismatch in argument 2: expected int32 but got bool
---   var r = ispace(opaque, true)
+-- type_mismatch_ispace4.lg:23: type mismatch in argument 2: expected iptr but got bool
+--   var r = ispace(iptr, true)
 --                ^
 
 import "legion"
 
 task f()
-  var r = ispace(opaque, true)
+  var r = ispace(iptr, true)
 end
 f:compile()
