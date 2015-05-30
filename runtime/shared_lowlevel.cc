@@ -783,9 +783,10 @@ namespace LegionRuntime {
         public:
           enum ThreadState {
             RUNNING_STATE,
-            PAUSING_STATE,
+            PAUSING_STATE, // about to pause
             PAUSED_STATE,
             RESUMABLE_STATE,
+            SLEEPING_STATE, // about to sleep
             SLEEP_STATE,
           };
         public:
@@ -799,6 +800,7 @@ namespace LegionRuntime {
           void run(void);
           void awake(void);
           void sleep(void);
+          void prepare_to_sleep(void);
           void preempt(EventImpl *event, EventImpl::EventGeneration needed); 
           void resume(void);
           void shutdown(void);
@@ -2046,6 +2048,7 @@ namespace LegionRuntime {
       {
         // Move this thread on to the available threads and wake
         // up one of the resumable threads
+        thread->prepare_to_sleep();
         available_threads.push_back(thread);
         // Pull the first thread off the resumable threads
         ProcessorThread *to_resume = resumable_threads.front();
@@ -2062,6 +2065,7 @@ namespace LegionRuntime {
       else if (ready_queue.empty())
       {
         // If there are no tasks to run, then we should go to sleep
+        thread->prepare_to_sleep();
         available_threads.push_back(thread);
         running_thread = NULL;
         PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
@@ -2311,20 +2315,31 @@ namespace LegionRuntime {
     void ProcessorImpl::ProcessorThread::awake(void)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      assert(state == SLEEP_STATE);
+      assert((state == SLEEPING_STATE) || (state == SLEEP_STATE));
+      // Only need to signal if the thread is actually asleep
+      if (state == SLEEP_STATE)
+        PTHREAD_SAFE_CALL(pthread_cond_signal(thread_cond));
       state = RUNNING_STATE;
-      PTHREAD_SAFE_CALL(pthread_cond_signal(thread_cond));
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
     }
 
     void ProcessorImpl::ProcessorThread::sleep(void)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      assert(state == RUNNING_STATE);
-      state = SLEEP_STATE;
-      PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
+      assert((state == SLEEPING_STATE) || (state = RUNNING_STATE));
+      // If we haven't been told to stay awake, then go to sleep
+      if (state == SLEEPING_STATE) {
+        state = SLEEP_STATE;
+        PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
+      }
       assert(state == RUNNING_STATE);
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+    }
+
+    void ProcessorImpl::ProcessorThread::prepare_to_sleep(void)
+    {
+      assert(state == RUNNING_STATE);
+      state = SLEEPING_STATE;
     }
 
     void ProcessorImpl::ProcessorThread::preempt(EventImpl *event,
@@ -2351,7 +2366,7 @@ namespace LegionRuntime {
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
       assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
-      bool need_resume = false;;
+      bool need_resume = false;
       // If the thread is still trying to go to sleep we
       // can just mark it runnable again, otherwise it
       // already went to sleep so we have to mark that
