@@ -1953,6 +1953,14 @@ function task:setcuda(cuda)
   self.cuda = cuda
 end
 
+function task:setinline(inline)
+  self.inline = inline
+end
+
+function task:setast(node)
+  self.ast = node
+end
+
 local global_kernel_id = 1
 function task:addcudakernel(kernel)
   if rawget(self, "cudakernels") == nil then
@@ -2043,6 +2051,14 @@ function task:getcudakernels()
   return self.cudakernels
 end
 
+function task:getinline()
+  return self.inline
+end
+
+function task:getast()
+  return self.ast
+end
+
 function task:printpretty()
   return self:getdefinition():printpretty()
 end
@@ -2067,6 +2083,7 @@ function std.newtask(name)
     taskid = terralib.global(c.legion_task_id_t),
     name = name,
     cuda = false,
+    inline = false,
   }, task)
 end
 

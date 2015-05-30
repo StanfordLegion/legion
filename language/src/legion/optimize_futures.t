@@ -68,7 +68,8 @@ end
 
 function analyze_var_flow.expr_call(cx, node)
   if std.is_task(node.fn.value) and
-    node.expr_type ~= terralib.types.unit
+    node.expr_type ~= terralib.types.unit and
+    not node.fn.value.inline
   then
     return {[true] = true}
   end
@@ -417,7 +418,8 @@ function optimize_futures.expr_call(cx, node)
       function(arg) return concretize(arg) end)
   end
   local expr_type = node.expr_type
-  if std.is_task(node.fn.value) and expr_type ~= terralib.types.unit then
+  if std.is_task(node.fn.value) and expr_type ~= terralib.types.unit and
+    not node.fn.value.inline then
     expr_type = std.future(expr_type)
   end
 
