@@ -921,6 +921,7 @@ namespace LegionRuntime {
       virtual ~IndexTreeNode(void);
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
+      virtual size_t get_num_elmts(void) = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
@@ -960,7 +961,7 @@ namespace LegionRuntime {
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     protected:
-      std::set<std::pair<ColorPoint,ColorPoint> > pending_tests;
+      std::map<std::pair<ColorPoint,ColorPoint>,Event> pending_tests;
     };
 
     /**
@@ -995,6 +996,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
+      virtual size_t get_num_elmts(void);
     public:
       virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
@@ -1009,10 +1011,13 @@ namespace LegionRuntime {
       size_t get_num_children(void) const;
       void get_children(std::map<ColorPoint,IndexPartNode*> &children);
     public:
-      const Domain& get_domain(bool app_query = false);
-      const Domain& get_domain_no_wait(Event &ready_event);
+      Event get_domain_precondition(void);
+      const Domain& get_domain_blocking(void);
+      const Domain& get_domain(Event &ready_event);
+      const Domain& get_domain_no_wait(void);
       void set_domain(const Domain &dom);
-      void get_domains(std::vector<Domain> &domains, bool app_query = false);
+      void get_domains_blocking(std::vector<Domain> &domains);
+      void get_domains(std::vector<Domain> &domains, Event &precondition);
       size_t get_domain_volume(bool app_query = false);
     public:
       bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2); 
@@ -1028,9 +1033,10 @@ namespace LegionRuntime {
     public:
       bool has_component_domains(void) const;
       void update_component_domains(const std::set<Domain> &domains);
-      const std::set<Domain>& get_component_domains(void) const;
-      bool intersects_with(IndexSpaceNode *other, bool compute);
-      bool intersects_with(IndexPartNode *other, bool compute);
+      const std::set<Domain>& get_component_domains_blocking(void) const;
+      const std::set<Domain>& get_component_domains(Event &precondition) const;
+      bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -1084,6 +1090,7 @@ namespace LegionRuntime {
       std::map<ColorPoint,IndexPartNode*> valid_map;
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subsets;
+      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subsets;
       // If we have component domains keep track of those as well
       std::set<Domain> component_domains;
     private:
@@ -1123,6 +1130,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
+      virtual size_t get_num_elmts(void);
     public:
       virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
@@ -1166,9 +1174,10 @@ namespace LegionRuntime {
       Event create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
                                 LowLevel::IndexSpace::IndexSpaceOperation op);
     public:
+      void get_subspace_domain_preconditions(std::set<Event> &preconditions);
       void get_subspace_domains(std::set<Domain> &subspaces);
-      bool intersects_with(IndexSpaceNode *other, bool compute);
-      bool intersects_with(IndexPartNode *other, bool compute);
+      bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -1204,6 +1213,7 @@ namespace LegionRuntime {
       std::map<ColorPoint,IndexSpaceNode*> valid_map;
       std::set<PartitionNode*> logical_nodes;
       std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subspaces;
+      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subspaces;
     protected:
       // Support for pending child spaces that still need to be computed
       std::map<ColorPoint,std::pair<UserEvent,UserEvent> > pending_children;
@@ -2054,6 +2064,7 @@ namespace LegionRuntime {
                                        MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
+                                       Event copy_domains_precondition,
                                        const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                            LegionMap<Event,FieldMask>::aligned &postconditions,
@@ -2106,26 +2117,31 @@ namespace LegionRuntime {
       virtual IndexTreeNode *get_row_source(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
-      virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0;
-      virtual bool are_children_disjoint(const ColorPoint &c1, 
-                                         const ColorPoint &c2) = 0;
-      virtual bool are_all_children_disjoint(void) = 0;
+      virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0; 
       virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
       virtual RegionNode* as_region_node(void) const = 0;
       virtual PartitionNode* as_partition_node(void) const = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
+    public:
+      virtual bool are_children_disjoint(const ColorPoint &c1, 
+                                         const ColorPoint &c2) = 0;
+      virtual bool are_all_children_disjoint(void) = 0;
       virtual bool has_component_domains(void) const = 0;
-      virtual const std::set<Domain>& get_component_domains(void) const = 0;
-      virtual const Domain& get_domain(void) const = 0;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const = 0;
+      virtual const std::set<Domain>&
+                        get_component_domains_blocking(void) const = 0;
+      virtual const std::set<Domain>& 
+                        get_component_domains(Event &ready) const = 0;
+      virtual const Domain& get_domain_blocking(void) const = 0;
+      virtual const Domain& get_domain(Event &precondition) const = 0;
+      virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
-      virtual bool intersects_with(RegionTreeNode *other, 
-                                   bool compute = true) = 0;
+      virtual bool intersects_with(RegionTreeNode *other) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
       virtual const std::set<Domain>& 
-                            get_intersection_domains(RegionTreeNode *other) = 0;
+                      get_intersection_domains(RegionTreeNode *other) = 0;
+    public:
       virtual size_t get_num_children(void) const = 0;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
@@ -2245,11 +2261,14 @@ namespace LegionRuntime {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& get_component_domains(void) const;
-      virtual const Domain& get_domain(void) const;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const;
+      virtual const std::set<Domain>& 
+                                     get_component_domains_blocking(void) const;
+      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
+      virtual const Domain& get_domain_blocking(void) const;
+      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
+      virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -2395,11 +2414,14 @@ namespace LegionRuntime {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& get_component_domains(void) const;
-      virtual const Domain& get_domain(void) const;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const;
+      virtual const std::set<Domain>& 
+                                     get_component_domains_blocking(void) const;
+      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
+      virtual const Domain& get_domain_blocking(void) const;
+      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
+      virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -3710,8 +3732,8 @@ namespace LegionRuntime {
                                    FieldID src_field, FieldID dst_field,
                                    Event dst_precondition,
                                    std::set<Event> &conditions);
-      void find_component_domains(ReductionView *reduction_view,
-                                  std::set<Domain> &component_domains);
+      Event find_component_domains(ReductionView *reduction_view,
+                                   std::set<Domain> &component_domains);
     protected:
       void activate_deferred(void);
       void garbage_collect_deferred(void);
@@ -3972,7 +3994,7 @@ namespace LegionRuntime {
                                std::set<Event> &preconditions,
                                std::set<Event> &postconditions);
     public:
-      bool intersects_with(RegionTreeNode *dst, bool compute = true);
+      bool intersects_with(RegionTreeNode *dst);
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
@@ -4150,13 +4172,15 @@ namespace LegionRuntime {
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const std::set<Event> &preconditions,
-                                        const std::set<Domain> &reduce_domains);
+                                        const std::set<Domain> &reduce_domains,
+                                        Event domain_precondition);
       Event perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
                                               FieldID src_field,
                                               unsigned src_index,
                                        const std::set<Event> &preconditions,
-                                       const std::set<Domain> &reduce_domains);
+                                       const std::set<Domain> &reduce_domains,
+                                       Event domain_precondition);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
