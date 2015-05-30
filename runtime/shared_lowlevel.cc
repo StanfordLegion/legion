@@ -2326,7 +2326,7 @@ namespace LegionRuntime {
     void ProcessorImpl::ProcessorThread::sleep(void)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
-      assert((state == SLEEPING_STATE) || (state = RUNNING_STATE));
+      assert((state == SLEEPING_STATE) || (state == RUNNING_STATE));
       // If we haven't been told to stay awake, then go to sleep
       if (state == SLEEPING_STATE) {
         state = SLEEP_STATE;
