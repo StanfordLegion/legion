@@ -809,7 +809,7 @@ namespace LegionRuntime {
         public:
           virtual bool event_triggered(void);
           virtual void print_info(FILE *f) {
-            fprintf(f, "Paused thread");
+            fprintf(f, "Paused thread %lx\n", (unsigned long)thread);
           }
         public:
           ProcessorImpl *const proc;
@@ -2123,7 +2123,8 @@ namespace LegionRuntime {
     {
       // First check to make sure that we received the kill
       // pill. If we didn't then wait for it. This is how
-      // we distinguish deadlock from 
+      // we distinguish deadlock from just normal termination
+      // from all the processors being idle 
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       if (!shutdown_trigger)
         PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond, mutex));
@@ -2133,6 +2134,8 @@ namespace LegionRuntime {
       assert(resumable_threads.empty());
       assert(paused_threads.empty());
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      //printf("Processor " IDFMT " needed %ld threads\n", 
+      //        proc.id, available_threads.size());
       // We can now read this outside the lock since we know
       // that the threads are all asleep and are all about to exit
       for (unsigned idx = 0; idx < available_threads.size(); idx++)
@@ -2338,6 +2341,7 @@ namespace LegionRuntime {
 
     void ProcessorImpl::ProcessorThread::prepare_to_sleep(void)
     {
+      // Don't need the lock since we are running
       assert(state == RUNNING_STATE);
       state = SLEEPING_STATE;
     }
