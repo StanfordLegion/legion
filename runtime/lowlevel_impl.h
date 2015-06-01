@@ -1095,7 +1095,7 @@ namespace LegionRuntime {
 
       void start_thread(size_t stack_size, int core_id, const char *debug_name);
 
-      static bool preemptable_sleep(Event wait_for, bool block = false);
+      static bool preemptable_sleep(Event wait_for);
 
       virtual Processor get_processor(void) const = 0;
 
@@ -1115,7 +1115,7 @@ namespace LegionRuntime {
 
       virtual void thread_main(void) = 0;
 
-      virtual void sleep_on_event(Event wait_for, bool block = false) = 0;
+      virtual void sleep_on_event(Event wait_for) = 0;
 
       pthread_t thread;
 
@@ -1134,7 +1134,7 @@ namespace LegionRuntime {
         { assert(false); return Processor::NO_PROC; }
     public:
       virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for, bool block = false);
+      virtual void sleep_on_event(Event wait_for);
     public:
       void join(void);
     private:
@@ -1166,7 +1166,7 @@ namespace LegionRuntime {
       virtual Processor get_processor(void) const;
     protected:
       virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for, bool block = false);
+      virtual void sleep_on_event(Event wait_for);
       virtual bool event_triggered(void);
       virtual void print_info(FILE *f);
     public:

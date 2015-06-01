@@ -754,8 +754,7 @@ void HandlerThread::thread_main(void)
   }
 }
 
-void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for,
-                                   bool block/* = false*/)
+void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for)
 {
   while (!wait_for.has_triggered()) {
     // Try handling the next message

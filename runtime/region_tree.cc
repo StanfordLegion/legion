@@ -3088,7 +3088,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_index_space_request(owner, rez);
       // Wait on the event, be safe for now and block
-      wait_on.wait(true/*block*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
@@ -3134,7 +3134,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_index_partition_request(owner, rez);
       // Be safe and block for now
-      wait_on.wait(true/*block*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
         index_parts.find(part);
@@ -3179,7 +3179,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_field_space_request(owner, rez);
       // Be safe and block for now
-      wait_on.wait(true/*blcok*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -5870,7 +5870,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       return domain_ready;
     }
 
@@ -5879,9 +5879,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait(false/*block*/);
+        domain_ready.wait();
       return domain;
     }
 
@@ -5890,7 +5890,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       precondition = domain_ready;
       return domain;
     }
@@ -5901,7 +5901,7 @@ namespace LegionRuntime {
     {
       // We still need to wait for the handle to be valid
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       return domain;
     }
 
@@ -5917,9 +5917,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait(false/*block*/);
+        domain_ready.wait();
       if (has_component_domains())
       {
         domains.insert(domains.end(), 
@@ -5935,7 +5935,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       precondition = domain_ready;
       if (has_component_domains())
       {
@@ -5956,11 +5956,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          handle_ready.wait(false/*block*/);
+          handle_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          handle_ready.wait(true/*block*/);
+          handle_ready.wait();
       }
       if (!domain_ready.has_triggered())
       {
@@ -5968,11 +5968,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          domain_ready.wait(false/*block*/);
+          domain_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          domain_ready.wait(true/*block*/);
+          domain_ready.wait();
       }
       if (domain.get_dim() == 0)
       {
@@ -6041,7 +6041,7 @@ namespace LegionRuntime {
           ready = finder->second;
       }
       // Wait for the ready event and then get the result
-      ready.wait(false/*block*/);
+      ready.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subsets.find(key) != disjoint_subsets.end())
         return true;
@@ -6186,9 +6186,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait(false/*block*/);
+        domain_ready.wait();
       return component_domains;
     }
 
@@ -6198,7 +6198,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait(false/*block*/);
+        handle_ready.wait();
       ready = domain_ready;
       return component_domains;
     }
@@ -6562,7 +6562,7 @@ namespace LegionRuntime {
         parent->send_node(target, true/*up*/, false/*down*/);
       // Check to see if we need to wait for the handle event to be ready
       if (!handle_ready.has_triggered())
-          handle_ready.wait(true/*block*/);
+          handle_ready.wait();
       // Check to see if our creation set includes the target
       std::map<ColorPoint,IndexPartNode*> valid_copy;
       {
@@ -7003,11 +7003,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          disjoint_ready.wait(false/*block*/);
+          disjoint_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          disjoint_ready.wait(true/*block*/);
+          disjoint_ready.wait();
       }
       return disjoint;
     }
@@ -7066,7 +7066,7 @@ namespace LegionRuntime {
         else
           ready_event = finder->second;
       }
-      ready_event.wait(false/*block*/);
+      ready_event.wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
         return true;
@@ -11932,7 +11932,7 @@ namespace LegionRuntime {
       }
       // See if we need to wait
       if (wait_event.exists())
-        wait_event.wait(true/*block*/);
+        wait_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -16184,7 +16184,7 @@ namespace LegionRuntime {
             if (!pending_events.empty())
             {
               Event wait_for = Event::merge_events(pending_events);
-              wait_for.wait(true/*block*/);
+              wait_for.wait();
             }
           }
           else
@@ -21779,7 +21779,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       size_t num_atomic;
@@ -22629,7 +22629,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       size_t epoch_count;
       derez.deserialize(epoch_count);
@@ -23324,7 +23324,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       size_t num_roots;
@@ -25103,7 +25103,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       unpack_valid_reductions(derez, logical_node->column_source, 

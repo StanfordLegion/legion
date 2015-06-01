@@ -1008,7 +1008,7 @@ namespace LegionRuntime {
       }
 
       if(!e.has_triggered())
-        e.wait(true/*block*/); // FIXME
+        e.wait(); // FIXME
     }
 
     class MetadataInvalidateMessage {
@@ -5539,7 +5539,7 @@ namespace LegionRuntime {
         proc->finalize_processor();
     }
 
-    void LocalThread::sleep_on_event(Event wait_for, bool block)
+    void LocalThread::sleep_on_event(Event wait_for)
     {
 #ifdef EVENT_GRAPH_TRACE
       unsigned long long start = TimeStamp::get_current_time_in_micros(); 
@@ -5971,8 +5971,7 @@ namespace LegionRuntime {
         delete task;
     }
 
-    /*static*/ bool PreemptableThread::preemptable_sleep(Event wait_for,
-							 bool block /*= false*/)
+    /*static*/ bool PreemptableThread::preemptable_sleep(Event wait_for)
     {
       // check TLS to see if we're really a preemptable thread
       void *tls_val = gasnett_threadkey_get(cur_preemptable_thread);
@@ -5980,7 +5979,7 @@ namespace LegionRuntime {
 
       PreemptableThread *me = (PreemptableThread *)tls_val;
 
-      me->sleep_on_event(wait_for, block);
+      me->sleep_on_event(wait_for);
       return true;
     }
     
@@ -6009,7 +6008,7 @@ namespace LegionRuntime {
       int priority;
     };
 
-    void Event::wait(bool block) const
+    void Event::wait(void) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       if(!id) return;  // special case: never wait for NO_EVENT
@@ -6022,7 +6021,7 @@ namespace LegionRuntime {
       DetailedTimer::ScopedPush sp2(TIME_NONE);
 
       // are we a thread that knows how to do something useful while waiting?
-      if(PreemptableThread::preemptable_sleep(*this, block))
+      if(PreemptableThread::preemptable_sleep(*this))
 	return;
 
       // maybe a GPU thread?
@@ -6821,7 +6820,7 @@ namespace LegionRuntime {
 		      id, r_impl->valid_mask,
 		      wait_on.id, wait_on.gen);
 
-	wait_on.wait(true /*blocking*/);
+	wait_on.wait();
       }
 #endif
       return *(r_impl->valid_mask);

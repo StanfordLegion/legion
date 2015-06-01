@@ -259,6 +259,48 @@ namespace LegionRuntime {
       virtual void print_info(FILE *f) = 0;
     };
 
+    class ExternalWaiter : public EventWaiter {
+    public:
+      ExternalWaiter(void)
+        : ready(false)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex, NULL));
+        PTHREAD_SAFE_CALL(pthread_cond_init(&cond, NULL));
+      }
+      virtual ~ExternalWaiter(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_destroy(&mutex));
+        PTHREAD_SAFE_CALL(pthread_cond_destroy(&cond));
+      }
+    public:
+      virtual bool event_triggered(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
+        ready = true;
+        PTHREAD_SAFE_CALL(pthread_cond_signal(&cond));
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
+        // Don't delete us, we're on the stack
+        return false;
+      }
+      virtual void print_info(FILE *f) 
+      {
+        fprintf(f,"External waiter");
+      }
+    public:
+      void wait(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
+        if (!ready) {
+          PTHREAD_SAFE_CALL(pthread_cond_wait(&cond, &mutex));
+        }
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
+      }
+    protected:
+      pthread_mutex_t mutex;
+      pthread_cond_t cond;
+      bool ready;
+    };
+
     class DMAOperation : public EventWaiter {
     public:
       virtual ~DMAOperation(void) { }
@@ -608,7 +650,7 @@ namespace LegionRuntime {
 	// test whether an event has triggered without waiting
 	bool has_triggered(EventGeneration needed_gen);
 	// block until event has triggered
-	void wait(EventGeneration needed_gen, bool block);
+	void wait(EventGeneration needed_gen);
         // defer triggering of an event on another event
         void defer_trigger(Event wait_for);
 	// create an event that won't trigger until all input events have
@@ -902,19 +944,22 @@ namespace LegionRuntime {
 	return e->has_triggered(gen);
     }
 
-    void Event::wait(bool block) const
+    void Event::wait(void) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL); 
 	if (!id) return;
 	EventImpl *e = Runtime::Impl::get_runtime()->get_event_impl(*this);
-	e->wait(gen,block);
+	e->wait(gen);
     }
 
     // used by non-legion threads to wait on an event - always blocking
     void Event::external_wait(void) const
     {
-      // shared lowlevel does pthreads for everybody
-      wait(true);
+      if (!id) return;
+      EventImpl *e = Runtime::Impl::get_runtime()->get_event_impl(*this);
+      ExternalWaiter waiter;
+      e->add_waiter(gen, &waiter);
+      waiter.wait();
     }
 
     Event Event::merge_events(Event ev1, Event ev2, Event ev3,
@@ -1023,9 +1068,8 @@ namespace LegionRuntime {
 	return result;
     }
 
-    void EventImpl::wait(EventGeneration needed_gen, bool block)
+    void EventImpl::wait(EventGeneration needed_gen)
     {
-      // Now we can ignore block
       ProcessorImpl::ProcessorThread *thread = 
         (ProcessorImpl::ProcessorThread*)pthread_getspecific(local_thread_key);
       thread->preempt(this, needed_gen);

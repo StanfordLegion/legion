@@ -1784,7 +1784,7 @@ namespace LegionRuntime {
 	    for(std::set<Event>::const_iterator it = events.begin();
 		it != events.end();
 		it++)
-	      (*it).wait(true);
+	      (*it).wait();
 	  } else {
 	    // nothing happened and we don't need to tell anyone - life is simple
 	  }

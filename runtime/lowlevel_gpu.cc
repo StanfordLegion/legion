@@ -1116,7 +1116,7 @@ namespace LegionRuntime {
       }
     }
 
-    void GPUWorker::sleep_on_event(Event wait_for, bool block)
+    void GPUWorker::sleep_on_event(Event wait_for)
     {
       // should never be called
       assert(false);
@@ -1163,7 +1163,7 @@ namespace LegionRuntime {
       // create an async copy and then wait for it to finish...
       Event e = GenEventImpl::create_genevent()->current_event();
       gpu->copy_from_fb(dst, offset, size, Event::NO_EVENT, e);
-      e.wait(true /*blocking*/);
+      e.wait();
     }
 
     void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -1171,7 +1171,7 @@ namespace LegionRuntime {
       // create an async copy and then wait for it to finish...
       Event e = GenEventImpl::create_genevent()->current_event();
       gpu->copy_to_fb(offset, src, size, Event::NO_EVENT, e);
-      e.wait(true /*blocking*/);
+      e.wait();
     }
 
     // zerocopy memory

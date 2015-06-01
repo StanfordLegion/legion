@@ -183,7 +183,7 @@ namespace LegionRuntime {
     public:
       virtual Processor get_processor(void) const;
       virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for, bool block = false);
+      virtual void sleep_on_event(Event wait_for);
     public:
       static GPUWorker* start_gpu_worker_thread(size_t stack_size);
       static void stop_gpu_worker_thread(void);
