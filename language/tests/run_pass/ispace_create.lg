@@ -29,9 +29,13 @@ g:compile()
 task main()
   var is0 = ispace(iptr, 5)
   var is1 = ispace(i1d, 7, 0)
-  var i : iptr = 3
-  f(is0, i)
+
+  var i0 : iptr = 3
+  f(is0, i0)
   f(is0, 4)
-  -- g(is1, 3)
+
+  var i1 : i1d = 14
+  g(is1, i1)
+  g(is1, 3)
 end
 legionlib.start(main)
