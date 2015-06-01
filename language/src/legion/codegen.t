@@ -1998,6 +1998,7 @@ function codegen.expr_region(cx, node)
 
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
   -- FIXME: Runtime does not understand how to make multi-dimensional
   -- index spaces allocable.
   local isa = false
@@ -2043,7 +2044,7 @@ function codegen.expr_region(cx, node)
   actions = quote
     [actions]
     var capacity = [ispace.value]
-    var is = [ispace.value].impl
+    var [is] = [ispace.value].impl
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
     [std.zip(field_types, field_ids):map(
@@ -2052,7 +2053,7 @@ function codegen.expr_region(cx, node)
          return `(c.legion_field_allocator_allocate_field(
                     [fsa], terralib.sizeof([field_type]), [field_id]))
        end)]
-    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], is, fs)
+    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], fs)
     var il = c.legion_inline_launcher_create_logical_region(
       [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
     [field_ids:map(
@@ -2076,7 +2077,7 @@ function codegen.expr_region(cx, node)
   if region_type:ispace().dim == 0 then
     actions = quote
       [actions]
-      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
+      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
     end
   end
 
