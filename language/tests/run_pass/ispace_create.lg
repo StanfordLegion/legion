@@ -15,27 +15,37 @@
 import "legion"
 
 local i1d = index_type(int, "i1d")
+struct i2 { x : int, y : int }
+local i2d = index_type(i2, "i2d")
 
-task f(is : ispace(iptr), i : iptr)
+task f0(is : ispace(iptr), i : iptr)
 end
 
-task g(is : ispace(i1d), i : i1d)
+task f1(is : ispace(i1d), i : i1d)
 end
 
-task h(is : ispace(i1d), i2 : i1d(is))
+task f1b(is : ispace(i1d), i2 : i1d(is))
 end
-g:compile()
+f1b:compile()
+
+task f2(is : ispace(i2d), i : i2d)
+end
 
 task main()
   var is0 = ispace(iptr, 5)
-  var is1 = ispace(i1d, 7, 0)
+  var is1 = ispace(i1d, 7, 2)
+  var is2 = ispace(i2d, { x = 2, y = 2 }, { x = 3, y = 4 })
 
   var i0 : iptr = 3
-  f(is0, i0)
-  f(is0, 4)
+  f0(is0, i0)
+  f0(is0, 4)
 
   var i1 : i1d = 14
-  g(is1, i1)
-  g(is1, 3)
+  f1(is1, i1)
+  f1(is1, 3)
+
+  var i2 : i2d = { x = 4, y = 5 }
+  f2(is2, i2)
+  f2(is2, i2d { x = 3, y = 5 })
 end
 legionlib.start(main)

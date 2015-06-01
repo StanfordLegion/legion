@@ -226,7 +226,7 @@ end
 
 local function accessor_generic_get_base_pointer(field_type)
   return terra(physical : c.legion_physical_region_t,
-             accessor : c.legion_accessor_generic_t)
+               accessor : c.legion_accessor_generic_t)
 
     var base_pointer : &opaque = nil
     var stride : c.size_t = terralib.sizeof(field_type)
@@ -1950,19 +1950,39 @@ function codegen.expr_ispace(cx, node)
   if index_type:is_opaque() then
     start_value = start and `([start_value].value)
   end
-  local check_start = quote end
-  if start then
-    check_start = quote legionlib.assert([start_value] == 0, "ispaces must start at 0 right now") end
+
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
+  local i = terralib.newsymbol(ispace_type, "i")
+  if ispace_type.dim == 0 then
+    if start then
+      actions = quote
+        [actions]
+        legionlib.assert([start_value] == 0, "opaque ispaces must start at 0 right now")
+      end
+    end
+    actions = quote
+      [actions]
+      var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
+    end
+  else
+    if not start then
+      start_value = index_type:zero()
+    end
+
+    local domain_from_bounds = std["domain_from_bounds_" .. tostring(ispace_type.dim) .. "d"]
+    actions = quote
+      [actions]
+      var domain = [domain_from_bounds](
+        [index_type:to_point(`([index_type](start_value)))],
+        [index_type:to_point(`([index_type](extent_value)))])
+      var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context], domain)
+    end
   end
 
-  local i = terralib.newsymbol(ispace_type, "i")
   actions = quote
     [actions]
-    [check_start]
-    var is = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
     var [i] = [ispace_type]{ impl = [is] }
   end
-
 
   return values.value(expr.just(actions, i), ispace_type)
 end
@@ -1978,7 +1998,12 @@ function codegen.expr_region(cx, node)
 
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
-  local isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
+  -- FIXME: Runtime does not understand how to make multi-dimensional
+  -- index spaces allocable.
+  local isa = false
+  if region_type:ispace().dim == 0 then
+    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
+  end
   local it = false
   if cache_index_iterator then
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -2019,7 +2044,6 @@ function codegen.expr_region(cx, node)
     [actions]
     var capacity = [ispace.value]
     var is = [ispace.value].impl
-    var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
     [std.zip(field_types, field_ids):map(
@@ -2047,6 +2071,13 @@ function codegen.expr_region(cx, node)
          end
        end)]
     var [r] = [region_type]{ impl = [lr] }
+  end
+
+  if region_type:ispace().dim == 0 then
+    actions = quote
+      [actions]
+      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
+    end
   end
 
   if cache_index_iterator then

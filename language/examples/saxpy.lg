@@ -46,8 +46,8 @@ do
 end
 
 task test(n: int)
-  var x = region(ispace(int1d, n), float)
-  var y = region(ispace(int1d, n), float)
+  var x = region(ispace(iptr, n), float)
+  var y = region(ispace(iptr, n), float)
   for i = 0, n do
     var px = new(ptr(float, x))
     var py = new(ptr(float, y))

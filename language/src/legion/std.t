@@ -134,6 +134,42 @@ terra std.assert(x : bool, message : rawstring)
   end
 end
 
+terra std.domain_from_bounds_1d(start : c.legion_point_1d_t,
+                                extent : c.legion_point_1d_t)
+  var rect = c.legion_rect_1d_t {
+    lo = start,
+    hi = c.legion_point_1d_t {
+      x = array(start.x[0] + extent.x[0] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_1d(rect)
+end
+
+terra std.domain_from_bounds_2d(start : c.legion_point_2d_t,
+                                extent : c.legion_point_2d_t)
+  var rect = c.legion_rect_2d_t {
+    lo = start,
+    hi = c.legion_point_2d_t {
+      x = array(start.x[0] + extent.x[0] - 1,
+                start.x[1] + extent.x[1] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_2d(rect)
+end
+
+terra std.domain_from_bounds_3d(start : c.legion_point_3d_t,
+                                extent : c.legion_point_3d_t)
+  var rect = c.legion_rect_3d_t {
+    lo = start,
+    hi = c.legion_point_3d_t {
+      x = array(start.x[0] + extent.x[0] - 1,
+                start.x[1] + extent.x[1] - 1,
+                start.x[2] + extent.x[2] - 1),
+    },
+  }
+  return c.legion_domain_from_rect_3d(rect)
+end
+
 -- #####################################
 -- ## Privilege Helpers
 -- #################
@@ -1384,6 +1420,31 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   return st
 end)
 
+local function validate_index_base_type(base_type)
+  assert(terralib.types.istype(base_type),
+         "Index type expected a type, got " .. tostring(base_type))
+  if std.type_eq(base_type, opaque) then
+    return c.legion_ptr_t, 0, terralib.newlist({"value"})
+  elseif std.type_eq(base_type, int) then
+    return base_type, 1, false
+  elseif base_type:isstruct() then
+    local entries = base_type:getentries()
+    assert(#entries >= 1 and #entries <= 3,
+           "Multi-dimensional index type expected 1 to 3 fields, got " ..
+             tostring(#entries))
+    for _, entry in ipairs(entries) do
+      local field_type = entry[2] or entry.type
+      assert(std.type_eq(field_type, int),
+             "Multi-dimensional index type expected fields to be " .. tostring(int) ..
+               ", got " .. tostring(field_type))
+    end
+    return base_type, #entries, entries:map(function(entry) return entry[1] or entry.field end)
+  else
+    assert(false, "Index type expected " .. tostring(opaque) .. ", " ..
+             tostring(int) .. " or a struct, got " .. tostring(base_type))
+  end
+end
+
 -- Hack: Terra uses getmetatable() in terralib.types.istype(), so
 -- setting a custom metatable on a type requires some trickery. The
 -- approach used here is to define __metatable() to return the
@@ -1397,17 +1458,7 @@ index_type.__call = bounded_type
 index_type.__metatable = getmetatable(int)
 
 function std.index_type(base_type, displayname)
-  assert(terralib.types.istype(base_type),
-         "Index type requires base type")
-  if not (std.type_eq(base_type, opaque) or std.type_eq(base_type, int)) then
-    assert(false, "Index type requires base type to be " .. tostring(opaque) ..
-             " or " .. tostring(int))
-  end
-
-  local impl_type = base_type
-  if std.type_eq(base_type, opaque) then
-    impl_type = c.legion_ptr_t
-  end
+  local impl_type, dim, fields = validate_index_base_type(base_type)
 
   local st = terralib.types.newstruct(displayname)
   st.entries = terralib.newlist({
@@ -1417,6 +1468,8 @@ function std.index_type(base_type, displayname)
   st.is_index_type = true
   st.base_type = base_type
   st.impl_type = impl_type
+  st.dim = dim
+  st.fields = fields
 
   function st:is_opaque()
     return std.type_eq(self.base_type, opaque)
@@ -1431,6 +1484,34 @@ function std.index_type(base_type, displayname)
       end
     end
     assert(false)
+  end
+
+  function st:zero()
+    assert(self.dim >= 1)
+    local fields = self.fields
+    local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
+
+    if fields then
+      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return 0 end)] } })
+    else
+      return `(self({ __ptr = [self.impl_type](0) }))
+    end
+  end
+
+  function st:to_point(expr)
+    assert(self.dim >= 1)
+    local fields = self.fields
+    local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
+
+    if fields then
+      return quote
+        var v = [expr].__ptr
+      in
+        pt { x = arrayof(int, [fields:map(function(field) return `(v.[field]) end)]) }
+      end
+    else
+      return quote var v = [expr].__ptr in pt { x = arrayof(int, v) } end
+    end
   end
 
   return setmetatable(st, index_type)
@@ -1449,6 +1530,7 @@ function std.ispace(index_type)
 
   st.is_ispace = true
   st.index_type = index_type
+  st.dim = index_type.dim
 
   -- Ispace types can have an optional partition. This is used by
   -- cross_product to enable patterns like prod[i][j]. Of course, the
@@ -2060,7 +2142,9 @@ do
     local st = terralib.types.newstruct()
     st.entries = fields
     st.metamethods.__cast = function(from, to, expr)
-      if to:isstruct() then
+      if std.is_index_type(to) then
+        return `([to]{ __ptr = [to.impl_type](expr)})
+      elseif to:isstruct() then
         local from_fields = {}
         for _, from_field in ipairs(to:getentries()) do
           from_fields[field_name(from_field)] = field_type(from_field)
@@ -2086,6 +2170,8 @@ do
           end)
 
         return quote var [v] = [expr] in [to]({ [fields] }) end
+      else
+        error("ctor must cast to a struct")
       end
     end
     return st
