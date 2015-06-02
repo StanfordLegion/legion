@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -218,7 +218,7 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF
           LegionProf::register_event(0, PROF_BEGIN_WAIT);
 #endif
-          lock_event.wait(true/*block*/);
+          lock_event.wait();
 #ifdef LEGION_PROF
           LegionProf::register_event(0, PROF_END_WAIT);
 #endif

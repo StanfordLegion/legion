@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -118,12 +118,7 @@ pthread_mutex_t debug_mutex;
 // Instead of using __thread, we'll try and make this
 // code more portable by using pthread thread local storage
 //__thread unsigned local_proc_id;
-pthread_key_t local_proc_key;
-static void thread_proc_free(void *arg)
-{
-  assert(arg != NULL);
-  free(arg);
-}
+pthread_key_t local_thread_key;
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -264,6 +259,48 @@ namespace LegionRuntime {
       virtual void print_info(FILE *f) = 0;
     };
 
+    class ExternalWaiter : public EventWaiter {
+    public:
+      ExternalWaiter(void)
+        : ready(false)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_init(&mutex, NULL));
+        PTHREAD_SAFE_CALL(pthread_cond_init(&cond, NULL));
+      }
+      virtual ~ExternalWaiter(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_destroy(&mutex));
+        PTHREAD_SAFE_CALL(pthread_cond_destroy(&cond));
+      }
+    public:
+      virtual bool event_triggered(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
+        ready = true;
+        PTHREAD_SAFE_CALL(pthread_cond_signal(&cond));
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
+        // Don't delete us, we're on the stack
+        return false;
+      }
+      virtual void print_info(FILE *f) 
+      {
+        fprintf(f,"External waiter");
+      }
+    public:
+      void wait(void)
+      {
+        PTHREAD_SAFE_CALL(pthread_mutex_lock(&mutex));
+        if (!ready) {
+          PTHREAD_SAFE_CALL(pthread_cond_wait(&cond, &mutex));
+        }
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(&mutex));
+      }
+    protected:
+      pthread_mutex_t mutex;
+      pthread_cond_t cond;
+      bool ready;
+    };
+
     class DMAOperation : public EventWaiter {
     public:
       virtual ~DMAOperation(void) { }
@@ -303,8 +340,8 @@ namespace LegionRuntime {
     public:
       PerThreadTimerData(void)
       {
-        unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
-        thread = *local_proc_id; 
+        //unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
+        //thread = *local_proc_id; 
         mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
         PTHREAD_SAFE_CALL(pthread_mutex_init(mutex,NULL));
       }
@@ -314,7 +351,7 @@ namespace LegionRuntime {
         free(mutex);
       }
 
-      unsigned thread;
+      //unsigned thread;
       std::list<TimerStackEntry> timer_stack;
       std::map<int, double> timer_accum;
       pthread_mutex_t *mutex;
@@ -613,7 +650,7 @@ namespace LegionRuntime {
 	// test whether an event has triggered without waiting
 	bool has_triggered(EventGeneration needed_gen);
 	// block until event has triggered
-	void wait(EventGeneration needed_gen, bool block);
+	void wait(EventGeneration needed_gen);
         // defer triggering of an event on another event
         void defer_trigger(Event wait_for);
 	// create an event that won't trigger until all input events have
@@ -690,73 +727,47 @@ namespace LegionRuntime {
     public:
         // For creation of normal processors when there is no utility processors
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table, 
-                      Processor p, size_t stacksize, bool return_finish = false) 
+                      Processor p, size_t stacksize) 
           : init_bar(init), task_table(table), proc(p), 
             proc_kind(Processor::LOC_PROC), utility_proc(this),
-            is_utility_proc(true), return_on_finish(return_finish), remaining_stops(0),
-            scheduler_invoked(false), util_shutdown(true)
+            shutdown(false), shutdown_trigger(false), 
+            stack_size(stacksize), running_thread(NULL)
         {
           utility.id = p.id; // we are our own utility processor
-          initialize_state(stacksize);
-          // Add ourselves as the processor that we're managing 
-          util_users.insert(p);
+          initialize_state();
         }
         // For the creation of normal processors when there are utility processors
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table,
-                      Processor p, size_t stacksize, ProcessorImpl *util, bool return_finish = false)
+                      Processor p, size_t stacksize, ProcessorImpl *util)
           : init_bar(init), task_table(table), proc(p), 
             utility(util->get_utility_processor()), 
-            proc_kind(Processor::LOC_PROC), utility_proc(util), 
-            is_utility_proc(false), return_on_finish(return_finish), remaining_stops(0),
-            scheduler_invoked(false), util_shutdown(false)
+            proc_kind(Processor::LOC_PROC), utility_proc(util),
+            shutdown(false), shutdown_trigger(false), 
+            stack_size(stacksize), running_thread(NULL)
         {
-          initialize_state(stacksize);
-        }
-        // For the creation of explicit utility processors
-        ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table,
-                      Processor p, size_t stacksize, unsigned num_owners, bool return_finish = false)
-          : init_bar(init), task_table(table), proc(p), 
-            proc_kind(Processor::UTIL_PROC), utility_proc(this),
-            is_utility_proc(true), return_on_finish(return_finish), remaining_stops(num_owners),
-            scheduler_invoked(false), util_shutdown(true)
-        {
-          utility.id = p.id;
-          initialize_state(stacksize);
+          initialize_state();
         }
         virtual ~ProcessorImpl(void)
         {
-                PTHREAD_SAFE_CALL(pthread_mutex_destroy(mutex));
-                PTHREAD_SAFE_CALL(pthread_cond_destroy(wait_cond));
-                PTHREAD_SAFE_CALL(pthread_attr_destroy(&attr));
-                free(mutex);
-                free(wait_cond);
+          PTHREAD_SAFE_CALL(pthread_mutex_destroy(mutex));
+          PTHREAD_SAFE_CALL(pthread_cond_destroy(wait_cond));
+          free(mutex);
+          free(wait_cond);
         }
     protected:
-        void initialize_state(size_t stacksize);
+        void initialize_state(void);
     public:
         // Operations for utility processors
         Processor get_utility_processor(void) const;
         Processor get_id(void) const { return proc; }
         Processor::Kind get_proc_kind(void) const { return proc_kind; }
-        void release_user(void);
-        void utility_finish(void);
-        const std::set<Processor>& get_utility_users(void) const;
-        void add_utility_user(Processor p, ProcessorImpl *impl);
     public:
         void add_to_group(ProcessorGroup *grp) { groups.push_back(grp); }
         virtual void get_group_members(std::vector<Processor>& members);
     public:
         virtual Event spawn(Processor::TaskFuncID func_id, const void * args,
                             size_t arglen, Event wait_on, int priority);
-        void run(void);
-	static void* start(void *proc);
-	void preempt(EventImpl *event, EventImpl::EventGeneration needed);
-    public:
-        void increment_utility(void);
-        void decrement_utility(void);
-    protected:
-	bool execute_task(bool permit_shutdown);
-        bool perform_scheduling(bool need_lock);
+    
     protected:
 	class TaskDesc {
         public:
@@ -809,27 +820,65 @@ namespace LegionRuntime {
           ProcessorImpl *target;
           TaskDesc *task;
         };
-        class PreemptWaiter : public EventWaiter {
+      public:
+        class ProcessorThread : public EventWaiter {
         public:
-          PreemptWaiter(ProcessorImpl *t)
-            : target(t) { }
-          virtual ~PreemptWaiter(void) { }
+          enum ThreadState {
+            RUNNING_STATE,
+            PAUSING_STATE, // about to pause
+            PAUSED_STATE,
+            RESUMABLE_STATE,
+            SLEEPING_STATE, // about to sleep
+            SLEEP_STATE,
+          };
         public:
-          virtual bool event_triggered(void) {
-            target->signal_proc();
-            return true;
-          }
+          ProcessorThread(ProcessorImpl *impl, size_t stack_size);
+          ~ProcessorThread(void);
+        public:
+          void do_initialize(void) { initialize = true; }
+          void do_finalize(void) { finalize = true; }
+        public:
+          static void* entry(void *arg);
+          void run(void);
+          void awake(void);
+          void sleep(void);
+          void prepare_to_sleep(void);
+          void preempt(EventImpl *event, EventImpl::EventGeneration needed); 
+          void resume(void);
+          void shutdown(void);
+          void start(void);
+          inline Processor get_processor(void) const { return proc->get_id(); } 
+        public:
+          virtual bool event_triggered(void);
           virtual void print_info(FILE *f) {
-            fprintf(f,"Preempt waiter");
+            fprintf(f, "Paused thread %lx\n", (unsigned long)thread);
           }
+        public:
+          ProcessorImpl *const proc;
         protected:
-          ProcessorImpl *target;
+          pthread_t thread;
+          pthread_attr_t attr;
+          ThreadState state;
+          pthread_mutex_t *thread_mutex;
+          pthread_cond_t *thread_cond;
+          bool initialize;
+          bool finalize;
         };
     public:
+        void start_processor(void);
+        void shutdown_processor(void);
+        void initialize_processor(void);
+        void finalize_processor(void);
+        void process_kill(void);
+        bool is_idle(void);
+        void pause_thread(ProcessorThread *thread);
+        void resume_thread(ProcessorThread *thread);
+    public:
         void enqueue_task(TaskDesc *task, Event wait_on);
-        void signal_proc(void);
     protected:
         void add_to_ready_queue(TaskDesc *desc);
+	bool execute_task(ProcessorThread *thread);
+        void run_task(TaskDesc *task);
     public:
         pthread_attr_t attr; // For setting pthread parameters when starting the thread
     protected:
@@ -843,16 +892,14 @@ namespace LegionRuntime {
 	pthread_mutex_t *mutex;
 	pthread_cond_t *wait_cond;
 	// Used for detecting the shutdown condition
-	bool shutdown;
-	EventImpl *shutdown_trigger;
-        const bool is_utility_proc;
-        const bool return_on_finish;
-        unsigned remaining_stops; // for utility processor knowing when to stop
-        bool scheduler_invoked;   // for traking if we've invoked the scheduler
-        bool util_shutdown;       // for knowing when our utility processor is done
-        std::set<Processor> util_users;// Users of the utility processor to know when it's safe to finish
-        std::vector<ProcessorImpl*> constituents; // User impls of the utility processor
+	bool shutdown, shutdown_trigger;
+        const size_t stack_size;
         std::vector<ProcessorGroup *> groups;  // groups this proc is a member of
+    protected:
+        ProcessorThread               *running_thread;
+        std::set<ProcessorThread*>    paused_threads;
+        std::deque<ProcessorThread*>  resumable_threads;
+        std::vector<ProcessorThread*> available_threads;
     };
 
     class ProcessorGroup : public ProcessorImpl {
@@ -897,19 +944,22 @@ namespace LegionRuntime {
 	return e->has_triggered(gen);
     }
 
-    void Event::wait(bool block) const
+    void Event::wait(void) const
     {
         DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL); 
 	if (!id) return;
 	EventImpl *e = Runtime::Impl::get_runtime()->get_event_impl(*this);
-	e->wait(gen,block);
+	e->wait(gen);
     }
 
     // used by non-legion threads to wait on an event - always blocking
     void Event::external_wait(void) const
     {
-      // shared lowlevel does pthreads for everybody
-      wait(true);
+      if (!id) return;
+      EventImpl *e = Runtime::Impl::get_runtime()->get_event_impl(*this);
+      ExternalWaiter waiter;
+      e->add_waiter(gen, &waiter);
+      waiter.wait();
     }
 
     Event Event::merge_events(Event ev1, Event ev2, Event ev3,
@@ -1018,30 +1068,11 @@ namespace LegionRuntime {
 	return result;
     }
 
-    void EventImpl::wait(EventGeneration needed_gen, bool block)
+    void EventImpl::wait(EventGeneration needed_gen)
     {
-        if (block)
-        {
-            // First check to see if the event has triggered
-            PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));	
-            // Wait until the generation indicates that the event has occurred
-            while (needed_gen > generation) 
-            {
-                    DetailedTimer::ScopedPush sp(TIME_NONE);
-                    PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
-            }
-            PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-        }
-        else
-        {
-            // Try preempting the process
-            unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
-            Processor local;
-            local.id = *local_proc_id;
-            ProcessorImpl *impl = Runtime::Impl::get_runtime()->get_processor_impl(local);
-            // This call will only return once the event has triggered
-            impl->preempt(this,needed_gen);
-        }
+      ProcessorImpl::ProcessorThread *thread = 
+        (ProcessorImpl::ProcessorThread*)pthread_getspecific(local_thread_key);
+      thread->preempt(this, needed_gen);
     }
 
     void EventImpl::defer_trigger(Event wait_for)
@@ -1925,10 +1956,9 @@ namespace LegionRuntime {
     
     /*static*/ Processor Processor::get_executing_processor(void)
     {
-      unsigned *local_proc_id = (unsigned*)pthread_getspecific(local_proc_key);
-      Processor local;
-      local.id = *local_proc_id;
-      return local;
+      ProcessorImpl::ProcessorThread *thread = 
+        (ProcessorImpl::ProcessorThread*)pthread_getspecific(local_thread_key);
+      return thread->get_processor();
     }
 
     Processor::Kind Processor::kind(void) const
@@ -1964,19 +1994,12 @@ namespace LegionRuntime {
       Runtime::Impl::get_runtime()->get_processor_impl(*this)->get_group_members(members);
     }
 
-    void ProcessorImpl::initialize_state(size_t stacksize)
+    void ProcessorImpl::initialize_state(void)
     {
-        // stack size is 0 if we don't need a thread at all
-        if(stacksize == 0) return;
-
         mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
         wait_cond = (pthread_cond_t*)malloc(sizeof(pthread_cond_t));
         PTHREAD_SAFE_CALL(pthread_mutex_init(mutex,NULL));
         PTHREAD_SAFE_CALL(pthread_cond_init(wait_cond,NULL));
-        PTHREAD_SAFE_CALL(pthread_attr_init(&attr));
-        PTHREAD_SAFE_CALL(pthread_attr_setstacksize(&attr,stacksize));
-        shutdown = false;
-        shutdown_trigger = NULL;
     }
 
     void ProcessorImpl::get_group_members(std::vector<Processor>& members)
@@ -2005,26 +2028,18 @@ namespace LegionRuntime {
         wait_impl->add_waiter(wait_on.gen, waiter);
         return;
       }
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // Put it on the ready queue
       add_to_ready_queue(task);
-      // Signal the thread there is a task to run in case it is waiting
-      PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-    }
-
-    void ProcessorImpl::signal_proc(void)
-    {
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-      PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
     void ProcessorImpl::add_to_ready_queue(TaskDesc *task)
     {
-      // Better already hold the lock when calling this method
+      ProcessorThread *to_wake = NULL;
+      ProcessorThread *to_start = NULL;
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
       // Common case
-      if (ready_queue.empty() || (ready_queue.back()->priority >= task->priority))
+      if (ready_queue.empty() || 
+          (ready_queue.back()->priority >= task->priority))
         ready_queue.push_back(task);
       else
       {
@@ -2043,313 +2058,404 @@ namespace LegionRuntime {
         if (!inserted)
           ready_queue.push_back(task);
       }
+      // Figure out if we need to wake someone up
+      if (running_thread == NULL) {
+        if (!available_threads.empty()) {
+          to_wake = available_threads.back();
+          available_threads.pop_back();
+          running_thread = to_wake;
+        } else {
+          to_start = new ProcessorThread(this, stack_size);
+          running_thread = to_start;
+        }
+      }
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      if (to_wake)
+        to_wake->awake();
+      if (to_start)
+        to_start->start();
     }
 
     Processor ProcessorImpl::get_utility_processor(void) const
     {
-        return utility;
+      return utility;
     }
 
-    void ProcessorImpl::release_user()
+    bool ProcessorImpl::execute_task(ProcessorThread *thread)
     {
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-#ifdef DEBUG_LOW_LEVEL
-      assert(remaining_stops > 0);
-#endif
-      remaining_stops--;
-      // If we've had all our users released, we can shutdown
-      if (remaining_stops == 0)
+      // Sanity check, we should be the running thread if we are in here
+      assert(thread == running_thread);
+      // First check to see if there are any resumable threads
+      // If there are then we will switch onto those
+      if (!resumable_threads.empty())
       {
-        shutdown = true;
+        // Move this thread on to the available threads and wake
+        // up one of the resumable threads
+        thread->prepare_to_sleep();
+        available_threads.push_back(thread);
+        // Pull the first thread off the resumable threads
+        ProcessorThread *to_resume = resumable_threads.front();
+        resumable_threads.pop_front();
+        // Make this the running thread
+        running_thread = to_resume;
+        // Release the lock
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+        // Wake up the resumable thread
+        to_resume->resume();
+        // Put ourselves to sleep
+        thread->sleep();
       }
-      // Signal in case the utility processor is waiting on work
-      PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-    }
-
-    void ProcessorImpl::utility_finish(void)
-    {
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-#ifdef DEBUG_LOW_LEVEL
-      assert(!is_utility_proc);
-      assert(!util_shutdown);
-#endif
-      // Set util shutdown to true
-      util_shutdown = true;
-      // send a signal in case the processor was waiting
-      PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
-      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-    }
-
-    const std::set<Processor>& ProcessorImpl::get_utility_users(void) const
-    {
-      if (is_utility_proc)
-        return util_users;
+      else if (ready_queue.empty())
+      {
+        // If there are no tasks to run, then we should go to sleep
+        thread->prepare_to_sleep();
+        available_threads.push_back(thread);
+        running_thread = NULL;
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+        thread->sleep();
+      }
       else
-        return utility_proc->get_utility_users();
+      {
+        // Pull a task off the queue and execute it
+        TaskDesc *task = ready_queue.front();
+        ready_queue.pop_front();
+        PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+        run_task(task);
+      }
+      // This value is monotonic so once it becomes true, then we should exit
+      return shutdown;
     }
 
-    void ProcessorImpl::add_utility_user(Processor p, ProcessorImpl *impl)
+    void ProcessorImpl::run_task(TaskDesc *task)
     {
-      util_users.insert(p);
-      constituents.push_back(impl);
-    }
-
-    void ProcessorImpl::increment_utility(void)
-    {
-      // do we need this any more?
-    }
-
-    void ProcessorImpl::decrement_utility(void)
-    {
-      // do we need this any more?
-    }
-
-    void ProcessorImpl::run(void)
-    {
-        //fprintf(stdout,"This is processor %d\n",proc.id);
-        //fflush(stdout);
-        // Check to see if there is an initialization task
-        Processor::TaskIDTable::const_iterator it = 
-	  task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
-        if (it != task_table.end())
-        {	  
+      int start_count = __sync_fetch_and_add(&(task->start_arrivals),1);
+      if (start_count == 0)
+      {
+        if (task->func_id != 0)
+        {
+          Processor::TaskIDTable::const_iterator it = 
+                              task_table.find(task->func_id);
+#ifdef DEBUG_LOW_LEVEL
+          assert(it != task_table.end());
+#endif
           Processor::TaskFuncPtr func = it->second;
-          func(NULL, 0, proc);
+          func(task->args, task->arglen, proc);
+          
+        } else {
+          process_kill();
         }
-        // Wait for all the processors to be ready to go
+        // Trigger the event indicating that the task has been run
+        task->complete->trigger();
+      }
+      int expected_finish = task->expected;
+      int finish_count = __sync_add_and_fetch(&(task->finish_arrivals),1);
+      if (finish_count == expected_finish)
+        delete task;
+    }
+
+    void ProcessorImpl::start_processor(void)
+    {
+      // Make a new thread and tell it to run the start-up routine
+      assert(running_thread == NULL);
+      running_thread = new ProcessorThread(this, stack_size);
+      running_thread->do_initialize();
+      running_thread->start();
+    }
+
+    void ProcessorImpl::shutdown_processor(void)
+    {
+      // First check to make sure that we received the kill
+      // pill. If we didn't then wait for it. This is how
+      // we distinguish deadlock from just normal termination
+      // from all the processors being idle 
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      if (!shutdown_trigger)
+        PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond, mutex));
+      assert(shutdown_trigger);
+      shutdown = true;
+      assert(running_thread == NULL);
+      assert(resumable_threads.empty());
+      assert(paused_threads.empty());
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      //printf("Processor " IDFMT " needed %ld threads\n", 
+      //        proc.id, available_threads.size());
+      // We can now read this outside the lock since we know
+      // that the threads are all asleep and are all about to exit
+      for (unsigned idx = 0; idx < available_threads.size(); idx++)
+      {
+        if (idx == 0)
+          available_threads[idx]->do_finalize();
+        available_threads[idx]->shutdown();
+        delete available_threads[idx];
+      }
+    }
+
+    void ProcessorImpl::initialize_processor(void)
+    {
+      //fprintf(stdout,"This is processor %d\n",proc.id);
+      //fflush(stdout);
+      // Check to see if there is an initialization task
+      Processor::TaskIDTable::const_iterator it = 
+        task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
+      if (it != task_table.end())
+      {	  
+        Processor::TaskFuncPtr func = it->second;
+        func(NULL, 0, proc);
+      }
+      // Wait for all the processors to be ready to go
 #ifndef __MACH__
-        int bar_result = pthread_barrier_wait(init_bar);
-        if (bar_result == PTHREAD_BARRIER_SERIAL_THREAD)
-        {
-          // Free the barrier
-          PTHREAD_SAFE_CALL(pthread_barrier_destroy(init_bar));
-          free(init_bar);
-        }
+      int bar_result = pthread_barrier_wait(init_bar);
+      if (bar_result == PTHREAD_BARRIER_SERIAL_THREAD)
+      {
+        // Free the barrier
+        PTHREAD_SAFE_CALL(pthread_barrier_destroy(init_bar));
+        free(init_bar);
+      }
 #if DEBUG_LOW_LEVEL
-        else
-        {
-          PTHREAD_SAFE_CALL(bar_result);
-        }
+      else
+      {
+        PTHREAD_SAFE_CALL(bar_result);
+      }
 #endif
 #else // MAC OSX case
-        bool delete_barrier = init_bar->arrive();
-        if (delete_barrier)
-          delete init_bar;
+      bool delete_barrier = init_bar->arrive();
+      if (delete_barrier)
+        delete init_bar;
 #endif
-        init_bar = NULL;
-        //fprintf(stdout,"Processor %d is starting\n",proc.id);
-        //fflush(stdout);
-	// Processors run forever and permit shutdowns
-	while (true)
-	{
-		// Make sure we're holding the lock
-		PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-		// This task will perform the unlock
-		bool quit = execute_task(true);
-		if(quit) break;
-	}
+      init_bar = NULL;
     }
 
-    void ProcessorImpl::preempt(EventImpl *event, EventImpl::EventGeneration needed)
+    void ProcessorImpl::finalize_processor(void)
     {
-      // Put a preempt waiter to on the list of waiters to make
-      // sure that this thread is awake when the event actually triggers
-      PreemptWaiter *waiter = new PreemptWaiter(this);
-      event->add_waiter(needed, waiter);
-      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-      // have to hold the lock here when testing this
-      // so we don't accidentally miss a wake-up when
-      // going to sleep.
-      while (!(event->has_triggered(needed)))
-      {
-        // Don't permit shutdowns since there is still a task waiting
-        execute_task(false);
-        // Relock the task for our next attempt
-        PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      // Check to see if there is a shutdown method
+      Processor::TaskIDTable::const_iterator it = 
+        task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
+      if (it != task_table.end())
+      {	  
+        Processor::TaskFuncPtr func = it->second;
+        func(NULL, 0, proc);
       }
+    }
+    
+    void ProcessorImpl::process_kill(void)
+    {
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      shutdown_trigger = true;
+      PTHREAD_SAFE_CALL(pthread_cond_signal(wait_cond));
       PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
     }
 
-    bool ProcessorImpl::perform_scheduling(bool need_lock)
+    bool ProcessorImpl::is_idle(void)
     {
-      // the scheduler wasn't invoked so we still hold the lock
+      // This processor is idle if all its threads are idle
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      bool result = (running_thread == NULL) && resumable_threads.empty()
+                      && paused_threads.empty();
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      return result;
+    }
+
+    void ProcessorImpl::pause_thread(ProcessorThread *thread)
+    {
+      ProcessorThread *to_wake = NULL;
+      ProcessorThread *to_start = NULL;
+      ProcessorThread *to_resume = NULL;
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      assert(running_thread == thread);
+      // Put this on the list of paused threads
+      paused_threads.insert(thread);
+      // Now see if we have other work to do
+      if (!resumable_threads.empty()) {
+        to_resume = resumable_threads.front();
+        resumable_threads.pop_front();
+        running_thread = to_resume;
+      } else if (!ready_queue.empty()) {
+        // Note we might need to make a new thread here
+        if (!available_threads.empty()) {
+          to_wake = available_threads.back();
+          available_threads.pop_back();
+          running_thread = to_wake;
+        } else {
+          // Make a new thread to run
+          to_start = new ProcessorThread(this, stack_size);
+          running_thread = to_start;
+        }
+      } else {
+        // Nothing else to do, so mark that no one is running
+        running_thread = NULL;
+      }
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      // Wake up any threads while not holding the lock
+      if (to_wake)
+        to_wake->awake();
+      if (to_start)
+        to_start->start();
+      if (to_resume)
+        to_resume->resume();
+    }
+
+    void ProcessorImpl::resume_thread(ProcessorThread *thread)
+    {
+      bool resume_now = false; 
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
+      std::set<ProcessorThread*>::iterator finder = 
+        paused_threads.find(thread);
+      assert(finder != paused_threads.end());
+      paused_threads.erase(finder);
+      if (running_thread == NULL) {
+        // No one else is running now, so resume the thread
+        running_thread = thread;
+        resume_now = true;
+      } else {
+        // Easy case, just add it to the list of resumable threads
+        resumable_threads.push_back(thread);
+      }
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
+      if (resume_now)
+        thread->resume();
+    }
+
+    ProcessorImpl::ProcessorThread::ProcessorThread(ProcessorImpl *p,
+                                                    size_t stack_size)
+      : proc(p), state(RUNNING_STATE), 
+        initialize(false), finalize(false)
+    {
+      thread_mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+      thread_cond = (pthread_cond_t*)malloc(sizeof(pthread_cond_t));
+      PTHREAD_SAFE_CALL(pthread_mutex_init(thread_mutex,NULL));
+      PTHREAD_SAFE_CALL(pthread_cond_init(thread_cond,NULL));
+      PTHREAD_SAFE_CALL(pthread_attr_init(&attr));
+      PTHREAD_SAFE_CALL(pthread_attr_setstacksize(&attr, stack_size));
+    }
+
+    ProcessorImpl::ProcessorThread::~ProcessorThread(void)
+    {
+      free(thread_mutex);
+      free(thread_cond);
+    }
+
+    /*static*/ void* ProcessorImpl::ProcessorThread::entry(void *arg)
+    {
+      ProcessorThread *thread = (ProcessorThread*)arg; 
+      PTHREAD_SAFE_CALL(pthread_setspecific(local_thread_key, thread));
+      // Also set the value of thread timer key
+      PTHREAD_SAFE_CALL( pthread_setspecific(thread_timer_key, NULL) );
+      thread->run();
+      return NULL;
+    }
+
+    void ProcessorImpl::ProcessorThread::run(void)
+    {
+      if (initialize)
+        proc->initialize_processor();
+      while (true)
+      {
+        assert(state == RUNNING_STATE);
+        bool quit = proc->execute_task(this);
+        if (quit) break;
+      }
+      if (finalize)
+        proc->finalize_processor();
+    }
+
+    void ProcessorImpl::ProcessorThread::awake(void)
+    {
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      assert((state == SLEEPING_STATE) || (state == SLEEP_STATE));
+      // Only need to signal if the thread is actually asleep
+      if (state == SLEEP_STATE)
+        PTHREAD_SAFE_CALL(pthread_cond_signal(thread_cond));
+      state = RUNNING_STATE;
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+    }
+
+    void ProcessorImpl::ProcessorThread::sleep(void)
+    {
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      assert((state == SLEEPING_STATE) || (state == RUNNING_STATE));
+      // If we haven't been told to stay awake, then go to sleep
+      if (state == SLEEPING_STATE) {
+        state = SLEEP_STATE;
+        PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
+      }
+      assert(state == RUNNING_STATE);
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+    }
+
+    void ProcessorImpl::ProcessorThread::prepare_to_sleep(void)
+    {
+      // Don't need the lock since we are running
+      assert(state == RUNNING_STATE);
+      state = SLEEPING_STATE;
+    }
+
+    void ProcessorImpl::ProcessorThread::preempt(EventImpl *event,
+                                                 EventImpl::EventGeneration needed)
+    {
+      // First set our state to paused 
+      assert(state == RUNNING_STATE);
+      state = PAUSING_STATE;
+      // Register ourselves with the event
+      event->add_waiter(needed, this);
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      if (state == PAUSING_STATE)
+      {
+        state = PAUSED_STATE;
+        // Tell the processor that this thread is going to sleep
+        proc->pause_thread(this);
+        PTHREAD_SAFE_CALL(pthread_cond_wait(thread_cond, thread_mutex));
+      }
+      assert(state == RUNNING_STATE);
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+    }
+
+    bool ProcessorImpl::ProcessorThread::event_triggered(void)
+    {
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      assert((state == PAUSING_STATE) || (state == PAUSED_STATE));
+      bool need_resume = false;
+      // If the thread is still trying to go to sleep we
+      // can just mark it runnable again, otherwise it
+      // already went to sleep so we have to mark that
+      // it is resumable
+      if (state == PAUSED_STATE) {
+        need_resume = true;
+        state = RESUMABLE_STATE;
+      } else {
+        state = RUNNING_STATE;
+      }
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+      if (need_resume)
+        proc->resume_thread(this);
       return false;
     }
 
-    // Must always be holding the lock when calling this task
-    // This task will always unlock it
-    // returns true if the shutdown task was executed
-    bool ProcessorImpl::execute_task(bool permit_shutdown)
+    void ProcessorImpl::ProcessorThread::resume(void)
     {
-        // Look through the waiting queue, to see if any tasks
-        // have been woken up	
-        	
-        // If we don't have any work to do, check to see
-        // if we can run the idle task.  Also if we're the utility
-        // processor, and we don't have anything to do then try
-        // running the idle task for each of our constituents.
-        if (ready_queue.empty() && perform_scheduling(false/*need lock*/))
-        {
-          // If we return true then we've release the lock so we
-          // have to go back around the loop when we're done
-          // Now we need to return since we no longer hold the lock
-          return false;
-        }
-        else if (is_utility_proc && !shutdown && ready_queue.empty())
-        {
-	  PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
-
-          PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-          // Note we don't need the lock to read these
-          // since they don't change after the constructor is called
-          for (std::vector<ProcessorImpl*>::const_iterator it = constituents.begin();
-                it != constituents.end(); it++)
-          {
-            // We should never be in our own list of constituents
-#ifdef DEBUG_LOW_LEVEL
-            assert((*it) != this);
-#endif
-            (*it)->perform_scheduling(true/*need lock*/);
-          }
-          // Return since we no longer hold the lock
-          return false;
-        }
-	if (ready_queue.empty())
-	{	
-		if (shutdown && permit_shutdown)
-		{
-                        // Check to see if we have to wait for our utility processor to finish
-                        if (!util_shutdown)
-                        {
-                          DetailedTimer::ScopedPush sp(TIME_NONE);
-                          // Wait for our utility processor to indicate that its done
-                          PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
-                        }
-                        // unlock the lock, just in case someone else decides they want to tell us something
-                        // to do even though we've already exited
-                        PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-                        // Check to see if there is a shutdown method
-			Processor::TaskIDTable::const_iterator it = 
-			  task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
-			if (it != task_table.end())
-			{	  
-			  Processor::TaskFuncPtr func = it->second;
-                          func(NULL, 0, proc);
-                        }
-                        // If we don't have any utility users or we are our own
-                        // utility processor, then we are done
-                        if (util_users.empty() || 
-                            ((util_users.size() == 1) && (util_users.find(proc) != util_users.end())))
-                        {
-                          shutdown_trigger->trigger();
-                        }
-                        else
-                        {
-                          PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-                          while (remaining_stops > 0)
-                            PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
-                          PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-                          // Send shutdown messages to all our users that aren't us
-                          for (std::set<Processor>::const_iterator it = util_users.begin();
-                                it != util_users.end(); it++)
-                          {
-                            // Skip ourselves
-                            if ((*it) == proc)
-                              continue;
-                            ProcessorImpl *orig = Runtime::Impl::get_runtime()->get_processor_impl(*it);
-                            orig->utility_finish();
-                          }
-                        }
-			return true; // caller may have other stuff to clean up
-                        //pthread_exit(NULL);	
-		}
-		
-		// Wait until someone tells us there is work to do unless we've been told to shutdown
-                if (!shutdown)
-                {
-                  DetailedTimer::ScopedPush sp(TIME_NONE);
-                  PTHREAD_SAFE_CALL(pthread_cond_wait(wait_cond,mutex));
-                }
-		PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-	}
-        else if (scheduler_invoked)
-        {
-                // Don't allow other tasks to be run while running the idle task
-                PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));
-                return false;
-        }
-	else
-	{
-		// Pop a task off the queue and run it
-		TaskDesc *task = ready_queue.front();
-		ready_queue.pop_front();
-		PTHREAD_SAFE_CALL(pthread_mutex_unlock(mutex));	
-                // See if we need to run it or if has already been done
-                int start_count = __sync_fetch_and_add(&(task->start_arrivals),1);
-                // If we are the first one to do arrival at this task do it
-                if (start_count == 0)
-                {
-                  // Check for the shutdown function
-                  if (task->func_id == 0)
-                  {
-                          shutdown = true;
-                          shutdown_trigger = task->complete;
-                          // Check to see if we have a utility processor, if so mark that we're done
-                          // and then set the flag to indicate when the utility processor has drained
-                          // its tasks
-                          if (!is_utility_proc && (utility_proc != this))
-                          {
-                            util_shutdown = false;
-                            // Tell our utility processor to tell us when it's done
-                            utility_proc->release_user();
-                          }
-                          else
-                          {
-                            // We didn't have a utility processor to shutdown
-                            util_shutdown = true;
-                          }
-                  }
-                  else
-                  {
-			  Processor::TaskIDTable::const_iterator it = 
-			    task_table.find(task->func_id);
-#ifdef DEBUG_LOW_LEVEL
-                          assert(it != task_table.end());
-#endif
-                          Processor::TaskFuncPtr func = it->second;
-                          func(task->args, task->arglen, proc);
-                          // Trigger the event indicating that the task has been run
-                          task->complete->trigger();
-                  }
-                }
-                // Now see if we need to delete it
-                int expected_finish = task->expected;
-                int finish_count = __sync_add_and_fetch(&(task->finish_arrivals),1);
-                if (finish_count == expected_finish)
-                    delete task;
-	}
-	return false;
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      assert(state == RESUMABLE_STATE);
+      state = RUNNING_STATE;
+      PTHREAD_SAFE_CALL(pthread_cond_signal(thread_cond));
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
     }
 
-    // The static method used to start the processor running
-    void* ProcessorImpl::start(void *p)
+    void ProcessorImpl::ProcessorThread::shutdown(void)
     {
-	ProcessorImpl *proc = (ProcessorImpl*)p;
-	// Set the thread local variable processor id
-	//local_proc_id = proc->proc.id;
-        {
-          unsigned *thread_id = (unsigned*)malloc(sizeof(unsigned));
-          *thread_id = proc->proc.id;
-          PTHREAD_SAFE_CALL( pthread_setspecific(local_proc_key, thread_id) );
-        }
-        // Also set the value of thread timer key
-        PTHREAD_SAFE_CALL( pthread_setspecific(thread_timer_key, NULL) );
-	// Will never return from this call
-	proc->run();
-        if (!proc->return_on_finish)
-          pthread_exit(NULL);	
-        return NULL;
+      // Wake up the thread
+      PTHREAD_SAFE_CALL(pthread_mutex_lock(thread_mutex));
+      state = RUNNING_STATE;
+      PTHREAD_SAFE_CALL(pthread_cond_signal(thread_cond));
+      PTHREAD_SAFE_CALL(pthread_mutex_unlock(thread_mutex));
+      // Now wait to join with the thread
+      void *result;
+      PTHREAD_SAFE_CALL(pthread_join(thread, &result));
+    }
+
+    void ProcessorImpl::ProcessorThread::start(void)
+    {
+      PTHREAD_SAFE_CALL(pthread_create(&thread, &attr,
+                          ProcessorImpl::ProcessorThread::entry, (void*)this));
     }
 
     void ProcessorGroup::get_group_members(std::vector<Processor>& members)
@@ -5926,7 +6032,7 @@ namespace LegionRuntime {
 	PTHREAD_SAFE_CALL(pthread_mutex_init(&debug_mutex,NULL));
 #endif
         // Create the pthread keys for thread local data
-        PTHREAD_SAFE_CALL( pthread_key_create(&local_proc_key, thread_proc_free) );
+        PTHREAD_SAFE_CALL( pthread_key_create(&local_thread_key, NULL) );
         PTHREAD_SAFE_CALL( pthread_key_create(&thread_timer_key, thread_timer_free) );
 
         for (int i=1; i < *argc; i++)
@@ -5949,7 +6055,9 @@ namespace LegionRuntime {
 
         if (num_utility_cpus > num_cpus)
         {
-            fprintf(stderr,"The number of processor groups (%d) cannot be greater than the number of cpus (%d)\n",num_utility_cpus,num_cpus);
+            fprintf(stderr,"The number of processor groups (%d) cannot be "
+                    "greater than the number of cpus (%d)\n",
+                    num_utility_cpus,num_cpus);
             fflush(stderr);
             exit(1);
         }
@@ -5965,10 +6073,13 @@ namespace LegionRuntime {
         // find in proc 0 with NULL
         processors.push_back(NULL);
 #ifndef __MACH__
-        pthread_barrier_t *init_barrier = (pthread_barrier_t*)malloc(sizeof(pthread_barrier_t));
-        PTHREAD_SAFE_CALL(pthread_barrier_init(init_barrier,NULL,(num_cpus+num_utility_cpus)));
+        pthread_barrier_t *init_barrier = 
+          (pthread_barrier_t*)malloc(sizeof(pthread_barrier_t));
+        PTHREAD_SAFE_CALL(pthread_barrier_init(init_barrier,NULL,
+                                    (num_cpus+num_utility_cpus)));
 #else
-        pthread_barrier_t *init_barrier = new pthread_barrier_t(num_cpus+num_utility_cpus);
+        pthread_barrier_t *init_barrier = 
+          new pthread_barrier_t(num_cpus+num_utility_cpus);
 #endif
         if (num_utility_cpus > 0)
         {
@@ -5981,9 +6092,8 @@ namespace LegionRuntime {
             Processor p;
             p.id = num_cpus+idx+1;
             procs.insert(p);
-            // Figure out how many users this guy will have
-            unsigned num_users = (num_cpus/num_utility_cpus) + (idx < (num_cpus%num_utility_cpus) ? 1 : 0);
-            temp_utils[idx] = new ProcessorImpl(init_barrier, task_table, p, cpu_stack_size, num_users);
+            temp_utils[idx] = new ProcessorImpl(init_barrier, task_table, 
+                                                p, cpu_stack_size);
           }
           // Now we can make the processors themselves
           for (unsigned idx = 0; idx < num_cpus; idx++)
@@ -6000,9 +6110,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOW_LEVEL
             assert(utility_idx < num_utility_cpus);
 #endif
-            ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, cpu_stack_size, temp_utils[utility_idx], (idx==0));
+            ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, 
+                                        cpu_stack_size, temp_utils[utility_idx]);
             // Add this processor as utility user
-            temp_utils[utility_idx]->add_utility_user(p, impl);
             processors.push_back(impl);
           }
           // Finally we can add the utility processors to the set of processors
@@ -6019,50 +6129,12 @@ namespace LegionRuntime {
             Processor p;
             p.id = idx + 1;
             procs.insert(p);
-            ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, cpu_stack_size, (idx == 0));
+            ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, 
+                                                    cpu_stack_size);
             processors.push_back(impl);
           }
         }
 	
-#if 0
-	for (unsigned id=1; id<=num_cpus; id++)
-	{
-		Processor p;
-		p.id = id;
-		procs.insert(p);
-                // Compute its utility processor (if any)
-		ProcessorImpl *impl;
-                if (num_utility_cpus > 0)
-                {
-                  unsigned util = id % num_utility_cpus;
-                  Processor utility;
-                  utility.id = num_cpus + 1 + util;
-                  //fprintf(stdout,"Processor %d has utility processor %d\n",id,utility.id);
-                  //fflush(stdout);
-                  impl = new ProcessorImpl(init_barrier,task_table, p, utility, cpu_stack_size);
-                  utility_users[util]++;
-                }
-                else
-                {
-                  impl = new ProcessorImpl(init_barrier,task_table, p, cpu_stack_size);
-                }
-		processors.push_back(impl);
-	}	
-        // Also create the utility processors
-        for (unsigned id=1; id<=num_utility_cpus; id++)
-        {
-                Processor p;
-                p.id = num_cpus + id;
-#ifdef DEBUG_LOW_LEVEL
-                assert(utility_users[id-1] > 0);
-#endif
-                //fprintf(stdout,"Utility processor %d has %d users\n",p.id,utility_users[id-1]);
-                //fflush(stdout);
-                // This processor is a utility processor so it is be default its own utility
-                ProcessorImpl *impl = new ProcessorImpl(init_barrier,task_table, p, cpu_stack_size, true/*utility*/, utility_users[id-1]);
-                processors.push_back(impl);
-        }
-#endif
         if (cpu_mem_size_in_mb > 0)
 	{
                 // Make the first memory null
@@ -6093,23 +6165,7 @@ namespace LegionRuntime {
                   memories.push_back(impl);
           }
         }
-#if 0
-	// All memories are visible from each processor
-	for (unsigned id=1; id<=num_cpus; id++)
-	{
-		Processor p;
-		p.id = id;
-		visible_memories_from_procs.insert(std::pair<Processor,std::set<Memory> >(p,memories));
-	}	
-	// All memories are visible from all memories, all processors are visible from all memories
-	for (unsigned id=1; id<=(num_cpus+1); id++)
-	{
-		Memory m;
-		m.id = id;
-		visible_memories_from_memory.insert(std::pair<Memory,std::set<Memory> >(m,memories));
-		machine->visible_procs_from_memory.insert(std::pair<Memory,std::set<Processor> >(m,procs));
-	}
-#endif
+
         // Now set up the affinities for each of the different processors and memories
         for (std::set<Processor>::iterator it = procs.begin(); it != procs.end(); it++)
         {
@@ -6180,12 +6236,6 @@ namespace LegionRuntime {
         assert(processors.size() == (num_cpus+num_utility_cpus+1));
 #endif
 		
-	// Finally do the initialization for thread 0
-        unsigned *local_proc_id = (unsigned*)malloc(sizeof(unsigned));
-	*local_proc_id = 1;
-        PTHREAD_SAFE_CALL( pthread_setspecific(local_proc_key, local_proc_id) );
-        PTHREAD_SAFE_CALL( pthread_setspecific(thread_timer_key, NULL) );
-
 #ifdef LEGION_BACKTRACE
         signal(SIGSEGV, legion_backtrace);
         signal(SIGTERM, legion_backtrace);
@@ -6232,7 +6282,8 @@ namespace LegionRuntime {
 	pthread_t *threadp = (pthread_t*)malloc(sizeof(pthread_t));
 	pthread_attr_t attr;
 	PTHREAD_SAFE_CALL( pthread_attr_init(&attr) );
-	PTHREAD_SAFE_CALL( pthread_create(threadp, &attr, &background_run_thread, (void *)margs) );
+	PTHREAD_SAFE_CALL( pthread_create(threadp, &attr, 
+                            &background_run_thread, (void *)margs) );
 	PTHREAD_SAFE_CALL( pthread_attr_destroy(&attr) );
         // Save this pointer in the background thread
         background_pthread = threadp;
@@ -6248,23 +6299,23 @@ namespace LegionRuntime {
 	}
       }
       // Start the threads for each of the processors (including the utility processors)
-      std::vector<pthread_t> other_threads(processors.size());
-      for (unsigned id=2; id<processors.size(); id++)
-      {
-              ProcessorImpl *impl = processors[id];
-              PTHREAD_SAFE_CALL(pthread_create(&(other_threads[id]), &(impl->attr), ProcessorImpl::start, (void*)impl));
-      }
+      for (unsigned id=1; id < processors.size(); id++)
+        processors[id]->start_processor();
       dma_queue->start();
-
-      // Now run the scheduler
-      ProcessorImpl *impl = processors[1];
-      ProcessorImpl::start((void*)impl);
-      // When we return join on all the other threads and then exit
-      for (unsigned id=2; id<other_threads.size(); id++)
+      // Poll the processors to see if they are done
+      while (true)
       {
-          void *result;
-          PTHREAD_SAFE_CALL(pthread_join(other_threads[id],&result));
+        size_t idle_processors = 1; // 0 proc is always done
+        for (unsigned id=1; id < processors.size(); id++)
+          if (processors[id]->is_idle())
+            idle_processors++;
+        if (idle_processors == processors.size())
+          break;
+        // Otherwise sleep for a whole second
+        sleep(1);
       }
+      for (unsigned id=1; id < processors.size(); id++)
+        processors[id]->shutdown_processor();
       dma_queue->shutdown();
 
       // Once we're done with this, then we can exit with a successful error code
@@ -6296,8 +6347,6 @@ namespace LegionRuntime {
 	// Kill pill
 	it->spawn(0, NULL, 0);
       }
-      // dma thread is shut down automatically after all processor threads are done
-      //Runtime::dma_queue->shutdown();
     }
 
     void Runtime::Impl::wait_for_shutdown(void)

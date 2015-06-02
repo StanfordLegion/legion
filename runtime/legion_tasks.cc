@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2310,7 +2310,7 @@ namespace LegionRuntime {
       // Since we shouldn't be holding any locks here, it should be safe
       // to wait withinout blocking the processor.
       if (wait_on.exists())
-        wait_on.wait(true/*block*/);
+        wait_on.wait();
       return result;
     }
 
@@ -10396,7 +10396,7 @@ namespace LegionRuntime {
       if (!wait_events.empty())
       {
         Event sliced_event = Event::merge_events(wait_events);
-        sliced_event.wait(false/*block*/);
+        sliced_event.wait();
       }
 
       bool success = failed_slices.empty();

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -656,8 +656,11 @@ namespace LegionRuntime {
         PhysicalUser user(RegionUsage(req), user_mask, term_event);
         child_node->find_field_descriptors(ctx.get_id(), user, fid_idx, proc,
                                            field_data, preconditions);
+        Event child_pre;
         const Domain &child_dom = 
-                        child_node->row_source->get_domain(false/*app query*/);
+                        child_node->row_source->get_domain(child_pre);
+        if (child_pre.exists())
+          preconditions.insert(child_pre);
         subspaces[child_dom.get_index_space()] = LowLevel::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
@@ -671,7 +674,7 @@ namespace LegionRuntime {
         ColorPoint child_color(itr.p);
         RegionNode     *orig_child = projection_node->get_child(child_color);
         IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain();
+        const Domain &orig_dom = orig_child->get_domain_no_wait();
         next_child->set_domain(subspaces[orig_dom.get_index_space()]);
       }
       return result;
@@ -715,7 +718,10 @@ namespace LegionRuntime {
       {
         IndexSpaceNode *child_node = 
           projection_node->get_child(ColorPoint(itr.p));
-        const Domain &child_dom = child_node->get_domain(false/*app query*/);
+        Event child_pre;
+        const Domain &child_dom = child_node->get_domain(child_pre);
+        if (child_pre.exists())
+          preconditions.insert(child_pre);
         subspaces[child_dom.get_index_space()] = LowLevel::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
@@ -729,7 +735,7 @@ namespace LegionRuntime {
         ColorPoint child_color(itr.p);
         IndexSpaceNode *orig_child = projection_node->get_child(child_color);
         IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain(false/*app query*/);
+        const Domain &orig_dom = orig_child->get_domain_no_wait();
         next_child->set_domain(subspaces[orig_dom.get_index_space()]);
       }
       return result;
@@ -783,14 +789,14 @@ namespace LegionRuntime {
       {
         IndexSpaceNode *node = get_node(*it); 
         Event precondition;
-        const Domain &dom = node->get_domain_no_wait(precondition);
+        const Domain &dom = node->get_domain(precondition);
         spaces[idx] = dom.get_index_space();
         if (precondition.exists())
           preconditions.insert(precondition);
       }
       Event parent_precondition;
       const Domain &parent_dom = 
-              parent_node->parent->get_domain_no_wait(parent_precondition);
+              parent_node->parent->get_domain(parent_precondition);
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
@@ -825,14 +831,14 @@ namespace LegionRuntime {
         ColorPoint node_color(itr.p);
         IndexSpaceNode *node = reduce_node->get_child(node_color);
         Event precondition;
-        const Domain &dom = node->get_domain_no_wait(precondition);
+        const Domain &dom = node->get_domain(precondition);
         spaces[idx] = dom.get_index_space();
         if (precondition.exists())
           preconditions.insert(precondition);
       }
       Event parent_precondition;
       const Domain &parent_dom = 
-            parent_node->parent->get_domain_no_wait(parent_precondition);
+            parent_node->parent->get_domain(parent_precondition);
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
@@ -860,7 +866,7 @@ namespace LegionRuntime {
       std::vector<LowLevel::IndexSpace> spaces(handles.size()+1);
       IndexSpaceNode *init_node = get_node(initial);
       Event init_precondition;
-      const Domain &init_dom = init_node->get_domain_no_wait(init_precondition);
+      const Domain &init_dom = init_node->get_domain(init_precondition);
       spaces[0] = init_dom.get_index_space();
       if (init_precondition.exists())
         preconditions.insert(init_precondition);
@@ -870,14 +876,14 @@ namespace LegionRuntime {
       {
         IndexSpaceNode *node = get_node(*it);  
         Event precondition;
-        const Domain &dom = node->get_domain_no_wait(precondition);
+        const Domain &dom = node->get_domain(precondition);
         spaces[idx] = dom.get_index_space();
         if (precondition.exists())
           preconditions.insert(precondition);
       }
       Event parent_precondition;
       const Domain &parent_dom = 
-              parent_node->parent->get_domain_no_wait(parent_precondition);
+              parent_node->parent->get_domain(parent_precondition);
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
@@ -925,7 +931,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->get_domain(true/*app query*/);
+      return node->get_domain_blocking();
     }
 
     //--------------------------------------------------------------------------
@@ -934,7 +940,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      node->get_domains(domains, true/*app query*/); 
+      node->get_domains_blocking(domains); 
     }
 
     //--------------------------------------------------------------------------
@@ -1314,7 +1320,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
-      Domain d = node->get_domain();
+      Domain d = node->get_domain_blocking();
       if (d.get_dim() == 0)
       {
         const LowLevel::ElementMask &mask = 
@@ -2236,9 +2242,17 @@ namespace LegionRuntime {
       dst_view->manager->compute_copy_offsets(dst_req.instance_fields, 
                                               dst_fields);
 
+      std::set<Domain> dst_domains;
+      RegionNode *dst_node = get_node(dst_req.region);
+      Event dom_precondition = Event::NO_EVENT;
+      if (dst_node->has_component_domains())
+        dst_domains = dst_node->get_component_domains(dom_precondition);
+      else
+        dst_domains.insert(dst_node->get_domain(dom_precondition));
+
       Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
                                            dst_ref.get_ready_event(),
-                                           precondition);
+                                           precondition, dom_precondition);
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       if (!copy_pre.exists())
       {
@@ -2265,27 +2279,15 @@ namespace LegionRuntime {
       LegionSpy::log_event_dependence(precondition, copy_pre);
 #endif
 #endif
-      RegionNode *dst_node = get_node(dst_req.region);
-      // See if we have component domains or whether there is only
-      // one domain for which the copy needs to be issued
-      Event result;
-      if (dst_node->has_component_domains())
+      std::set<Event> result_events;
+      for (std::set<Domain>::const_iterator it = dst_domains.begin();
+            it != dst_domains.end(); it++)
       {
-        const std::set<Domain> &component_domains = 
-                                  dst_node->get_component_domains();
-        std::set<Event> result_events;
-        for (std::set<Domain>::const_iterator it = component_domains.begin();
-              it != component_domains.end(); it++)
-        {
-          result_events.insert(it->copy(src_fields, dst_fields, copy_pre));
-        }
-        result = Event::merge_events(result_events);
+        Event copy_result = it->copy(src_fields, dst_fields, copy_pre); 
+        if (copy_result.exists())
+          result_events.insert(copy_result);
       }
-      else
-      {
-        Domain copy_domain = dst_node->get_domain();
-        result = copy_domain.copy(src_fields, dst_fields, copy_pre);  
-      }
+      Event result = Event::merge_events(result_events);
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
 #if 0
@@ -3086,7 +3088,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_index_space_request(owner, rez);
       // Wait on the event, be safe for now and block
-      wait_on.wait(true/*block*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
@@ -3132,7 +3134,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_index_partition_request(owner, rez);
       // Be safe and block for now
-      wait_on.wait(true/*block*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
         index_parts.find(part);
@@ -3177,7 +3179,7 @@ namespace LegionRuntime {
       rez.serialize(wait_on);
       runtime->send_field_space_request(owner, rez);
       // Be safe and block for now
-      wait_on.wait(true/*blcok*/);
+      wait_on.wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -3558,8 +3560,8 @@ namespace LegionRuntime {
     {
       IndexSpaceNode *left_node = get_node(left);
       IndexSpaceNode *right_node = get_node(right);
-      const Domain &left_dom = left_node->get_domain();
-      const Domain &right_dom = right_node->get_domain();
+      const Domain &left_dom = left_node->get_domain_blocking();
+      const Domain &right_dom = right_node->get_domain_blocking();
       if (left_dom.get_dim() != right_dom.get_dim())
         return false;
       else if (left_dom.get_dim() == 0)
@@ -4040,11 +4042,12 @@ namespace LegionRuntime {
       bool disjoint = true;
       if (left->has_component_domains())
       {
-        const std::set<Domain> &left_domains = left->get_component_domains();
+        const std::set<Domain> &left_domains = 
+          left->get_component_domains_blocking();
         if (right->has_component_domains())
         {
           const std::set<Domain> &right_domains = 
-                                              right->get_component_domains();
+            right->get_component_domains_blocking();
           // Double Loop
           for (std::set<Domain>::const_iterator lit = left_domains.begin();
                 disjoint && (lit != left_domains.end()); lit++)
@@ -4062,7 +4065,8 @@ namespace LegionRuntime {
           for (std::set<Domain>::const_iterator it = left_domains.begin();
                 disjoint && (it != left_domains.end()); it++)
           {
-            disjoint = RegionTreeForest::are_disjoint(*it, right->get_domain());
+            disjoint = RegionTreeForest::are_disjoint(*it, 
+                        right->get_domain_blocking());
           }
         }
       }
@@ -4071,19 +4075,20 @@ namespace LegionRuntime {
         if (right->has_component_domains())
         {
           const std::set<Domain> &right_domains = 
-                                              right->get_component_domains();
+              right->get_component_domains_blocking();
           // Loop over right components
           for (std::set<Domain>::const_iterator it = right_domains.begin();
                 disjoint && (it != right_domains.end()); it++)
           {
-            disjoint = RegionTreeForest::are_disjoint(left->get_domain(), *it);
+            disjoint = RegionTreeForest::are_disjoint(
+                          left->get_domain_blocking(), *it);
           }
         }
         else
         {
           // No Loops
-          disjoint = RegionTreeForest::are_disjoint(left->get_domain(),
-                                                    right->get_domain());
+          disjoint = RegionTreeForest::are_disjoint(left->get_domain_blocking(),
+                                                  right->get_domain_blocking());
         }
       }
       return disjoint;
@@ -4909,7 +4914,7 @@ namespace LegionRuntime {
             remote_tree_states.begin(); it != remote_tree_states.end(); it++)
       {
         if ((node == it->first) || 
-              node->intersects_with(it->first, false/*compute*/))
+              node->intersects_with(it->first), false/*compute*/)
         {
           // Check to see if we intersect with the tree in any way
           bool remove = issue_invalidations(it->second, node, mask);
@@ -4943,7 +4948,7 @@ namespace LegionRuntime {
       {
         // Check to see if we intersect with the tree in any way
         if ((node == it->first) || 
-              node->intersects_with(it->first, false/*compute*/))
+              node->intersects_with(it->first), false/*compute*/)
         {
           bool remove = issue_invalidations(it->second, node, mask, source);
           if (remove)
@@ -5745,6 +5750,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t IndexSpaceNode::get_num_elmts(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(kind == UNSTRUCTURED_KIND);
+#endif
+      if (parent != NULL)
+        return parent->get_num_elmts();
+      const Domain &dom = get_domain_blocking();
+      return dom.get_index_space().get_valid_mask().get_num_elmts();
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::send_semantic_info(const NodeSet &targets,
                                             SemanticTag tag,
                                             const void *buffer, size_t size,
@@ -5848,44 +5866,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const Domain& IndexSpaceNode::get_domain(bool app_query)
+    Event IndexSpaceNode::get_domain_precondition(void)
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          handle_ready.wait(false/*block*/);
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          handle_ready.wait(true/*block*/); 
-      }
+        handle_ready.wait();
+      return domain_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& IndexSpaceNode::get_domain_blocking(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!handle_ready.has_triggered())
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          domain_ready.wait(false/*block*/);
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          domain_ready.wait(true/*block*/);
-      }
+        domain_ready.wait();
       return domain;
     }
 
     //--------------------------------------------------------------------------
-    const Domain& IndexSpaceNode::get_domain_no_wait(Event &ready)
+    const Domain& IndexSpaceNode::get_domain(Event &precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!handle_ready.has_triggered())
+        handle_ready.wait();
+      precondition = domain_ready;
+      return domain;
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& IndexSpaceNode::get_domain_no_wait(void)
     //--------------------------------------------------------------------------
     {
       // We still need to wait for the handle to be valid
       if (!handle_ready.has_triggered())
-        handle_ready.wait(true/*block*/);
-      ready = domain_ready;
+        handle_ready.wait();
       return domain;
     }
 
@@ -5897,34 +5913,30 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_domains(std::vector<Domain> &domains, 
-                                     bool app_query)
+    void IndexSpaceNode::get_domains_blocking(std::vector<Domain> &domains) 
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          handle_ready.wait(false/*block*/);
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          handle_ready.wait(true/*block*/);
-      }
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
+        domain_ready.wait();
+      if (has_component_domains())
       {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          domain_ready.wait(false/*block*/);
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          domain_ready.wait(true/*block*/);
+        domains.insert(domains.end(), 
+                       component_domains.begin(), component_domains.end());
       }
+      else
+        domains.push_back(domain);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::get_domains(std::vector<Domain> &domains, 
+                                     Event &precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!handle_ready.has_triggered())
+        handle_ready.wait();
+      precondition = domain_ready;
       if (has_component_domains())
       {
         domains.insert(domains.end(), 
@@ -5944,11 +5956,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          handle_ready.wait(false/*block*/);
+          handle_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          handle_ready.wait(true/*block*/);
+          handle_ready.wait();
       }
       if (!domain_ready.has_triggered())
       {
@@ -5956,11 +5968,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          domain_ready.wait(false/*block*/);
+          domain_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          domain_ready.wait(true/*block*/);
+          domain_ready.wait();
       }
       if (domain.get_dim() == 0)
       {
@@ -5981,41 +5993,60 @@ namespace LegionRuntime {
       if (c1 == c2)
         return false;
       // Do the test with read-only mode first
+      Event ready = Event::NO_EVENT;
       bool issue_dynamic_test = false;
+      std::pair<ColorPoint,ColorPoint> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        if (disjoint_subsets.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) !=
-            disjoint_subsets.end())
+        if (disjoint_subsets.find(key) != disjoint_subsets.end())
           return true;
-        else if (Runtime::dynamic_independence_tests &&
-                 (pending_tests.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) ==
-                  pending_tests.end()))
-          issue_dynamic_test = true;
+        else if (aliased_subsets.find(key) != aliased_subsets.end())
+          return false;
+        else
+        {
+          std::map<std::pair<ColorPoint,ColorPoint>,Event>::const_iterator
+            finder = pending_tests.find(key);
+          if (finder != pending_tests.end())
+            ready = finder->second;
+          else
+            issue_dynamic_test = true;
+        }
       }
       if (issue_dynamic_test)
       {
         IndexPartNode *left = get_child(c1);
         IndexPartNode *right = get_child(c2);
+        std::set<Event> preconditions; 
+        left->get_subspace_domain_preconditions(preconditions);
+        right->get_subspace_domain_preconditions(preconditions);
         Processor util = context->runtime->find_utility_group();
         AutoLock n_lock(node_lock);
         // Test again to make sure we didn't lose the race
-        if (pending_tests.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) ==
-            pending_tests.end())
+        std::map<std::pair<ColorPoint,ColorPoint>,Event>::const_iterator
+          finder = pending_tests.find(key);
+        if (finder == pending_tests.end())
         {
           DynamicIndependenceArgs args;
           args.hlr_id = HLR_PART_INDEPENDENCE_TASK_ID;
           args.parent = this;
           args.left = left;
           args.right = right;
-          // Launch the task with low priority so it doesn't
-          // get put on the critical path
-          util.spawn(HLR_TASK_ID, &args, sizeof(args), 
-                     Event::NO_EVENT, -1/*low priority*/);
-          pending_tests.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-          pending_tests.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+          // Get the preconditions for domains 
+          Event pre = Event::merge_events(preconditions);
+          ready = util.spawn(HLR_TASK_ID, &args, sizeof(args), pre);
+          pending_tests[key] = ready;
+          pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready;
         }
+        else
+          ready = finder->second;
       }
-      return false;
+      // Wait for the ready event and then get the result
+      ready.wait();
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      if (disjoint_subsets.find(key) != disjoint_subsets.end())
+        return true;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6034,6 +6065,11 @@ namespace LegionRuntime {
       {
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+      }
+      else
+      {
+        aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
+        aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
       }
       pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c1,c2));
       pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c2,c1));
@@ -6145,9 +6181,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexSpaceNode::get_component_domains(void) const
+    const std::set<Domain>& IndexSpaceNode::get_component_domains_blocking(
+                                                                     void) const
     //--------------------------------------------------------------------------
     {
+      if (!handle_ready.has_triggered())
+        handle_ready.wait();
+      if (!domain_ready.has_triggered())
+        domain_ready.wait();
+      return component_domains;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::set<Domain>& IndexSpaceNode::get_component_domains(
+                                                             Event &ready) const
+    //--------------------------------------------------------------------------
+    {
+      if (!handle_ready.has_triggered())
+        handle_ready.wait();
+      ready = domain_ready;
       return component_domains;
     }
 
@@ -6170,12 +6222,14 @@ namespace LegionRuntime {
       if (component_domains.empty())
       { 
         if (other->has_component_domains())
-          result = compute_intersections(other->get_component_domains(),
-                                         get_domain(), intersect, compute);
+          result = compute_intersections(
+                                   other->get_component_domains_blocking(),
+                                   get_domain_blocking(), intersect, compute);
         else
         {
           Domain inter;
-          result = compute_intersection(get_domain(), other->get_domain(),
+          result = compute_intersection(get_domain_blocking(), 
+                                        other->get_domain_blocking(),
                                         inter, compute);
           if (result)
             intersect.insert(inter);
@@ -6185,10 +6239,10 @@ namespace LegionRuntime {
       {
         if (other->has_component_domains())
           result = compute_intersections(component_domains,
-                        other->get_component_domains(), intersect, compute);
+                  other->get_component_domains_blocking(), intersect, compute);
         else
           result = compute_intersections(component_domains,
-                                         other->get_domain(), 
+                                         other->get_domain_blocking(), 
                                          intersect, compute); 
       }
       AutoLock n_lock(node_lock);
@@ -6231,7 +6285,7 @@ namespace LegionRuntime {
       bool result;
       if (component_domains.empty())
       {
-        result = compute_intersections(other_domains, get_domain(), 
+        result = compute_intersections(other_domains, get_domain_blocking(), 
                                        intersect, compute);
       }
       else
@@ -6277,13 +6331,14 @@ namespace LegionRuntime {
       if (component_domains.empty())
       { 
         if (other->has_component_domains())
-          result = compute_intersections(other->get_component_domains(),
-                                         get_domain(), 
-                                         intersect, true/*compute*/);
+          result = compute_intersections(
+                    other->get_component_domains_blocking(),
+                    get_domain_blocking(), intersect, true/*compute*/);
         else
         {
           Domain inter;
-          result = compute_intersection(get_domain(), other->get_domain(), 
+          result = compute_intersection(get_domain_blocking(), 
+                                        other->get_domain_blocking(), 
                                         inter, true/*compute*/);
           if (result)
             intersect.insert(inter);
@@ -6293,10 +6348,11 @@ namespace LegionRuntime {
       {
         if (other->has_component_domains())
           result = compute_intersections(component_domains,
-                  other->get_component_domains(), intersect, true/*compute*/);
+                  other->get_component_domains_blocking(), 
+                  intersect, true/*compute*/);
         else
           result = compute_intersections(component_domains,
-                                         other->get_domain(), 
+                                         other->get_domain_blocking(), 
                                          intersect, true/*compute*/); 
       }
       AutoLock n_lock(node_lock);
@@ -6333,7 +6389,7 @@ namespace LegionRuntime {
       bool result;
       if (component_domains.empty())
       {
-        result = compute_intersections(other_domains, get_domain(), 
+        result = compute_intersections(other_domains, get_domain_blocking(), 
                                        intersect, true/*compute*/);
       }
       else
@@ -6373,14 +6429,15 @@ namespace LegionRuntime {
         if (other->has_component_domains())
         {
           std::set<Domain> local;
-          local.insert(get_domain());
-          result = compute_dominates(local, other->get_component_domains());
+          local.insert(get_domain_blocking());
+          result = compute_dominates(local, 
+                                     other->get_component_domains_blocking());
         }
         else
         {
           std::set<Domain> left, right;
-          left.insert(get_domain());
-          right.insert(other->get_domain());
+          left.insert(get_domain_blocking());
+          right.insert(other->get_domain_blocking());
           result = compute_dominates(left, right);
         }
       }
@@ -6388,11 +6445,11 @@ namespace LegionRuntime {
       {
         if (other->has_component_domains())
           result = compute_dominates(component_domains,   
-                                     other->get_component_domains()); 
+                                     other->get_component_domains_blocking()); 
         else
         {
           std::set<Domain> other_doms;
-          other_doms.insert(other->get_domain());
+          other_doms.insert(other->get_domain_blocking());
           result = compute_dominates(component_domains, other_doms);
         }
       }
@@ -6418,7 +6475,7 @@ namespace LegionRuntime {
       if (component_domains.empty())
       {
         std::set<Domain> local;
-        local.insert(get_domain());
+        local.insert(get_domain_blocking());
         result = compute_dominates(local, other_doms);
       }
       else
@@ -6435,9 +6492,12 @@ namespace LegionRuntime {
                         bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
-      const Domain &dom = get_domain(false/*app query*/);
+      Event dom_precondition;
+      const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_field(field_data,
-                                     subspaces, mutable_results, precondition);
+                                     subspaces, mutable_results, 
+                                     Event::merge_events(precondition,
+                                                     dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -6447,9 +6507,12 @@ namespace LegionRuntime {
                 bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
-      const Domain &dom = get_domain(false/*app query*/);
+      Event dom_precondition;
+      const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_image(field_data,
-                                     subspaces, mutable_results, precondition);
+                                     subspaces, mutable_results, 
+                                     Event::merge_events(precondition,
+                                                     dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -6459,9 +6522,12 @@ namespace LegionRuntime {
                 bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
-      const Domain &dom = get_domain(false/*app query*/);
+      Event dom_precondition;
+      const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_preimage(field_data,
-                                     subspaces, mutable_results, precondition);
+                                     subspaces, mutable_results, 
+                                     Event::merge_events(precondition,
+                                                     dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -6496,7 +6562,7 @@ namespace LegionRuntime {
         parent->send_node(target, true/*up*/, false/*down*/);
       // Check to see if we need to wait for the handle event to be ready
       if (!handle_ready.has_triggered())
-          handle_ready.wait(true/*block*/);
+          handle_ready.wait();
       // Check to see if our creation set includes the target
       std::map<ColorPoint,IndexPartNode*> valid_copy;
       {
@@ -6663,7 +6729,8 @@ namespace LegionRuntime {
         if (allocator == NULL)
         {
           allocator = (IndexSpaceAllocator*)malloc(sizeof(IndexSpaceAllocator));
-          *allocator = get_domain().get_index_space().create_allocator();
+          const Domain &dom = get_domain_blocking();
+          *allocator = dom.get_index_space().create_allocator();
         }
       }
       return allocator;
@@ -6745,6 +6812,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    size_t IndexPartNode::get_num_elmts(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      return parent->get_num_elmts();
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::send_semantic_info(const NodeSet &targets, 
                                            SemanticTag tag, const void *buffer,
                                            size_t size, const NodeSet &current)
@@ -6822,10 +6899,9 @@ namespace LegionRuntime {
         // Make a new sub-index space first based on the 
         // parent. Determine if it is allocable based on the
         // properties of this partition object.
-        const Domain &parent_dom = parent->get_domain();
+        const Domain &parent_dom = parent->get_domain_no_wait();
         LowLevel::IndexSpace parent_space = parent_dom.get_index_space();
-        const size_t num_elmts = parent_space.get_valid_mask().get_num_elmts();
-        LowLevel::ElementMask new_mask(num_elmts);
+        LowLevel::ElementMask new_mask(get_num_elmts());
         LowLevel::IndexSpace new_space =  
           LowLevel::IndexSpace::create_index_space(parent_space, new_mask,
                                                    (mode & ALLOCABLE));
@@ -6927,11 +7003,11 @@ namespace LegionRuntime {
         {
           Processor current_proc = Processor::get_executing_processor();
           context->runtime->pre_wait(current_proc);
-          disjoint_ready.wait(false/*block*/);
+          disjoint_ready.wait();
           context->runtime->post_wait(current_proc);
         }
         else
-          disjoint_ready.wait(true/*block*/);
+          disjoint_ready.wait();
       }
       return disjoint;
     }
@@ -6946,40 +7022,56 @@ namespace LegionRuntime {
       if (!force_compute && is_disjoint(false/*appy query*/))
         return true;
       bool issue_dynamic_test = false;
+      std::pair<ColorPoint,ColorPoint> key(c1,c2);
+      Event ready_event = Event::NO_EVENT;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        if (disjoint_subspaces.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) !=
-            disjoint_subspaces.end())
+        if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
           return true;
-        else if (Runtime::dynamic_independence_tests &&
-                 (pending_tests.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) ==
-                  pending_tests.end()))
-          issue_dynamic_test = true;
+        else if (aliased_subspaces.find(key) != aliased_subspaces.end())
+          return false;
+        else
+        {
+          std::map<std::pair<ColorPoint,ColorPoint>,Event>::const_iterator
+            finder = pending_tests.find(key);
+          if (finder != pending_tests.end())
+            ready_event = finder->second;
+          else
+            issue_dynamic_test = true;
+        }
       }
       if (issue_dynamic_test)
       {
         IndexSpaceNode *left = get_child(c1);
         IndexSpaceNode *right = get_child(c2);
+        Event left_pre = left->get_domain_precondition();
+        Event right_pre = right->get_domain_precondition();
         Processor util = context->runtime->find_utility_group();
         AutoLock n_lock(node_lock);
         // Test again to see if we lost the race
-        if (pending_tests.find(std::pair<ColorPoint,ColorPoint>(c1,c2)) ==
-            pending_tests.end())
+        std::map<std::pair<ColorPoint,ColorPoint>,Event>::const_iterator
+          finder = pending_tests.find(key);
+        if (finder == pending_tests.end())
         {
           DynamicIndependenceArgs args;
           args.hlr_id = HLR_SPACE_INDEPENDENCE_TASK_ID;
           args.parent = this;
           args.left = left;
           args.right = right;
-          // Launch the task with low priority so it doesn't
-          // get put on the critical path
-          util.spawn(HLR_TASK_ID, &args, sizeof(args),
-                     Event::NO_EVENT, -1/*low priority*/);
-          pending_tests.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-          pending_tests.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+          Event pre = Event::merge_events(left_pre, right_pre);
+          ready_event = util.spawn(HLR_TASK_ID, &args, sizeof(args), pre);
+          pending_tests[key] = ready_event;
+          pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready_event;
         }
+        else
+          ready_event = finder->second;
       }
-      return false;
+      ready_event.wait();
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
+        return true;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6999,6 +7091,11 @@ namespace LegionRuntime {
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
       }
+      else
+      {
+        aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
+        aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+      }
       pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c1,c2));
       pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c2,c1));
     }
@@ -7008,16 +7105,19 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // If we've cached the value then we are good to go
-      if (has_complete)
-        return complete;
+      {
+        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
+        if (has_complete)
+          return complete;
+      }
       // Otherwise compute it 
       std::set<Domain> parent_domains, child_domains;
       bool can_cache = false;
       if (parent->has_component_domains())
-        parent_domains = parent->get_component_domains();
+        parent_domains = parent->get_component_domains_blocking();
       else
       {
-        const Domain &dom = parent->get_domain();
+        const Domain &dom = parent->get_domain_blocking();
         parent_domains.insert(dom);
         // We can cache the result if we know the domains
         // has dimension greater than zero indicating we have
@@ -7030,15 +7130,16 @@ namespace LegionRuntime {
         if (it->second->has_component_domains())
         {
           const std::set<Domain> &child_doms = 
-                                      it->second->get_component_domains();
+                            it->second->get_component_domains_blocking();
           child_domains.insert(child_doms.begin(), child_doms.end());
         }
         else
-          child_domains.insert(it->second->get_domain());
+          child_domains.insert(it->second->get_domain_blocking());
       }
       bool result = compute_dominates(child_domains, parent_domains);
       if (can_cache)
       {
+        AutoLock n_lock(node_lock);
         complete = result;
         has_complete = true;
       }
@@ -7177,7 +7278,7 @@ namespace LegionRuntime {
         size_t num_subspaces = color_space.get_volume();
         std::vector<LowLevel::IndexSpace> subspaces(num_subspaces);
         Event precondition;
-        const Domain &parent_dom = parent->get_domain_no_wait(precondition);
+        const Domain &parent_dom = parent->get_domain(precondition);
         // Launch the operation down to the low-level runtime
         Event ready_event = 
           parent_dom.get_index_space().create_equal_subspaces(num_subspaces,
@@ -7223,7 +7324,7 @@ namespace LegionRuntime {
         }
         std::vector<LowLevel::IndexSpace> subspaces(num_subspaces);
         Event precondition;
-        const Domain &parent_dom = parent->get_domain_no_wait(precondition);
+        const Domain &parent_dom = parent->get_domain(precondition);
         // Launch the operation down to the low-level runtime
         Event ready_event = 
           parent_dom.get_index_space().create_weighted_subspaces(num_subspaces,
@@ -7267,7 +7368,7 @@ namespace LegionRuntime {
                                                     operations(num_subspaces);
         std::set<Event> preconditions;
         Event parent_pre;
-        const Domain parent_dom = parent->get_domain_no_wait(parent_pre); 
+        const Domain parent_dom = parent->get_domain(parent_pre); 
         if (parent_pre.exists())
           preconditions.insert(parent_pre);
         unsigned idx = 0;
@@ -7277,10 +7378,10 @@ namespace LegionRuntime {
           IndexSpaceNode *left_child = left->get_child(child_color);
           IndexSpaceNode *right_child = right->get_child(child_color);
           Event left_pre, right_pre;
-          const Domain &left_dom = left_child->get_domain_no_wait(left_pre);
+          const Domain &left_dom = left_child->get_domain(left_pre);
           if (left_pre.exists())
             preconditions.insert(left_pre);
-          const Domain &right_dom = right_child->get_domain_no_wait(right_pre);
+          const Domain &right_dom = right_child->get_domain(right_pre);
           if (right_pre.exists())
             preconditions.insert(right_pre);
           operations[idx].op = op;
@@ -7327,11 +7428,11 @@ namespace LegionRuntime {
                                                     operations(num_subspaces);
         std::set<Event> preconditions;
         Event parent_pre;
-        const Domain parent_dom = parent->get_domain_no_wait(parent_pre); 
+        const Domain parent_dom = parent->get_domain(parent_pre); 
         if (parent_pre.exists())
           preconditions.insert(parent_pre);
         Event left_pre;
-        const Domain left_dom = left->get_domain_no_wait(left_pre);
+        const Domain left_dom = left->get_domain(left_pre);
         if (left_pre.exists())
           preconditions.insert(left_pre);
         unsigned idx = 0;
@@ -7340,7 +7441,7 @@ namespace LegionRuntime {
           ColorPoint child_color(itr.p);
           IndexSpaceNode *child = right->get_child(child_color);
           Event child_pre;
-          const Domain child_dom = child->get_domain_no_wait(child_pre);
+          const Domain child_dom = child->get_domain(child_pre);
           if (child_pre.exists())
             preconditions.insert(child_pre);
           operations[idx].op = op;
@@ -7375,20 +7476,34 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::get_subspace_domain_preconditions(
+                                                 std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock, 1, false/*exclusive*/);
+      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
+            color_map.begin(); it != color_map.end(); it++)
+      {
+        preconditions.insert(it->second->get_domain_precondition());
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::get_subspace_domains(std::set<Domain> &subspaces)
     //--------------------------------------------------------------------------
     {
+      AutoLock n_lock(node_lock, 1, false/*exclusive*/);
       for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
       {
         if (it->second->has_component_domains())
         {
           const std::set<Domain> &components = 
-                                            it->second->get_component_domains();
+                                it->second->get_component_domains_blocking();
           subspaces.insert(components.begin(), components.end());
         }
         else
-          subspaces.insert(it->second->get_domain());
+          subspaces.insert(it->second->get_domain_blocking());
       }
     }
 
@@ -7410,11 +7525,12 @@ namespace LegionRuntime {
       if (other->has_component_domains())
       {
         result = compute_intersections(local_domains, 
-                     other->get_component_domains(), intersect, compute);
+                   other->get_component_domains_blocking(), intersect, compute);
       }
       else
       {
-        result = compute_intersections(local_domains, other->get_domain(), 
+        result = compute_intersections(local_domains, 
+                                       other->get_domain_blocking(), 
                                        intersect, compute);
       }
       AutoLock n_lock(node_lock);
@@ -7495,11 +7611,12 @@ namespace LegionRuntime {
       if (other->has_component_domains())
       {
         result = compute_intersections(local_domains, 
-                   other->get_component_domains(), intersect, true/*compute*/);
+           other->get_component_domains_blocking(), intersect, true/*compute*/);
       }
       else
       {
-        result = compute_intersections(local_domains, other->get_domain(), 
+        result = compute_intersections(local_domains, 
+                                       other->get_domain_blocking(), 
                                        intersect, true/*compute*/);
       }
       AutoLock n_lock(node_lock);
@@ -7563,11 +7680,12 @@ namespace LegionRuntime {
       get_subspace_domains(local);
       bool result;
       if (other->has_component_domains())
-        result = compute_dominates(local, other->get_component_domains()); 
+        result = compute_dominates(local, 
+                  other->get_component_domains_blocking()); 
       else
       {
         std::set<Domain> other_doms;
-        other_doms.insert(other->get_domain());
+        other_doms.insert(other->get_domain_blocking());
         result = compute_dominates(local, other_doms);
       }
       AutoLock n_lock(node_lock);
@@ -8600,10 +8718,9 @@ namespace LegionRuntime {
         // for right now we'll just over approximate with the number of elements
         // in the handle index space since ideally reduction lists are sparse
         // and will have less than one reduction per point.
-        LowLevel::IndexSpace local = 
-                              node->row_source->get_domain().get_index_space();
-        Domain ptr_space = Domain(LowLevel::IndexSpace::create_index_space(
-                                  local.get_valid_mask().get_num_elmts()));
+        const size_t num_elmts = node->row_source->get_num_elmts();
+        Domain ptr_space = 
+          Domain(LowLevel::IndexSpace::create_index_space(num_elmts));
         std::vector<size_t> element_sizes;
         element_sizes.push_back(sizeof(ptr_t)); // pointer types
         element_sizes.push_back(op->sizeof_rhs);
@@ -9766,7 +9883,7 @@ namespace LegionRuntime {
           }
         }
         // Also set the maximum blocking factor for this region
-        Domain node_domain = node->get_domain();
+        Domain node_domain = node->get_domain_blocking();
         if (node_domain.get_dim() == 0)
         {
           const LowLevel::ElementMask &mask = 
@@ -11815,7 +11932,7 @@ namespace LegionRuntime {
       }
       // See if we need to wait
       if (wait_event.exists())
-        wait_event.wait(true/*block*/);
+        wait_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -13927,14 +14044,21 @@ namespace LegionRuntime {
         LegionMap<Event,FieldMask>::aligned postconditions;
         if (!has_component_domains())
         {
+          Event domain_pre;
           std::set<Domain> copy_domain;
-          copy_domain.insert(get_domain());
+          copy_domain.insert(get_domain(domain_pre));
           issue_grouped_copies(info, dst, preconditions, update_mask,
-                           copy_domain, src_instances, postconditions, tracker);
+             domain_pre, copy_domain, src_instances, postconditions, tracker);
         }
         else
+        {
+          Event domain_pre;
+          const std::set<Domain> &component_domains = 
+                                            get_component_domains(domain_pre);
           issue_grouped_copies(info, dst, preconditions, update_mask,
-               get_component_domains(), src_instances, postconditions, tracker);
+                               domain_pre, component_domains, src_instances,
+                               postconditions, tracker);
+        }
 
         // Tell the destination about all of the copies that were done
         for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
@@ -14147,6 +14271,7 @@ namespace LegionRuntime {
                                                          MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
+                                       Event copy_domains_precondition,
                                        const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
@@ -14186,6 +14311,9 @@ namespace LegionRuntime {
         assert(!dst_fields.empty());
         assert(src_fields.size() == dst_fields.size());
 #endif
+        // Add the copy domain precondition if it exists
+        if (copy_domains_precondition.exists())
+          pre_set.preconditions.insert(copy_domains_precondition);
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
         Event copy_pre = Event::merge_events(pre_set.preconditions);
@@ -14367,14 +14495,21 @@ namespace LegionRuntime {
     {
       if (has_component_domains())
       {
-        const std::set<Domain> &component_domains = get_component_domains();
+        Event domain_pre;
+        const std::set<Domain> &component_domains = 
+                                  get_component_domains(domain_pre);
+        if (domain_pre.exists())
+          precondition = Event::merge_events(precondition, domain_pre);
         std::set<Event> result_events;
         for (std::set<Domain>::const_iterator it = component_domains.begin();
               it != component_domains.end(); it++)
           result_events.insert(it->copy(src_fields, dst_fields, precondition));
         return Event::merge_events(result_events);
       }
-      Domain copy_domain = get_domain();
+      Event domain_pre;
+      Domain copy_domain = get_domain(domain_pre);
+      if (domain_pre.exists())
+        precondition = Event::merge_events(precondition, domain_pre);
       return copy_domain.copy(src_fields, dst_fields, precondition);
     }
 
@@ -15594,24 +15729,40 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::set<Domain>& RegionNode::get_component_domains(void) const
+    const std::set<Domain>& RegionNode::get_component_domains_blocking(
+                                                                     void) const
     //--------------------------------------------------------------------------
     {
-      return row_source->get_component_domains();
+      return row_source->get_component_domains_blocking();
     }
 
     //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain(void) const
+    const std::set<Domain>& RegionNode::get_component_domains(
+                                                             Event &ready) const
     //--------------------------------------------------------------------------
     {
-      return row_source->get_domain();
+      return row_source->get_component_domains(ready);
     }
 
     //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain_no_wait(Event &precondition) const
+    const Domain& RegionNode::get_domain_blocking(void) const
     //--------------------------------------------------------------------------
     {
-      return row_source->get_domain_no_wait(precondition);
+      return row_source->get_domain_blocking();
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& RegionNode::get_domain(Event &precondition) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source->get_domain(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& RegionNode::get_domain_no_wait(void) const
+    //--------------------------------------------------------------------------
+    {
+      return row_source->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -15623,15 +15774,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::intersects_with(RegionTreeNode *other, bool compute)
+    bool RegionNode::intersects_with(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
       if (other->is_region())
         return row_source->intersects_with(
-                  other->as_region_node()->row_source, compute);
+                  other->as_region_node()->row_source);
       else
         return row_source->intersects_with(
-                  other->as_partition_node()->row_source, compute);
+                  other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------
@@ -15758,10 +15909,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       InstanceManager *manager = column_source->create_instance(target_mem,
-                                                      row_source->get_domain(),
-                                                      fields,
-                                                      blocking_factor, 
-                                                      depth, this);
+                                        row_source->get_domain_blocking(),
+                                        fields, blocking_factor, depth, this);
       // See if we made the instance
       MaterializedView *result = NULL;
       if (manager != NULL)
@@ -15792,9 +15941,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ReductionManager *manager = column_source->create_reduction(target_mem,
-                                                      row_source->get_domain(),
-                                                      fid, reduction_list,
-                                                      this, redop);
+                                      row_source->get_domain_blocking(),
+                                      fid, reduction_list, this, redop);
       ReductionView *result = NULL;
       if (manager != NULL)
       {
@@ -16036,7 +16184,7 @@ namespace LegionRuntime {
             if (!pending_events.empty())
             {
               Event wait_for = Event::merge_events(pending_events);
-              wait_for.wait(true/*block*/);
+              wait_for.wait();
             }
           }
           else
@@ -17162,33 +17310,55 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::set<Domain>& PartitionNode::get_component_domains(void) const
+    const std::set<Domain>& PartitionNode::get_component_domains_blocking(
+                                                                     void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+ #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
-      return parent->get_component_domains();
+      return parent->get_component_domains_blocking();     
     }
 
     //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain(void) const
+    const std::set<Domain>& PartitionNode::get_component_domains(
+                                                             Event &ready) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
-      return parent->get_domain();
+      return parent->get_component_domains(ready);
     }
 
     //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain_no_wait(Event &precondition) const
+    const Domain& PartitionNode::get_domain_blocking(void) const
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif     
+      return parent->get_domain_blocking();
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& PartitionNode::get_domain(Event &precondition) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
-      return parent->get_domain_no_wait(precondition);
+      return parent->get_domain(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    const Domain& PartitionNode::get_domain_no_wait(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      return parent->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -17202,15 +17372,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::intersects_with(RegionTreeNode *other, bool compute)
+    bool PartitionNode::intersects_with(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
       if (other->is_region())
         return row_source->intersects_with(
-                    other->as_region_node()->row_source, compute);
+                    other->as_region_node()->row_source);
       else
         return row_source->intersects_with(
-                    other->as_partition_node()->row_source, compute);
+                    other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------
@@ -18525,15 +18695,15 @@ namespace LegionRuntime {
       {
         // If we have a local layout, then we should be able to find it
         result = field_space_node->find_layout_description(mask,  
-                                              region_node->get_domain(),
-                                              blocking_factor);
+                                            region_node->get_domain_blocking(),
+                                            blocking_factor);
       }
       else
       {
         // Otherwise create a new layout description, 
         // unpack it, and then try registering it with
         // the field space node
-        result = new LayoutDescription(mask, region_node->get_domain(),
+        result = new LayoutDescription(mask, region_node->get_domain_blocking(),
                                        blocking_factor, field_space_node);
         result->unpack_layout_description(derez);
         result = field_space_node->register_layout_description(result);
@@ -19075,7 +19245,7 @@ namespace LegionRuntime {
       assert(layout != NULL);
 #endif
       // First check to see if the domains are the same
-      if (region_node->get_domain() != dom)
+      if (region_node->get_domain_blocking() != dom)
         return false;
       return layout->match_shape(field_size);
     }
@@ -19090,7 +19260,7 @@ namespace LegionRuntime {
       assert(layout != NULL);
 #endif
       // First check to see if the domains are the same
-      if (region_node->get_domain() != dom)
+      if (region_node->get_domain_blocking() != dom)
         return false;
       return layout->match_shape(field_sizes, bf);
     }
@@ -19612,7 +19782,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       size_t result = op->sizeof_rhs;
-      const Domain &d = region_node->row_source->get_domain();
+      const Domain &d = region_node->row_source->get_domain_blocking();
       if (d.get_dim() == 0)
       {
         const LowLevel::ElementMask &mask = 
@@ -21483,7 +21653,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Get the low-level index space
-      const Domain &dom = logical_node->get_domain();
+      const Domain &dom = logical_node->get_domain_no_wait();
       desc.index_space = dom.get_index_space();
       // Then ask the manager to fill in the rest of the information
       manager->set_descriptor(desc, fid_idx);
@@ -21609,7 +21779,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       size_t num_atomic;
@@ -22248,10 +22418,10 @@ namespace LegionRuntime {
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
           std::set<Domain> component_domains;
-          find_component_domains(*it, component_domains);
+          Event dom_pre = find_component_domains(*it, component_domains);
           Event result = (*it)->perform_deferred_reduction(dst,
                                   epoch.valid_fields, preconditions,
-                                  component_domains);
+                                  component_domains, dom_pre);
           if (result.exists())
             postconditions.insert(result);
         }
@@ -22298,10 +22468,11 @@ namespace LegionRuntime {
           {
             // Get the domains for this reduction view
             std::set<Domain> component_domains;
-            find_component_domains(*it, component_domains);
+            Event dom_pre = find_component_domains(*it, component_domains);
             Event result = (*it)->perform_deferred_across_reduction(dst,
                                             dst_field, src_field, src_index,
-                                            preconditions, component_domains);
+                                            preconditions, component_domains,
+                                            dom_pre);
             if (result.exists())
               postconditions.insert(result);
           }
@@ -22317,20 +22488,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::find_component_domains(ReductionView *reduction_view,
+    Event DeferredView::find_component_domains(ReductionView *reduction_view,
                                             std::set<Domain> &component_domains)
     //--------------------------------------------------------------------------
     {
+      Event result = Event::NO_EVENT;
       if (logical_node == reduction_view->logical_node)
       {
         if (logical_node->has_component_domains())
-          component_domains = logical_node->get_component_domains();
+          component_domains = logical_node->get_component_domains(result);
         else
-          component_domains.insert(logical_node->get_domain());
+          component_domains.insert(logical_node->get_domain(result));
       }
       else
         component_domains = 
           logical_node->get_intersection_domains(reduction_view->logical_node);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -22456,7 +22629,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       size_t epoch_count;
       derez.deserialize(epoch_count);
@@ -22826,7 +22999,7 @@ namespace LegionRuntime {
         {
           Event target_pre;
           const Domain &target = 
-            it->first->logical_node->get_domain_no_wait(target_pre);
+            it->first->logical_node->get_domain(target_pre);
           std::vector<LowLevel::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(user, fid_idx, local_proc, 
@@ -23151,7 +23324,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       size_t num_roots;
@@ -23684,7 +23857,7 @@ namespace LegionRuntime {
             // Now we have our preconditions so we can issue our copy
             LegionMap<Event,FieldMask>::aligned update_postconditions;
             RegionTreeNode::issue_grouped_copies(info, dst, 
-                         update_preconditions, update_mask, 
+                         update_preconditions, update_mask, Event::NO_EVENT,
                          find_intersection_domains(dst->logical_node),
                          src_instances, update_postconditions, tracker);
             // If we dominate the target, then we can remove
@@ -23880,10 +24053,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool CompositeNode::intersects_with(RegionTreeNode *dst, bool compute)
+    bool CompositeNode::intersects_with(RegionTreeNode *dst)
     //--------------------------------------------------------------------------
     {
-      return logical_node->intersects_with(dst, compute);
+      return logical_node->intersects_with(dst);
     }
 
     //--------------------------------------------------------------------------
@@ -23971,7 +24144,7 @@ namespace LegionRuntime {
       unsigned done_children = 0;
       Event domain_precondition;
       const Domain &local_domain = 
-        logical_node->get_domain_no_wait(domain_precondition);
+        logical_node->get_domain(domain_precondition);
       bool need_child_intersect = (target != local_domain.get_index_space());
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
@@ -23982,7 +24155,7 @@ namespace LegionRuntime {
           // Compute the low-level index space to ask for from the child
           Event child_precondition;
           const Domain &child_domain = 
-            it->first->logical_node->get_domain_no_wait(child_precondition);
+            it->first->logical_node->get_domain(child_precondition);
           if (need_child_intersect)
           {
             // Compute the intersection of our target with the child
@@ -24039,7 +24212,7 @@ namespace LegionRuntime {
       {
         Event parent_precondition;
         const Domain &parent_dom = 
-          logical_node->get_domain_no_wait(parent_precondition);
+          logical_node->get_domain(parent_precondition);
         if (parent_precondition.exists())
           handled_preconditions.insert(parent_precondition);
         // Compute the union of all our handled index spaces
@@ -24608,8 +24781,11 @@ namespace LegionRuntime {
         if (dst->logical_node->has_component_domains())
         {
           std::set<Event> post_events; 
+          Event dom_pre;
           const std::set<Domain> &fill_domains = 
-            dst->logical_node->get_component_domains();
+            dst->logical_node->get_component_domains(dom_pre);
+          if (dom_pre.exists())
+            fill_pre = Event::merge_events(fill_pre, dom_pre);
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
@@ -24620,7 +24796,10 @@ namespace LegionRuntime {
         }
         else
         {
-          const Domain &dom = dst->logical_node->get_domain();
+          Event dom_pre;
+          const Domain &dom = dst->logical_node->get_domain(dom_pre);
+          if (dom_pre.exists())
+            fill_pre = Event::merge_events(fill_pre, dom_pre);
           fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
@@ -24715,8 +24894,11 @@ namespace LegionRuntime {
         if (dst->logical_node->has_component_domains())
         {
           std::set<Event> post_events; 
+          Event dom_pre;
           const std::set<Domain> &fill_domains = 
-            dst->logical_node->get_component_domains();
+            dst->logical_node->get_component_domains(dom_pre);
+          if (dom_pre.exists())
+            fill_pre = Event::merge_events(fill_pre, dom_pre);
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
           {
@@ -24727,7 +24909,10 @@ namespace LegionRuntime {
         }
         else
         {
-          const Domain &dom = dst->logical_node->get_domain();
+          Event dom_pre;
+          const Domain &dom = dst->logical_node->get_domain(dom_pre);
+          if (dom_pre.exists())
+            fill_pre = Event::merge_events(fill_pre, dom_pre);
           fill_post = dom.fill(dst_fields, value, value_size, fill_pre);
         }
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
@@ -24918,7 +25103,7 @@ namespace LegionRuntime {
       if (need_lock)
       {
         Event lock_event = view_lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
       }
       DerezCheck z(derez);
       unpack_valid_reductions(derez, logical_node->column_source, 
@@ -25201,8 +25386,11 @@ namespace LegionRuntime {
       if (logical_node->has_component_domains())
       {
         std::set<Event> post_events;
+        Event dom_pre;
         const std::set<Domain> &component_domains = 
-          logical_node->get_component_domains();
+          logical_node->get_component_domains(dom_pre);
+        if (dom_pre.exists())
+          reduce_pre = Event::merge_events(reduce_pre, dom_pre);
         for (std::set<Domain>::const_iterator it = 
               component_domains.begin(); it != component_domains.end(); it++)
         {
@@ -25218,7 +25406,10 @@ namespace LegionRuntime {
       }
       else
       {
-        Domain domain = logical_node->get_domain();
+        Event dom_pre;
+        Domain domain = logical_node->get_domain(dom_pre);
+        if (dom_pre.exists())
+          reduce_pre = Event::merge_events(reduce_pre, dom_pre);
         reduce_post = manager->issue_reduction(src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
@@ -25274,7 +25465,8 @@ namespace LegionRuntime {
     Event ReductionView::perform_deferred_reduction(MaterializedView *target,
                                                     const FieldMask &red_mask,
                                                     const std::set<Event> &pre,
-                                         const std::set<Domain> &reduce_domains)
+                                         const std::set<Domain> &reduce_domains,
+                                                    Event dom_precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -25291,6 +25483,8 @@ namespace LegionRuntime {
       find_copy_preconditions(manager->redop, true/*reading*/,
                               red_mask, src_pre);
       std::set<Event> preconditions = pre;
+      if (dom_precondition.exists())
+        preconditions.insert(dom_precondition);
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
       {
@@ -25371,7 +25565,8 @@ namespace LegionRuntime {
                               MaterializedView *target, FieldID dst_field, 
                               FieldID src_field, unsigned src_index, 
                               const std::set<Event> &preconds,
-                              const std::set<Domain> &reduce_domains)
+                              const std::set<Domain> &reduce_domains,
+                              Event dom_precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -25390,6 +25585,8 @@ namespace LegionRuntime {
       find_copy_preconditions(manager->redop, true/*reading*/,
                               red_mask, src_pre);
       std::set<Event> preconditions = preconds;
+      if (dom_precondition.exists())
+        preconditions.insert(dom_precondition);
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
       {

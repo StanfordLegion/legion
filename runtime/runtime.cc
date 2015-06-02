@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1027,7 +1027,7 @@ namespace LegionRuntime {
       if (valid)
       {
         Event lock_event = lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
         // Check to see if we already have a future for the point
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
@@ -1711,7 +1711,7 @@ namespace LegionRuntime {
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
       // low-level runtime here
-      legion_ready.wait(false/*block*/);
+      legion_ready.wait();
 #ifdef DEBUG_HIGH_LEVEL
       assert(state == IN_LEGION);
 #endif
@@ -1897,7 +1897,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -1941,7 +1941,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -1986,7 +1986,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2032,7 +2032,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2078,7 +2078,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2124,7 +2124,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2170,7 +2170,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2216,7 +2216,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2286,7 +2286,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(task->map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[task->map_id]);
         inside_mapper_call[task->map_id] = true;
@@ -2411,7 +2411,7 @@ namespace LegionRuntime {
         {
           if (!messages.empty())
             send_mapper_messages(mappable->map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[mappable->map_id]);
         inside_mapper_call[mappable->map_id] = true;
@@ -5366,7 +5366,7 @@ namespace LegionRuntime {
         if (count == total_ranks)
           Runtime::mpi_rank_event.trigger();
         // Wait on the event
-        mpi_rank_event.wait(false/*block*/);
+        mpi_rank_event.wait();
         // Once we've triggered, then we can build the maps
         for (unsigned local_rank = 0; local_rank < count; local_rank++)
         {

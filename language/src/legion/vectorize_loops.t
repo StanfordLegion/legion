@@ -713,14 +713,8 @@ function annotate_vectorizability.expr(vars, node)
     annotate_vectorizability.expr_call(vars, node)
 
   elseif node:is(ast.typed.ExprCast) then
-    if not (node.expr_type:isprimitive()) then
-      node.vectorizable = false
-      node.error_msg = error_prefix .. "an unsupported casting expression"
-      return
-    else
-      annotate_vectorizability.expr(vars, node.arg)
-      node.fact = node.arg.fact
-    end
+    annotate_vectorizability.expr(vars, node.arg)
+    node.fact = node.arg.fact
 
   else
     node.vectorizable = false
@@ -885,7 +879,7 @@ function vectorize_loops.stat_for_list(node)
   if body.vectorizable then
     return vectorize.stat_for_list(node)
   else
-    log.warn(body.error_msg)
+    log.error(node, body.error_msg)
     return node { block = body }
   end
 end

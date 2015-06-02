@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,7 +274,7 @@ namespace LegionRuntime {
       bool has_triggered(void) const;
 
       // causes calling thread to block until event has occurred
-      void wait(bool block = false) const;
+      void wait(void) const;
 
       // used by non-legion threads to wait on an event - always blocking
       void external_wait(void) const;

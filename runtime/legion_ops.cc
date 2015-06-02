@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7206,7 +7206,7 @@ namespace LegionRuntime {
       if (!wait_events.empty())
       {
         Event trigger_event = Event::merge_events(wait_events);
-        trigger_event.wait(false/*block*/);
+        trigger_event.wait();
       }
       
       // Now see if any failed
@@ -7355,7 +7355,7 @@ namespace LegionRuntime {
       if (!wait_events.empty())
       {
         Event mapped_event = Event::merge_events(wait_events);
-        mapped_event.wait(false/*block*/);
+        mapped_event.wait();
       }
 
       // If we failed to map then unmap all the tasks 
@@ -7480,7 +7480,7 @@ namespace LegionRuntime {
       if (!wait_events.empty())
       {
         Event dist_event = Event::merge_events(wait_events);
-        dist_event.wait(false/*block*/);
+        dist_event.wait();
       }
     }
 

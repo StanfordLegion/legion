@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -916,8 +916,6 @@ namespace LegionRuntime {
 
     extern Processor::TaskIDTable task_id_table;
 
-    class UtilityProcessor;
-
     class ProcessorGroup;
 
     // information for a task launch
@@ -951,8 +949,6 @@ namespace LegionRuntime {
 	run_counter = _run_counter;
       }
 
-      virtual void tasks_available(int priority) = 0;
-
       virtual void enqueue_task(Task *task) = 0;
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
@@ -972,6 +968,24 @@ namespace LegionRuntime {
       Processor::Kind kind;
       Atomic<int> *run_counter;
     }; 
+
+    class DeferredTaskSpawn : public EventWaiter {
+    public:
+      DeferredTaskSpawn(Processor::Impl *_proc, Task *_task) 
+        : proc(_proc), task(_task) {}
+
+      virtual ~DeferredTaskSpawn(void)
+      {
+        // we do _NOT_ own the task - do not free it
+      }
+
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+
+    protected:
+      Processor::Impl *proc;
+      Task *task;
+    };
 
     // generic way of keeping a prioritized queue of stuff to do
     // Needs to be protected by owner lock
@@ -1051,8 +1065,6 @@ namespace LegionRuntime {
 
       void get_group_members(std::vector<Processor>& member_list);
 
-      virtual void tasks_available(int priority);
-
       virtual void enqueue_task(Task *task);
 
       virtual void spawn_task(Processor::TaskFuncID func_id,
@@ -1083,9 +1095,11 @@ namespace LegionRuntime {
 
       void start_thread(size_t stack_size, int core_id, const char *debug_name);
 
-      static bool preemptable_sleep(Event wait_for, bool block = false);
+      static bool preemptable_sleep(Event wait_for);
 
       virtual Processor get_processor(void) const = 0;
+
+      void run_task(Task *task, Processor actual_proc = Processor::NO_PROC);
 
 #ifdef EVENT_GRAPH_TRACE
       inline Event find_enclosing(void) 
@@ -1101,9 +1115,7 @@ namespace LegionRuntime {
 
       virtual void thread_main(void) = 0;
 
-      virtual void sleep_on_event(Event wait_for, bool block = false) = 0;
-
-      void run_task(Task *task, Processor actual_proc = Processor::NO_PROC);
+      virtual void sleep_on_event(Event wait_for) = 0;
 
       pthread_t thread;
 
@@ -1122,7 +1134,7 @@ namespace LegionRuntime {
         { assert(false); return Processor::NO_PROC; }
     public:
       virtual void thread_main(void);
-      virtual void sleep_on_event(Event wait_for, bool block = false);
+      virtual void sleep_on_event(Event wait_for);
     public:
       void join(void);
     private:
@@ -1131,48 +1143,85 @@ namespace LegionRuntime {
     };
 #endif
 
-    class UtilityProcessor : public Processor::Impl {
+    // Forward declaration
+    class LocalProcessor;
+
+    class LocalThread : public PreemptableThread, EventWaiter {
     public:
-      UtilityProcessor(Processor _me, 
-                       int core_id = -1, 
-                       int _num_worker_threads = 1);
+      enum ThreadState {
+        RUNNING_STATE,
+        PAUSING_STATE, // about to pause
+        PAUSED_STATE,
+        RESUMABLE_STATE,
+        SLEEPING_STATE, // about to sleep
+        SLEEP_STATE,
+      };
+    public:
+      LocalThread(LocalProcessor *proc);
+      virtual ~LocalThread(void);
+    public:
+      inline void do_initialize(void) { initialize = true; }
+      inline void do_finalize(void) { finalize = true; }
+    public:
+      virtual Processor get_processor(void) const;
+    protected:
+      virtual void thread_main(void);
+      virtual void sleep_on_event(Event wait_for);
+      virtual bool event_triggered(void);
+      virtual void print_info(FILE *f);
+    public:
+      void awake(void);
+      void sleep(void);
+      void prepare_to_sleep(void);
+      void resume(void);
+      void shutdown(void);
+    public:
+      LocalProcessor *const proc;
+    protected:
+      ThreadState state;
+      gasnet_hsl_t thread_mutex;
+      gasnett_cond_t thread_cond;
+      bool initialize;
+      bool finalize;
+    };
 
-      virtual ~UtilityProcessor(void);
-
-      void start_worker_threads(size_t stack_size);
-
-      virtual void tasks_available(int priority);
-      
+    class LocalProcessor : public Processor::Impl {
+    public:
+      LocalProcessor(Processor _me, Processor::Kind _kind, 
+                     size_t stack_size, const char *name,
+                     int core_id = -1);
+      virtual ~LocalProcessor(void);
+    public:
+      // Make these virtual so they can be modified if necessary
+      virtual void start_processor(void);
+      virtual void shutdown_processor(void);
+      virtual void initialize_processor(void);
+      virtual void finalize_processor(void);
+      virtual LocalThread* create_new_thread(void);
+    public:
+      bool execute_task(LocalThread *thread);
+      void pause_thread(LocalThread *thread);
+      void resume_thread(LocalThread *thread);
+    public:
       virtual void enqueue_task(Task *task);
-
       virtual void spawn_task(Processor::TaskFuncID func_id,
 			      const void *args, size_t arglen,
 			      //std::set<RegionInstance> instances_needed,
 			      Event start_event, Event finish_event,
                               int priority);
-
-      void request_shutdown(void);
-
-      void wait_for_shutdown(void);
-
-      class UtilityThread;
-
     protected:
-      //friend class UtilityThread;
-      //friend class UtilityTask;
-
-      //void enqueue_runnable_task(Task *task);
-      int core_id;
-      int num_worker_threads;
-      bool shutdown_requested;
-      //Event shutdown_event;
-
+      const int core_id;
+      const size_t stack_size;
+      const char *const processor_name;
       gasnet_hsl_t mutex;
       gasnett_cond_t condvar;
-
-      std::set<UtilityThread *> threads;
-
       JobQueue<Task> task_queue;
+      bool shutdown, shutdown_trigger;
+    protected:
+      LocalThread               *running_thread;
+      std::set<LocalThread*>    paused_threads;
+      std::deque<LocalThread*>  resumable_threads;
+      std::vector<LocalThread*> available_threads;
     };
 
     class Memory::Impl {
