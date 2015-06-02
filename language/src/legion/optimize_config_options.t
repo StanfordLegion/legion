@@ -359,7 +359,7 @@ local analyze_inner = {}
 
 function analyze_inner.expr_field_access(cx, node)
   return
-    not std.is_ptr(std.as_read(node.value.expr_type)) and
+    not std.is_bounded_type(std.as_read(node.value.expr_type)) and
     analyze_inner.expr(cx, node.value)
 end
 
@@ -441,7 +441,7 @@ end
 
 function analyze_inner.expr_deref(cx, node)
   return
-    not std.is_ptr(std.as_read(node.value.expr_type)) and
+    not std.is_bounded_type(std.as_read(node.value.expr_type)) and
     analyze_inner.expr(cx, node.value)
 end
 

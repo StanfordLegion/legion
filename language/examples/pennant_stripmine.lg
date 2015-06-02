@@ -2356,9 +2356,9 @@ task test()
 
   var conf : config = read_config()
 
-  var rz_all = region(ispace(iptr, conf.nz), zone)
-  var rp_all = region(ispace(iptr, conf.np), point)
-  var rs_all = region(ispace(iptr, conf.ns), side(wild, wild, wild, wild))
+  var rz_all = region(ispace(ptr, conf.nz), zone)
+  var rp_all = region(ispace(ptr, conf.np), point)
+  var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 

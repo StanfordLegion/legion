@@ -20,8 +20,8 @@
 import "legion"
 
 task f()
-  var r = region(ispace(iptr, 5), int)
-  var s = region(ispace(iptr, 5), float)
+  var r = region(ispace(ptr, 5), int)
+  var s = region(ispace(ptr, 5), float)
   var x = new(ptr(float, s))
   var y = static_cast(ptr(int, r), x)
 end

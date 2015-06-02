@@ -15,12 +15,12 @@
 import "legion"
 
 task f()
-  var r = region(ispace(iptr, 5), int)
+  var r = region(ispace(ptr, 5), int)
 end
 
 task g()
   var x : uint = 5
-  var is = ispace(iptr, x)
+  var is = ispace(ptr, x)
   var r = region(is, int)
 end
 

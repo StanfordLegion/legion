@@ -25,8 +25,8 @@ fspace t {
 } where b <= a end
 
 task f()
-  var r = region(ispace(iptr, 5), int)
-  var s = region(ispace(iptr, 7), int)
+  var r = region(ispace(ptr, 5), int)
+  var s = region(ispace(ptr, 7), int)
   var x = t { a = r, b = s }
 end
 f:compile()

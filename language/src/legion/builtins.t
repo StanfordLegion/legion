@@ -23,7 +23,6 @@ local builtins = {}
 -- via std).
 
 builtins.index_type = std.index_type
-builtins.iptr = std.iptr
 builtins.ispace = std.ispace
 builtins.region = std.region
 builtins.disjoint = std.disjoint

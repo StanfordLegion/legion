@@ -556,10 +556,6 @@ function std.is_cross_product(t)
   return terralib.types.istype(t) and rawget(t, "is_cross_product")
 end
 
-function std.is_ptr(t)
-  return terralib.types.istype(t) and rawget(t, "is_pointer")
-end
-
 function std.is_vptr(t)
   return terralib.types.istype(t) and rawget(t, "is_vpointer")
 end
@@ -589,11 +585,6 @@ struct std.untyped {}
 function std.type_sub(t, mapping)
   if mapping[t] then
     return mapping[t]
-  elseif std.is_ptr(t) then
-    return std.ptr(
-      std.type_sub(t.points_to_type, mapping),
-      unpack(t.points_to_region_symbols:map(
-               function(region) return std.type_sub(region, mapping) end)))
   elseif std.is_bounded_type(t) then
     if t.points_to_type then
       return t.index_type(
@@ -629,22 +620,6 @@ function std.type_eq(a, b, mapping)
       return true
     end
     return std.type_eq(a.type, b.type, mapping)
-  elseif std.is_ptr(a) and std.is_ptr(b) then
-    if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
-      return false
-    end
-    local a_regions = a:points_to_regions()
-    local b_regions = b:points_to_regions()
-    if #a_regions ~= #b_regions then
-      return false
-    end
-    for i, a_region in ipairs(a_regions) do
-      local b_region = b_regions[i]
-      if not std.type_eq(a_region, b_region, mapping) then
-        return false
-      end
-    end
-    return true
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
@@ -687,8 +662,6 @@ function std.type_maybe_eq(a, b, mapping)
 
   if std.type_eq(a, b, mapping) then
     return true
-  elseif std.is_ptr(a) and std.is_ptr(b) then
-    return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
@@ -723,11 +696,7 @@ local function add_region_symbol(symbols, region)
 end
 
 local function add_type(symbols, type)
-  if std.is_ptr(type) then
-    for _, region in ipairs(type.points_to_region_symbols) do
-      add_region_symbol(symbols, region)
-    end
-  elseif std.is_bounded_type(type) then
+  if std.is_bounded_type(type) then
     for _, bound in ipairs(type.bounds_symbols) do
       add_region_symbol(symbols, bound)
     end
@@ -1129,11 +1098,11 @@ function std.check_read(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:refers_to_regions(), t.field_path
+    local region_types, field_path = t:bounds(), t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reads, region_type, field_path) then
-        local regions = t.refers_to_region_symbols
-        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        local regions = t.bounds_symbols
+        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege reads(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
@@ -1147,11 +1116,11 @@ function std.check_write(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:refers_to_regions(), t.field_path
+    local region_types, field_path = t:bounds(), t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.writes, region_type, field_path) then
-        local regions = t.refers_to_region_symbols
-        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        local regions = t.bounds_symbols
+        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege writes(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
@@ -1169,11 +1138,11 @@ function std.check_reduce(cx, op, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:refers_to_regions(), t.field_path
+    local region_types, field_path = t:bounds(), t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
-        local regions = t.refers_to_region_symbols
-        local ref_as_ptr = std.ptr(t.refers_to_type, unpack(regions))
+        local regions = t.bounds_symbols
+        local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
         log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
                   (std.newtuple(regions[i]) .. field_path):hash() ..
                   ") for dereference of " .. tostring(ref_as_ptr))
@@ -1189,7 +1158,7 @@ end
 
 function std.get_field(t, f)
   assert(terralib.types.istype(t))
-  if std.is_ptr(t) then
+  if std.is_bounded_type(t) then
     local field_type = std.ref(t, f)
     if not std.as_read(field_type) then
       return nil
@@ -1242,7 +1211,7 @@ end
 function std.implicit_cast(from, to, expr)
    assert(not (std.is_ref(from) or std.is_rawref(from)))
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_ptr(to) or std.is_bounded_type(to) or
+     std.is_cross_product(to) or std.is_bounded_type(to) or
      std.is_fspace_instance(to)
   then
     return to:force_cast(from, to, expr)
@@ -1255,7 +1224,7 @@ end
 
 function std.explicit_cast(from, to, expr)
    if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_ptr(to) or std.is_bounded_type(to) or
+     std.is_cross_product(to) or std.is_bounded_type(to) or
      std.is_fspace_instance(to)
    then
     return to:force_cast(from, to, expr)
@@ -1306,6 +1275,15 @@ end
 -- ## Types
 -- #################
 
+-- WARNING: Bounded types are NOT unique. If two regions are aliased
+-- then it is possible for two different pointer types to be equal:
+--
+-- var r = region(ispace(ptr, n), t)
+-- var s = r
+-- var x = new(ptr(t, r))
+-- var y = new(ptr(t, s))
+--
+-- The types of x and y are distinct objects, but are still type_eq.
 local bounded_type = terralib.memoize(function(index_type, ...)
   assert(std.is_index_type(index_type))
   local bounds = terralib.newlist({...})
@@ -1354,6 +1332,10 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   st.index_type = index_type
   st.points_to_type = points_to_type
   st.bounds_symbols = bounds
+
+  function st:is_ptr()
+    return self.points_to_type ~= nil
+  end
 
   function st:bounds()
     local bounds = terralib.newlist()
@@ -1517,7 +1499,7 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-std.iptr = std.index_type(opaque, "iptr")
+std.ptr = std.index_type(opaque, "ptr")
 
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
@@ -1599,7 +1581,7 @@ end
 function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
     fspace_type = ispace_symbol
-    ispace_symbol = terralib.newsymbol(std.ispace(std.iptr))
+    ispace_symbol = terralib.newsymbol(std.ispace(std.ptr))
   end
 
   assert(terralib.issymbol(ispace_symbol),
@@ -1846,108 +1828,8 @@ function std.cross_product(lhs, rhs)
   return st
 end
 
--- WARNING: ptr types are NOT unique. If two regions are aliased then
--- it is possible for two different pointer types to be equal:
---
--- var r = region(t, n)
--- var s = r
--- var x = new(ptr(t, r))
--- var y = new(ptr(t, s))
---
--- The types of x and y are distinct objects, but are still type_eq.
-std.ptr = terralib.memoize(function(points_to_type, ...)
-  local regions = terralib.newlist({...})
-  if not terralib.types.istype(points_to_type) then
-    error("ptr expected a type as argument 1, got " .. tostring(points_to_type))
-  end
-  if #regions <= 0 then
-    error("ptr expected at least one region, got none")
-  end
-  for i, region in ipairs(regions) do
-    if not terralib.issymbol(region) then
-      error("ptr expected a symbol as argument " .. tostring(i+1) .. ", got " .. tostring(region))
-    end
-  end
-
-  local st = terralib.types.newstruct("ptr")
-  st.entries = terralib.newlist({
-      { "__ptr", c.legion_ptr_t },
-  })
-  if #regions > 1 then
-    -- Find the smallest bitmask that will fit.
-    -- TODO: Would be nice to compress smaller than one byte.
-   local bitmask_type
-    if #regions < bit.lshift(1, 8) - 1 then
-      bitmask_type = uint8
-    elseif #regions < bit.lshift(1, 16) - 1 then
-      bitmask_type = uint16
-    elseif #regions < bit.lshift(1, 32) - 1 then
-      bitmask_type = uint32
-    else
-      assert(false) -- really?
-    end
-    st.entries:insert({ "__index", bitmask_type })
-  end
-
-  st.is_pointer = true
-  st.points_to_type = points_to_type
-  st.points_to_region_symbols = regions
-
-  function st:points_to_regions()
-    local regions = terralib.newlist()
-    for i, region_symbol in ipairs(self.points_to_region_symbols) do
-      local region = region_symbol.type
-      if terralib.types.istype(region) then
-        region = std.as_read(region)
-      end
-      if not (terralib.types.istype(region) and std.is_region(region)) then
-        log.error(nil, "ptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region))
-      end
-      if not (std.type_eq(region.fspace_type, points_to_type) or
-                std.is_unpack_result(points_to_type))
-      then
-        log.error(nil, "ptr expected region(" .. tostring(points_to_type) ..
-                    ") as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region))
-      end
-      regions:insert(region)
-    end
-    return regions
-  end
-
-  st.metamethods.__eq = macro(function(a, b)
-      assert(std.is_ptr(a:gettype()) and std.is_ptr(b:gettype()))
-      return `(a.__ptr.value == b.__ptr.value)
-  end)
-
-  st.metamethods.__ne = macro(function(a, b)
-      assert(std.is_ptr(a:gettype()) and std.is_ptr(b:gettype()))
-      return `(a.__ptr.value ~= b.__ptr.value)
-  end)
-
-  function st:force_cast(from, to, expr)
-    assert(std.is_ptr(from) and std.is_ptr(to) and
-             (#(from:points_to_regions()) > 1) ==
-             (#(to:points_to_regions()) > 1))
-    if #(to:points_to_regions()) == 1 then
-      return `([to]{ __ptr = [expr].__ptr })
-    else
-      return quote var x = [expr] in [to]{ __ptr = x.__ptr, __index = x.__index} end
-    end
-  end
-
-  function st.metamethods.__typename(st)
-    local regions = st.points_to_region_symbols
-
-    return "ptr(" .. tostring(st.points_to_type) .. ", " .. tostring(regions:mkstring(", ")) .. ")"
-  end
-
-  return st
-end)
-
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
-  local regions = terralib.newlist({...})
+  local bounds = terralib.newlist({...})
 
   local vec = vector(uint32, width)
   local struct legion_vptr_t {
@@ -1959,14 +1841,14 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   })
 
   local bitmask_type
-  if #regions > 1 then
+  if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
-    if #regions < bit.lshift(1, 8) - 1 then
+    if #bounds < bit.lshift(1, 8) - 1 then
       bitmask_type = vector(uint8, width)
-    elseif #regions < bit.lshift(1, 16) - 1 then
+    elseif #bounds < bit.lshift(1, 16) - 1 then
       bitmask_type = vector(uint16, width)
-    elseif #regions < bit.lshift(1, 32) - 1 then
+    elseif #bounds < bit.lshift(1, 32) - 1 then
       bitmask_type = vector(uint32, width)
     else
       assert(false) -- really?
@@ -1976,13 +1858,13 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
 
   st.is_vpointer = true
   st.points_to_type = points_to_type
-  st.points_to_region_symbols = regions
+  st.bounds_symbols = bounds
   st.N = width
   st.type = ptr(points_to_type, ...)
 
-  function st:points_to_regions()
-    local regions = terralib.newlist()
-    for i, region_symbol in ipairs(self.points_to_region_symbols) do
+  function st:bounds()
+    local bounds = terralib.newlist()
+    for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol.type
       if not (terralib.types.istype(region) and std.is_region(region)) then
         log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
@@ -1993,17 +1875,17 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end
-      regions:insert(region)
+      bounds:insert(region)
     end
-    return regions
+    return bounds
   end
 
   function st.metamethods.__typename(st)
-    local regions = st.points_to_region_symbols
+    local bounds = st.bounds_symbols
 
     return "vptr(" .. st.N .. ", " ..
            tostring(st.points_to_type) .. ", " ..
-           tostring(regions:mkstring(", ")) .. ")"
+           tostring(bounds:mkstring(", ")) .. ")"
   end
 
   return st
@@ -2052,8 +1934,8 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   if not terralib.types.istype(pointer_type) then
     error("ref expected a type as argument 1, got " .. tostring(pointer_type))
   end
-  if not (std.is_ptr(pointer_type) or std.is_ref(pointer_type)) then
-    error("ref expected a ptr or ref type as argument 1, got " .. tostring(pointer_type))
+  if not (std.is_bounded_type(pointer_type) or std.is_ref(pointer_type)) then
+    error("ref expected a bounded type or ref as argument 1, got " .. tostring(pointer_type))
   end
   if std.is_ref(pointer_type) then
     pointer_type = pointer_type.pointer_type
@@ -2064,17 +1946,17 @@ std.ref = terralib.memoize(function(pointer_type, ...)
   st.is_ref = true
   st.pointer_type = pointer_type
   st.refers_to_type = pointer_type.points_to_type
-  st.refers_to_region_symbols = pointer_type.points_to_region_symbols
+  st.bounds_symbols = pointer_type.bounds_symbols
   st.field_path = std.newtuple(...)
 
-  function st:refers_to_regions()
-    return self.pointer_type:points_to_regions()
+  function st:bounds()
+    return self.pointer_type:bounds()
   end
 
   function st.metamethods.__typename(st)
-    local regions = st.refers_to_region_symbols
+    local bounds = st.bounds_symbols
 
-    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(regions:mkstring(", ")) .. ")"
+    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
   end
 
   return st

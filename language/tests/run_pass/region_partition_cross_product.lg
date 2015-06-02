@@ -25,7 +25,7 @@ where reads(r, s), r * s do
 end
 
 task main()
-  var r = region(ispace(iptr, 5), int)
+  var r = region(ispace(ptr, 5), int)
   var x0 = new(ptr(int, r))
   var x1 = new(ptr(int, r))
   var x2 = new(ptr(int, r))

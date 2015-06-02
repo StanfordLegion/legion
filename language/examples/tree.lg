@@ -76,7 +76,7 @@ do
 end
 
 task top() : int
-  var rtop = region(ispace(iptr, 16), tree(wild))
+  var rtop = region(ispace(ptr, 16), tree(wild))
   var root = make_tree(rtop, 0, 15)
   var s1 = sum_tree(rtop, root)
   reverse_tree(rtop, root)

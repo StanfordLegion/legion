@@ -18,7 +18,7 @@ local i1d = index_type(int, "i1d")
 struct i2 { x : int, y : int }
 local i2d = index_type(i2, "i2d")
 
-task f0(is : ispace(iptr), i : iptr)
+task f0(is : ispace(ptr), i : ptr)
 end
 
 task f1(is : ispace(i1d), i : i1d)
@@ -32,11 +32,11 @@ task f2(is : ispace(i2d), i : i2d)
 end
 
 task main()
-  var is0 = ispace(iptr, 5)
+  var is0 = ispace(ptr, 5)
   var is1 = ispace(i1d, 7, 2)
   var is2 = ispace(i2d, { x = 2, y = 2 }, { x = 3, y = 4 })
 
-  var i0 : iptr = 3
+  var i0 : ptr = 3
   f0(is0, i0)
   f0(is0, 4)
 

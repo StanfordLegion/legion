@@ -38,7 +38,7 @@ where reads(a), writes(a) do
 end
 
 task h() : int
-  var t = region(ispace(iptr, 5), int)
+  var t = region(ispace(ptr, 5), int)
   var tc = [c.legion_coloring_create]();
   [c.legion_coloring_ensure_color](tc, 0)
   var u = partition(disjoint, t, tc)

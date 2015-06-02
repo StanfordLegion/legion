@@ -23,7 +23,7 @@ function ptr_to_raw(t)
 end
 
 task main()
-  var r = region(ispace(iptr, 5), int)
+  var r = region(ispace(ptr, 5), int)
   var x = new(ptr(int, r))
   var rc = c.legion_coloring_create()
   c.legion_coloring_add_point(rc, 0, [ptr_to_raw(ptr(int, r))](x))

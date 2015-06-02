@@ -373,7 +373,8 @@ end
 function value:__get_field(cx, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(self:read(cx), value_type, std.newtuple(field_name))
-  elseif std.is_ptr(value_type) then
+  elseif std.is_bounded_type(value_type) then
+    assert(value_type:is_ptr())
     return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
   elseif std.is_vptr(value_type) then
     return values.vref(self:read(cx, value_type), value_type, std.newtuple(field_name))
@@ -405,8 +406,9 @@ function value:unpack(cx, value_type, field_name, field_type)
     region_expr = unpack_region(cx, region_expr, unpack_type, static_region_type)
     region_expr = expr.just(region_expr.actions, self.expr.value)
     return self:new(region_expr, self.value_type, self.field_path)
-  elseif std.is_ptr(unpack_type) then
-    local region_types = unpack_type:points_to_regions()
+  elseif std.is_bounded_type(unpack_type) then
+    assert(unpack_type:is_ptr())
+    local region_types = unpack_type:bounds()
 
     do
       local has_all_regions = true
@@ -426,7 +428,7 @@ function value:unpack(cx, value_type, field_name, field_type)
     local region_type = region_types[1]
 
     local static_ptr_type = std.get_field(value_type, field_name)
-    local static_region_types = static_ptr_type:points_to_regions()
+    local static_region_types = static_ptr_type:bounds()
     assert(#static_region_types == 1)
     local static_region_type = static_region_types[1]
 
@@ -453,7 +455,7 @@ ref.__index = ref
 
 function values.ref(value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or
-    not (std.is_ptr(value_type) or std.is_vptr(value_type)) then
+    not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
   end
   return setmetatable(values.value(value_expr, value_type, field_path), ref)
@@ -473,7 +475,7 @@ function ref:__ref(cx, expr_type)
   local absolute_field_paths = field_paths:map(
     function(field_path) return self.field_path .. field_path end)
 
-  local region_types = self.value_type:points_to_regions()
+  local region_types = self.value_type:bounds()
   local base_pointers_by_region = region_types:map(
     function(region_type)
       return absolute_field_paths:map(
@@ -700,7 +702,7 @@ function vref:__unpack(cx)
   local absolute_field_paths = field_paths:map(
     function(field_path) return self.field_path .. field_path end)
 
-  local region_types = self.value_type:points_to_regions()
+  local region_types = self.value_type:bounds()
   local base_pointers_by_region = region_types:map(
     function(region_type)
       return absolute_field_paths:map(
@@ -1792,7 +1794,7 @@ function codegen.expr_dynamic_cast(cx, node)
   end
   local input = `([value.value].__ptr)
   local result
-  local regions = expr_type:points_to_regions()
+  local regions = expr_type:bounds()
   if #regions == 1 then
     local region = regions[1]
     assert(cx:has_region(region))
@@ -1840,9 +1842,9 @@ function codegen.expr_static_cast(cx, node)
   end
   local input = value.value
   local result
-  if #(expr_type:points_to_regions()) == 1 then
+  if #(expr_type:bounds()) == 1 then
     result = terralib.newsymbol(expr_type)
-    local input_regions = value_type:points_to_regions()
+    local input_regions = value_type:bounds()
     local result_last = node.parent_region_map[#input_regions]
     local cases
     if result_last then
@@ -1878,7 +1880,7 @@ function codegen.expr_static_cast(cx, node)
     actions = quote [actions]; var [result]; [cases] end
   else
     result = terralib.newsymbol(expr_type)
-    local input_regions = value_type:points_to_regions()
+    local input_regions = value_type:bounds()
     local result_last = node.parent_region_map[#input_regions]
     local cases
     if result_last then
@@ -2373,7 +2375,8 @@ function codegen.expr_deref(cx, node)
 
   if value_type:ispointer() then
     return values.rawptr(value, value_type)
-  elseif std.is_ptr(value_type) then
+  elseif std.is_bounded_type(value_type) then
+    assert(value_type:is_ptr())
     return values.ref(value, value_type)
   else
     assert(false)

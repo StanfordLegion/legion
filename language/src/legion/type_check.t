@@ -131,21 +131,21 @@ function type_check.expr_field_access(cx, node)
     -- If the value is an fspace instance, unpack before allowing access.
     local unpack_type, constraints = value_type
     if std.is_fspace_instance(value_type) or
-      (std.is_ptr(value_type) and std.is_fspace_instance(value_type.points_to_type)) or
+      (std.is_bounded_type(value_type) and std.is_fspace_instance(value_type.points_to_type)) or
       (std.is_fspace_instance(std.as_read(value_type))) or
-      (std.is_ptr(std.as_read(value_type)) and std.is_fspace_instance(std.as_read(value_type).points_to_type))
+      (std.is_bounded_type(std.as_read(value_type)) and std.is_fspace_instance(std.as_read(value_type).points_to_type))
     then
       local fspace = std.as_read(value_type)
-      if std.is_ptr(fspace) then
+      if std.is_bounded_type(fspace) then
         fspace = fspace.points_to_type
       end
       unpack_type, constraints = std.unpack_fields(fspace)
 
-      if std.is_ptr(std.as_read(value_type)) then
+      if std.is_bounded_type(std.as_read(value_type)) then
         local ptr_type = std.as_read(value_type)
-        unpack_type = std.ref(std.ptr(unpack_type, unpack(ptr_type.points_to_region_symbols)))
+        unpack_type = std.ref(ptr_type.index_type(unpack_type, unpack(ptr_type.bounds_symbols)))
       elseif std.is_ref(value_type) then
-        unpack_type = std.ref(std.ptr(unpack_type, unpack(value_type.refers_to_region_symbols)))
+        unpack_type = std.ref(value_type.pointer_type.index_type(unpack_type, unpack(value_type.bounds_symbols)))
       elseif std.is_rawref(value_type) then
         unpack_type = std.rawref(&unpack_type)
       end
@@ -570,6 +570,9 @@ end
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
+  if not std.is_bounded_type(pointer_type) then
+    log.error(node, "isnull requires bounded type, got " .. tostring(pointer_type))
+  end
   return ast.typed.ExprIsnull {
     pointer = pointer,
     expr_type = bool,
@@ -580,6 +583,7 @@ end
 function type_check.expr_new(cx, node)
   local region = type_check.expr(cx, node.region)
   local region_type = std.check_read(cx, region)
+  -- Checked in specialize.
   return ast.typed.ExprNew {
     pointer_type = node.pointer_type,
     region = region,
@@ -589,12 +593,13 @@ function type_check.expr_new(cx, node)
 end
 
 function type_check.expr_null(cx, node)
-  if not std.is_ptr(node.pointer_type) then
-    log.error(node, "null requires ptr type, got " .. tostring(node.pointer_type))
+  local pointer_type = node.pointer_type
+  if not std.is_bounded_type(pointer_type) then
+    log.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.ExprNull {
-    pointer_type = node.pointer_type,
-    expr_type = node.pointer_type,
+    pointer_type = pointer_type,
+    expr_type = pointer_type,
     span = node.span,
   }
 end
@@ -603,10 +608,10 @@ function type_check.expr_dynamic_cast(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_ptr(node.expr_type) then
+  if not std.is_bounded_type(node.expr_type) then
     log.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not std.is_ptr(value_type) then
+  if not std.is_bounded_type(value_type) then
     log.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
   if not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
@@ -625,10 +630,10 @@ function type_check.expr_static_cast(cx, node)
   local value_type = std.check_read(cx, value)
   local expr_type = node.expr_type
 
-  if not std.is_ptr(expr_type) then
+  if not std.is_bounded_type(expr_type) then
     log.error(node, "static_cast requires ptr type as argument 1, got " .. tostring(expr_type))
   end
-  if not std.is_ptr(value_type) then
+  if not std.is_bounded_type(value_type) then
     log.error(node, "static_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
   if not std.type_eq(expr_type.points_to_type, value_type.points_to_type) then
@@ -636,8 +641,8 @@ function type_check.expr_static_cast(cx, node)
   end
 
   local parent_region_map = {}
-  for i, value_region_symbol in ipairs(value_type.points_to_region_symbols) do
-    for j, expr_region_symbol in ipairs(expr_type.points_to_region_symbols) do
+  for i, value_region_symbol in ipairs(value_type.bounds_symbols) do
+    for j, expr_region_symbol in ipairs(expr_type.bounds_symbols) do
       local constraint = {
         lhs = value_region_symbol,
         rhs = expr_region_symbol,
@@ -841,7 +846,7 @@ end
 local function binary_equality(op)
   local check = binary_op_type(op)
   return function(cx, node, lhs_type, rhs_type)
-    if std.is_ptr(lhs_type) and std.is_ptr(rhs_type) then
+    if std.is_bounded_type(lhs_type) and std.is_bounded_type(rhs_type) then
       if not std.type_eq(lhs_type, rhs_type) then
         log.error(node, "type mismatch between " .. tostring(lhs_type) ..
                     " and " .. tostring(rhs_type))
@@ -893,7 +898,7 @@ function type_check.expr_deref(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_ptr(value_type) then
+  if not std.is_bounded_type(value_type) then
     log.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
@@ -1084,25 +1089,32 @@ function type_check.stat_for_list(cx, node)
 
   -- Enter scope for header.
   local cx = cx:new_local_scope()
+
+  -- Hack: Try to recover the original symbol for this bound if possible
+  local bound
+  if value:is(ast.typed.ExprID) then
+    bound = value.value
+  else
+    bound = terralib.newsymbol(value_type)
+  end
+
+  local expected_var_type
+  if std.is_region(value_type) then
+    local index_type = value_type:ispace().index_type
+    expected_var_type = index_type(value_type.fspace_type, bound)
+  else
+    local index_type = value_type.index_type
+    expected_var_type = index_type(bound)
+  end
+
   local var_type = node.symbol.type
   if not var_type then
-    -- Hack: Try to recover the original symbol for this bound if possible
-    local bound
-    if value:is(ast.typed.ExprID) then
-      bound = value.value
-    else
-      bound = terralib.newsymbol(value_type)
-    end
-    if std.is_region(value_type) then
-      -- FIXME: Should be bounded type
-      var_type = std.ptr(value_type.fspace_type, bound)
-    else
-      var_type = value_type.index_type(bound)
-    end
+    var_type = expected_var_type
   end
-  if not (std.is_ptr(var_type) or std.is_bounded_type(var_type)) then
-    -- FIXME: Should be bounded type
-    log.error(node, "iterator for loop expected pointer type, got " .. tostring(var_type))
+
+  if not std.type_eq(expected_var_type, var_type) then
+    log.error(node, "iterator for loop expected symbol of type " ..
+                tostring(expected_var_type) .. ", got " .. tostring(var_type))
   end
 
   -- Hack: Stuff the type back into the symbol so it's available

@@ -13,31 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- constraint_subregion2.lg:39: invalid cast missing constraint $t0 <= $t1
---   assert_subregion { x = t0, y = t1 }
---                  ^
+-- type_mismatch_isnull1.lg:23: isnull requires bounded type, got int32
+--   var x = isnull(5)
+--                ^
 
-import 'legion'
+import "legion"
 
-local c = legionlib.c
-
-fspace assert_subregion {
-  x : region(int),
-  y : region(int),
-} where x <= y end
-
-task main()
-  var t = region(ispace(ptr, 5), int)
-  var colors = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(colors, 0)
-  c.legion_coloring_ensure_color(colors, 1)
-
-  var tp = partition(disjoint, t, colors)
-  var t0 = tp[0]
-  var t1 = tp[1]
-
-  assert_subregion { x = t0, y = t1 }
-
-  c.legion_coloring_destroy(colors)
+task f()
+  var x = isnull(5)
 end
-legionlib.start(main)
+f:compile()

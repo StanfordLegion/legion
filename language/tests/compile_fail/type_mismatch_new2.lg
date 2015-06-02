@@ -12,24 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_new2.lg:25: new requires bounded type with exactly one region, got ptr(int32, $r, $s)
+--   var x = new(ptr(int, r, s))
+--             ^
+
 import "legion"
 
-local c = legionlib.c
-
 task f()
-  var t = region(ispace(ptr, 5), int)
-  var colors = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(colors, 0)
-  c.legion_coloring_ensure_color(colors, 1)
-
-  var tp = partition(disjoint, t, colors)
-  var t0 = tp[0]
-  var t1 = tp[1]
-
-  var x = new(ptr(int, t))
-  var x0 = static_cast(ptr(int, t0), x)
-  legionlib.assert(isnull(x0), "test failed")
-
-  c.legion_coloring_destroy(colors)
+  var r = region(ispace(ptr, 5), int)
+  var s = region(ispace(ptr, 5), int)
+  var x = new(ptr(int, r, s))
 end
 f:compile()

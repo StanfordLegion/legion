@@ -264,7 +264,7 @@ end
 function flip_types.type(simd_width, ty)
   if std.is_ref(ty) then
     local vector_type = flip_types.type(simd_width, std.as_read(ty))
-    return std.ref(std.ptr(vector_type, unpack(ty.refers_to_region_symbols)))
+    return std.ref(ty.pointer_type.index_type(vector_type, unpack(ty.bounds_symbols)))
   elseif std.is_rawref(ty) then
     local vector_type = flip_types.type(simd_width, std.as_read(ty))
     return std.rawref(&vector_type)
@@ -272,10 +272,10 @@ function flip_types.type(simd_width, ty)
     return vector(ty, simd_width)
   elseif ty:isarray() then
     return (vector(ty.type, simd_width))[ty.N]
-  elseif std.is_ptr(ty) then
+  elseif std.is_bounded_type(ty) then
     return std.vptr(simd_width,
                     ty.points_to_type,
-                    unpack(ty.points_to_region_symbols))
+                    unpack(ty.bounds_symbols))
   elseif ty:isstruct() then
     return std.sov(ty, simd_width)
   elseif ty:isfunction() then
@@ -397,7 +397,7 @@ end
 
 function min_simd_width.type(reg_size, ty)
   assert(not (std.is_ref(ty) or std.is_rawref(ty)))
-  if std.is_ptr(ty) then
+  if std.is_bounded_type(ty) then
     return reg_size / sizeof(uint32)
   elseif ty:isarray() then
     return reg_size / sizeof(ty.type)
@@ -826,7 +826,7 @@ end
 -- this check might be too restrictive though...
 -- need to be more careful about what the vectorizer can support
 function annotate_vectorizability.type(ty)
-  if ty:isprimitive() or std.is_ptr(ty) then
+  if ty:isprimitive() or std.is_bounded_type(ty) then
     return true
   elseif ty:isstruct() then
     for _, entry in pairs(ty.entries) do

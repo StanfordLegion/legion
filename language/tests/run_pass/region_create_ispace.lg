@@ -25,7 +25,7 @@ task f1(is : ispace(i1d), r : region(is, float))
 end
 
 task main()
-  var is0 = ispace(iptr, 5)
+  var is0 = ispace(ptr, 5)
   var r0 = region(is0, float)
 
   -- var is1 = ispace(i1d, 7, 2)

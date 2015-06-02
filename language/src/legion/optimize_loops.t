@@ -121,7 +121,7 @@ function analyze_is_side_effect_free.expr_field_access(cx, node)
   if not analyze_is_side_effect_free.expr(cx, node.value) then
     return false
   end
-  if std.is_ptr(std.as_read(node.value.expr_type)) or
+  if std.is_bounded_type(std.as_read(node.value.expr_type)) or
     std.is_ref(node.value.expr_type)
   then
     return false

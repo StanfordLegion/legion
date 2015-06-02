@@ -52,8 +52,8 @@ local analyze_region_divergence = {}
 
 function analyze_region_divergence.expr_field_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
-  if std.is_ptr(value_type) and #value_type:points_to_regions() > 1 then
-    cx:mark_region_divergence(unpack(value_type:points_to_regions()))
+  if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
+    cx:mark_region_divergence(unpack(value_type:bounds()))
   end
   analyze_region_divergence.expr(cx, node.value)
 end
@@ -113,8 +113,8 @@ end
 
 function analyze_region_divergence.expr_deref(cx, node)
   local value_type = std.as_read(node.value.expr_type)
-  if std.is_ptr(value_type) and #value_type:points_to_regions() > 1 then
-    cx:mark_region_divergence(unpack(value_type:points_to_regions()))
+  if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
+    cx:mark_region_divergence(unpack(value_type:bounds()))
   end
   analyze_region_divergence.expr(cx, node.value)
 end

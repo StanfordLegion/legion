@@ -20,8 +20,8 @@
 import "legion"
 
 task f()
-  var s = region(ispace(iptr, 5), int)
-  var t = region(ispace(iptr, 5), int)
+  var s = region(ispace(ptr, 5), int)
+  var t = region(ispace(ptr, 5), int)
 
   s = t
 end

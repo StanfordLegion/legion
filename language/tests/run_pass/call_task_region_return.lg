@@ -24,7 +24,7 @@ where reads(t) do
 end
 
 task h() : int
-  var r = region(ispace(iptr, 5), int)
+  var r = region(ispace(ptr, 5), int)
   var x = f(r)
   @x = 5
   return g(r, x)

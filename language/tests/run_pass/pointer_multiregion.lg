@@ -25,9 +25,9 @@ do
 end
 
 task main()
-  var r = region(ispace(iptr, 5), int)
-  var s = region(ispace(iptr, 5), int)
-  var t = region(ispace(iptr, 10), ptr(int, r, s))
+  var r = region(ispace(ptr, 5), int)
+  var s = region(ispace(ptr, 5), int)
+  var t = region(ispace(ptr, 10), ptr(int, r, s))
 
   f(r, s, t)
 end

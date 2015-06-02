@@ -249,7 +249,7 @@ function analyze_usage.expr_deref(cx, node)
   local ptr_type = std.as_read(node.value.expr_type)
   return std.reduce(
     usage_meet,
-    ptr_type:points_to_regions():map(
+    ptr_type:bounds():map(
       function(region) return uses(cx, region, inline) end),
     analyze_usage.expr(cx, node.value))
 end

@@ -462,13 +462,15 @@ end
 
 function specialize.expr_new(cx, node)
   local pointer_type = node.pointer_type_expr(cx.env:env())
-  assert(std.is_ptr(pointer_type))
-  local regions = pointer_type.points_to_region_symbols
-  if #regions ~= 1 then
-   log.error(node, "new requires pointer type with exactly one region, got " .. tostring(pointer_type))
+  if not std.is_bounded_type(pointer_type) then
+    log.error(node, "new requires bounded type, got " .. tostring(pointer_type))
+  end
+  local bounds = pointer_type.bounds_symbols
+  if #bounds ~= 1 then
+    log.error(node, "new requires bounded type with exactly one region, got " .. tostring(pointer_type))
   end
   local region = ast.specialized.ExprID {
-    value = regions[1],
+    value = bounds[1],
     span = node.span,
   }
   return ast.specialized.ExprNew {

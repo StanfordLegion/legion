@@ -13,31 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- constraint_subregion2.lg:39: invalid cast missing constraint $t0 <= $t1
---   assert_subregion { x = t0, y = t1 }
---                  ^
+-- type_mismatch_for6.lg:23: iterator for loop expected symbol of type ptr(int32, $r), got ptr(double, $r)
+--   for x : ptr(double, r) in r do end
+--     ^
 
-import 'legion'
+import "legion"
 
-local c = legionlib.c
-
-fspace assert_subregion {
-  x : region(int),
-  y : region(int),
-} where x <= y end
-
-task main()
-  var t = region(ispace(ptr, 5), int)
-  var colors = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(colors, 0)
-  c.legion_coloring_ensure_color(colors, 1)
-
-  var tp = partition(disjoint, t, colors)
-  var t0 = tp[0]
-  var t1 = tp[1]
-
-  assert_subregion { x = t0, y = t1 }
-
-  c.legion_coloring_destroy(colors)
+task f(r : region(int))
+  for x : ptr(double, r) in r do end
 end
-legionlib.start(main)
+f()

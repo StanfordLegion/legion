@@ -27,8 +27,8 @@ where reads(b, c) do
 end
 
 task g() : int
-  var d = region(ispace(iptr, 5), int)
-  var e = region(ispace(iptr, 5), s(d))
+  var d = region(ispace(ptr, 5), int)
+  var e = region(ispace(ptr, 5), s(d))
   var w = new(ptr(int, d))
   var u = new(ptr(s(d), e))
   @w = 7

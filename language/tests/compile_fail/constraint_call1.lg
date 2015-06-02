@@ -26,7 +26,7 @@ do
 end
 
 task main()
-  var a = region(ispace(iptr, 5), int)
+  var a = region(ispace(ptr, 5), int)
 
   f(a, a)
 end

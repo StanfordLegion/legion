@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_for5.lg:23: iterator for loop expected pointer type, got double
+-- type_mismatch_for5.lg:23: iterator for loop expected symbol of type ptr(int32, $r), got double
 --   for x : double in r do end
 --     ^
 

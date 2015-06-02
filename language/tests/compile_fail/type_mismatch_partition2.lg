@@ -20,7 +20,7 @@
 import "legion"
 
 task f() : int
-  var r = region(ispace(iptr, 5), int)
+  var r = region(ispace(ptr, 5), int)
   var p = partition(disjoint, r, 0)
 end
 f:compile()
