@@ -1077,24 +1077,31 @@ function type_check.stat_for_list(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not std.is_region(value_type) then
-    log.error(node, "iterator for loop expected region, got " .. tostring(value_type))
+  if not (std.is_ispace(value_type) or std.is_region(value_type)) then
+    log.error(node, "iterator for loop expected ispace or region, got " ..
+                tostring(value_type))
   end
 
   -- Enter scope for header.
   local cx = cx:new_local_scope()
   local var_type = node.symbol.type
   if not var_type then
-    -- Hack: Try to recover the original symbol for this region if possible
-    local region
+    -- Hack: Try to recover the original symbol for this bound if possible
+    local bound
     if value:is(ast.typed.ExprID) then
-      region = value.value
+      bound = value.value
     else
-      region = terralib.newsymbol(value_type)
+      bound = terralib.newsymbol(value_type)
     end
-    var_type = std.ptr(value_type.fspace_type, region)
+    if std.is_region(value_type) then
+      -- FIXME: Should be bounded type
+      var_type = std.ptr(value_type.fspace_type, bound)
+    else
+      var_type = value_type.index_type(bound)
+    end
   end
-  if not std.is_ptr(var_type) then
+  if not (std.is_ptr(var_type) or std.is_bounded_type(var_type)) then
+    -- FIXME: Should be bounded type
     log.error(node, "iterator for loop expected pointer type, got " .. tostring(var_type))
   end
 

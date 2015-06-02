@@ -2641,41 +2641,55 @@ function codegen.stat_for_list(cx, node)
   local cx = cx:new_local_scope()
   local block = codegen.block(cx, node.block)
 
-  assert(cx:has_region(value_type))
-  local lr = cx:region(value_type).logical_region
-  local it = cx:region(value_type).index_iterator
+  local ispace_type, is, it
+  if std.is_region(value_type) then
+    assert(cx:has_region(value_type))
+    ispace_type = value_type:ispace()
+    is = `([value.value].impl.index_space)
+    it = cx:region(value_type).index_iterator
+  else
+    ispace_type = value_type
+    is = `([value.value].impl)
+  end
 
   local actions = quote
     [value.actions]
   end
   local cleanup_actions = quote end
 
-  local iterator_has_next
-  local iterator_next_span
-  if cache_index_iterator then
-    iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-    iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-    actions = quote
-      [actions]
-      c.legion_terra_cached_index_iterator_reset(it)
+  local iterator_has_next, iterator_next_span -- For unstructured
+  local domain -- For structured
+  if ispace_type.dim == 0 then
+    if it and cache_index_iterator then
+      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
+      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
+      actions = quote
+        [actions]
+        c.legion_terra_cached_index_iterator_reset(it)
+      end
+    else
+      iterator_has_next = c.legion_index_iterator_has_next
+      iterator_next_span = c.legion_index_iterator_next_span
+      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+      actions = quote
+        [actions]
+        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
+      end
+      cleanup_actions = quote
+        c.legion_index_iterator_destroy([it])
+      end
     end
   else
-    iterator_has_next = c.legion_index_iterator_has_next
-    iterator_next_span = c.legion_index_iterator_next_span
-    it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+    domain = terralib.newsymbol(c.legion_domain_t, "domain")
     actions = quote
       [actions]
-      var is = [lr].impl.index_space
-      var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], is)
-    end
-    cleanup_actions = quote
-      c.legion_index_iterator_destroy([it])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
   end
 
   if not cx.task_meta:getcuda() then
-    return quote
-      do
+    if ispace_type.dim == 0 then
+      return quote
         [actions]
         while iterator_has_next([it]) do
           var count : c.size_t = 0
@@ -2692,6 +2706,45 @@ function codegen.stat_for_list(cx, node)
           end
         end
         [cleanup_actions]
+      end
+    else
+      local fields = ispace_type.index_type.fields
+      if fields then
+        local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
+        local rect = terralib.newsymbol("rect")
+        local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
+        local body = quote
+          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+          do
+            [block]
+          end
+        end
+        for i = ispace_type.dim, 1, -1 do
+          local rect_i = i - 1 -- C is zero-based, Lua is one-based
+          body = quote
+            for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
+              [body]
+            end
+          end
+        end
+        return quote
+          [actions]
+          var [rect] = [domain_get_rect]([domain])
+          [body]
+          [cleanup_actions]
+        end
+      else
+        return quote
+          [actions]
+          var rect = c.legion_domain_get_rect_1d([domain])
+          for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+            var [symbol] = [symbol.type]{ __ptr = i }
+            do
+              [block]
+            end
+          end
+          [cleanup_actions]
+        end
       end
     end
   else

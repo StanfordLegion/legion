@@ -12,14 +12,33 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_for4.lg:23: iterator for loop expected ispace or region, got int32
---   for x in 1 do end
---     ^
-
 import "legion"
 
-task f()
-  for x in 1 do end
+local i1d = index_type(int, "i1d")
+struct i2 { x : int, y : int }
+local i2d = index_type(i2, "i2d")
+
+task main()
+  var is0 = ispace(iptr, 5)
+  var is1 = ispace(i1d, 7, 2)
+  var is2 = ispace(i2d, { x = 2, y = 2 }, { x = 3, y = 4 })
+
+  var s0 = 0
+  for i0 in is0 do
+    s0 += 1
+  end
+  legionlib.assert(s0 == 0, "test failed")
+
+  var s1 = 0
+  for i1 in is1 do
+    s1 += 1
+  end
+  legionlib.assert(s1 == 7, "test failed")
+
+  var s2 = 0
+  for i2 in is2 do
+    s2 += 1
+  end
+  legionlib.assert(s2 == 4, "test failed")
 end
-f()
+legionlib.start(main)
