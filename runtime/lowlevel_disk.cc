@@ -199,7 +199,7 @@ namespace LegionRuntime {
     void HDFMemory::destroy_instance(RegionInstance i,
 				     bool local_destroy)
     {
-      HDFMetadata* new_hdf = hdf_metadata[i.id];
+      HDFMetadata* new_hdf = hdf_metadata[i.index_l()];
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);

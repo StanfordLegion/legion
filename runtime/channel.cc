@@ -24,6 +24,7 @@ namespace LegionRuntime {
       }
 
       static inline int min(int a, int b) { return (a < b) ? a : b; }
+      static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 
       static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
@@ -61,25 +62,25 @@ namespace LegionRuntime {
           int todo = min((max_req_size - nbytes) / oas_vec[offset_idx].size, min(total - done, min(src_in_block, dst_in_block)));
           // make sure we have source data ready
           if (src_buf->is_ib) {
-            todo = min(todo, (src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+            todo = min(todo, max(0, src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
             scatter_src_ib = scatter_src_ib || scatter_ib(src_start, nbytes + todo * oas_vec[offset_idx].size, src_buf->buf_size);
           }
           // make sure there are enough space in destination
           if (dst_buf->is_ib) {
-            todo = min(todo, (dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
+            todo = min(todo, max(0, dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
             scatter_dst_ib = scatter_dst_ib || scatter_ib(dst_start, nbytes + todo * oas_vec[offset_idx].size, dst_buf->buf_size);
           }
           if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
           ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
             break;
-          printf("min(%d, %d, %d)\n = ", (int)(max_req_size - nbytes) / oas_vec[offset_idx].size, total - done, min(src_in_block, dst_in_block));
-          printf("todo = %d, size = %d\n", todo, oas_vec[offset_idx].size);
+          //printf("min(%d, %d, %d) \n =", (int)(max_req_size - nbytes) / oas_vec[offset_idx].size, total - done, min(src_in_block, dst_in_block));
+          //printf("todo = %d, size = %d\n", todo, oas_vec[offset_idx].size);
           nbytes += todo * oas_vec[offset_idx].size;
-          // see if we can batchmore
+          // see if we can batch more
           if (todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
-              && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
-              && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
-              && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
+          && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
+          && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
+          && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
             done = block_start;
             offset_idx += 1;
           }
@@ -89,115 +90,117 @@ namespace LegionRuntime {
           }
         }
 
-        if (((done + irect.lo) % src_buf->block_size == 0 && order == SRC_FIFO)
-          ||((done + orect.lo) % dst_buf->block_size == 0 && order == DST_FIFO)
-          || done == total) {
+        if (nbytes > 0 &&
+        (((done + irect.lo) % src_buf->block_size == 0 && order == SRC_FIFO)
+        ||((done + orect.lo) % dst_buf->block_size == 0 && order == DST_FIFO)
+        || (done == total))) {
           offset_idx ++;
-        }
-        if (offset_idx < oas_vec.size()) {
-          switch (order) {
-            case SRC_FIFO:
-              done = block_start - irect.lo;
-              break;
-            case DST_FIFO:
-              done = block_start - orect.lo;
-              break;
-            case ANY_ORDER:
-              assert(0);
-              break;
-            default:
-              assert(0);
+          if (offset_idx < oas_vec.size()) {
+            switch (order) {
+              case SRC_FIFO:
+                done = block_start - irect.lo;
+                break;
+              case DST_FIFO:
+                done = block_start - orect.lo;
+                break;
+              case ANY_ORDER:
+                assert(0);
+                break;
+              default:
+                assert(0);
+            }
           }
-        }
-        else {
-          int new_block_start;
-          switch (order) {
-            case SRC_FIFO:
-              new_block_start = block_start + src_buf->block_size;
-              new_block_start = new_block_start - new_block_start % src_buf->block_size;
-              block_start = new_block_start;
-              done = block_start - irect.lo;
-              offset_idx = 0;
-              if (block_start > irect.hi) {
-                dso->step();
-                if (dso->any_left) {
-                  dsi->step();
-                  if (dsi->any_left) {
-                    free(dso);
-                    dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-                  }
-                }
-                if (dso->any_left && dsi->any_left) {
-                  Rect<DIM> subrect_check;
-                  irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
-                  orect = dso->image;
-                  done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
-                }
-              }
-              break;
-            case DST_FIFO:
-              new_block_start = block_start + dst_buf->block_size;
-              new_block_start = new_block_start - new_block_start % dst_buf->block_size;
-              block_start = new_block_start;
-              done = block_start - orect.lo;
-              offset_idx = 0;
-              if (block_start > orect.hi) {
-                dsi->step();
-                if (!dsi->any_left) {
+          else {
+            int new_block_start;
+            switch (order) {
+              case SRC_FIFO:
+                new_block_start = block_start + src_buf->block_size;
+                new_block_start = new_block_start - new_block_start % src_buf->block_size;
+                block_start = new_block_start;
+                done = block_start - irect.lo;
+                offset_idx = 0;
+                if (block_start > irect.hi) {
                   dso->step();
                   if (dso->any_left) {
-                    free(dsi);
-                    dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
+                    dsi->step();
+                    if (dsi->any_left) {
+                      free(dso);
+                      dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
+                    }
+                  }
+                  if (dso->any_left && dsi->any_left) {
+                    Rect<DIM> subrect_check;
+                    irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
+                    orect = dso->image;
+                    done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
                   }
                 }
-                if (dso->any_left && dsi->any_left) {
-                  Rect<DIM> subrect_check;
-                  orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
-                  irect = dsi->image;
-                  done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+                break;
+              case DST_FIFO:
+                new_block_start = block_start + dst_buf->block_size;
+                new_block_start = new_block_start - new_block_start % dst_buf->block_size;
+                block_start = new_block_start;
+                done = block_start - orect.lo;
+                offset_idx = 0;
+                if (block_start > orect.hi) {
+                  dsi->step();
+                  if (!dsi->any_left) {
+                    dso->step();
+                    if (dso->any_left) {
+                      free(dsi);
+                      dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
+                    }
+                  }
+                  if (dso->any_left && dsi->any_left) {
+                    Rect<DIM> subrect_check;
+                    orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
+                    irect = dsi->image;
+                    done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+                  }
                 }
-              }
-              break;
-            case ANY_ORDER:
-              assert(0);
-              break;
-            default:
-              assert(0);
+                break;
+              case ANY_ORDER:
+                assert(0);
+                break;
+              default:
+                assert(0);
+            }
           }
         }
-
         return (nbytes > 0);
       }
 
       template<unsigned DIM>
-      MemcpyXferDes<DIM>::MemcpyXferDes(Channel* _channel,
-                     bool has_pre_XferDes, bool has_next_XferDes,
-                     Buffer* _src_buf, Buffer* _dst_buf,
-                     char* _src_mem_base, char* _dst_mem_base,
-                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                     uint64_t _bytes_total, uint64_t _max_req_size, long max_nr,
-                     XferOrder _order)
+      MemcpyXferDes<DIM>::MemcpyXferDes(Channel* _channel, bool has_pre_XferDes,
+                                        Buffer* _src_buf, Buffer* _dst_buf,
+                                        char* _src_mem_base, char* _dst_mem_base,
+                                        Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size, long max_nr, XferOrder _order)
       {
         kind = XferDes::XFER_MEM_CPY;
         channel = _channel;
         order = _order;
         bytes_read = bytes_write = 0;
+        pre_XferDes = NULL;
+        next_XferDes = NULL;
         pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
         next_bytes_read = 0;
-        bytes_total = _bytes_total;
         max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
         src_mem_base = _src_mem_base;
         dst_mem_base = _dst_mem_base;
         domain = _domain;
+        size_t total_field_size = 0;
         for (int i = 0; i < _oas_vec.size(); i++) {
           OffsetsAndSize oas;
           oas.src_offset = _oas_vec[i].src_offset;
           oas.dst_offset = _oas_vec[i].dst_offset;
           oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
           oas_vec.push_back(oas);
         }
+        bytes_total = total_field_size * domain.get_volume();
         order = _order;
         Rect<DIM> subrect_check;
         switch (order) {
@@ -237,6 +240,9 @@ namespace LegionRuntime {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
+          if (nbytes == 0)
+            break;
           while (nbytes > 0) {
             size_t req_size = nbytes;
             if (src_buf->is_ib) {
@@ -268,13 +274,14 @@ namespace LegionRuntime {
       void MemcpyXferDes<DIM>::notify_request_read_done(Request* req)
       {
         req->is_read_done = true;
-        DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
+        MemcpyRequest* mc_req = (MemcpyRequest*) req;
         if (pre_XferDes) {
-          segments_read.insert(std::pair<int64_t, uint64_t>(dw_req->src_buf - src_buf->alloc_offset, dw_req->nbytes));
+          assert(src_buf->is_ib);
+          segments_read.insert(std::pair<int64_t, uint64_t>(mc_req->src_buf - src_mem_base, mc_req->nbytes));
           std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
           while (true) {
-            it = segments_read.find(bytes_read);
+            it = segments_read.find(bytes_read % src_buf->buf_size);
             if (it == segments_read.end())
               break;
             bytes_read += it->second;
@@ -285,7 +292,7 @@ namespace LegionRuntime {
             pre_XferDes->update_next_bytes_read(bytes_read);
         }
         else {
-          bytes_read += dw_req->nbytes;
+          bytes_read += mc_req->nbytes;
         }
       }
 
@@ -293,13 +300,14 @@ namespace LegionRuntime {
       void MemcpyXferDes<DIM>::notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
-        DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
+        MemcpyRequest* mc_req = (MemcpyRequest*) req;
         if (next_XferDes) {
-          segments_write.insert(std::pair<int64_t, uint64_t>(dw_req->dst_offset - dst_buf->alloc_offset, dw_req->nbytes));
+          assert(dst_buf->is_ib);
+          segments_write.insert(std::pair<int64_t, uint64_t>(mc_req->dst_buf - dst_mem_base, mc_req->nbytes));
           std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
           while (true) {
-            it = segments_write.find(bytes_write);
+            it = segments_write.find(bytes_write % dst_buf->buf_size);
             if (it == segments_write.end())
               break;
             bytes_write += it->second;
@@ -310,40 +318,85 @@ namespace LegionRuntime {
             next_XferDes->update_pre_bytes_write(bytes_write);
         }
         else {
-          bytes_write += dw_req->nbytes;
+          bytes_write += mc_req->nbytes;
         }
         available_reqs.push(req);
       }
 
       template<unsigned DIM>
-      DiskWriteXferDes<DIM>::DiskWriteXferDes(
-                       Channel* _channel, int _fd,
-                       bool has_pre_XferDes, bool has_next_XferDes,
-                       Buffer* _src_buf, Buffer* _dst_buf,
-                       uint64_t _bytes_total, long max_nr)
+      DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
+                                    Buffer* _src_buf, Buffer* _dst_buf,
+                                    char *_mem_base, int _fd,
+                                    Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                    uint64_t _bytes_total, uint64_t _max_req_size, long max_nr,
+                                    XferOrder _order, XferKind _kind)
       {
-        kind = XferDes::XFER_DISK_WRITE;
-        fd = _fd;
+        kind = _kind;
         channel = _channel;
+        order = _order;
         bytes_read = bytes_write = 0;
-        pre_XferDes = NULL;
         pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
+        pre_XferDes = NULL;
         next_XferDes = NULL;
         next_bytes_read = 0;
         bytes_total = _bytes_total;
+        max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
-        // Make sure this is the last XferDes in the chain
-        assert(!has_next_XferDes);
-        // set iterator
-        dsi = Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
-        dso = Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi.subrect, *(dst_buf->linearization.get_mapping<DIM>()));
+        fd = _fd;
+        mem_base = _mem_base;
+        domain = _domain;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          oas_vec.push_back(oas);
+        }
+
         Rect<DIM> subrect_check;
-        irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso.subrect, subrect_check);
-        orect = dso.image;
-        done = 0; offset_idx = 0; block_start = irect.lo;
-        //allocate memory for DiskWRiteRequests, and push them into
-        // available_reqs
+        switch (order) {
+          case SRC_FIFO:
+            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
+            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
+            orect = dso->image;
+            irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            break;
+          case DST_FIFO:
+            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
+            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
+            irect = dsi->image;
+            orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            break;
+          case ANY_ORDER:
+            assert(0);
+            break;
+          default:
+            assert(0);
+        }
+
+        switch (kind) {
+          case XferDes::XFER_DISK_READ:
+            DiskReadRequest* disk_read_reqs = (DiskReadRequest*) calloc(max_nr, sizeof(DiskReadRequest));
+            for (int i = 0; i < max_nr; i++) {
+              disk_read_reqs[i].xd = this;
+              available_reqs.push(&disk_read_reqs[i]);
+            }
+            requests = disk_read_reqs;
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            DiskWriteRequest* disk_write_reqs = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
+            for (int i = 0; i < max_nr; i++) {
+              disk_write_reqs[i].xd = this;
+              available_reqs.push(&disk_write_reqs[i]);
+            }
+            requests = disk_write_reqs;
+            break;
+          default:
+            assert(0);
+        }
         requests = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
@@ -352,92 +405,69 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      long DiskWriteXferDes<DIM>::get_requests(Request** requests, long nr)
+      long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
       {
-        DiskWriteRequest** disk_write_reqs = (DiskWriteRequest**) requests;
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && dsi && dso) {
-          off_t src_start = calc_mem_loc(src_buf->alloc_offset, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                         src_buf->elmt_size, src_buf->block_size, done + irect.lo);
-          off_t dst_start = calc_mem_loc(dst_buf->alloc_offset, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                         dst_buf->elmt_size, dst_buf->block_size, done + orect.lo);
-          size_t nbytes = 0;
-          while (true) {
-            // check to see if we can generate next request
-            int src_in_block = src_buf->block_size - (done + irect.lo) % src_buf->block_size;
-            int dst_in_block = dst_buf->block_size - (done + orect.lo) % dst_buf->block_size;
-            int todo = min((max_req_size - nbytes) / oas_vec[offset_idx].size, min(irect.hi - irect.lo + 1 - done, min(src_in_block, dst_in_block)));
-            // make sure if we have source data ready
-            if (src_buf->is_ib)
-              todo = min(todo, (src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
-            nbytes += todo * oas_vec[offset_idx].size;
-            // see if we can batch more
-            if (todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
-                && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
-                && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
-                && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
-              done = block_start;
-              offset_idx += 1;
-            }
-            else {
-              done += todo;
-              break;
-            }
-          }
-          if ((done + irect.lo) % src_buf->block_size == 0 || done == irect.hi - irect.lo + 1) {
-            offset_idx ++;
-          }
-          if (offset_idx < oas_vec.size()) {
-            done = block_start - irect.lo;
-          }
-          else {
-            int new_block_start = block_start + src_buf->block_size;
-            new_block_start = new_block_start - new_block_start % src_buf->block_size;
-            block_start = new_block_start;
-            done = block_start - irect.lo;
-            offset_idx = 0;
-            if (block_start > irect.hi) {
-              dso++;
-              if (!dso) {
-                dsi++;
-                if (dsi) {
-                  dso = Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi.subrect, *(dst_buf->linearization.get_mapping<DIM>()));
-                }
-              }
-              if (dso && dsi) {
-                Rect<DIM> subrect_check;
-                irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso.subrect, subrect_check);
-                orect = dso.image;
-                done = 0; offset_idx = 0; block_start = irect.lo;
-              }
-            }
-          }
+          off_t src_start, dst_start;
+          size_t nbytes;
+          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
-          disk_write_reqs[idx] = (DiskWriteRequest*) available_reqs.front();
-          available_reqs.pop();
-          disk_write_reqs[idx]->fd = fd;
-          disk_write_reqs[idx]->is_read_done = false;
-          disk_write_reqs[idx]->is_write_done = false;
-          disk_write_reqs[idx]->src_buf = src_start;
-          disk_write_reqs[idx]->dst_offset = dst_start;
-          disk_write_reqs[idx]->nbytes = nbytes;
-          idx ++;
+          while (nbytes > 0) {
+            size_t req_size = nbytes;
+            if (src_buf->is_ib) {
+              src_start = src_start % src_buf->buf_size;
+              req_size = umin(req_size, src_buf->buf_size - src_start);
+            }
+            if (dst_buf->is_ib) {
+              dst_start = dst_start % dst_buf->buf_size;
+              req_size = umin(req_size, dst_buf->buf_size - dst_start);
+            }
+            requests[idx] = available_reqs.front();
+            available_reqs.pop();
+            requests[idx]->is_read_done = false;
+            requests[idx]->is_write_done = false;
+            switch (kind) {
+              case XferDes::XFER_DISK_READ:
+                DiskReadRequest* disk_read_req = (DiskReadRequest*) requests[idx];
+                disk_read_req->fd = fd;
+                disk_read_req->src_offset = src_start;
+                disk_read_req->dst_buf = (uint64_t)(mem_base + dst_start);
+                disk_read_req->nbytes = req_size;
+                break;
+              case XferDes::XFER_DISK_WRITE:
+                printf("[DiskWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, req_size);
+                DiskWriteRequest* disk_write_req = (DiskWriteRequest*) requests[idx];
+                disk_write_req->fd = fd;
+                disk_write_req->src_buf = (uint64_t)(mem_base + src_start);
+                disk_write_req->dst_offset = dst_start;
+                disk_write_req->nbytes = req_size;
+                break;
+              default:
+                assert(0);
+            }
+            src_start += req_size; // here we don't have to mod src_buf->buf_size since it will be performed in next loop
+            dst_start += req_size; //
+            nbytes -= req_size;
+            idx ++;
+          }
         }
         return idx;
       }
 
       template<unsigned DIM>
-      void DiskWriteXferDes<DIM>::notify_request_read_done(Request* req)
+      void DiskXferDes<DIM>::notify_request_read_done(Request* req)
       {
         req->is_read_done = true;
         DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
         if (pre_XferDes) {
-          segments_read.insert(std::pair<int64_t, uint64_t>(dw_req->src_buf - src_buf->alloc_offset, dw_req->nbytes));
+          segments_read.insert(std::pair<int64_t, uint64_t>(dw_req->src_buf - (uint64_t)mem_base, dw_req->nbytes));
           std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
           while (true) {
-            it = segments_read.find(bytes_read);
+            it = segments_read.find(bytes_read % src_buf->buf_size);
             if (it == segments_read.end())
               break;
             bytes_read += it->second;
@@ -453,7 +483,7 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      void DiskWriteXferDes<DIM>::notify_request_write_done(Request* req)
+      void DiskXferDes<DIM>::notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
         DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
@@ -462,7 +492,7 @@ namespace LegionRuntime {
           std::map<int64_t, uint64_t>::iterator it;
           bool update = false;
           while (true) {
-            it = segments_write.find(bytes_write);
+            it = segments_write.find(bytes_write % dst_buf->buf_size);
             if (it == segments_write.end())
               break;
             bytes_write += it->second;
@@ -478,114 +508,181 @@ namespace LegionRuntime {
         available_reqs.push(req);
       }
 
+#ifdef USE_CUDA
       template<unsigned DIM>
-      DiskReadXferDes<DIM>::DiskReadXferDes(
-                       Channel* _channel, int _fd,
-                       bool has_pre_XferDes, bool has_next_XferDes,
-                       Buffer* _src_buf, Buffer* _dst_buf,
-                       uint64_t _bytes_total, long max_nr)
+      GPUXferDes<DIM>::GPUXferDes(Channel* _channel, bool has_pre_XferDes,
+                                  Buffer* _src_buf, Buffer* _dst_buf,
+                                  char* _src_mem_base, char* _dst_mem_base,
+                                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _bytes_total, uint64_t _max_req_size, long max_nr,
+                                  XferOrder _order, XferDes::XferKind _kind,
+                                  GPUProcessor* _dst_gpu)
       {
-        kind = XferDes::XFER_DISK_READ;
-        fd = _fd;
+        kind = _kind;
         channel = _channel;
+        order = _order;
         bytes_read = bytes_write = 0;
+        pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
         pre_XferDes = NULL;
-        pre_bytes_write = _bytes_total;
         next_XferDes = NULL;
         next_bytes_read = 0;
         bytes_total = _bytes_total;
+        max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
-        // Make sure this is the last XferDes in the chain
-        assert(!has_pre_XferDes);
-        // set iterator
-        dsi = Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), src_buf->linearization.get_mapping<DIM>());
-        dso = Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi.subrect, dst_buf->linearization.get_mapping<DIM>());
+        src_mem_base = _src_mem_base;
+        dst_mem_base = _dst_mem_base;
+        dst_gpu = _dst_gpu;
+        domain = _domain;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          oas_vec.push_back(oas);
+        }
+
         Rect<DIM> subrect_check;
-        irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso.subrect, subrect_check);
-        orect = dso.image;
-        done = 0; offset_idx = 0; block_start = irect.lo;
-        //allocate memory for DiskWRiteRequests, and push them into
-        // available_reqs
-        requests = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
-        for (int i = 0; i < max_nr; i++) {
-          requests[i].xd = this;
-          available_reqs.push(&requests[i]);
+        switch (order) {
+          case SRC_FIFO:
+            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf->linearization.get_mapping<DIM>()));
+            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
+            orect = dso->image;
+            irect = src_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dso->subrect, subrect_check);
+            done = 0; offset_idx = 0; block_start = irect.lo; total = irect.hi - irect.lo + 1;
+            break;
+          case DST_FIFO:
+            dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf->linearization.get_mapping<DIM>()));
+            dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
+            irect = dsi->image;
+            orect = dst_buf->linearization.get_mapping<DIM>()->image_dense_subrect(dsi->subrect, subrect_check);
+            done = 0; offset_idx = 0; block_start = orect.lo; total = orect.hi - orect.lo + 1;
+            break;
+          case ANY_ORDER:
+            assert(0);
+            break;
+          default:
+            assert(0);
+        }
+
+        switch (kind) {
+          case XferDes::XFER_GPU_TO_FB:
+          {
+            GPUtoFBRequest* gpu_to_fb_reqs = (GPUtoFBRequest*) calloc(max_nr, sizeof(GPUtoFBRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gpu_to_fb_reqs[i].xd = this;
+              available_reqs.push(&gpu_to_fb_reqs[i]);
+            }
+            requests = gpu_to_fb_reqs;
+            break;
+          }
+          case XferDes::XFER_GPU_FROM_FB:
+          {
+            GPUfromFBRequest* gpu_from_fb_reqs = (GPUfromFBRequest*) calloc(max_nr, sizeof(GPUfromFBRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gpu_from_fb_reqs[i].xd = this;
+              available_reqs.push(&gpu_from_fb_reqs[i]);
+            }
+            requests = gpu_from_fb_reqs;
+            break;
+          }
+          case XferDes::XFER_GPU_IN_FB:
+          {
+            GPUinFBRequest* gpu_in_fb_reqs = (GPUinFBRequest*) calloc(max_nr, sizeof(GPUinFBRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gpu_in_fb_reqs[i].xd = this;
+              available_reqs.push(&gpu_in_fb_reqs[i]);
+            }
+            requests = gpu_in_fb_reqs;
+            break;
+          }
+          case XferDes::XFER_GPU_PEER_FB:
+          {
+            GPUpeerFBRequest* gpu_peer_fb_reqs = (GPUpeerFBRequest*) calloc(max_nr, sizeof(GPUpeerFBRequest));
+            for (int i = 0; i < max_nr; i++) {
+              gpu_peer_fb_reqs[i].xd = this;
+              available_reqs.push(&gpu_peer_fb_reqs[i]);
+            }
+            requests = gpu_peer_fb_reqs;
+            break;
+          }
+        default:
         }
       }
 
       template<unsigned DIM>
-      long DiskReadXferDes<DIM>::get_requests(Request** requests, long nr)
+      long GPUXferDes<DIM>::get_requests(Request** requests, long nr)
       {
-        DiskReadRequest** disk_read_reqs = (DiskReadRequest**) requests;
         long idx = 0;
-        /*
-        while(idx < nr && !available_reqs.empty()) {
-          disk_read_reqs[idx] = (DiskReadRequest*) available_reqs.front();
-          available_reqs.pop();
-          disk_read_reqs[idx]->fd = fd;
-          disk_read_reqs[idx]->is_read_done = false;
-          disk_read_reqs[idx]->is_write_done = false;
-          // TODO: generate copy requests
-          uint64_t size;
-          size = gen_next_request(disk_read_reqs[idx]);
-          bytes_submit += size;
-          idx ++;
+        while (idx < nr && !available_reqs.empty() && dsi && dso) {
+          off_t src_start, dst_start;
+          size_t nbytes;
+          simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
+          if (nbytes == 0)
+            break;
+          while (nbytes > 0) {
+            size_t req_size = nbytes;
+            size_t req_size = nbytes;
+            if (src_buf->is_ib) {
+              src_start = src_start % src_buf->buf_size;
+              req_size = umin(req_size, src_buf->buf_size - src_start);
+            }
+            if (dst_buf->is_ib) {
+              dst_start = dst_start % dst_buf->buf_size;
+              req_size = umin(req_size, dst_buf->buf_size - dst_start);
+            }
+            requests[idx] = available_reqs.front();
+            available_reqs.pop();
+            requests[idx]->is_read_done = false;
+            requests[idx]->is_write_done = false;
+            switch (kind) {
+              case XferDes::XFER_GPU_TO_FB:
+                GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
+                gpu_to_fb_req->src = src_mem_base + src_start;
+                gpu_to_fb_req->dst_offset = dst_start;
+                gpu_to_fb_req->nbytes = req_size;
+                break;
+              case XferDes::XFER_GPU_FROM_FB:
+                GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
+                gpu_from_fb_req->src_offset = src_start;
+                gpu_from_fb_req->dst = dst_mem_base + dst_start;
+                gpu_from_fb_req->nbytes = req_size;
+                break;
+              case XferDes::XFER_GPU_IN_FB:
+                GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
+                gpu_in_fb_req->src_offset = src_start;
+                gpu_in_fb_req->dst_offset = dst_start;
+                gpu_in_fb_req->nbytes = req_size;
+                break;
+              case XferDes::XFER_GPU_PEER_FB:
+                GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*) requests[idx];
+                gpu_peer_fb_req->src_offset = src_start;
+                gpu_peer_fb_req->dst_offset = dst_start;
+                gpu_peer_fb_req->nbytes = req_size;
+                gpu_peer_fb_req->dst_gpu = dst_gpu;
+                break;
+              default:
+                assert(0);
+            }
+            src_start += req_size;
+            dst_start += req_size;
+            nbytes -= req_size;
+            idx ++;
+          }
         }
-        */
         return idx;
       }
 
       template<unsigned DIM>
-      void DiskReadXferDes<DIM>::notify_request_read_done(Request* req)
+      void GPUXferDes<DIM>::notify_request_read_done(Request* req)
       {
-        req->is_read_done = true;
-        DiskReadRequest* dw_req = (DiskReadRequest*) req;
-        if (pre_XferDes) {
-          segments_read.insert(std::pair<int64_t, uint64_t>(dw_req->src_offset - src_buf->alloc_offset, dw_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_read.find(bytes_read);
-            if (it == segments_read.end())
-              break;
-            bytes_read += it->second;
-            update = true;
-            segments_read.erase(it);
-          }
-          if (update)
-            pre_XferDes->update_next_bytes_read(bytes_read);
-        }
-        else {
-          bytes_read += dw_req->nbytes;
-        }
       }
 
       template<unsigned DIM>
-      void DiskReadXferDes<DIM>::notify_request_write_done(Request* req)
+      void GPUXferDes<DIM>::notify_request_write_done(Request* req)
       {
-        req->is_write_done = true;
-        DiskReadRequest* dw_req = (DiskReadRequest*) req;
-        if (next_XferDes) {
-          segments_write.insert(std::pair<int64_t, uint64_t>(dw_req->dst_buf - dst_buf->alloc_offset, dw_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_write.find(bytes_write);
-            if (it == segments_write.end())
-              break;
-            bytes_write += it->second;
-            update = true;
-            segments_write.erase(it);
-          }
-          if (next_XferDes != NULL && update)
-            next_XferDes->update_pre_bytes_write(bytes_write);
-        }
-        else {
-          bytes_write += dw_req->nbytes;
-        }
-        available_reqs.push(req);
       }
+#endif
 
       MemcpyChannel::MemcpyChannel(long max_nr, MemcpyThread* _worker)
       {
@@ -625,9 +722,9 @@ namespace LegionRuntime {
         return capacity;
       }
 
-      DiskReadChannel::DiskReadChannel(long max_nr)
+      DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
       {
-        kind = XferDes::XFER_DISK_READ;
+        kind = _kind;
         ctx = 0;
         capacity = max_nr;
         int ret = io_setup(max_nr, &ctx);
@@ -636,14 +733,27 @@ namespace LegionRuntime {
         cb = (struct iocb*) calloc(max_nr, sizeof(struct iocb));
         cbs = (struct iocb**) calloc(max_nr, sizeof(struct iocb*));
         events = (struct io_event*) calloc(max_nr, sizeof(struct io_event));
-        for (int i = 0; i < max_nr; i++) {
-          memset(&cb[i], 0, sizeof(cb[i]));
-          cb[i].aio_lio_opcode = IOCB_CMD_PREAD;
-          available_cb.push_back(&cb[i]);
+        switch (kind) {
+          case XferDes::XFER_DISK_READ:
+            for (int i = 0; i < max_nr; i++) {
+              memset(&cb[i], 0, sizeof(cb[i]));
+              cb[i].aio_lio_opcode = IOCB_CMD_PREAD;
+              available_cb.push_back(&cb[i]);
+            }
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            for (int i = 0; i < max_nr; i++) {
+              memset(&cb[i], 0, sizeof(cb[i]));
+              cb[i].aio_lio_opcode = IOCB_CMD_PWRITE;
+              available_cb.push_back(&cb[i]);
+            }
+            break;
+          default:
+            assert(0);
         }
       }
 
-      DiskReadChannel::~DiskReadChannel()
+      DiskChannel::~DiskChannel()
       {
         io_destroy(ctx);
         free(cb);
@@ -651,19 +761,38 @@ namespace LegionRuntime {
         free(events);
       }
 
-      long DiskReadChannel::submit(Request** requests, long nr)
+      long DiskChannel::submit(Request** requests, long nr)
       {
-        DiskReadRequest** disk_read_reqs = (DiskReadRequest**) requests;
         int ns = 0;
-        while (ns < nr && !available_cb.empty()) {
-          cbs[ns] = available_cb.back();
-          available_cb.pop_back();
-          cbs[ns]->aio_fildes = disk_read_reqs[ns]->fd;
-          cbs[ns]->aio_data = (uint64_t) (disk_read_reqs[ns]);
-          cbs[ns]->aio_buf = disk_read_reqs[ns]->dst_buf;
-          cbs[ns]->aio_offset = disk_read_reqs[ns]->src_offset;
-          cbs[ns]->aio_nbytes = disk_read_reqs[ns]->nbytes;
-          ns++;
+        switch (kind) {
+          case XferDes::XFER_DISK_READ:
+            while (ns < nr && !available_cb.empty()) {
+              DiskReadRequest* disk_read_req = (DiskReadRequest*) requests[ns];
+              cbs[ns] = available_cb.back();
+              available_cb.pop_back();
+              cbs[ns]->aio_fildes = disk_read_req->fd;
+              cbs[ns]->aio_data = (uint64_t) (disk_read_req);
+              cbs[ns]->aio_buf = disk_read_req->dst_buf;
+              cbs[ns]->aio_offset = disk_read_req->src_offset;
+              cbs[ns]->aio_nbytes = disk_read_req->nbytes;
+              ns++;
+            }
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            while (ns < nr && !available_cb.empty()) {
+              DiskWriteRequest* disk_write_req = (DiskWriteRequest*) requests[ns];
+              cbs[ns] = available_cb.back();
+              available_cb.pop_back();
+              cbs[ns]->aio_fildes = disk_write_req->fd;
+              cbs[ns]->aio_data = (uint64_t) (disk_write_req);
+              cbs[ns]->aio_buf = disk_write_req->src_buf;
+              cbs[ns]->aio_offset = disk_write_req->dst_offset;
+              cbs[ns]->aio_nbytes = disk_write_req->nbytes;
+              ns++;
+            }
+            break;
+          default:
+             assert(0);
         }
         assert(ns == nr);
         int ret = io_submit(ctx, ns, cbs);
@@ -673,13 +802,13 @@ namespace LegionRuntime {
         return ret;
       }
 
-      void DiskReadChannel::pull()
+      void DiskChannel::pull()
       {
         int nr = io_getevents(ctx, 0, capacity, events, NULL);
         if (nr < 0)
           perror("io_getevents error");
         for (int i = 0; i < nr; i++) {
-          DiskReadRequest* req = (DiskReadRequest*) events[i].data;
+          Request* req = (Request*) events[i].data;
           struct iocb* ret_cb = (struct iocb*) events[i].obj;
           available_cb.push_back(ret_cb);
           assert(events[i].res == (int64_t)ret_cb->aio_nbytes);
@@ -688,99 +817,166 @@ namespace LegionRuntime {
         }
       }
 
-      long DiskReadChannel::available()
+#ifdef USE_CUDA
+      GPUChannel::GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
-        return available_cb.size();
-      }
-
-      DiskWriteChannel::DiskWriteChannel(long max_nr)
-      {
-        kind = XferDes::XFER_DISK_WRITE;
-        ctx = 0;
+        src_gpu = _src_gpu;
+        kind = _kind;
         capacity = max_nr;
-        int ret = io_setup(max_nr, &ctx);
-        assert(ret >= 0);
-        assert(available_cb.empty());
-        cb = (struct iocb*) calloc(max_nr, sizeof(struct iocb));
-        cbs = (struct iocb**) calloc(max_nr, sizeof(struct iocb*));
-        events = (struct io_event*) calloc(max_nr, sizeof(struct io_event));
-        for (int i = 0; i < max_nr; i++) {
-          memset(&cb[i], 0, sizeof(cb[i]));
-          cb[i].aio_lio_opcode = IOCB_CMD_PWRITE;
-          available_cb.push_back(&cb[i]);
+      }
+
+      long GPUChannel::submit(Request** requests, long nr)
+      {
+        switch (kind) {
+          case XferDes::XFER_GPU_TO_FB:
+          {
+            GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
+                                  gpu_to_fb_reqs[i]->src,
+                                  gpu_to_fb_reqs[i]->nbytes,
+                                  Event::NO_EVENT,
+                                  gpu_to_fb_reqs[i]->complete_event);
+              pending_copies.push_back(gpu_to_fb_reqs[i]);
+            }
+            break;
+          }
+          case XferDes::XFER_GPU_FROM_FB:
+          {
+        	GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
+        	for (int i = 0; i < nr; i++) {
+        	  gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+        	  src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
+                                    gpu_from_fb_reqs[i]->src_offset,
+                                    gpu_from_fb_reqs[i]->nbytes,
+                                    Event::NO_EVENT,
+                                    gpu_from_fb_reqs[i]->complete_event);
+        	  pending_copies.push_back(gpu_from_fb_reqs[i]);
+        	}
+        	break;
+          }
+          case XferDes::XFER_GPU_IN_FB:
+          {
+            GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              src_gpu->copy_within_fb(gpu_in_fb_reqs[i]->dst_offset,
+                                      gpu_in_fb_reqs[i]->src_offset,
+                                      gpu_in_fb_reqs[i]->nbytes,
+                                      Event::NO_EVENT,
+                                      gpu_in_fb_reqs[i]->complete_event);
+              pending_copies.push_back(gpu_in_fb_reqs[i]);
+            }
+            break;
+          }
+          case XferDes::XFER_GPU_PEER_FB:
+          {
+            GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              src_gpu->copy_to_peer(gpu_peer_fb_reqs[i]->dst_gpu,
+                                    gpu_peer_fb_reqs[i]->dst_offset,
+                                    gpu_peer_fb_reqs[i]->src_offset,
+                                    gpu_peer_fb_reqs[i]->nbytes,
+                                    Event::NO_EVENT,
+                                    gpu_peer_fb_reqs[i]->complete_event);
+              pending_copies.push_back(gpu_peer_fb_reqs[i]);
+            }
+            break;
+          }
+          default:
+            assert(0);
+        }
+        return nr;
+      }
+
+      void GPUChannel::pull()
+      {
+        switch (kind) {
+          case XferDes::XFER_GPU_TO_FB:
+            while (!pending_copies.empty()) {
+              GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*)pending_copies.front();
+              if (gpu_to_fb_req->complete_event.has_triggered()) {
+                gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
+                gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
+                pending_copies.pop_front();
+              }
+              else
+                break;
+            }
+            break;
+          case XferDes::XFER_GPU_FROM_FB:
+            while (!pending_copies.empty()) {
+              GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*)pending_copies.front();
+              if (gpu_from_fb_req->complete_event.has_triggered()) {
+                gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
+                gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
+                pending_copies.pop_front();
+              }
+              else
+                break;
+            }
+            break;
+          case XferDes::XFER_GPU_IN_FB:
+            while (!pending_copies.empty()) {
+              GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*)pending_copies.front();
+              if (gpu_in_fb_req->complete_event.has_triggered()) {
+                gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
+                gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
+                pending_copies.pop_front();
+              }
+              else
+                break;
+            }
+            break;
+          case XferDes::XFER_GPU_PEER_FB:
+            while (!pending_copies.empty()) {
+              GPUinFBRequest* gpu_peer_fb_req = (GPUinFBRequest*)pending_copies.front();
+              if (gpu_peer_fb_req->complete_event.has_triggered()) {
+            	  gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
+                gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
+                pending_copies.pop_front();
+              }
+              else
+                break;
+            }
+            break;
+          default:
+            assert(0);
         }
       }
 
-      DiskWriteChannel::~DiskWriteChannel()
+      long GPUChannel::available()
       {
-        io_destroy(ctx);
-        free(cb);
-        free(cbs);
-        free(events);
+        return capacity - pending_copies.size();
       }
+#endif
 
-      long DiskWriteChannel::submit(Request** requests, long nr)
-      {
-        DiskWriteRequest** disk_write_reqs = (DiskWriteRequest**) requests;
-        int ns = 0;
-        while (ns < nr && !available_cb.empty()) {
-          cbs[ns] = available_cb.back();
-          available_cb.pop_back();
-          cbs[ns]->aio_fildes = disk_write_reqs[ns]->fd;
-          cbs[ns]->aio_data = (uint64_t) (disk_write_reqs[ns]);
-          cbs[ns]->aio_buf = disk_write_reqs[ns]->src_buf;
-          cbs[ns]->aio_offset = disk_write_reqs[ns]->dst_offset;
-          cbs[ns]->aio_nbytes = disk_write_reqs[ns]->nbytes;
-          ns++;
-        }
-        assert(ns == nr);
-        int ret = io_submit(ctx, ns, cbs);
-        if (ret < 0) {
-          perror("io_submit error");
-        }
-        return ret;
-      }
+#ifdef USE_HDF
 
-      void DiskWriteChannel::pull()
-      {
-        int nr = io_getevents(ctx, 0, capacity, events, NULL);
-        if (nr < 0)
-          perror("io_getevents error");
-        for (int i = 0; i < nr; i++) {
-          DiskWriteRequest* req = (DiskWriteRequest*) events[i].data;
-          struct iocb* ret_cb = (struct iocb*) events[i].obj;
-          available_cb.push_back(ret_cb);
-          assert(events[i].res == (int64_t)ret_cb->aio_nbytes);
-          req->xd->notify_request_read_done(req);
-          req->xd->notify_request_write_done(req);
-        }
-      }
-
-      long DiskWriteChannel::available()
-      {
-        return available_cb.size();
-      }
+#endif
 
       void MemcpyThread::work()
       {
         while (true) {
           pthread_mutex_lock(&submit_lock);
-          printf("[MemcpyThread] CP#1\n");
+          //printf("[MemcpyThread] CP#1\n");
           if (num_pending_reqs == 0)
             pthread_cond_wait(&condvar, &submit_lock);
-          printf("[MemcpyThread] Pull from pending queue\n");
-          printf("[MemcpyThread] num_pending_reqs = %ld\n", num_pending_reqs);
+          //printf("[MemcpyThread] Pull from pending queue\n");
+          //printf("[MemcpyThread] num_pending_reqs = %ld\n", num_pending_reqs);
           assert(pending_queue.size() > 0);
           MemcpyRequest* cur_req = pending_queue.front();
           pending_queue.pop();
           num_pending_reqs --;
           pthread_mutex_unlock(&submit_lock);
-          printf("[MemcpyThread] Begin processing copy\n");
+          //printf("[MemcpyThread] Begin processing copy\n");
           //printf("[MemcpyThread] dst = %ld, src = %ld, nbytes = %lu\n", (off_t) cur_req->dst_buf, (off_t) cur_req->src_buf, cur_req->nbytes);
           memcpy(cur_req->dst_buf, cur_req->src_buf, cur_req->nbytes);
-          printf("[MemcpyThread] Finish processing copy\n");
+          //printf("[MemcpyThread] Finish processing copy\n");
           pthread_mutex_lock(&pull_lock);
-          printf("[MemcpyThread] Push into finished queue\n");
+          //printf("[MemcpyThread] Push into finished queue\n");
           finished_queue.push(cur_req);
           pthread_mutex_unlock(&pull_lock);
         }
@@ -801,15 +997,15 @@ namespace LegionRuntime {
         while (true) {
           if (dma->is_stopped)
             break;
-          printf("[DMAThread] CP#1\n");
+          //printf("[DMAThread] CP#1\n");
           pthread_mutex_lock(&dma->channel_lock);
           std::vector<Channel*>::iterator it;
           for (it = dma->channel_queue.begin(); it != dma->channel_queue.end(); it++) {
-            printf("[DMAThread] CP#2\n");
+            //printf("[DMAThread] CP#2\n");
             (*it)->pull();
-            printf("[DMAThread] CP#3\n");
+            //printf("[DMAThread] CP#3\n");
             long nr = (*it)->available();
-            printf("[DMAThread] available = %ld\n", nr);
+            //printf("[DMAThread] available = %ld\n", nr);
             if (nr > dma->max_nr)
               nr = dma->max_nr;
             if (nr == 0)
@@ -820,10 +1016,10 @@ namespace LegionRuntime {
               if ((*it2)->channel == (*it)) {
                 assert((*it2)->kind == (*it)->kind);
                 long nr_got = (*it2)->get_requests(dma->requests, nr);
-                printf("[DMAThread] nr_got = %ld\n", nr_got);
+                //printf("[DMAThread] nr_got = %ld\n", nr_got);
                 long nr_submitted = (*it)->submit(dma->requests, nr_got);
                 nr -= nr_submitted;
-                printf("[DMAThread] nr_submitted = %ld\n", nr_submitted);
+                //printf("[DMAThread] nr_submitted = %ld\n", nr_submitted);
                 assert(nr_got == nr_submitted);
               }
             }
@@ -835,6 +1031,10 @@ namespace LegionRuntime {
       }
 
       template class MemcpyXferDes<1>;
+      template class DiskXferDes<1>;
+#ifdef USE_CUDA
+      template class GPUXferDes<1>;
+#endif
   } // namespace LowLevel
 } // namespace LegionRuntime
 

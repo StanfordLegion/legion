@@ -15,7 +15,11 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
+#define USE_CUDA
 #include "lowlevel.h"
+#ifdef USE_CUDA
+#include "lowlevel_gpu.h"
+#endif
 
 namespace LegionRuntime{
   namespace LowLevel{
@@ -79,6 +83,25 @@ namespace LegionRuntime{
 
     class Buffer {
     public:
+      enum MemoryKind {
+        MKIND_CPUMEM,
+        MKIND_GPUFB,
+        MKIND_DISK
+      };
+
+      Buffer(RegionInstance::Impl::Metadata* metadata)
+            : field_sizes(metadata->field_sizes), alloc_offset(metadata->alloc_offset),
+              is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
+              buf_size(metadata->size), linearization(metadata->linearization){}
+
+      Buffer(std::vector<size_t>& _field_sizes,
+             off_t _alloc_offset, bool _is_ib,
+             int _block_size, int _elmt_size, size_t _buf_size,
+             DomainLinearization _linearization)
+            : field_sizes(_field_sizes), alloc_offset(_alloc_offset),
+              is_ib(_is_ib), block_size(_block_size), elmt_size(elmt_size),
+              buf_size(_buf_size), linearization(linearization){}
+
       enum DimensionKind {
         DIM_X, // first logical index space dimension
         DIM_Y, // second logical index space dimension
@@ -94,11 +117,6 @@ namespace LegionRuntime{
         OUTER_DIM_F,
       };
 
-      enum MemoryKind {
-        MKIND_CPUMEM,
-        MKIND_GPUFB,
-        MKIND_DISK
-      };
       // std::vector<size_t> field_ordering;
       std::vector<size_t> field_sizes;
       //std::vector<DimensionKind> dimension_ordering;
@@ -108,7 +126,7 @@ namespace LegionRuntime{
       int block_size, elmt_size;
       //int inner_stride[3], outer_stride[3], inner_dim_size[3];
 
-      MemoryKind memory_kind;
+      //MemoryKind memory_kind;
 
       DomainLinearization linearization;
 
@@ -117,7 +135,7 @@ namespace LegionRuntime{
       // entire data set.
       // A number smaller than bytes_total means we need
       // to reuse the buffer.
-      uint64_t buf_size;
+      size_t buf_size;
     };
 
     class Request {
@@ -156,6 +174,46 @@ namespace LegionRuntime{
       //long num_flying_aios;
     };
 
+#ifdef USE_CUDA
+    class GPUtoFBRequest : public Request {
+    public:
+      char* src;
+      off_t dst_offset;
+      size_t nbytes;
+      Event complete_event;
+    };
+
+    class GPUfromFBRequest : public Request {
+    public:
+      off_t src_offset;
+      char* dst;
+      size_t nbytes;
+      Event complete_event;
+    };
+
+    class GPUinFBRequest : public Request {
+    public:
+      off_t src_offset, dst_offset;
+      size_t nbytes;
+      Event complete_event;
+    };
+
+    class GPUpeerFBRequest : public Request {
+    public:
+      off_t src_offset, dst_offset;
+      size_t nbytes;
+      GPUProcessor* dst_gpu;
+      Event complete_event;
+    };
+
+#endif
+
+#ifdef USE_HDF
+    class HDFReadRequest : public Request {
+    public:
+    };
+#endif
+
     class XferDes {
     public:
       enum XferKind {
@@ -163,8 +221,10 @@ namespace LegionRuntime{
         XFER_DISK_WRITE,
         XFER_SSD_READ,
         XFER_SSD_WRITE,
-        XFER_GPU_READ,
-        XFER_GPU_WRITE,
+        XFER_GPU_TO_FB,
+        XFER_GPU_FROM_FB,
+        XFER_GPU_IN_FB,
+        XFER_GPU_PEER_FB,
         XFER_MEM_CPY
       };
       enum XferOrder {
@@ -200,6 +260,8 @@ namespace LegionRuntime{
       XferOrder order;
       // channel this XferDes describes
       Channel* channel;
+      // priority of the containing XferDes
+      int priority;
     public:
       virtual ~XferDes() {};
 
@@ -394,13 +456,11 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class MemcpyXferDes : public XferDes {
     public:
-      MemcpyXferDes(Channel* _channel,
-                    bool has_pre_XferDes, bool has_next_XferDes,
-                    Buffer* _src_bufsize, Buffer* _dst_bufsize,
+      MemcpyXferDes(Channel* _channel, bool has_pre_XferDes,
+                    Buffer* _src_buf, Buffer* _dst_buf,
                     char *_src_mem_base, char *_dst_mem_base,
                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                    uint64_t _bytes_total, uint64_t max_req_size, long max_nr,
-                    XferOrder _order);
+                    uint64_t max_req_size, long max_nr, XferOrder _order);
 
       ~MemcpyXferDes()
       {
@@ -421,17 +481,16 @@ namespace LegionRuntime{
     };
 
     template<unsigned DIM>
-    class DiskWriteXferDes : public XferDes {
+    class DiskXferDes : public XferDes {
     public:
-      DiskWriteXferDes(Channel* _channel, int _fd,
-                       bool has_pre_XferDes, bool has_next_XferDes,
-                       Buffer* _src_buf, Buffer* _dst_buf,
-                       uint64_t _bytes_total, long max_nr);
+      DiskXferDes(Channel* _channel, bool has_pre_XferDes,
+                  Buffer* _src_buf, Buffer* _dst_buf,
+                  char *_mem_base, int _fd,
+                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                  uint64_t _max_req_size, long max_nr,
+                  XferOrder _order, XferKind _kind);
 
-      ~DiskWriteXferDes()
-      {
-        free(requests);
-      }
+      ~DiskXferDes();
 
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
@@ -439,22 +498,26 @@ namespace LegionRuntime{
 
     private:
       int fd;
-      DiskWriteRequest* requests;
+      Request* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso, dsi;
-      int done, offset_idx, block_start;
+      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
+      int done, offset_idx, block_start, total;
       Rect<1> orect, irect;
+      char *mem_base;
     };
 
+#ifdef USE_CUDA
     template<unsigned DIM>
-    class DiskReadXferDes : public XferDes {
+    class GPUXferDes : public XferDes {
     public:
-        DiskReadXferDes(Channel* _channel, int _fd,
-                        bool has_pre_XferDes, bool has_next_XferDes,
-                        Buffer* _src_buf, Buffer* _dst_buf,
-                        uint64_t _bytes_total, long max_nr);
-
-      ~DiskReadXferDes()
+      GPUXferDes(Channel* _channel, bool has_pre_XferDes,
+                 Buffer* _src_buf, Buffer* _dst_buf,
+                 char* _src_mem_base, char* _dst_mem_base,
+                 Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                 uint64_t _max_req_size, long max_nr,
+                 XferOrder _order, XferKind _kind,
+                 GPUProcessor* _dst_gpu = NULL);
+      ~GPUXferDes()
       {
         free(requests);
       }
@@ -462,30 +525,41 @@ namespace LegionRuntime{
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
+
     private:
-      int fd;
-      DiskReadRequest* requests;
+      Request* requests;
       std::map<int64_t, uint64_t> segments_read, segments_write;
-      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso, dsi;
-      int done, offset_idx, block_start;
+      Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > *dso, *dsi;
+      int done, offset_idx, block_start, total;
       Rect<1> orect, irect;
-    #ifdef DEADCODE
-    private:
-      long min(long a, long b)
+      char *src_mem_base, *dst_mem_base;
+      GPUProcessor* dst_gpu;
+    };
+#endif
+
+#ifdef USE_HDF
+    template<unsigned DIM>
+    class HDFXferDes : public XferDes {
+    public:
+      HDFXferDes(Channel* _channel,
+                 bool has_pre_XferDes, bool has_next_XferDes,
+                 Buffer* src_buf, Buffer* _dst_buf,
+                 char* _mem_base, HDFMemory::HDFMetadata* hdf_metadata,
+                 Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
+                 XferOrder _order, XferKind _kind);
+      ~HDFXferDes()
       {
-        return (a<b) ? a : b;
+
       }
 
-      long num_available_reqs()
-      {
-        assert(bytes_submit <= pre_bytes_write);
-        long ret = min((pre_bytes_write - bytes_submit) / req_nbytes, (dst_bufsize + next_bytes_read - bytes_submit) / req_nbytes);
-        //ret = min(ret, (bytes_total - bytes_submit) / req_nbytes);
-        ret = min(ret, available_reqs.size());
-        return ret;
-      }
-    #endif
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+
+    private:
+      Request* requests;
     };
+#endif
 
     class Channel {
     public:
@@ -532,10 +606,10 @@ namespace LegionRuntime{
       MemcpyRequest** cbs;
     };
 
-    class DiskReadChannel : public Channel {
+    class DiskChannel : public Channel {
     public:
-      DiskReadChannel(long max_nr);
-      ~DiskReadChannel();
+      DiskChannel(long max_nr, XferDes::XferKind _kind);
+      ~DiskChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
@@ -551,24 +625,20 @@ namespace LegionRuntime{
       //uint64_t cur_line;
     };
 
-    class DiskWriteChannel : public Channel {
+#ifdef USE_CUDA
+    class GPUChannel : public Channel {
     public:
-      DiskWriteChannel(long max_nr);
-      ~DiskWriteChannel();
+      GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind);
+      ~GPUChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
     private:
-      aio_context_t ctx;
+      GPUProcessor* src_gpu;
       long capacity;
-      std::vector<struct iocb*> available_cb;
-      struct iocb* cb;
-      struct iocb** cbs;
-      struct io_event* events;
-      //std::deque<Copy_1D*>::iterator iter_1d;
-      //std::deque<Copy_2D*>::iterator iter_2d;
-      //uint64_t cur_line;
+      std::deque<Request*> pending_copies;
     };
+#endif
 
     class MemcpyThread {
     public:
@@ -617,6 +687,188 @@ namespace LegionRuntime{
       pthread_cond_t condvar;
     };
 
+    class ChannelManager {
+    public:
+      ChannelManager(void) {
+        memcpy_channel = NULL;
+        disk_read_channel = NULL;
+        disk_write_channel = NULL;
+      }
+      ~ChannelManager(void) {
+        if (memcpy_channel)
+          free(memcpy_channel);
+        if (disk_read_channel)
+          free(disk_read_channel);
+        if (disk_write_channel)
+          free(disk_write_channel);
+        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
+          free(it->second);
+        }
+        for (it = gpu_from_fb_channels.begin(); it != gpu_from_fb_channels.end(); it++) {
+          free(it->second);
+        }
+        for (it = gpu_in_fb_channels.begin(); it != gpu_in_fb_channels.end(); it++) {
+          free(it->second);
+        }
+        for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
+          free(it->second);
+        }
+      }
+      void create_memcpy_channel(long max_nr, MemcpyThread* _thread) {
+        memcpy_channel = new MemcpyChannel(max_nr, _thread);
+      }
+      void create_disk_read_channel(long max_nr) {
+        disk_read_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_READ);
+      }
+      void create_disk_write_channel(long max_nr) {
+        disk_write_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_WRITE);
+      }
+#ifdef USE_CUDA
+      void create_gpu_to_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+        gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
+      }
+      void create_gpu_from_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+        gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_FROM_FB);
+      }
+      void create_gpu_in_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+        gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_IN_FB);
+      }
+      void create_gpu_peer_fb_channel(long max_nr, GPUProcessor* src_gpu) {
+        gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
+      }
+#endif
+      MemcpyChannel* get_memcpy_channel() {
+        return memcpy_channel;
+      }
+      DiskChannel* get_disk_read_channel() {
+        return disk_read_channel;
+      }
+      DiskChannel* get_disk_write_channel() {
+        return disk_write_channel;
+      }
+#ifdef USE_CUDA
+      GPUChannel* get_gpu_to_fb_channel(GPUProcessor* gpu) {
+        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        it = gpu_to_fb_channels.find(gpu);
+        assert(it != gpu_to_fb_channels.end());
+        return (it->second);
+      }
+      GPUChannel* get_gpu_from_fb_channel(GPUProcessor* gpu) {
+        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        it = gpu_from_fb_channels.find(gpu);
+        assert(it != gpu_from_fb_channels.end());
+        return (it->second);
+      }
+      GPUChannel* get_gpu_in_fb_channel(GPUProcessor* gpu) {
+        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        it = gpu_in_fb_channels.find(gpu);
+        assert(it != gpu_in_fb_channels.end());
+        return (it->second);
+      }
+      GPUChannel* get_gpu_peer_fb_channel(GPUProcessor* gpu) {
+        std::map<GPUProcessor*, GPUChannel*>::iterator it;
+        it = gpu_peer_fb_channels.find(gpu);
+        assert(it != gpu_peer_fb_channels.end());
+        return (it->second);
+      }
+#endif
+    public:
+      MemcpyChannel* memcpy_channel;
+      DiskChannel *disk_read_channel, *disk_write_channel;
+#ifdef USE_CUDA
+      std::map<GPUProcessor*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
+#endif
+    };
+
+    class XferDesQueue {
+      class CompareXferDes {
+      public:
+        bool operator() (XferDes* a, XferDes* b) {
+          return (a->priority < b->priority);
+        }
+      };
+      //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
+      typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
+    public:
+      XferDesQueue() {
+        pthread_mutex_init(&queue_mutex, NULL);
+      }
+
+      void enqueue_xferDes(XferDes* xd) {
+        pthread_mutex_lock(&queue_mutex);
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+        it2 = queues.find(xd->channel);
+        if (it2 == queues.end()) {
+          // nothing with this channel, create a new one
+          PriorityXferDesQueue* pq = new PriorityXferDesQueue;
+          pq->insert(xd);
+          queues[xd->channel] = pq;
+        }
+        else {
+          // push ourself into the priority queue
+          it2->second->insert(xd);
+        }
+        pthread_mutex_unlock(&queue_mutex);
+      }
+
+      void enqueue_xferDes_path(std::vector<XferDes*>& path) {
+        XferDes* pre = NULL;
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
+          if (pre == NULL)
+            pre = *it;
+          else {
+            pre->update_next_XferDes(*it);
+            (*it)->update_pre_XferDes(pre);
+            pre = *it;
+          }
+        }
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
+          enqueue_xferDes(*it);
+        }
+      }
+
+      // Note that getting the XferDes doesn't remove it from priority queue
+      bool get_xferDes_list(Channel* channel, std::vector<XferDes*>& xd) {
+        pthread_mutex_lock(&queue_mutex);
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+        it2 = queues.find(channel);
+        if (it2 == queues.end()) {
+          xd.clear();
+          return false;
+        }
+        else {
+          xd.clear();
+          xd.resize(it2->second->size());
+          PriorityXferDesQueue::iterator it;
+          for (it = it2->second->begin(); it != it2->second->end(); it++) {
+            xd.push_back(*it);
+          }
+          return true;
+        }
+        pthread_mutex_unlock(&queue_mutex);
+      }
+
+      void dequeue_xferDes(XferDes* xd) {
+        pthread_mutex_lock(&queue_mutex);
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+        it2 = queues.find(xd->channel);
+        assert(it2 != queues.end());
+        PriorityXferDesQueue::iterator it;
+        it = it2->second->find(xd);
+        assert(it != it2->second->end());
+        it2->second->erase(it);
+        if (it2->second->empty()) {
+          delete it2->second;
+          queues.erase(it2);
+        }
+        pthread_mutex_unlock(&queue_mutex);
+      }
+    protected:
+      pthread_mutex_t queue_mutex;
+      std::map<Channel*, PriorityXferDesQueue*> queues;
+    };
+
     class DMAThread {
     public:
       DMAThread(long _max_nr) {
@@ -649,6 +901,25 @@ namespace LegionRuntime{
         xferDes_queue.push_back(xferDes);
         pthread_mutex_unlock(&xferDes_lock);
       }
+      // Add a path (of XferDes) into the DMAThread instance.
+      // Adjacent XferDes in the path has previous/next relations.
+      // The DMAThread will start to polling requests from all XferDeses
+      void add_xferDes_path(std::vector<XferDes*>& path) {
+        pthread_mutex_lock(&xferDes_lock);
+        XferDes* pre = NULL;
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
+          xferDes_queue.push_back(*it);
+          if(pre==NULL)
+            pre = *it;
+          else {
+            pre->update_next_XferDes(*it);
+            (*it)->update_pre_XferDes(pre);
+            pre = *it;
+          }
+        }
+        pthread_mutex_unlock(&xferDes_lock);
+      }
+
       // Thread start function that takes an input of DMAThread
       // instance, and start to execute the requests from XferDes
       // by using its channels.

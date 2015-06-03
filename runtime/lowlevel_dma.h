@@ -17,6 +17,7 @@
 #define LOWLEVEL_DMA_H
 
 #include "lowlevel_impl.h"
+#include "channel.h"
 #include "activemsg.h"
 
 namespace LegionRuntime {

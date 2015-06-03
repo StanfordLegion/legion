@@ -157,6 +157,9 @@ namespace LegionRuntime {
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
 
+      template <unsigned DIM>
+      void perform_new_dma(Memory src_mem, Memory dst_mem);
+
       virtual void perform_dma(void);
 
       virtual bool handler_safe(void) { return(false); }
@@ -2625,6 +2628,211 @@ namespace LegionRuntime {
       }
     }
 
+    extern XferDesQueue* xferDes_queue;
+    extern ChannelManager* channel_manager;
+    extern class LocalCPUMemory;
+
+    template <unsigned DIM>
+    void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
+    {
+      Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
+      for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        RegionInstance src_inst = it->first.first;
+        RegionInstance dst_inst = it->first.second;
+        OASVec& oasvec = it->second;
+        RegionInstance::Impl *src_impl = src_inst.impl();
+        RegionInstance::Impl *dst_impl = dst_inst.impl();
+
+        Memory::Impl::MemoryKind src_kind = src_mem.impl()->kind;
+        Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
+        std::vector<XferDes*> path;
+        // We don't need to care about deallocation of Buffer class
+        // This will be handled by XferDes deconstruction
+        Buffer* src_buf = new Buffer(&src_impl->metadata);
+        Buffer* dst_buf = new Buffer(&dst_impl->metadata);
+        switch (src_kind) {
+        case Memory::Impl::MKIND_SYSMEM:
+        case Memory::Impl::MKIND_ZEROCOPY:
+          const char* src_mem_base = (const char *)(src_mem.impl()->get_direct_ptr(0, src_mem.impl()->size));
+          switch (dst_kind) {
+          case Memory::Impl::MKIND_SYSMEM:
+          case Memory::Impl::MKIND_ZEROCOPY:
+          {
+            const char* dst_mem_base = (const char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            XferDes* xd = new MemcpyXferDes(channel_manager->get_memcpy_channel(), false,
+                                            src_buf, dst_buf, src_mem_base, dst_mem_base,
+                                            domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                            100/*max_nr*/, XferDes::DST_FIFO);
+            path.push_back(xd);
+            break;
+          }
+          case Memory::Impl::MKIND_GPUFB:
+          {
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
+            XferDes* xd = new GPUXferDes(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
+                                         src_buf, dst_buf, src_mem_base, NULL /*dst_mem_base*/,
+                                         domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                         100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_GPU_TO_FB);
+            path.push_back(xd);
+            break;
+          }
+          case Memory::Impl::MKIND_DISK:
+          {
+            int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
+            XferDes* xd = new DiskXferDes(channel_manager->get_disk_write_channel(), false,
+                                          src_buf, dst_buf, src_mem_base, dst_fd,
+                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_WRITE);
+            path.push_back(xd);
+            break;
+          }
+          case Memory::Impl::MKIND_GLOBAL:
+            fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
+            assert(0);
+            break;
+          case Memory::Impl::MKIND_RDMA:
+          case Memory::Impl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: cpu memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        case Memory::Impl::MKIND_GPUFB:
+          switch (dst_kind) {
+          case Memory::Impl::MKIND_SYSMEM:
+          case Memory::Impl::MKIND_ZEROCOPY:
+          case Memory::Impl::MKIND_GPUFB:
+          case Memory::Impl::MKIND_DISK:
+          case Memory::Impl::MKIND_GLOBAL:
+          case Memory::Impl::MKIND_RDMA:
+          case Memory::Impl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: gpu memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        case Memory::Impl::MKIND_DISK:
+          int src_fd = ((DiskMemory*)src_mem.impl())->fd;
+          switch (dst_kind) {
+          case Memory::Impl::MKIND_SYSMEM:
+          case Memory::Impl::MKIND_ZEROCOPY:
+          {
+            const char* dst_mem_base = (const char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            XferDes* xd = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+                                          src_buf, dst_buf, dst_mem_base, src_fd,
+                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_READ);
+            path.push_back(xd);
+            break;
+          }
+          case Memory::Impl::MKIND_GPUFB:
+          {
+            GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
+            /* need to find a cpu memory as intermediate buffer*/
+            Machine machine = Machine::get_machine();
+            std::set<Memory> mem;
+            Memory cpu_mem = NULL;
+            machine.get_all_memories(mem);
+            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
+              if (it->kind() == Memory::SYSTEM_MEM) {
+                cpu_mem = *it;
+              }
+            assert(cpu_mem != NULL);
+            Buffer* ib_buf = new Buffer();
+            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            off_t ib_offset = cpu_mem.impl()->alloc_bytes(64 * 1024/*size of ib*/);
+            XferDes* xd1 = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+                                           src_buf, ib_buf, ib_mem_base, src_fd,
+                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
+            XferDes* xd2 = new GPUXferDes(channel_manager->get_gpu_to_fb_channel(dst_gpu), true,
+                                          ib_buf, dst_buf, ib_mem_base, NULL/*dst_mem_base*/,
+                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
+            path.push_back(xd1);
+            path.push_back(xd2);
+            break;
+          }
+          case Memory::Impl::MKIND_DISK:
+          {
+            int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
+            /* need to find a cpu memory as intermediate buffer*/
+            Machine machine = Machine::get_machine();
+            std::set<Memory> mem;
+            Memory cpu_mem = NULL;
+            machine.get_all_memories(mem);
+            for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
+              if (it->kind() == Memory::SYSTEM_MEM) {
+                cpu_mem = *it;
+              }
+            assert(cpu_mem != NULL);
+            Buffer* ib_buf = new Buffer();
+            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            off_t ib_offset = cpu_mem.impl()->alloc_bytes(64 * 1024/*size of ib*/);
+            XferDes* xd1 = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+                                           src_buf, ib_buf, ib_mem_base, src_fd,
+                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
+            XferDes* xd2 = new DiskXferDes(channel_manager->get_disk_write_channel(), true,
+                                           ib_buf, dst_buf, ib_mem_base, dst_fd,
+                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_WRITE);
+            path.push_back(xd1);
+            path.push_back(xd2);
+            break;
+          }
+          case Memory::Impl::MKIND_GLOBAL:
+            fprintf(stderr, "[DMA] To be implemented: cpu memory -> gasnet memory\n");
+            assert(0);
+            break;
+          case Memory::Impl::MKIND_RDMA:
+          case Memory::Impl::MKIND_REMOTE:
+            fprintf(stderr, "[DMA] To be implemented: disk memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        case Memory::Impl::MKIND_GLOBAL:
+          fprintf(stderr, "[DMA] To be implemented: gasnet memory transfer\n");
+          assert(0);
+          switch (dst_kind) {
+          case Memory::Impl::MKIND_SYSMEM:
+          case Memory::Impl::MKIND_ZEROCOPY:
+          case Memory::Impl::MKIND_GPUFB:
+          case Memory::Impl::MKIND_DISK:
+          case Memory::Impl::MKIND_GLOBAL:
+          case Memory::Impl::MKIND_RDMA:
+          case Memory::Impl::MKIND_REMOTE:
+            fprintf(stderr, "To be implemented: global memory -> remote memory\n");
+            assert(0);
+            break;
+          default:
+            fprintf(stderr, "Unrecognized destination memory kind!\n");
+            assert(0);
+          }
+          break;
+        case Memory::Impl::MKIND_RDMA:
+        case Memory::Impl::MKIND_REMOTE:
+          fprintf(stderr, "Source memory shouldn't be a remote kind\n");
+          assert(0);
+          break;
+        default:
+          fprintf(stderr, "Unrecognized memory kind!\n");
+          assert(0);
+        }
+        xferDes_queue->enqueue_xferDes_path(path);
+      }
+    }
+
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -3734,6 +3942,12 @@ namespace LegionRuntime {
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
+    // we use a single queue for all xferDes
+    static XferDesQueue *xferDes_queue = 0;
+
+    // we use a single manager to organize all channels
+    static ChannelManager *channel_manager = 0;
+
     static void *dma_worker_thread_loop(void *arg)
     {
       DmaRequestQueue *rq = (DmaRequestQueue *)arg;
@@ -3758,6 +3972,9 @@ namespace LegionRuntime {
     void start_dma_worker_threads(int count)
     {
       dma_queue = new DmaRequestQueue;
+      channel_manager = new ChannelManager;
+      xferDes_queue = new XferDesQueue;
+
       num_threads = count;
 
       worker_threads = new pthread_t[count];
