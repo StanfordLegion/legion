@@ -980,18 +980,6 @@ end
 function std.validate_implicit_cast(from_type, to_type, mapping)
   if std.type_eq(from_type, to_type, mapping) then
     return true
-  elseif std.is_index_type(to_type) then
-    if to_type:is_opaque() and std.validate_implicit_cast(from_type, int) then
-      return true
-    elseif not to_type:is_opaque() and std.type_eq(from_type, to_type.base_type) then
-      return true
-    end
-  elseif std.is_index_type(from_type) then
-    if from_type:is_opaque() and std.validate_implicit_cast(to_type, int) then
-      return true
-    elseif not from_type:is_opaque() and std.type_eq(to_type, from_type.base_type) then
-      return true
-    end
   end
 
   -- Ask the Terra compiler to kindly tell us the cast is valid.
@@ -1481,6 +1469,12 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.type_eq(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
+      end
+    elseif std.is_index_type(from) then
+      if from:is_opaque() and std.validate_implicit_cast(int, to) then
+        return `([to]([expr].__ptr.value))
+      elseif not from:is_opaque() and std.type_eq(from.base_type, to) then
+        return `([to]([expr].__ptr))
       end
     end
     assert(false)
