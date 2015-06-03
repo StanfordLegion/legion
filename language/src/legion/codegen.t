@@ -2878,6 +2878,16 @@ function codegen.stat_for_list(cx, node)
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
+  if cx.task_meta:getcuda() then
+    return codegen.stat_for_list(cx,
+      ast.typed.StatForList {
+        symbol = node.symbol,
+        value = node.value,
+        block = node.orig_block,
+        vectorize = false,
+        span = node.span,
+      })
+  end
   local symbol = node.symbol
   local cx = cx:new_local_scope()
   local value = codegen.expr(cx, node.value):read(cx)
@@ -3501,10 +3511,8 @@ end
 
 function codegen.stat_task(cx, node)
   local task = node.prototype
-  task:setcuda(node.cuda)
   -- we temporaily turn off generating two task versions for cuda tasks
   if node.cuda then node.region_divergence = false end
-  std.register_task(task)
 
   task:set_config_options(node.config_options)
 
@@ -3911,7 +3919,24 @@ end
 
 function codegen.stat_top(cx, node)
   if node:is(ast.typed.StatTask) then
-    return codegen.stat_task(cx, node)
+    if not node.cuda then
+      local cpu_task = codegen.stat_task(cx, node)
+      std.register_task(cpu_task)
+      return cpu_task
+    else
+      node.cuda = false
+      local cpu_task = codegen.stat_task(cx, node)
+      local cuda_task = cpu_task:make_variant()
+      cuda_task:setcuda(true)
+      local new_node = node {
+        cuda = true,
+        prototype = cuda_task,
+      }
+      cuda_task = codegen.stat_task(cx, new_node)
+      std.register_task(cpu_task)
+      std.register_task(cuda_task)
+      return cpu_task
+    end
 
   elseif node:is(ast.typed.StatFspace) then
     return codegen.stat_fspace(cx, node)

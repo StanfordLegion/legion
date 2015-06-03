@@ -2271,6 +2271,10 @@ function task:get_config_options()
   return self.config_options
 end
 
+function task:settaskid(taskid)
+  self.taskid = taskid
+end
+
 function task:gettaskid()
   return self.taskid
 end
@@ -2297,6 +2301,33 @@ end
 
 function task:getast()
   return self.ast
+end
+
+function task:is_variant_task()
+  if rawget(self, "source_variant") then
+    return true
+  else
+    return false
+  end
+end
+
+function task:set_source_variant(source_variant)
+  self.source_variant = source_variant
+end
+
+function task:get_source_variant()
+  assert(rawget(self, "source_variant") ~= nil)
+  return self.source_variant
+end
+
+function task:make_variant()
+  local variant_task = std.newtask(self.name)
+  variant_task:settaskid(self:gettaskid())
+  variant_task:settype(self:gettype())
+  variant_task:setprivileges(self:getprivileges())
+  variant_task:set_constraints(self:get_constraints())
+  variant_task:set_source_variant(self)
+  return variant_task
 end
 
 function task:printpretty()
@@ -2571,8 +2602,15 @@ function std.start(main_task)
   local next_task_id = 0
   local task_registrations = tasks:map(
     function(task)
-      next_task_id = next_task_id + 1
-      task:gettaskid():set(next_task_id)
+      local task_id
+      if not task:is_variant_task() then
+        next_task_id = next_task_id + 1
+        task_id = next_task_id
+        task:gettaskid():set(task_id)
+      else
+        local source_variant = task:get_source_variant()
+        task_id = source_variant:gettaskid():get()
+      end
 
       local return_type = task:getdefinition():gettype().returntype
       local result_type_bucket = std.type_size_bucket_name(return_type)
@@ -2584,11 +2622,11 @@ function std.start(main_task)
       if task:getcuda() then proc_type = c.TOC_PROC end
 
       return quote [register](
-        [next_task_id],
+        task_id,
         proc_type,
         true,
         true,
-        -1 --[[ AUTO_GENERATE_ID ]],
+        4294967295 --[[ AUTO_GENERATE_ID ]],
         c.legion_task_config_options_t {
           leaf = options.leaf,
           -- FIXME: Inner appears to be broken.
