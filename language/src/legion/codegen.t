@@ -44,12 +44,6 @@ local codegen = {}
 -- load Legion dynamic library
 local c = std.c
 
-local regions = {}
-regions.__index = function(t, k) error("context: no such region " .. tostring(k), 2) end
-
-local region = setmetatable({}, { __index = function(t, k) error("region has no field " .. tostring(k), 2) end})
-region.__index = region
-
 local context = {}
 context.__index = context
 
@@ -66,7 +60,8 @@ function context:new_local_scope(div)
     divergence = div,
     context = self.context,
     runtime = self.runtime,
-    regions = self.regions:new_local_scope()
+    ispaces = self.ispaces:new_local_scope(),
+    regions = self.regions:new_local_scope(),
   }, context)
 end
 
@@ -81,7 +76,8 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     divergence = nil,
     context = ctx,
     runtime = runtime,
-    regions = symbol_table.new_global_scope({})
+    ispaces = symbol_table.new_global_scope({}),
+    regions = symbol_table.new_global_scope({}),
   }, context)
 end
 
@@ -115,6 +111,72 @@ function context:check_divergence(region_types, field_paths)
   return false
 end
 
+local ispace = setmetatable({}, { __index = function(t, k) error("ispace has no field " .. tostring(k), 2) end})
+ispace.__index = ispace
+
+function context:has_ispace(ispace_type)
+  if not rawget(self, "ispaces") then
+    error("not in task context", 2)
+  end
+  return self.ispaces:safe_lookup(ispace_type)
+end
+
+function context:ispace(ispace_type)
+  if not rawget(self, "ispaces") then
+    error("not in task context", 2)
+  end
+  return self.ispaces:lookup(nil, ispace_type)
+end
+
+function context:add_ispace_root(ispace_type, index_space, index_allocator,
+                                 index_iterator)
+  if not self.ispaces then
+    error("not in task context", 2)
+  end
+  if self:has_ispace(ispace_type) then
+    error("ispace " .. tostring(ispace_type) .. " already defined in this context", 2)
+  end
+  self.ispaces:insert(
+    nil,
+    ispace_type,
+    setmetatable(
+      {
+        index_space = index_space,
+        index_partition = nil,
+        index_allocator = index_allocator,
+        index_iterator = index_iterator,
+        root_ispace_type = ispace_type,
+      }, ispace))
+end
+
+function context:add_ispace_subispace(ispace_type, index_space,
+                                      index_partition, index_allocator,
+                                      index_iterator, parent_ispace_type)
+  if not self.ispaces then
+    error("not in task context", 2)
+  end
+  if self:has_ispace(ispace_type) then
+    error("ispace " .. tostring(ispace_type) .. " already defined in this context", 2)
+  end
+  if not self:ispace(parent_ispace_type) then
+    error("parent to ispace " .. tostring(ispace_type) .. " not defined in this context", 2)
+  end
+  self.ispaces:insert(
+    nil,
+    ispace_type,
+    setmetatable(
+      {
+        index_space = index_space,
+        index_partition = index_partition,
+        index_allocator = index_allocator,
+        index_iterator = index_iterator,
+        root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
+      }, ispace))
+end
+
+local region = setmetatable({}, { __index = function(t, k) error("region has no field " .. tostring(k), 2) end})
+region.__index = region
+
 function context:has_region(region_type)
   if not rawget(self, "regions") then
     error("not in task context", 2)
@@ -129,8 +191,7 @@ function context:region(region_type)
   return self.regions:lookup(nil, region_type)
 end
 
-function context:add_region_root(region_type, logical_region, index_allocator,
-                                 index_iterator, field_paths,
+function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
                                  field_ids, physical_regions, accessors,
                                  base_pointers)
@@ -140,6 +201,9 @@ function context:add_region_root(region_type, logical_region, index_allocator,
   if self:has_region(region_type) then
     error("region " .. tostring(region_type) .. " already defined in this context", 2)
   end
+  if not self:has_ispace(region_type:ispace()) then
+    error("ispace of region " .. tostring(region_type) .. " not defined in this context", 2)
+  end
   self.regions:insert(
     nil,
     region_type,
@@ -147,8 +211,6 @@ function context:add_region_root(region_type, logical_region, index_allocator,
       {
         logical_region = logical_region,
         logical_partition = nil,
-        index_allocator = index_allocator,
-        index_iterator = index_iterator,
         field_paths = field_paths,
         privilege_field_paths = privilege_field_paths,
         field_privileges = field_privileges,
@@ -162,13 +224,15 @@ function context:add_region_root(region_type, logical_region, index_allocator,
 end
 
 function context:add_region_subregion(region_type, logical_region,
-                                      logical_partition, index_allocator,
-                                      index_iterator, parent_region_type)
+                                      logical_partition, parent_region_type)
   if not self.regions then
     error("not in task context", 2)
   end
   if self:has_region(region_type) then
     error("region " .. tostring(region_type) .. " already defined in this context", 2)
+  end
+  if not self:has_ispace(region_type:ispace()) then
+    error("ispace of region " .. tostring(region_type) .. " not defined in this context", 2)
   end
   if not self:region(parent_region_type) then
     error("parent to region " .. tostring(region_type) .. " not defined in this context", 2)
@@ -180,8 +244,6 @@ function context:add_region_subregion(region_type, logical_region,
       {
         logical_region = logical_region,
         logical_partition = logical_partition,
-        index_allocator = index_allocator,
-        index_iterator = index_iterator,
         field_paths = self:region(parent_region_type).field_paths,
         privilege_field_paths = self:region(parent_region_type).privilege_field_paths,
         field_privileges = self:region(parent_region_type).field_privileges,
@@ -276,7 +338,8 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   assert(not cx:has_region(region_type))
 
   local r = terralib.newsymbol(region_type, "r")
-  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local isa = false
   if not cx.leaf then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -295,9 +358,9 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   if not cx.leaf then
     actions = quote
       [actions]
+      var [is] = [lr].index_space
       var [isa] = c.legion_index_allocator_create(
-        [cx.runtime], [cx.context],
-        [lr].index_space)
+        [cx.runtime], [cx.context], [is])
     end
   end
 
@@ -305,7 +368,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     actions = quote
       [actions]
       var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [lr].index_space)
+        [cx.runtime], [cx.context], [is])
     end
   end
 
@@ -318,7 +381,8 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     error("failed to find appropriate for region " .. tostring(region_type) .. " in unpack", 2)
   end
 
-  cx:add_region_subregion(region_type, r, false, isa, it, parent_region_type)
+  cx:add_ispace_subispace(region_type:ispace(), is, false, isa, it, parent_region_type:ispace())
+  cx:add_region_subregion(region_type, r, false, parent_region_type)
 
   return expr.just(actions, r)
 end
@@ -1201,6 +1265,7 @@ function codegen.expr_index_access(cx, node)
 
     local r = terralib.newsymbol(expr_type, "r")
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+    local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
     if not cx.leaf then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -1214,6 +1279,7 @@ function codegen.expr_index_access(cx, node)
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
         [cx.runtime], [cx.context],
         [partition], [index.value])
+      var [is] = [lr].index_space
       var [r] = [expr_type] { impl = [lr] }
     end
 
@@ -1221,8 +1287,7 @@ function codegen.expr_index_access(cx, node)
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
-          [cx.runtime], [cx.context],
-          [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
 
@@ -1230,24 +1295,27 @@ function codegen.expr_index_access(cx, node)
       actions = quote
         [actions]
         var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
 
     local lp = false
+    local ip = false
     if std.is_cross_product(value_type) then
       lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+      ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
       actions = quote
         [actions]
-        var ip = c.legion_terra_index_cross_product_get_subpartition_by_color(
+        var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color(
           [cx.runtime], [cx.context],
           [value.value].product, [index.value])
         var [lp] = c.legion_logical_partition_create(
-          [cx.runtime], [cx.context], [lr], ip)
+          [cx.runtime], [cx.context], [lr], [ip])
       end
     end
 
-    cx:add_region_subregion(expr_type, r, lp, isa, it, parent_region_type)
+    cx:add_ispace_subispace(expr_type:ispace(), is, ip, isa, it, parent_region_type:ispace())
+    cx:add_region_subregion(expr_type, r, lp, parent_region_type)
 
     return values.value(expr.just(actions, r), expr_type)
   else
@@ -1758,7 +1826,12 @@ function codegen.expr_new(cx, node)
   local pointer_type = node.pointer_type
   local region = codegen.expr(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
-  local isa = cx:region(region_type).index_allocator
+  local ispace_type = region_type
+  if std.is_region(region_type) then
+    ispace_type = region_type:ispace()
+  end
+  assert(std.is_ispace(ispace_type))
+  local isa = cx:ispace(ispace_type).index_allocator
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
@@ -1955,6 +2028,20 @@ function codegen.expr_ispace(cx, node)
 
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local i = terralib.newsymbol(ispace_type, "i")
+
+  -- FIXME: Runtime does not understand how to make multi-dimensional
+  -- index spaces allocable.
+  local isa = false
+  if ispace_type.dim == 0 then
+    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
+  end
+  local it = false
+  if cache_index_iterator then
+    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+  end
+
+  cx:add_ispace_root(ispace_type, i, isa, it)
+
   if ispace_type.dim == 0 then
     if start then
       actions = quote
@@ -1965,6 +2052,15 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
+      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+    end
+
+    if cache_index_iterator then
+      actions = quote
+        [actions]
+        var [it] = c.legion_terra_cached_index_iterator_create(
+          [cx.runtime], [cx.context], [lr].index_space)
+      end
     end
   else
     if not start then
@@ -2001,16 +2097,6 @@ function codegen.expr_region(cx, node)
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
-  -- FIXME: Runtime does not understand how to make multi-dimensional
-  -- index spaces allocable.
-  local isa = false
-  if region_type:ispace().dim == 0 then
-    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-  end
-  local it = false
-  if cache_index_iterator then
-    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-  end
   local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
@@ -2033,7 +2119,7 @@ function codegen.expr_region(cx, node)
       return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
     end)
 
-  cx:add_region_root(region_type, r, isa, it,
+  cx:add_region_root(region_type, r,
                      field_paths,
                      terralib.newlist({field_paths}),
                      std.dict(std.zip(field_paths:map(std.hash), field_privileges)),
@@ -2074,21 +2160,6 @@ function codegen.expr_region(cx, node)
          end
        end)]
     var [r] = [region_type]{ impl = [lr] }
-  end
-
-  if region_type:ispace().dim == 0 then
-    actions = quote
-      [actions]
-      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
-    end
-  end
-
-  if cache_index_iterator then
-    actions = quote
-      [actions]
-      var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [lr].index_space)
-    end
   end
 
   return values.value(expr.just(actions, r), region_type)
@@ -2646,10 +2717,10 @@ function codegen.stat_for_list(cx, node)
 
   local ispace_type, is, it
   if std.is_region(value_type) then
-    assert(cx:has_region(value_type))
     ispace_type = value_type:ispace()
+    assert(cx:has_ispace(ispace_type))
     is = `([value.value].impl.index_space)
-    it = cx:region(value_type).index_iterator
+    it = cx:ispace(ispace_type).index_iterator
   else
     ispace_type = value_type
     is = `([value.value].impl)
@@ -2812,7 +2883,7 @@ function codegen.stat_for_list_vectorized(cx, node)
 
   assert(cx:has_region(value_type))
   local lr = cx:region(value_type).logical_region
-  local it = cx:region(value_type).index_iterator
+  local it = cx:ispace(value_type:ispace()).index_iterator
 
   local actions = quote
     [value.actions]
@@ -3582,6 +3653,7 @@ function codegen.stat_task(cx, node)
     for _, region_i in ipairs(std.fn_param_regions_by_index(task:gettype())) do
       local region_type = param_types[region_i]
       local r = params[region_i]
+      local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
       if not cx.leaf then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -3653,8 +3725,8 @@ function codegen.stat_task(cx, node)
       if not cx.leaf then
         actions = quote
           [actions]
-          var is = [r].impl.index_space
-          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
+          var [is] = [r].impl.index_space
+          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
         end
       end
 
@@ -3709,7 +3781,8 @@ function codegen.stat_task(cx, node)
         end
       end
 
-      cx:add_region_root(region_type, r, isa, it,
+      cx:add_ispace_root(region_type:ispace(), is, isa, it)
+      cx:add_region_root(region_type, r,
                          field_paths,
                          privilege_field_paths,
                          privileges_by_field_path,
