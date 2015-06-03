@@ -18,5 +18,9 @@ task main()
   var r = region(ispace(ptr, 5), int)
   var x = null(ptr(int, r))
   legionlib.assert(isnull(x), "test failed")
+
+  var is = ispace(ptr, 5)
+  var y = null(ptr(is))
+  legionlib.assert(isnull(y), "test failed")
 end
 legionlib.start(main)
