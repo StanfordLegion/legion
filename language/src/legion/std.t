@@ -1376,13 +1376,15 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   function st.metamethods.__cast(from, to, expr)
     if std.is_bounded_type(from) then
-      if std.type_eq(from.index_type, to) then
-        return `([to]{ __ptr = [expr].__ptr })
-      elseif std.type_eq(from.index_type.base_type, to) then
-        return `([to]([expr].__ptr))
+      if std.validate_implicit_cast(from.index_type, to) then
+        return `([to]([from.index_type]({ __ptr = [expr].__ptr })))
       end
     end
     assert(false)
+  end
+
+  terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
+    return st { __ptr = a.__ptr + b.__ptr }
   end
 
   function st:force_cast(from, to, expr)
@@ -1478,6 +1480,10 @@ function std.index_type(base_type, displayname)
       end
     end
     assert(false)
+  end
+
+  terra st.metamethods.__add(a : st, b : st) : st
+    return st { __ptr = a.__ptr + b.__ptr }
   end
 
   function st:zero()
