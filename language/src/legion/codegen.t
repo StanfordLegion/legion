@@ -437,9 +437,15 @@ end
 function value:__get_field(cx, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(self:read(cx), value_type, std.newtuple(field_name))
+  elseif std.is_index_type(value_type) then
+    return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
-    assert(value_type:is_ptr())
-    return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+    if std.get_field(value_type.index_type.base_type, field_name) then
+      return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
+    else
+      assert(value_type:is_ptr())
+      return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+    end
   elseif std.is_vptr(value_type) then
     return values.vref(self:read(cx, value_type), value_type, std.newtuple(field_name))
   else

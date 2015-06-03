@@ -112,7 +112,7 @@ function type_check.expr_field_access(cx, node)
   local value_type = value.expr_type -- Keep references, do NOT std.check_read
 
   if std.is_region(std.as_read(value_type)) then
-    local region_type = std.as_read(value_type)
+    local region_type = std.check_read(cx, value)
     if node.field_name == "partition" and
       region_type:has_default_partition()
     then
@@ -128,20 +128,36 @@ function type_check.expr_field_access(cx, node)
                   tostring(std.as_read(value_type)))
     end
   else
-    -- If the value is an fspace instance, unpack before allowing access.
-    local unpack_type, constraints = value_type
-    if std.is_fspace_instance(value_type) or
-      (std.is_bounded_type(value_type) and std.is_fspace_instance(value_type.points_to_type)) or
+    -- If the value is an fspace instance, or a index or bounded type,
+    -- unpack before allowing access.
+    local unpack_type, constraints, rewrap_ptrs
+    if std.is_index_type(std.as_read(value_type)) then
+      unpack_type = std.as_read(value_type).base_type
+    elseif (std.is_bounded_type(value_type) and
+              std.get_field(value_type.index_type.base_type, node.field_name)) or
+      (std.is_bounded_type(std.as_read(value_type)) and
+         std.get_field(std.as_read(value_type).index_type.base_type, node.field_name))
+    then
+      -- Note: Bounded types with fields take precedence over dereferences.
+      unpack_type = std.as_read(value_type).index_type.base_type
+    elseif std.is_fspace_instance(value_type) or
+      (std.is_bounded_type(value_type) and value_type:is_ptr() and
+         std.is_fspace_instance(value_type.points_to_type)) or
       (std.is_fspace_instance(std.as_read(value_type))) or
-      (std.is_bounded_type(std.as_read(value_type)) and std.is_fspace_instance(std.as_read(value_type).points_to_type))
+      (std.is_bounded_type(std.as_read(value_type)) and
+         std.as_read(value_type):is_ptr() and
+         std.is_fspace_instance(std.as_read(value_type).points_to_type))
     then
       local fspace = std.as_read(value_type)
       if std.is_bounded_type(fspace) then
         fspace = fspace.points_to_type
       end
       unpack_type, constraints = std.unpack_fields(fspace)
+      rewrap_ptrs = true
+    end
 
-      if std.is_bounded_type(std.as_read(value_type)) then
+    if unpack_type then
+      if rewrap_ptrs and std.is_bounded_type(std.as_read(value_type)) then
         local ptr_type = std.as_read(value_type)
         unpack_type = std.ref(ptr_type.index_type(unpack_type, unpack(ptr_type.bounds_symbols)))
       elseif std.is_ref(value_type) then
@@ -149,6 +165,10 @@ function type_check.expr_field_access(cx, node)
       elseif std.is_rawref(value_type) then
         unpack_type = std.rawref(&unpack_type)
       end
+    end
+
+    if not unpack_type then
+      unpack_type = value_type
     end
 
     if constraints then

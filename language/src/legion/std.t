@@ -1159,6 +1159,9 @@ end
 function std.get_field(t, f)
   assert(terralib.types.istype(t))
   if std.is_bounded_type(t) then
+    if not t:is_ptr() then
+      return nil
+    end
     local field_type = std.ref(t, f)
     if not std.as_read(field_type) then
       return nil
@@ -1287,10 +1290,10 @@ end
 local bounded_type = terralib.memoize(function(index_type, ...)
   assert(std.is_index_type(index_type))
   local bounds = terralib.newlist({...})
-  local points_to_type
+  local points_to_type = false
   if #bounds > 0 then
-    points_to_type = bounds[1]
-    if terralib.types.istype(points_to_type) then
+    if terralib.types.istype(bounds[1]) then
+      points_to_type = bounds[1]
       bounds:remove(1)
     end
   end
@@ -1334,7 +1337,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   st.bounds_symbols = bounds
 
   function st:is_ptr()
-    return self.points_to_type ~= nil
+    return self.points_to_type ~= false
   end
 
   function st:bounds()
@@ -1383,6 +1386,17 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       return `(a.__ptr.value ~= b.__ptr.value)
   end)
 
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_bounded_type(from) then
+      if std.type_eq(from.index_type, to) then
+        return `([to]{ __ptr = [expr].__ptr })
+      elseif std.type_eq(from.index_type.base_type, to) then
+        return `([to]([expr].__ptr))
+      end
+    end
+    assert(false)
+  end
+
   function st:force_cast(from, to, expr)
     assert(std.is_bounded_type(from) and std.is_bounded_type(to) and
              (#(from:bounds()) > 1) == (#(to:bounds()) > 1))
@@ -1396,7 +1410,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   function st.metamethods.__typename(st)
     local bounds = st.bounds_symbols
 
-    return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+    if st.points_to_type then
+      return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+    else
+      return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+    end
   end
 
   return st

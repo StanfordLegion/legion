@@ -24,10 +24,6 @@ end
 task f1(is : ispace(i1d), i : i1d)
 end
 
-task f1b(is : ispace(i1d), i2 : i1d(is))
-end
-f1b:compile()
-
 task f2(is : ispace(i2d), i : i2d)
 end
 
@@ -44,8 +40,22 @@ task main()
   f1(is1, i1)
   f1(is1, 3)
 
+  var s1 = 0
+  for j1 in is1 do
+    s1 += [int](j1)
+  end
+  legionlib.assert(s1 == 35, "test failed")
+
   var i2 : i2d = { x = 4, y = 5 }
   f2(is2, i2)
   f2(is2, i2d { x = 3, y = 5 })
+
+  var s2 = i2d { x = 0, y = 0 }
+  for j2 in is2 do
+    s2.x += j2.x
+    s2.y += j2.y
+  end
+  legionlib.assert(s2.x == 14 and s2.y == 18, "test failed")
+
 end
 legionlib.start(main)

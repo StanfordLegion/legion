@@ -14,8 +14,14 @@
 
 import "legion"
 
+task f(is : ispace(ptr), x : ptr(is))
+end
+
 task main()
   var is = ispace(ptr, 5)
-  var p = new(ptr(is))
+  var x = new(ptr(is))
+  f(is, x)
+
+  var i = [ptr](x)
 end
 legionlib.start(main)
