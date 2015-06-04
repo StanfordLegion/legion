@@ -197,9 +197,11 @@ function type_check.expr_index_access(cx, node)
   local index = type_check.expr(cx, node.index)
   local index_type = std.check_read(cx, index)
 
-  if std.is_partition(value_type) or std.is_cross_product(value_type) or
-    (std.is_region(value_type) and value_type:has_default_partition())
-  then
+  if std.is_partition(value_type) or std.is_cross_product(value_type) then
+    if not std.validate_implicit_cast(index_type, int) then
+      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    end
+
     if index:is(ast.typed.ExprConstant) or
       (index:is(ast.typed.ExprID) and not std.is_rawref(index.expr_type))
     then
