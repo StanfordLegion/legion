@@ -1266,9 +1266,7 @@ function codegen.expr_index_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
-  if std.is_partition(value_type) or std.is_cross_product(value_type) or
-    (std.is_region(value_type) and value_type:has_default_partition())
-  then
+  if std.is_partition(value_type) or std.is_cross_product(value_type) then
     local value = codegen.expr(cx, node.value):read(cx)
     local index = codegen.expr(cx, node.index):read(cx)
 
@@ -1359,6 +1357,9 @@ function codegen.expr_index_access(cx, node)
     cx:add_region_subregion(expr_type, r, lp, parent_region_type)
 
     return values.value(expr.just(actions, r), expr_type)
+  elseif std.is_region(value_type) then
+    local index = codegen.expr(cx, node.index):read(cx)
+    return values.ref(index, node.expr_type.pointer_type)
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, index, expr_type)
@@ -3837,7 +3838,9 @@ function codegen.stat_task(cx, node)
         end
       end
 
-      cx:add_ispace_root(region_type:ispace(), is, isa, it)
+      if not cx:has_ispace(region_type:ispace()) then
+        cx:add_ispace_root(region_type:ispace(), is, isa, it)
+      end
       cx:add_region_root(region_type, r,
                          field_paths,
                          privilege_field_paths,

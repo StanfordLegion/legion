@@ -42,8 +42,8 @@ task main()
 
   f0(r0)
 
-  for x in r1 do
-    @x = x
+  for i in is1 do
+    r1[i] = i
   end
   legionlib.assert(f1(is1, r1) == 35, "test failed")
 end

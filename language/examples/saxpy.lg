@@ -27,46 +27,29 @@ terra abs(a : double) : double
   end
 end
 
-function index_to_ptr(ptr_type)
-  return terra(index : int)
-    return [ptr_type] { __ptr = [legionlib.c.legion_ptr_t] { value = index } }
-  end
-end
-
-task saxpy(n : int, x: region(float), y: region(float), a: float)
+task saxpy(is : ispace(int1d), x: region(is, float), y: region(is, float), a: float)
 where
   reads(x, y), writes(y)
 do
-  for i = 0, n do
-    var px = [index_to_ptr(ptr(float, x))](i)
-    var py = [index_to_ptr(ptr(float, y))](i)
-
-    @py += a*@px
+  for i in is do
+    y[i] += a*x[i]
   end
 end
 
 task test(n: int)
-  var x = region(ispace(ptr, n), float)
-  var y = region(ispace(ptr, n), float)
-  for i = 0, n do
-    var px = new(ptr(float, x))
-    var py = new(ptr(float, y))
+  var is = ispace(int1d, n)
+  var x = region(is, float)
+  var y = region(is, float)
+
+  for i in is do
+    x[i] = 1.0
+    y[i] = 0.0
   end
 
-  for i = 0, n do
-    var px = [index_to_ptr(ptr(float, x))](i)
-    var py = [index_to_ptr(ptr(float, y))](i)
+  saxpy(is, x, y, 0.5)
 
-    @px = 1.0
-    @py = 0.0
-  end
-
-  saxpy(n, x, y, float(0.5))
-
-  for i = 0, n do
-    var py = [index_to_ptr(ptr(float, y))](i)
-
-    assert(abs(@py - 0.5) < 0.00001)
+  for i in is do
+    legionlib.assert(abs(y[i] - 0.5) < 0.00001, "test failed")
   end
 end
 

@@ -236,6 +236,28 @@ function type_check.expr_index_access(cx, node)
         span = node.span,
       }
     end
+  elseif std.is_region(value_type) then
+    -- FIXME: Need to check if this is a bounded type (with the right
+    -- bound) and, if not, insert a dynamic cast.
+    local region_index_type = value_type:ispace().index_type
+    if not std.validate_implicit_cast(index_type, region_index_type) then
+      log.error(node, "type mismatch: expected " .. tostring(region_index_type) .. " but got " .. tostring(index_type))
+    end
+
+    local region_symbol
+    if value:is(ast.typed.ExprID) then
+      region_symbol = value.value
+    else
+      region_symbol = terralib.newsymbol(value_type)
+    end
+    local result_type = std.ref(region_index_type(value_type.fspace_type, region_symbol))
+
+    return ast.typed.ExprIndexAccess {
+      value = value,
+      index = index,
+      expr_type = result_type,
+      span = node.span,
+    }
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
     local function test()
