@@ -561,7 +561,7 @@ function ref:new(value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(base_pointer, index_type, index)
-  assert(index_type.dim == 1)
+  assert(index_type.dim <= 1)
   if index_type.fields then
     local field = index_type.fields[1]
     return `(base_pointer[ [index].__ptr.[ field ] ])
