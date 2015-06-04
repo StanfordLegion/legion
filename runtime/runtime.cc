@@ -5844,7 +5844,7 @@ namespace LegionRuntime {
 #endif
       ColorPoint partition_color;
       // If we have a valid color, set it now
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      new_index_spaces, color_space, part_kind, 
@@ -6029,7 +6029,7 @@ namespace LegionRuntime {
         validate_structured_disjointness(pid, coloring);
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      coloring, color_space, 
@@ -6155,7 +6155,7 @@ namespace LegionRuntime {
         validate_multi_structured_disjointness(pid, coloring);
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      convex_hulls, coloring,
@@ -6696,7 +6696,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       part_op->initialize_equal_partition(ctx, pid, granularity);
@@ -6751,7 +6751,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       part_op->initialize_weighted_partition(ctx, pid, granularity, weights);
@@ -6824,7 +6824,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -6901,7 +6901,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -6978,7 +6978,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -7044,7 +7044,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       Event handle_ready = part_op->get_handle_ready();
@@ -7100,7 +7100,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7205,7 +7205,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7311,7 +7311,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7412,7 +7412,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       forest->create_pending_partition(pid, parent, color_space, part_color,
                                        part_kind, allocable, Event::NO_EVENT,
