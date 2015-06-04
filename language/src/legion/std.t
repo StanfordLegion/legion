@@ -1323,6 +1323,8 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   st.index_type = index_type
   st.points_to_type = points_to_type
   st.bounds_symbols = bounds
+  st.dim = index_type.dim
+  st.fields = index_type.fields
 
   function st:is_ptr()
     return self.points_to_type ~= false

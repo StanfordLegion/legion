@@ -286,21 +286,46 @@ function region:base_pointer(field_path)
   return base_pointer
 end
 
-local function accessor_generic_get_base_pointer(field_type)
-  return terra(physical : c.legion_physical_region_t,
-               accessor : c.legion_accessor_generic_t)
+local function accessor_generic_get_base_pointer(field_type, index_type)
+  if index_type:is_opaque() then
+    return terra(runtime : c.legion_runtime_t,
+                 context : c.legion_context_t,
+                 physical : c.legion_physical_region_t,
+                 accessor : c.legion_accessor_generic_t)
 
-    var base_pointer : &opaque = nil
-    var stride : c.size_t = terralib.sizeof(field_type)
-    var ok = c.legion_accessor_generic_get_soa_parameters(
-      accessor, &base_pointer, &stride)
+      var base_pointer : &opaque = nil
+      var stride : c.size_t = terralib.sizeof(field_type)
+      var ok = c.legion_accessor_generic_get_soa_parameters(
+        accessor, &base_pointer, &stride)
 
-    std.assert(ok, "failed to get base pointer")
-    std.assert(base_pointer ~= nil, "base pointer is nil")
-    std.assert(stride == terralib.sizeof(field_type),
-               "stride does not match expected value")
+      std.assert(ok, "failed to get base pointer")
+      std.assert(base_pointer ~= nil, "base pointer is nil")
+      std.assert(stride == terralib.sizeof(field_type),
+                 "stride does not match expected value")
 
-    return [&field_type](base_pointer)
+      return [&field_type](base_pointer)
+    end
+  else
+    assert(index_type.dim == 1)
+    return terra(runtime : c.legion_runtime_t,
+                 context : c.legion_context_t,
+                 physical : c.legion_physical_region_t,
+                 accessor : c.legion_accessor_generic_t)
+      var region = c.legion_physical_region_get_logical_region(physical)
+      var domain = c.legion_index_space_get_domain(runtime, context, region.index_space)
+      var rect = c.legion_domain_get_rect_1d(domain)
+
+      var subrect : c.legion_rect_1d_t
+      var stride : c.legion_byte_offset_t
+      var base_pointer = c.legion_accessor_generic_raw_rect_ptr_1d(
+        accessor, rect, &subrect, &stride)
+
+      std.assert(base_pointer ~= nil, "base pointer is nil")
+      std.assert(stride.offset == terralib.sizeof(field_type),
+                 "stride does not match expected value")
+
+      return [&field_type](base_pointer)
+    end
   end
 end
 
@@ -535,6 +560,16 @@ function ref:new(value_expr, value_type, field_path)
   return values.ref(value_expr, value_type, field_path)
 end
 
+local function get_element_pointer(base_pointer, index_type, index)
+  assert(index_type.dim == 1)
+  if index_type.fields then
+    local field = index_type.fields[1]
+    return `(base_pointer[ [index].__ptr.[ field ] ])
+  else
+    return `(base_pointer[ [index].__ptr ])
+  end
+end
+
 function ref:__ref(cx, expr_type)
   local actions = self.expr.actions
   local value = self.expr.value
@@ -599,7 +634,7 @@ function ref:__ref(cx, expr_type)
   if not expr_type or std.as_read(expr_type) == value_type then
     values = base_pointers:map(
       function(base_pointer)
-        return `(base_pointer[ [value].__ptr.value ])
+        return get_element_pointer(base_pointer, self.value_type, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
@@ -607,7 +642,7 @@ function ref:__ref(cx, expr_type)
       function(field)
         local base_pointer, field_type = unpack(field)
         local vec = vector(field_type, std.as_read(expr_type).N)
-        return `(@[&vec](&base_pointer[ [value].__ptr.value ]))
+        return `(@[&vec](&[get_element_pointer(base_pointer, self.value_type, value)]))
       end)
     value_type = expr_type
   end
@@ -2095,6 +2130,7 @@ function codegen.expr_region(cx, node)
   local fspace_type = node.fspace_type
   local ispace = codegen.expr(cx, node.ispace):read(cx)
   local region_type = std.as_read(node.expr_type)
+  local index_type = region_type:ispace().index_type
   local actions = quote
     [ispace.actions];
     [emit_debuginfo(node)]
@@ -2160,9 +2196,12 @@ function codegen.expr_region(cx, node)
     [std.zip(field_ids, field_types, accessors, base_pointers):map(
        function(field)
          local field_id, field_type, accessor, base_pointer = unpack(field)
+         local get_base_pointer = accessor_generic_get_base_pointer(
+           field_type, index_type)
          return quote
            var [accessor] = c.legion_physical_region_get_field_accessor_generic([pr], [field_id])
-           var [base_pointer] = [accessor_generic_get_base_pointer(field_type)]([pr], [accessor])
+           var [base_pointer] = [get_base_pointer](
+             [cx.runtime], [cx.context], [pr], [accessor])
          end
        end)]
     var [r] = [region_type]{ impl = [lr] }
@@ -3666,6 +3705,7 @@ function codegen.stat_task(cx, node)
     local param_field_id_i = 1
     for _, region_i in ipairs(std.fn_param_regions_by_index(task:gettype())) do
       local region_type = param_types[region_i]
+      local index_type = region_type:ispace().index_type
       local r = params[region_i]
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
@@ -3786,10 +3826,12 @@ function codegen.stat_task(cx, node)
           end
 
           if privileges_by_field_path[field_path:hash()] ~= "none" then
+            local get_base_pointer = accessor_generic_get_base_pointer(
+              field_type, index_type)
             region_args_setup:insert(quote
               var [accessor] = [get_accessor]([accessor_args])
-              var [base_pointer] = [accessor_generic_get_base_pointer(field_type)](
-                [physical_region], [accessor])
+              var [base_pointer] = [get_base_pointer](
+                [cx.runtime], [cx.context], [physical_region], [accessor])
             end)
           end
         end
