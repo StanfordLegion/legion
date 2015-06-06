@@ -9831,7 +9831,7 @@ namespace LegionRuntime {
 
       start_handler_threads(active_msg_handler_threads, stack_size_in_mb << 20);
 
-      start_dma_worker_threads(dma_worker_threads);
+      //start_dma_worker_threads(dma_worker_threads);
 
       if (active_msg_sender_threads)
         start_sending_threads();
@@ -10285,6 +10285,14 @@ namespace LegionRuntime {
       }
 #endif
 
+      // start dma system at the very ending of initialization
+      // since we need list of local gpus to create channels
+      start_dma_system(dma_worker_threads, 100
+#ifdef USE_CUDA
+                       ,local_gpus
+#endif
+                       );
+
       return true;
     }
 
@@ -10544,7 +10552,8 @@ namespace LegionRuntime {
 
       // need to kill other threads too so we can actually terminate process
       // Exit out of the thread
-      stop_dma_worker_threads();
+      //stop_dma_worker_threads();
+      stop_dma_system();
 #ifdef USE_CUDA
       GPUWorker::stop_gpu_worker_thread();
 #endif

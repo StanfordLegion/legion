@@ -44,6 +44,14 @@ namespace LegionRuntime {
     extern void start_dma_worker_threads(int count);
     extern void stop_dma_worker_threads(void);
 
+    extern void start_dma_system(int count, int max_nr,
+#ifdef USE_CUDA
+                          std::vector<GPUProcessor*> &local_gpus
+#endif
+                         );
+
+    extern void stop_dma_system(void);
+
     /*
     extern Event enqueue_dma(IndexSpace idx,
 			     RegionInstance src, 

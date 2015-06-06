@@ -21,6 +21,7 @@
 #include <errno.h>
 
 #include <queue>
+#include <algorithm>
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
@@ -56,10 +57,11 @@ namespace LegionRuntime {
 
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
-    struct OffsetsAndSize {
+    // OffsetsAndSize is defined in channel.h
+    /*struct OffsetsAndSize {
       off_t src_offset, dst_offset;
       int size;
-    };
+    };*/
     typedef std::vector<OffsetsAndSize> OASVec;
     typedef std::map<InstPair, OASVec> OASByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
@@ -551,6 +553,10 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
@@ -2628,14 +2634,17 @@ namespace LegionRuntime {
       }
     }
 
-    extern XferDesQueue* xferDes_queue;
-    extern ChannelManager* channel_manager;
-    extern class LocalCPUMemory;
+    // we use a single queue for all xferDes
+    static XferDesQueue *xferDes_queue = 0;
+
+    // we use a single manager to organize all channels
+    static ChannelManager *channel_manager = 0;
+
+    bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
     template <unsigned DIM>
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
-      Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
@@ -2647,39 +2656,43 @@ namespace LegionRuntime {
         Memory::Impl::MemoryKind dst_kind = dst_mem.impl()->kind;
         std::vector<XferDes*> path;
         // We don't need to care about deallocation of Buffer class
-        // This will be handled by XferDes deconstruction
+        // This will be handled by XferDes destruction
         Buffer* src_buf = new Buffer(&src_impl->metadata);
         Buffer* dst_buf = new Buffer(&dst_impl->metadata);
         switch (src_kind) {
         case Memory::Impl::MKIND_SYSMEM:
         case Memory::Impl::MKIND_ZEROCOPY:
-          const char* src_mem_base = (const char *)(src_mem.impl()->get_direct_ptr(0, src_mem.impl()->size));
+        {
+          char* src_mem_base = (char *)(src_mem.impl()->get_direct_ptr(0, src_mem.impl()->size));
           switch (dst_kind) {
           case Memory::Impl::MKIND_SYSMEM:
           case Memory::Impl::MKIND_ZEROCOPY:
           {
-            const char* dst_mem_base = (const char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
-            XferDes* xd = new MemcpyXferDes(channel_manager->get_memcpy_channel(), false,
+            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            XferDes* xd = new MemcpyXferDes<DIM>(channel_manager->get_memcpy_channel(), false,
                                             src_buf, dst_buf, src_mem_base, dst_mem_base,
                                             domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
                                             100/*max_nr*/, XferDes::DST_FIFO);
             path.push_back(xd);
             break;
           }
+#ifdef USE_CUDA
           case Memory::Impl::MKIND_GPUFB:
           {
             GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
-            XferDes* xd = new GPUXferDes(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
+            XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), false,
                                          src_buf, dst_buf, src_mem_base, NULL /*dst_mem_base*/,
                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
                                          100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_GPU_TO_FB);
             path.push_back(xd);
             break;
           }
+#endif
           case Memory::Impl::MKIND_DISK:
           {
+            log_dma.info("create mem->disk xferdes");
             int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
-            XferDes* xd = new DiskXferDes(channel_manager->get_disk_write_channel(), false,
+            XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), false,
                                           src_buf, dst_buf, src_mem_base, dst_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
                                           100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_WRITE);
@@ -2700,10 +2713,23 @@ namespace LegionRuntime {
             assert(0);
           }
           break;
+        }
+#ifdef USE_CUDA
         case Memory::Impl::MKIND_GPUFB:
+        {
+          GPUProcessor* src_gpu = ((GPUFBMemory*)src_mem.impl())->gpu;
           switch (dst_kind) {
           case Memory::Impl::MKIND_SYSMEM:
           case Memory::Impl::MKIND_ZEROCOPY:
+          {
+            char* dst_mem_base = (char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
+            XferDes* xd = new GPUXferDes<DIM>(channel_manager->get_gpu_from_fb_channel(src_gpu), false,
+                                              src_buf, dst_buf, NULL, dst_mem_base,
+                                              domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                              100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_GPU_FROM_FB);
+            path.push_back(xd);
+            break;
+          }
           case Memory::Impl::MKIND_GPUFB:
           case Memory::Impl::MKIND_DISK:
           case Memory::Impl::MKIND_GLOBAL:
@@ -2717,71 +2743,108 @@ namespace LegionRuntime {
             assert(0);
           }
           break;
+        }
+#endif
         case Memory::Impl::MKIND_DISK:
+        {
           int src_fd = ((DiskMemory*)src_mem.impl())->fd;
           switch (dst_kind) {
           case Memory::Impl::MKIND_SYSMEM:
           case Memory::Impl::MKIND_ZEROCOPY:
           {
             const char* dst_mem_base = (const char *)(dst_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
-            XferDes* xd = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+            XferDes* xd = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                           src_buf, dst_buf, dst_mem_base, src_fd,
                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
                                           100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_READ);
             path.push_back(xd);
             break;
           }
+#ifdef USE_CUDA
           case Memory::Impl::MKIND_GPUFB:
           {
             GPUProcessor* dst_gpu = ((GPUFBMemory*)dst_mem.impl())->gpu;
             /* need to find a cpu memory as intermediate buffer*/
             Machine machine = Machine::get_machine();
             std::set<Memory> mem;
-            Memory cpu_mem = NULL;
+            Memory cpu_mem = Memory::NO_MEMORY;
             machine.get_all_memories(mem);
             for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
               if (it->kind() == Memory::SYSTEM_MEM) {
                 cpu_mem = *it;
               }
-            assert(cpu_mem != NULL);
-            Buffer* ib_buf = new Buffer();
-            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
-            off_t ib_offset = cpu_mem.impl()->alloc_bytes(64 * 1024/*size of ib*/);
-            XferDes* xd1 = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+            assert(cpu_mem != Memory::NO_MEMORY);
+            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+            off_t ib_offset = cpu_mem.impl()->alloc_bytes(ib_size);
+            char* ib_mem_base = (char *)(cpu_mem.impl()->get_direct_ptr(ib_offset, ib_size));
+            OASVec oasvec_src, oasvec_dst;
+            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+            off_t ib_elmnt_size = 0;
+            for (int i = 0; i < oasvec.size(); i++) {
+              OffsetsAndSize oas_src, oas_dst;
+              oas_src.src_offset = oasvec[i].src_offset;
+              oas_src.dst_offset = ib_elmnt_size;
+              oas_src.size = oasvec[i].size;
+              oas_dst.src_offset = ib_elmnt_size;
+              oas_dst.dst_offset = oasvec[i].dst_offset;
+              oas_dst.size = oasvec[i].size;
+              ib_elmnt_size += oasvec[i].size;
+              oasvec_src.push_back(oas_src);
+              oasvec_dst.push_back(oas_dst);
+            }
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization);
+            XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
-                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
                                            100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
-            XferDes* xd2 = new GPUXferDes(channel_manager->get_gpu_to_fb_channel(dst_gpu), true,
+            XferDes* xd2 = new GPUXferDes<DIM>(channel_manager->get_gpu_to_fb_channel(dst_gpu), true,
                                           ib_buf, dst_buf, ib_mem_base, NULL/*dst_mem_base*/,
-                                          domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                          domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
                                           100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_GPU_TO_FB);
             path.push_back(xd1);
             path.push_back(xd2);
             break;
           }
+#endif
           case Memory::Impl::MKIND_DISK:
           {
             int dst_fd = ((DiskMemory*)dst_mem.impl())->fd;
             /* need to find a cpu memory as intermediate buffer*/
             Machine machine = Machine::get_machine();
             std::set<Memory> mem;
-            Memory cpu_mem = NULL;
+            Memory cpu_mem = Memory::NO_MEMORY;
             machine.get_all_memories(mem);
             for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
               if (it->kind() == Memory::SYSTEM_MEM) {
                 cpu_mem = *it;
               }
-            assert(cpu_mem != NULL);
-            Buffer* ib_buf = new Buffer();
-            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(0, dst_mem.impl()->size));
-            off_t ib_offset = cpu_mem.impl()->alloc_bytes(64 * 1024/*size of ib*/);
-            XferDes* xd1 = new DiskXferDes(channel_manager->get_disk_read_channel(), false,
+            assert(cpu_mem != Memory::NO_MEMORY);
+            size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+            off_t ib_offset = cpu_mem.impl()->alloc_bytes(ib_size);
+            const char* ib_mem_base = (const char *)(cpu_mem.impl()->get_direct_ptr(ib_offset, ib_size));
+            OASVec oasvec_src, oasvec_dst;
+            std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+            off_t ib_elmnt_size = 0;
+            for (int i = 0; i < oasvec.size(); i++) {
+              OffsetsAndSize oas_src, oas_dst;
+              oas_src.src_offset = oasvec[i].src_offset;
+              oas_src.dst_offset = ib_elmnt_size;
+              oas_src.size = oasvec[i].size;
+              oas_dst.src_offset = ib_elmnt_size;
+              oas_dst.dst_offset = oasvec[i].dst_offset;
+              oas_dst.size = oasvec[i].size;
+              ib_elmnt_size += oasvec[i].size;
+              oasvec_src.push_back(oas_src);
+              oasvec_dst.push_back(oas_dst);
+            }
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization);
+            XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
-                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
                                            100/*max_nr*/, XferDes::DST_FIFO, XferDes::XFER_DISK_READ);
-            XferDes* xd2 = new DiskXferDes(channel_manager->get_disk_write_channel(), true,
+            XferDes* xd2 = new DiskXferDes<DIM>(channel_manager->get_disk_write_channel(), true,
                                            ib_buf, dst_buf, ib_mem_base, dst_fd,
-                                           domain, oasvec, 16 * 1024/*max_req_size (bytes)*/,
+                                           domain, oasvec_dst, 16 * 1024/*max_req_size (bytes)*/,
                                            100/*max_nr*/, XferDes::SRC_FIFO, XferDes::XFER_DISK_WRITE);
             path.push_back(xd1);
             path.push_back(xd2);
@@ -2801,13 +2864,16 @@ namespace LegionRuntime {
             assert(0);
           }
           break;
+        }
         case Memory::Impl::MKIND_GLOBAL:
           fprintf(stderr, "[DMA] To be implemented: gasnet memory transfer\n");
           assert(0);
           switch (dst_kind) {
           case Memory::Impl::MKIND_SYSMEM:
           case Memory::Impl::MKIND_ZEROCOPY:
+#ifdef USE_CUDA
           case Memory::Impl::MKIND_GPUFB:
+#endif
           case Memory::Impl::MKIND_DISK:
           case Memory::Impl::MKIND_GLOBAL:
           case Memory::Impl::MKIND_RDMA:
@@ -2829,7 +2895,16 @@ namespace LegionRuntime {
           fprintf(stderr, "Unrecognized memory kind!\n");
           assert(0);
         }
+        log_dma.info("enqueue xferDes");
         xferDes_queue->enqueue_xferDes_path(path);
+        log_dma.info("finished enqueue xferdes");
+        std::set<Event> finish_events;
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++)
+          finish_events.insert((*it)->complete_event);
+
+    	if(after_copy.exists())
+    	  get_runtime()->get_genevent_impl(after_copy)->trigger(after_copy.gen, gasnet_mynode(), GenEventImpl::merge_events(finish_events));
+    	log_dma.info("set event dependencies");
       }
     }
 
@@ -2993,6 +3068,37 @@ namespace LegionRuntime {
       // create a copier for the memory used by all of these instance pairs
       Memory src_mem = oas_by_inst->begin()->first.first.impl()->memory;
       Memory dst_mem = oas_by_inst->begin()->first.second.impl()->memory;
+
+      // <NEWDMA>
+      switch (domain.get_dim()) {
+      case 0:
+        fprintf(stderr, "Unstructed data is not supported at this moment\n");
+        break;
+      case 1:
+        perform_new_dma<1>(src_mem, dst_mem);
+        break;
+      case 2:
+        perform_new_dma<2>(src_mem, dst_mem);
+        break;
+      case 3:
+        perform_new_dma<3>(src_mem, dst_mem);
+        break;
+      default:
+        assert(0);
+      }
+      log_dma.info("dma request %p launched - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+		   this,
+		   oas_by_inst->begin()->first.first.id,
+		   oas_by_inst->begin()->second[0].src_offset,
+		   oas_by_inst->begin()->first.second.id,
+		   oas_by_inst->begin()->second[0].dst_offset,
+		   oas_by_inst->begin()->second[0].size,
+		   oas_by_inst->begin()->second.size() - 1,
+		   domain.is_id,
+		   before_copy.id, before_copy.gen,
+		   after_copy.id, after_copy.gen);
+      return;
+      // </NEWDMA>
 
       MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
 
@@ -3942,11 +4048,8 @@ namespace LegionRuntime {
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
     
-    // we use a single queue for all xferDes
-    static XferDesQueue *xferDes_queue = 0;
-
-    // we use a single manager to organize all channels
-    static ChannelManager *channel_manager = 0;
+    // list of all dma threads
+    static DMAThread** dma_threads = 0;
 
     static void *dma_worker_thread_loop(void *arg)
     {
@@ -3972,8 +4075,6 @@ namespace LegionRuntime {
     void start_dma_worker_threads(int count)
     {
       dma_queue = new DmaRequestQueue;
-      channel_manager = new ChannelManager;
-      xferDes_queue = new XferDesQueue;
 
       num_threads = count;
 
@@ -4008,6 +4109,70 @@ namespace LegionRuntime {
 
       delete dma_queue;
       dma_queue = 0;
+      terminate_flag = false;
+    }
+
+    void start_dma_system(int count, int max_nr,
+#ifdef USE_CUDA
+                          std::vector<GPUProcessor*> &local_gpus
+#endif
+                         )
+    {
+      //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
+      xferDes_queue = new XferDesQueue;
+      channel_manager = new ChannelManager;
+      num_threads = 2;
+      dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
+      MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
+      DiskChannel* disk_read_channel =  channel_manager->create_disk_read_channel(max_nr);
+      DiskChannel* disk_write_channel = channel_manager->create_disk_write_channel(max_nr);
+      dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
+      std::vector<Channel*> async_channels;
+      async_channels.push_back(disk_read_channel);
+      async_channels.push_back(disk_write_channel);
+#ifdef USE_CUDA
+      std::vector<GPUProcessor*>::iterator it;
+      for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
+        GPUChannel* gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
+        GPUChannel* gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(max_nr, *it);
+        GPUChannel* gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(max_nr, *it);
+        GPUChannel* gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(max_nr, *it);
+        async_channels.push_back(gpu_to_fb_channel);
+        async_channels.push_back(gpu_from_fb_channel);
+        async_channels.push_back(gpu_in_fb_channel);
+        async_channels.push_back(gpu_peer_fb_channel);
+      }
+#endif
+      dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
+      worker_threads = new pthread_t[num_threads];
+      for (int i = 0; i < num_threads; i++) {
+        pthread_attr_t attr;
+        CHECK_PTHREAD( pthread_attr_init(&attr) );
+        if (proc_assignment)
+          proc_assignment->bind_thread(-1, &attr, "DMA worker");
+        CHECK_PTHREAD( pthread_create(&worker_threads[i], 0, DMAThread::start, dma_threads[i]));
+        CHECK_PTHREAD( pthread_attr_destroy(&attr));
+      }
+    }
+
+    void stop_dma_system(void)
+    {
+      terminate_flag = true;
+      for(int i = 0; i < num_threads; i++)
+        dma_threads[i]->stop();
+      if(worker_threads) {
+        for (int i = 0; i < num_threads; i++) {
+          void *dummy;
+          CHECK_PTHREAD( pthread_join(worker_threads[i], &dummy) );
+        }
+        num_threads = 0;
+        delete[] worker_threads;
+      }
+      for(int i = 0; i < num_threads; i++)
+        delete dma_threads[i];
+      free(dma_threads);
+      delete xferDes_queue;
+      delete channel_manager;
       terminate_flag = false;
     }
 

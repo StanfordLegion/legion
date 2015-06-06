@@ -1,3 +1,18 @@
+/* Copyright 2015 Stanford University
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "channel.h"
 
 namespace LegionRuntime {
@@ -62,12 +77,12 @@ namespace LegionRuntime {
           int todo = min((max_req_size - nbytes) / oas_vec[offset_idx].size, min(total - done, min(src_in_block, dst_in_block)));
           // make sure we have source data ready
           if (src_buf->is_ib) {
-            todo = min(todo, max(0, src_buf->alloc_offset + pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+            todo = min(todo, max(0, src_buf->alloc_offset + pre_bytes_write - (src_start + nbytes)) / oas_vec[offset_idx].size);
             scatter_src_ib = scatter_src_ib || scatter_ib(src_start, nbytes + todo * oas_vec[offset_idx].size, src_buf->buf_size);
           }
           // make sure there are enough space in destination
           if (dst_buf->is_ib) {
-            todo = min(todo, max(0, dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - dst_start) / oas_vec[offset_idx].size);
+            todo = min(todo, max(0, dst_buf->alloc_offset + next_bytes_read + dst_buf->buf_size - (dst_start + nbytes)) / oas_vec[offset_idx].size);
             scatter_dst_ib = scatter_dst_ib || scatter_ib(dst_start, nbytes + todo * oas_vec[offset_idx].size, dst_buf->buf_size);
           }
           if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
@@ -91,8 +106,8 @@ namespace LegionRuntime {
         }
 
         if (nbytes > 0 &&
-        (((done + irect.lo) % src_buf->block_size == 0 && order == SRC_FIFO)
-        ||((done + orect.lo) % dst_buf->block_size == 0 && order == DST_FIFO)
+        (((done + irect.lo) % src_buf->block_size == 0 && done + irect.lo > block_start && order == SRC_FIFO)
+        ||((done + orect.lo) % dst_buf->block_size == 0 && done + orect.lo > block_start && order == DST_FIFO)
         || (done == total))) {
           offset_idx ++;
           if (offset_idx < oas_vec.size()) {
@@ -170,10 +185,56 @@ namespace LegionRuntime {
         return (nbytes > 0);
       }
 
+      void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_read)
+      {
+        if (pre_XferDes) {
+          segments_read.insert(std::pair<int64_t, uint64_t>(offset, size));
+          std::map<int64_t, uint64_t>::iterator it;
+          bool update = false;
+          while (true) {
+            it = segments_read.find(bytes_read % src_buf->buf_size);
+            if (it == segments_read.end())
+              break;
+            bytes_read += it->second;
+            update = true;
+            segments_read.erase(it);
+          }
+          if (update)
+        	  pre_XferDes->update_next_bytes_read(bytes_read);
+        }
+        else {
+          bytes_read += size;
+        }
+      }
+
+      void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_write)
+      {
+        if (next_XferDes) {
+          assert(dst_buf->is_ib);
+          segments_write.insert(std::pair<int64_t, uint64_t>(offset, size));
+          std::map<int64_t, uint64_t>::iterator it;
+          bool update = false;
+          while (true) {
+            it = segments_write.find(bytes_write % dst_buf->buf_size);
+            if (it == segments_write.end())
+              break;
+            bytes_write += it->second;
+            update = true;
+            segments_write.erase(it);
+          }
+          if (next_XferDes != NULL && update)
+            next_XferDes->update_pre_bytes_write(bytes_write);
+        }
+        else {
+          bytes_write += size;
+        }
+      }
+
+
       template<unsigned DIM>
       MemcpyXferDes<DIM>::MemcpyXferDes(Channel* _channel, bool has_pre_XferDes,
                                         Buffer* _src_buf, Buffer* _dst_buf,
-                                        char* _src_mem_base, char* _dst_mem_base,
+                                        const char* _src_mem_base, const char* _dst_mem_base,
                                         Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
                                         uint64_t _max_req_size, long max_nr, XferOrder _order)
       {
@@ -183,7 +244,6 @@ namespace LegionRuntime {
         bytes_read = bytes_write = 0;
         pre_XferDes = NULL;
         next_XferDes = NULL;
-        pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
         next_bytes_read = 0;
         max_req_size = _max_req_size;
         src_buf = _src_buf;
@@ -201,6 +261,7 @@ namespace LegionRuntime {
           oas_vec.push_back(oas);
         }
         bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
         order = _order;
         Rect<DIM> subrect_check;
         switch (order) {
@@ -229,6 +290,7 @@ namespace LegionRuntime {
           requests[i].xd = this;
           available_reqs.push(&requests[i]);
         }
+        complete_event = GenEventImpl::create_genevent()->current_event();
       }
 
       template<unsigned DIM>
@@ -255,7 +317,7 @@ namespace LegionRuntime {
             }
             mem_cpy_reqs[idx] = (MemcpyRequest*) available_reqs.front();
             available_reqs.pop();
-            printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, nbytes);
+            //printf("[MemcpyXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, nbytes);
             mem_cpy_reqs[idx]->is_read_done = false;
             mem_cpy_reqs[idx]->is_write_done = false;
             mem_cpy_reqs[idx]->src_buf = (char*)(src_mem_base + src_start);
@@ -275,25 +337,7 @@ namespace LegionRuntime {
       {
         req->is_read_done = true;
         MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        if (pre_XferDes) {
-          assert(src_buf->is_ib);
-          segments_read.insert(std::pair<int64_t, uint64_t>(mc_req->src_buf - src_mem_base, mc_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_read.find(bytes_read % src_buf->buf_size);
-            if (it == segments_read.end())
-              break;
-            bytes_read += it->second;
-            update = true;
-            segments_read.erase(it);
-          }
-          if (update)
-            pre_XferDes->update_next_bytes_read(bytes_read);
-        }
-        else {
-          bytes_read += mc_req->nbytes;
-        }
+        simple_update_bytes_read(mc_req->src_buf - src_mem_base, mc_req->nbytes, segments_read);
       }
 
       template<unsigned DIM>
@@ -301,58 +345,43 @@ namespace LegionRuntime {
       {
         req->is_write_done = true;
         MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        if (next_XferDes) {
-          assert(dst_buf->is_ib);
-          segments_write.insert(std::pair<int64_t, uint64_t>(mc_req->dst_buf - dst_mem_base, mc_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_write.find(bytes_write % dst_buf->buf_size);
-            if (it == segments_write.end())
-              break;
-            bytes_write += it->second;
-            update = true;
-            segments_write.erase(it);
-          }
-          if (next_XferDes != NULL && update)
-            next_XferDes->update_pre_bytes_write(bytes_write);
-        }
-        else {
-          bytes_write += mc_req->nbytes;
-        }
+        simple_update_bytes_write(mc_req->dst_buf - dst_mem_base, mc_req->nbytes, segments_write);
         available_reqs.push(req);
       }
 
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(Channel* _channel, bool has_pre_XferDes,
                                     Buffer* _src_buf, Buffer* _dst_buf,
-                                    char *_mem_base, int _fd,
+                                    const char *_mem_base, int _fd,
                                     Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                    uint64_t _bytes_total, uint64_t _max_req_size, long max_nr,
+                                    uint64_t _max_req_size, long max_nr,
                                     XferOrder _order, XferKind _kind)
       {
         kind = _kind;
         channel = _channel;
         order = _order;
         bytes_read = bytes_write = 0;
-        pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
         pre_XferDes = NULL;
         next_XferDes = NULL;
         next_bytes_read = 0;
-        bytes_total = _bytes_total;
         max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
         fd = _fd;
         mem_base = _mem_base;
         domain = _domain;
+        size_t total_field_size = 0;
         for (int i = 0; i < _oas_vec.size(); i++) {
           OffsetsAndSize oas;
           oas.src_offset = _oas_vec[i].src_offset;
           oas.dst_offset = _oas_vec[i].dst_offset;
           oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
           oas_vec.push_back(oas);
         }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
 
         Rect<DIM> subrect_check;
         switch (order) {
@@ -379,6 +408,7 @@ namespace LegionRuntime {
 
         switch (kind) {
           case XferDes::XFER_DISK_READ:
+          {
             DiskReadRequest* disk_read_reqs = (DiskReadRequest*) calloc(max_nr, sizeof(DiskReadRequest));
             for (int i = 0; i < max_nr; i++) {
               disk_read_reqs[i].xd = this;
@@ -386,7 +416,9 @@ namespace LegionRuntime {
             }
             requests = disk_read_reqs;
             break;
+          }
           case XferDes::XFER_DISK_WRITE:
+          {
             DiskWriteRequest* disk_write_reqs = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
             for (int i = 0; i < max_nr; i++) {
               disk_write_reqs[i].xd = this;
@@ -394,13 +426,9 @@ namespace LegionRuntime {
             }
             requests = disk_write_reqs;
             break;
+          }
           default:
             assert(0);
-        }
-        requests = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
-        for (int i = 0; i < max_nr; i++) {
-          requests[i].xd = this;
-          available_reqs.push(&requests[i]);
         }
       }
 
@@ -431,20 +459,25 @@ namespace LegionRuntime {
             requests[idx]->is_write_done = false;
             switch (kind) {
               case XferDes::XFER_DISK_READ:
+              {
+                // printf("[DiskReadXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, req_size);
                 DiskReadRequest* disk_read_req = (DiskReadRequest*) requests[idx];
                 disk_read_req->fd = fd;
                 disk_read_req->src_offset = src_start;
                 disk_read_req->dst_buf = (uint64_t)(mem_base + dst_start);
                 disk_read_req->nbytes = req_size;
                 break;
+              }
               case XferDes::XFER_DISK_WRITE:
-                printf("[DiskWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, req_size);
+              {
+                // printf("[DiskWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start - src_buf->alloc_offset, dst_start - dst_buf->alloc_offset, req_size);
                 DiskWriteRequest* disk_write_req = (DiskWriteRequest*) requests[idx];
                 disk_write_req->fd = fd;
                 disk_write_req->src_buf = (uint64_t)(mem_base + src_start);
                 disk_write_req->dst_offset = dst_start;
                 disk_write_req->nbytes = req_size;
                 break;
+              }
               default:
                 assert(0);
             }
@@ -461,51 +494,44 @@ namespace LegionRuntime {
       void DiskXferDes<DIM>::notify_request_read_done(Request* req)
       {
         req->is_read_done = true;
-        DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
-        if (pre_XferDes) {
-          segments_read.insert(std::pair<int64_t, uint64_t>(dw_req->src_buf - (uint64_t)mem_base, dw_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_read.find(bytes_read % src_buf->buf_size);
-            if (it == segments_read.end())
-              break;
-            bytes_read += it->second;
-            update = true;
-            segments_read.erase(it);
-          }
-          if (update)
-            pre_XferDes->update_next_bytes_read(bytes_read);
+        int64_t offset;
+        uint64_t size;
+        switch(kind) {
+          case XferDes::XFER_DISK_READ:
+            offset = ((DiskReadRequest*)req)->src_offset - src_buf->alloc_offset;
+            size = ((DiskReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            offset = ((DiskWriteRequest*)req)->src_buf - (int64_t) mem_base;
+            size = ((DiskWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
         }
-        else {
-          bytes_read += dw_req->nbytes;
-        }
+        simple_update_bytes_read(offset, size, segments_read);
       }
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
-        DiskWriteRequest* dw_req = (DiskWriteRequest*) req;
-        if (next_XferDes) {
-          segments_write.insert(std::pair<int64_t, uint64_t>(dw_req->dst_offset - dst_buf->alloc_offset, dw_req->nbytes));
-          std::map<int64_t, uint64_t>::iterator it;
-          bool update = false;
-          while (true) {
-            it = segments_write.find(bytes_write % dst_buf->buf_size);
-            if (it == segments_write.end())
-              break;
-            bytes_write += it->second;
-            update = true;
-            segments_write.erase(it);
-          }
-          if (next_XferDes != NULL && update)
-            next_XferDes->update_pre_bytes_write(bytes_write);
+        int64_t offset;
+        uint64_t size;
+        switch(kind) {
+          case XferDes::XFER_DISK_READ:
+            offset = ((DiskReadRequest*)req)->dst_buf - (int64_t) mem_base;
+            size = ((DiskReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            offset = ((DiskWriteRequest*)req)->dst_offset - dst_buf->alloc_offset;
+            size = ((DiskWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
         }
-        else {
-          bytes_write += dw_req->nbytes;
-        }
+        simple_update_bytes_write(offset, size, segments_write);
         available_reqs.push(req);
+        //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
 
 #ifdef USE_CUDA
@@ -514,19 +540,17 @@ namespace LegionRuntime {
                                   Buffer* _src_buf, Buffer* _dst_buf,
                                   char* _src_mem_base, char* _dst_mem_base,
                                   Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _bytes_total, uint64_t _max_req_size, long max_nr,
-                                  XferOrder _order, XferDes::XferKind _kind,
+                                  uint64_t _max_req_size, long max_nr,
+                                  XferOrder _order, XferKind _kind,
                                   GPUProcessor* _dst_gpu)
       {
         kind = _kind;
         channel = _channel;
         order = _order;
         bytes_read = bytes_write = 0;
-        pre_bytes_write = (!has_pre_XferDes) ? _bytes_total : 0;
         pre_XferDes = NULL;
         next_XferDes = NULL;
         next_bytes_read = 0;
-        bytes_total = _bytes_total;
         max_req_size = _max_req_size;
         src_buf = _src_buf;
         dst_buf = _dst_buf;
@@ -534,13 +558,18 @@ namespace LegionRuntime {
         dst_mem_base = _dst_mem_base;
         dst_gpu = _dst_gpu;
         domain = _domain;
+        size_t total_field_size = 0;
         for (int i = 0; i < _oas_vec.size(); i++) {
           OffsetsAndSize oas;
           oas.src_offset = _oas_vec[i].src_offset;
           oas.dst_offset = _oas_vec[i].dst_offset;
           oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
           oas_vec.push_back(oas);
         }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
 
         Rect<DIM> subrect_check;
         switch (order) {
@@ -606,7 +635,8 @@ namespace LegionRuntime {
             requests = gpu_peer_fb_reqs;
             break;
           }
-        default:
+          default:
+            assert(0);
         }
       }
 
@@ -622,7 +652,6 @@ namespace LegionRuntime {
             break;
           while (nbytes > 0) {
             size_t req_size = nbytes;
-            size_t req_size = nbytes;
             if (src_buf->is_ib) {
               src_start = src_start % src_buf->buf_size;
               req_size = umin(req_size, src_buf->buf_size - src_start);
@@ -637,30 +666,38 @@ namespace LegionRuntime {
             requests[idx]->is_write_done = false;
             switch (kind) {
               case XferDes::XFER_GPU_TO_FB:
+              {
                 GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
                 gpu_to_fb_req->src = src_mem_base + src_start;
                 gpu_to_fb_req->dst_offset = dst_start;
                 gpu_to_fb_req->nbytes = req_size;
                 break;
+              }
               case XferDes::XFER_GPU_FROM_FB:
+              {
                 GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
                 gpu_from_fb_req->src_offset = src_start;
                 gpu_from_fb_req->dst = dst_mem_base + dst_start;
                 gpu_from_fb_req->nbytes = req_size;
                 break;
+              }
               case XferDes::XFER_GPU_IN_FB:
+              {
                 GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
                 gpu_in_fb_req->src_offset = src_start;
                 gpu_in_fb_req->dst_offset = dst_start;
                 gpu_in_fb_req->nbytes = req_size;
                 break;
+              }
               case XferDes::XFER_GPU_PEER_FB:
+              {
                 GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*) requests[idx];
                 gpu_peer_fb_req->src_offset = src_start;
                 gpu_peer_fb_req->dst_offset = dst_start;
                 gpu_peer_fb_req->nbytes = req_size;
                 gpu_peer_fb_req->dst_gpu = dst_gpu;
                 break;
+              }
               default:
                 assert(0);
             }
@@ -676,36 +713,89 @@ namespace LegionRuntime {
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_read_done(Request* req)
       {
+        req->is_read_done = true;
+        int64_t offset;
+        uint64_t size;
+        switch (kind) {
+          case XferDes::XFER_GPU_TO_FB:
+            offset = ((GPUtoFBRequest*)req)->src - src_mem_base;
+            size = ((GPUtoFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_FROM_FB:
+            offset = ((GPUfromFBRequest*)req)->src_offset - src_buf->alloc_offset;
+            size = ((GPUfromFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_IN_FB:
+            offset = ((GPUinFBRequest*)req)->src_offset - src_buf->alloc_offset;
+            size = ((GPUinFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_PEER_FB:
+            offset = ((GPUpeerFBRequest*)req)->src_offset - src_buf->alloc_offset;
+            size = ((GPUpeerFBRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+        simple_update_bytes_read(offset, size, segments_read);
       }
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_write_done(Request* req)
       {
+        req->is_write_done = true;
+        int64_t offset;
+        uint64_t size;
+        switch (kind) {
+          case XferDes::XFER_GPU_TO_FB:
+            offset = ((GPUtoFBRequest*)req)->dst_offset - dst_buf->alloc_offset;
+            size = ((GPUtoFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_FROM_FB:
+            offset = ((GPUfromFBRequest*)req)->dst - dst_mem_base;
+            size = ((GPUfromFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_IN_FB:
+            offset = ((GPUinFBRequest*)req)->dst_offset - dst_buf->alloc_offset;
+            size = ((GPUfromFBRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_GPU_PEER_FB:
+            offset = ((GPUpeerFBRequest*)req)->dst_offset - dst_buf->alloc_offset;
+            size = ((GPUpeerFBRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+        simple_update_bytes_write(offset, size, segments_write);
+        available_reqs.push(req);
       }
 #endif
 
-      MemcpyChannel::MemcpyChannel(long max_nr, MemcpyThread* _worker)
+      MemcpyChannel::MemcpyChannel(long max_nr)
       {
         kind = XferDes::XFER_MEM_CPY;
-        worker = _worker;
         capacity = max_nr;
-        cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
+        //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
       }
 
       MemcpyChannel::~MemcpyChannel()
       {
-        free(cbs);
+        //free(cbs);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
       {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
-        long ns = worker->submit(mem_cpy_reqs, nr);
-        return ns;
+        for (int i = 0; i < nr; i++) {
+          memcpy(mem_cpy_reqs[i]->dst_buf, mem_cpy_reqs[i]->src_buf, mem_cpy_reqs[i]->nbytes);
+          mem_cpy_reqs[i]->xd->notify_request_read_done(mem_cpy_reqs[i]);
+          mem_cpy_reqs[i]->xd->notify_request_read_done(mem_cpy_reqs[i]);
+        }
+        return nr;
       }
 
       void MemcpyChannel::pull()
       {
+        /*
         while (true) {
           long np = worker->pull(cbs, capacity);
           for (int i = 0; i < np; i++) {
@@ -715,6 +805,7 @@ namespace LegionRuntime {
           if (np != capacity)
             break;
         }
+        */
       }
 
       long MemcpyChannel::available()
@@ -817,12 +908,21 @@ namespace LegionRuntime {
         }
       }
 
+      long DiskChannel::available()
+      {
+        return available_cb.size();
+      }
+
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(GPUProcessor* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
         src_gpu = _src_gpu;
         kind = _kind;
         capacity = max_nr;
+      }
+
+      GPUChannel::~GPUChannel()
+      {
       }
 
       long GPUChannel::submit(Request** requests, long nr)
@@ -899,7 +999,7 @@ namespace LegionRuntime {
               GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*)pending_copies.front();
               if (gpu_to_fb_req->complete_event.has_triggered()) {
                 gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
-                gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
+                gpu_to_fb_req->xd->notify_request_write_done(gpu_to_fb_req);
                 pending_copies.pop_front();
               }
               else
@@ -911,7 +1011,7 @@ namespace LegionRuntime {
               GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*)pending_copies.front();
               if (gpu_from_fb_req->complete_event.has_triggered()) {
                 gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
-                gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
+                gpu_from_fb_req->xd->notify_request_write_done(gpu_from_fb_req);
                 pending_copies.pop_front();
               }
               else
@@ -923,7 +1023,7 @@ namespace LegionRuntime {
               GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*)pending_copies.front();
               if (gpu_in_fb_req->complete_event.has_triggered()) {
                 gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
-                gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
+                gpu_in_fb_req->xd->notify_request_write_done(gpu_in_fb_req);
                 pending_copies.pop_front();
               }
               else
@@ -934,8 +1034,8 @@ namespace LegionRuntime {
             while (!pending_copies.empty()) {
               GPUinFBRequest* gpu_peer_fb_req = (GPUinFBRequest*)pending_copies.front();
               if (gpu_peer_fb_req->complete_event.has_triggered()) {
-            	  gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
-                gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
+            	gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
+                gpu_peer_fb_req->xd->notify_request_write_done(gpu_peer_fb_req);
                 pending_copies.pop_front();
               }
               else
@@ -957,6 +1057,7 @@ namespace LegionRuntime {
 
 #endif
 
+#ifdef MEMCPY_THREAD_CODE
       void MemcpyThread::work()
       {
         while (true) {
@@ -989,7 +1090,9 @@ namespace LegionRuntime {
         worker->work();
         return NULL;
       }
+#endif
 
+#ifdef OLD_DMA_THREAD_CODE
       void* DMAThread::start(void* arg)
       {
         printf("[DMAThread] start...\n");
@@ -1029,11 +1132,18 @@ namespace LegionRuntime {
         }
         return NULL;
       }
+#endif
 
       template class MemcpyXferDes<1>;
+      template class MemcpyXferDes<2>;
+      template class MemcpyXferDes<3>;
       template class DiskXferDes<1>;
+      template class DiskXferDes<2>;
+      template class DiskXferDes<3>;
 #ifdef USE_CUDA
       template class GPUXferDes<1>;
+      template class GPUXferDes<2>;
+      template class GPUXferDes<3>;
 #endif
   } // namespace LowLevel
 } // namespace LegionRuntime
