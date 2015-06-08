@@ -4226,6 +4226,9 @@ namespace LegionRuntime {
        * back to the physical instance before detaching (e.g. releasing
        * coherence, etc). If the physical region is still mapped when
        * this function is called, then it will be unmapped by this call.
+       * Note that this file may not actually get detached until much 
+       * later in the execution of the program due to Legion's deferred 
+       * execution model.
        * @param ctx enclosing task context 
        * @param region the physical region for an HDF5 file to detach
        */
