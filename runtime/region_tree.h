@@ -1461,7 +1461,11 @@ namespace LegionRuntime {
       RestrictInfo(void)
         : perform_check(false), projection(false) { }
       RestrictInfo(const RestrictInfo &rhs) 
-        { assert(false); }
+      {
+        perform_check = rhs.perform_check;
+        projection = rhs.projection;
+        restrictions = rhs.restrictions;
+      }
       ~RestrictInfo(void) { }
     public:
       RestrictInfo& operator=(const RestrictInfo &rhs)
