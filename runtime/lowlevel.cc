@@ -6637,6 +6637,16 @@ namespace LegionRuntime {
       return i;
     }
 
+    RegionInstance Domain::create_hdf5_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                const std::vector<const char*> &field_files,
+                                                bool ready_only) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return RegionInstance::NO_INST;
+    }
+
 #ifdef USE_HDF
     RegionInstance Domain::mmap_instance(Memory memory,
                                  const std::vector<size_t> &field_sizes,
@@ -6787,6 +6797,12 @@ namespace LegionRuntime {
     protected:
       RegionInstance::Impl *impl;
     };
+
+    Memory RegionInstance::get_location(void) const
+    {
+      RegionInstance::Impl *i_impl = impl();
+      return i_impl->memory;
+    }
 
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {

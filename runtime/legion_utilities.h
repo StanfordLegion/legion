@@ -345,7 +345,7 @@ namespace LegionRuntime {
     private:
       DomainPoint point;
       bool valid;
-    };
+    }; 
 
     /////////////////////////////////////////////////////////////
     // Serializer 

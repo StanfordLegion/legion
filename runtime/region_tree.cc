@@ -1332,15 +1332,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_dependence_analysis(RegionTreeContext ctx,
+    void RegionTreeForest::perform_dependence_analysis(
                                                   Operation *op, unsigned idx,
                                                   RegionRequirement &req,
+                                                  RestrictInfo &restrict_info,
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
+      SingleTask *parent_ctx = op->get_parent();
+      RegionTreeContext ctx = parent_ctx->get_context();
 #ifdef DEBUG_PERF
       begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
 #endif
@@ -1353,7 +1356,13 @@ namespace LegionRuntime {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
-      RestrictInfo restrict_info(req.restricted);
+      // Check to see if we need to do any restricted tests
+      if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
+      {
+        restrict_info.set_check();
+        if (req.handle_type != SINGULAR)
+          restrict_info.set_projection();
+      }
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -1370,15 +1379,9 @@ namespace LegionRuntime {
                                          restrict_info, trace_info);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
-      // Check to see if there was user-level software
-      // coherence for all of our fields.
-      // If none of our fields are still restricted
-      // then we can remove the restricted field on
-      // our region requirement.  Otherwise we keep
-      // the restriction.
-      if (restrict_info.is_restricted() && 
-          restrict_info.is_coherent(user_mask))
-        req.restricted = false;
+      // If we have a restriction, then record it on the region requirement
+      if (restrict_info.has_restrictions())
+        req.restricted = true;
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1575,25 +1578,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::acquire_user_coherence(RegionTreeContext ctx,
-                                                  LogicalRegion handle,
+    void RegionTreeForest::restrict_user_coherence(SingleTask *parent_ctx,
+                                                   LogicalRegion handle,
                                                 const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
+      RegionTreeContext ctx = parent_ctx->get_context();
       RegionNode *node = get_node(handle);
-      FieldMask user_mask = node->column_source->get_field_mask(fields);
-      node->acquire_user_coherence(ctx.get_id(), user_mask);
+      FieldMask restrict_mask = node->column_source->get_field_mask(fields);
+      RestrictionMutator<true/*restrict*/> mutator(ctx.get_id(),restrict_mask);
+      node->visit_node(&mutator);
+      // Tell the parent task about the restriction on this region tree
+      parent_ctx->add_tree_restriction(handle.get_tree_id(), restrict_mask);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::release_user_coherence(RegionTreeContext ctx,
+    void RegionTreeForest::acquire_user_coherence(SingleTask *parent_ctx,
                                                   LogicalRegion handle,
                                                 const std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
+      RegionTreeContext ctx = parent_ctx->get_context();
       RegionNode *node = get_node(handle);
-      FieldMask user_mask = node->column_source->get_field_mask(fields);
-      node->release_user_coherence(ctx.get_id(), user_mask);
+      FieldMask restrict_mask = node->column_source->get_field_mask(fields);
+      RestrictionMutator<false/*restrict*/> mutator(ctx.get_id(),restrict_mask);
+      node->visit_node(&mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_restrictions(LogicalRegion handle, 
+                                            const RestrictInfo &info,
+                                            const std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *node = get_node(handle);
+      return info.has_restrictions(handle, node, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1692,8 +1711,9 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
         start_node = start_node->get_parent();
       // Construct the traverser
-      MappingTraverser traverser(path, info, RegionUsage(req),
-                                 user_mask, target_proc, index);
+      MappingTraverser<false/*restrict*/> traverser(path, info, 
+                                                    RegionUsage(req), user_mask,
+                                                    target_proc, index);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      start_node, ctx.get_id(), 
@@ -1759,7 +1779,7 @@ namespace LegionRuntime {
     MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
                                                        RegionRequirement &req,
                                                        unsigned index,
-                                                       const InstanceRef &ref
+                                                       Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
                                                        , const char *log_name
                                                        , UniqueID uid
@@ -1769,50 +1789,88 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
-      assert(ref.has_ref());
+      assert(req.handle_type == SINGULAR);
 #endif
-      LogicalView *parent_view = ref.get_handle().get_view();
-      // Reductions are easy, there are no subviews
-      if (IS_REDUCE(req))
-      {
+#ifdef DEBUG_PERF
+      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
+#endif
+      RegionNode *child_node = get_node(req.region);
+      FieldMask user_mask = 
+        child_node->column_source->get_field_mask(req.privilege_fields);
+      // Make an empty path 
+      RegionTreePath single_path;
+      single_path.initialize(child_node->get_depth(), child_node->get_depth());
+      // Construct a dummy mappable info
+      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, req, user_mask);
+      MappingTraverser<true/*restricted*/> traverser(single_path, info, 
+                                                     RegionUsage(req), 
+                                                     user_mask, 
+                                                     target_proc, index);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(parent_view->is_reduction_view());
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     child_node, ctx.get_id(), 
+                                     true/*before*/, false/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
-        return MappingRef(parent_view, FieldMask());
-      }
-      // First compute the path from where the target instance view
-      // is down to the view where the child has requested privileges.
-      RegionTreeNode *parent_node = parent_view->logical_node;
-      RegionTreeNode *child_node; 
-      if (req.handle_type == PART_PROJECTION)
-        child_node = get_node(req.partition);
+      bool result = traverser.traverse(child_node);
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
+      if (result)
+        return traverser.get_instance_ref();
       else
-        child_node = get_node(req.region);
-      // Compute the path that we need
-      std::deque<ColorPoint> path;
-      RegionTreeNode *temp = child_node;
-      while (temp != parent_node)
-      {
-        path.push_front(temp->get_color()); 
-        RegionTreeNode *next = temp->get_parent();
+        return MappingRef();
+    }
+
+    //--------------------------------------------------------------------------
+    MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
+                                                       RegionTreePath &path,
+                                                       RegionRequirement &req,
+                                                       unsigned index,
+                                                       Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
-        assert(next != NULL);
+                                                       , const char *log_name
+                                                       , UniqueID uid
 #endif
-        temp = next;
-      }
-      // Now get the view that we need        
+                                                       )
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!parent_view->is_reduction_view());
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
 #endif
-      InstanceView *inst_view = parent_view->as_instance_view();
-      for (std::deque<ColorPoint>::const_iterator it = path.begin();
-            it != path.end(); it++)
-      {
-        inst_view = inst_view->get_subview(*it);
-      }
-      // We're done, we know since this is restricted that
-      // there are no needed fields
-      return MappingRef(inst_view, FieldMask());
+#ifdef DEBUG_PERF
+      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
+#endif
+      RegionNode *child_node = get_node(req.region);
+      FieldMask user_mask = 
+        child_node->column_source->get_field_mask(req.privilege_fields);
+      // Construct a dummy mappable info
+      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, req, user_mask);
+      // Get the start node
+      RegionTreeNode *start_node = child_node;
+      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
+        start_node = start_node->get_parent();
+      MappingTraverser<true/*restricted*/> traverser(path, info, 
+                                                     RegionUsage(req), 
+                                                     user_mask, 
+                                                     target_proc, index);
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     start_node, ctx.get_id(), 
+                                     true/*before*/, false/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
+      bool result = traverser.traverse(start_node);
+#ifdef DEBUG_PERF
+      end_perf_trace(Runtime::perf_trace_tolerance);
+#endif
+      if (result)
+        return traverser.get_instance_ref();
+      else
+        return MappingRef();
     }
 
     //--------------------------------------------------------------------------
@@ -2338,6 +2396,40 @@ namespace LegionRuntime {
         fill_node->column_source->get_field_mask(req.privilege_fields);
       // Fill in these fields on this node
       fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size); 
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef RegionTreeForest::attach_file(RegionTreeContext ctx,
+                                              const RegionRequirement &req,
+                                              AttachOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *attach_node = get_node(req.region);
+      FieldMask attach_mask = 
+        attach_node->column_source->get_field_mask(req.privilege_fields);
+      // Perform the attachment
+      return attach_node->attach_file(ctx.get_id(), attach_mask,
+                                      req, attach_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::detach_file(RegionTreeContext ctx,
+                                       const RegionRequirement &req,
+                                       const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *detach_node = get_node(req.region);
+      FieldMask detach_mask = 
+        detach_node->column_source->get_field_mask(req.privilege_fields);
+      LogicalView *view = ref.get_handle().get_view();
+      detach_node->detach_file(ctx.get_id(), detach_mask, 
+                               view->get_manager());
     }
 
     //--------------------------------------------------------------------------
@@ -8522,6 +8614,28 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::compute_create_offsets(
+                                        const std::set<FieldID> &create_fields, 
+                                        std::vector<size_t> &field_sizes,
+                                        std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      // Need to hold the lock when accessing field infos
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      unsigned idx = 0;
+      for (std::set<FieldID>::const_iterator it = 
+            create_fields.begin(); it != create_fields.end(); it++,idx++)
+      {
+        std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(*it);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != fields.end());
+#endif
+        field_sizes[idx] = finder->second.field_size;
+        indexes[idx] = finder->second.idx;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     InstanceManager* FieldSpaceNode::create_instance(Memory location,
                                                      Domain domain,
                                        const std::set<FieldID> &create_fields,
@@ -8610,22 +8724,7 @@ namespace LegionRuntime {
       {
         std::vector<size_t> field_sizes(create_fields.size());
         std::vector<unsigned> indexes(create_fields.size());
-        // Figure out the size of each element
-        {
-          // Need to hold the lock when accessing field infos
-          AutoLock n_lock(node_lock,1,false/*exclusive*/);
-          unsigned idx = 0;
-          for (std::set<FieldID>::const_iterator it = 
-                create_fields.begin(); it != create_fields.end(); it++,idx++)
-          {
-            std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(finder != fields.end());
-#endif
-            field_sizes[idx] = finder->second.field_size;
-            indexes[idx] = finder->second.idx;
-          }
-        }
+        compute_create_offsets(create_fields, field_sizes, indexes);
         // First see if we can recycle a physical instance
         Event use_event = Event::NO_EVENT;
 #ifndef DISABLE_RECYCLING
@@ -8774,6 +8873,46 @@ namespace LegionRuntime {
 #endif
         }
       }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceManager* FieldSpaceNode::create_file_instance(
+                                         const std::set<FieldID> &create_fields, 
+                                         const FieldMask &attach_mask,
+                                         RegionNode *node, AttachOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<size_t> field_sizes(create_fields.size());
+      std::vector<unsigned> indexes(create_fields.size());
+      compute_create_offsets(create_fields, field_sizes, indexes);
+      // Now make the instance, this should always succeed
+      const Domain &dom = node->get_domain_blocking();
+      PhysicalInstance inst = attach_op->create_instance(dom, field_sizes);
+      // Assume that everything is SOA for files right now
+      size_t blocking_factor = dom.get_volume();
+      // Get the layout
+      LayoutDescription *layout = 
+        find_layout_description(attach_mask, dom, blocking_factor);
+      if (layout == NULL)
+        layout = create_layout_description(attach_mask, dom,
+                                           blocking_factor,
+                                           create_fields,
+                                           field_sizes,
+                                           indexes);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(layout != NULL);
+#endif
+      DistributedID did = context->runtime->get_available_distributed_id();
+      Memory location = inst.get_location();
+      InstanceManager *result = legion_new<InstanceManager>(context, did, 
+                                         context->runtime->address_space,
+                                         context->runtime->address_space,
+                                         location, inst, node, layout,
+                                         Event::NO_EVENT, node->get_depth());
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
       return result;
     }
 
@@ -9201,6 +9340,58 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // RestrictInfo 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool RestrictInfo::has_restrictions(LogicalRegion handle, RegionNode *node,
+                                        const std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator finder = 
+        restrictions.find(handle);
+      if (finder != restrictions.end())
+      {
+        FieldMask mask = node->column_source->get_field_mask(fields);
+        return (!(mask * finder->second));
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void RestrictInfo::pack_info(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(restrictions.size());
+      for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RestrictInfo::unpack_info(Deserializer &derez, AddressSpaceID source,
+                                   RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_restrictions;
+      derez.deserialize(num_restrictions);
+      FieldSpaceNode *field_node = NULL;
+      for (unsigned idx = 0; idx < num_restrictions; idx++)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        FieldMask &mask = restrictions[handle];
+        derez.deserialize(mask);
+        if (field_node == NULL)
+          field_node = forest->get_node(handle)->column_source;
+        field_node->transform_field_mask(mask, source);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
 
@@ -9512,6 +9703,86 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // RestrictionMutator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<bool ADD_RESTRICT>
+    RestrictionMutator<ADD_RESTRICT>::RestrictionMutator(ContextID c,
+                                                         const FieldMask &mask)
+      : ctx(c), restrict_mask(mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ADD_RESTRICT>
+    bool RestrictionMutator<ADD_RESTRICT>::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ADD_RESTRICT>
+    bool RestrictionMutator<ADD_RESTRICT>::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD_RESTRICT)
+        node->add_restriction(ctx, restrict_mask);
+      else
+        node->release_restriction(ctx, restrict_mask);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool ADD_RESTRICT>
+    bool RestrictionMutator<ADD_RESTRICT>::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      if (ADD_RESTRICT)
+        node->add_restriction(ctx, restrict_mask);
+      else
+        node->release_restriction(ctx, restrict_mask);
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RestrictionRecorder 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RestrictionRecorder::RestrictionRecorder(ContextID c, RestrictInfo &info,
+                                             const FieldMask &mask)
+      : ctx(c), restrict_info(info), user_mask(mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool RestrictionRecorder::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RestrictionRecorder::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->record_logical_restrictions(ctx, restrict_info, user_mask);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RestrictionRecorder::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // Skip partitions because there are no restrictions
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // PhysicalInitializer 
     /////////////////////////////////////////////////////////////
 
@@ -9641,6 +9912,41 @@ namespace LegionRuntime {
         node->invalidate_physical_state(ctx);
       else
         node->invalidate_physical_state(ctx, invalid_mask, force);
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PhysicalDetacher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalDetacher::PhysicalDetacher(ContextID c, const FieldMask &m,
+                                       PhysicalManager *t)
+      : ctx(c), detach_mask(m), target(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    bool PhysicalDetacher::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalDetacher::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->detach_instance_views(ctx, detach_mask, target);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalDetacher::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->detach_instance_views(ctx, detach_mask, target);
       return true;
     }
 
@@ -9903,7 +10209,9 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MappingTraverser::MappingTraverser(RegionTreePath &p, const MappableInfo &i,
+    template<bool RESTRICTED>
+    MappingTraverser<RESTRICTED>::MappingTraverser(RegionTreePath &p, 
+                                                   const MappableInfo &i,
                                        const RegionUsage &u, const FieldMask &m,
                                        Processor proc, unsigned idx)
       : PathTraverser(p), info(i), usage(u), user_mask(m), 
@@ -9913,7 +10221,8 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    MappingTraverser::MappingTraverser(const MappingTraverser &rhs)
+    template<bool RESTRICTED>
+    MappingTraverser<RESTRICTED>::MappingTraverser(const MappingTraverser &rhs)
       : PathTraverser(rhs.path), info(rhs.info), usage(RegionUsage()),
         user_mask(FieldMask()), target_proc(rhs.target_proc), index(rhs.index)
     //--------------------------------------------------------------------------
@@ -9923,13 +10232,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    MappingTraverser::~MappingTraverser(void)
+    template<bool RESTRICTED>
+    MappingTraverser<RESTRICTED>::~MappingTraverser(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    MappingTraverser& MappingTraverser::operator=(const MappingTraverser &rhs)
+    template<bool RESTRICTED>
+    MappingTraverser<RESTRICTED>& MappingTraverser<RESTRICTED>::operator=(  
+                                                    const MappingTraverser &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9938,7 +10250,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MappingTraverser::visit_region(RegionNode *node)
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
       if (!has_child)
@@ -9949,12 +10262,18 @@ namespace LegionRuntime {
         {
           // See if we can get or make a physical instance
           // that we can use
-          return map_physical_region(node);
+          if (RESTRICTED)
+            return map_restricted_physical(node);
+          else
+            return map_physical_region(node);
         }
         else
         {
           // See if we can make or use an existing reduction instance
-          return map_reduction_region(node);
+          if (RESTRICTED)
+            return map_restricted_reduction(node);
+          else
+            return map_reduction_region(node);
         }
       }
       else
@@ -9966,7 +10285,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MappingTraverser::visit_partition(PartitionNode *node)
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
       // Since we know we're mapping we know we won't ever stop
@@ -9979,14 +10299,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const MappingRef& MappingTraverser::get_instance_ref(void) const
+    template<bool RESTRICTED>
+    const MappingRef& MappingTraverser<RESTRICTED>::get_instance_ref(void) const
     //--------------------------------------------------------------------------
     {
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void MappingTraverser::traverse_node(RegionTreeNode *node)
+    template<bool RESTRICTED>
+    void MappingTraverser<RESTRICTED>::traverse_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -10011,7 +10333,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MappingTraverser::map_physical_region(RegionNode *node)
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::map_physical_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -10244,7 +10567,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool MappingTraverser::map_reduction_region(RegionNode *node)
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::map_reduction_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -10340,6 +10664,72 @@ namespace LegionRuntime {
       // Remove our valid references before we return
       RegionTreeNode::remove_valid_references(valid_views);
       return (chosen_inst != NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::map_restricted_physical(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // Grab the set of valid instances, we should find exactly one
+      // that matches all the fields, if not that is very bad
+      LegionMap<InstanceView*,FieldMask>::aligned valid_instances;
+      PhysicalState *state = 
+          node->acquire_physical_state(info.ctx, false/*exclusive*/);
+      node->find_valid_instance_views(state, user_mask,
+                                      user_mask, false/*space*/,
+                                      valid_instances);
+      node->release_physical_state(state);
+      InstanceView *chosen_inst = NULL;
+      for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
+      {
+        // Skip any deferred views
+        if (it->first->is_deferred_view())
+          continue;
+        FieldMask uncovered = user_mask - it->second;
+        // If all the fields were valid, record it
+        if (!uncovered)
+        {
+          if (chosen_inst != NULL)
+          {
+            for (LegionMap<InstanceView*,FieldMask>::aligned::const_iterator it2 = 
+                  valid_instances.begin(); it2 != valid_instances.end(); it2++)
+            {
+              InstanceView *view = it2->first;
+              FieldMask mask = it2->second;
+              printf("%p, %p\n", view, &mask);
+            }
+            log_run.error("Multiple valid instances for restricted cohernece! "
+                          "This is almost certainly a runtime bug. Please "
+                          "create a minimal test case and report it.");
+            assert(false);
+          }
+          else
+            chosen_inst = it->first;
+        }
+      }
+      if (chosen_inst == NULL)
+      {
+        log_run.error("No single instance is valid for restricted coherence! "
+                      "Need support for multiple instances. This is currently "
+                      "a pending feature. Please report your use case.");
+        assert(false);
+      }
+      // We know we don't need any fields to be brought up to date
+      result = MappingRef(chosen_inst, FieldMask());
+      return (chosen_inst != NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool RESTRICTED>
+    bool MappingTraverser<RESTRICTED>::map_restricted_reduction(
+                                                               RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this later
+      assert(false);
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -10747,9 +11137,14 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalState::LogicalState(void)
+    LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
     //--------------------------------------------------------------------------
     {
+      // This first time we create the state, we need to pull down
+      // any restricted instances from our parent state
+      RegionTreeNode *parent = node->get_parent();
+      if (parent != NULL)
+        parent->set_restricted_fields(ctx, restricted_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -10808,7 +11203,7 @@ namespace LegionRuntime {
       field_states.clear();
       curr_epoch_users.clear();
       prev_epoch_users.clear();
-      user_level_coherence.clear();
+      restricted_fields.clear();
     } 
 
     //--------------------------------------------------------------------------
@@ -11866,7 +12261,19 @@ namespace LegionRuntime {
     LogicalState& RegionTreeNode::get_logical_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      return *(logical_states.lookup_entry(ctx));
+      // We pass in the necessary information for initializing restricted
+      // fields in case the logical state is going to be create
+      return *(logical_states.lookup_entry(ctx, this, ctx));
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::set_restricted_fields(ContextID ctx,
+                                               FieldMask &child_restricted)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      if (!!state.restricted_fields)
+        child_restricted = state.restricted_fields;
     }
 
     //--------------------------------------------------------------------------
@@ -12075,12 +12482,9 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
 #endif
-      LogicalState &state = *(logical_states.lookup_entry(ctx));
+      LogicalState &state = get_logical_state(ctx);
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
-      // First do a check to see if we need handle any restricted checks
-      if (restrict_info.is_restricted())
-        restrict_info.record_coherence(state.user_level_coherence);
       // Now check to see if we need to do any close operations
       // Close up any children which we may have dependences on below
       LogicalCloser closer(ctx, user, arrived/*validates*/);
@@ -12158,12 +12562,31 @@ namespace LegionRuntime {
           // Add ourselves to the current epoch
           state.curr_epoch_users.push_back(user);
         }
+        // Record any restrictions we have on mappings if necessary
+        if (restrict_info.needs_check())
+        {
+          if (restrict_info.is_projection())
+          {
+            RestrictionRecorder recorder(ctx, restrict_info, user.field_mask);
+            visit_node(&recorder);
+          }
+          else
+          {
+            FieldMask restricted = user.field_mask & state.restricted_fields;
+            if (!!restricted)
+            {
+              RegionNode *local_this = as_region_node();
+              restrict_info.add_restriction(local_this->handle, restricted);
+            }
+          }
+        }
       }
       else // We're still not there, so keep going
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
-          child->open_logical_node(ctx, user, path, trace_info.already_traced);
+          child->open_logical_node(ctx, user, path, restrict_info, 
+                                   trace_info.already_traced);
         else
           child->register_logical_node(ctx, user, path, 
                                        restrict_info, trace_info);
@@ -12174,13 +12597,14 @@ namespace LegionRuntime {
     void RegionTreeNode::open_logical_node(ContextID ctx,
                                              const LogicalUser &user,
                                              RegionTreePath &path,
+                                             RestrictInfo &restrict_info,
                                              const bool already_traced)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
-      LogicalState &state = *(logical_states.lookup_entry(ctx));
+      LogicalState &state = get_logical_state(ctx);
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
@@ -12192,6 +12616,24 @@ namespace LegionRuntime {
           // Record a mapping reference on this operation
           user.op->add_mapping_reference(user.gen);
           state.curr_epoch_users.push_back(user);
+        }
+        // Record any restrictions we have on mappings if necessary
+        if (restrict_info.needs_check())
+        {
+          if (restrict_info.is_projection())
+          {
+            RestrictionRecorder recorder(ctx, restrict_info, user.field_mask);
+            visit_node(&recorder);
+          }
+          else
+          {
+            FieldMask restricted = user.field_mask & state.restricted_fields;
+            if (!!restricted)
+            {
+              RegionNode *local_this = as_region_node();
+              restrict_info.add_restriction(local_this->handle, restricted);
+            }
+          }
         }
       }
       else
@@ -12205,7 +12647,8 @@ namespace LegionRuntime {
 #endif
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
-        child_node->open_logical_node(ctx, user, path, already_traced);
+        child_node->open_logical_node(ctx, user, path, 
+                                      restrict_info, already_traced);
       }
     }
 
@@ -12218,7 +12661,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
 #endif
-      LogicalState &state = *(logical_states.lookup_entry(closer.ctx));
+      LogicalState &state = get_logical_state(closer.ctx);
 
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
@@ -12871,7 +13314,7 @@ namespace LegionRuntime {
 #endif
       if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = *(logical_states.lookup_entry(ctx));
+        LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
         // Technically these should already be empty
         assert(state.field_states.empty());
@@ -12891,7 +13334,7 @@ namespace LegionRuntime {
 #endif
       if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = *(logical_states.lookup_entry(ctx));     
+        LogicalState &state = get_logical_state(ctx);     
         for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::
               const_iterator it = state.curr_epoch_users.begin(); it != 
               state.curr_epoch_users.end(); it++)
@@ -12917,7 +13360,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, REGISTER_LOGICAL_DEPS_CALL);
 #endif
-      LogicalState &state = *(logical_states.lookup_entry(ctx));
+      LogicalState &state = get_logical_state(ctx);
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); /*nothing*/)
@@ -12990,24 +13433,42 @@ namespace LegionRuntime {
         else
           it++;
       }
+    } 
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::add_restriction(ContextID ctx, 
+                                         const FieldMask &restricted_mask)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      state.restricted_fields |= restricted_mask;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::acquire_user_coherence(ContextID ctx, 
-                                                const FieldMask &coherence_mask)
+    void RegionTreeNode::release_restriction(ContextID ctx,
+                                             const FieldMask &restricted_mask)
     //--------------------------------------------------------------------------
     {
-      LogicalState &state = *(logical_states.lookup_entry(ctx));
-      state.user_level_coherence |= coherence_mask;
+      LogicalState &state = get_logical_state(ctx);
+      state.restricted_fields -= restricted_mask;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::release_user_coherence(ContextID ctx,
-                                                const FieldMask &coherence_mask)
+    void RegionTreeNode::record_logical_restrictions(ContextID ctx,
+                                                    RestrictInfo &restrict_info,
+                                                    const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      LogicalState &state = *(logical_states.lookup_entry(ctx));
-      state.user_level_coherence -= coherence_mask;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_region());
+#endif
+      LogicalState &state = get_logical_state(ctx);
+      FieldMask restricted = mask & state.restricted_fields;
+      if (!!restricted)
+      {
+        RegionNode *local_this = as_region_node();
+        restrict_info.add_restriction(local_this->handle, restricted);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15019,6 +15480,45 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::detach_instance_views(ContextID ctx,
+                                               const FieldMask &detach_mask,
+                                               PhysicalManager *target)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      std::vector<InstanceView*> to_delete;
+      for (LegionMap<InstanceView*,FieldMask>::aligned::iterator it = 
+            state->valid_views.begin(); it != state->valid_views.end(); it++)
+      {
+        if (it->first->get_manager() == target)
+        {
+          it->second -= detach_mask;
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+      }
+      for (std::vector<InstanceView*>::const_iterator it = to_delete.begin();
+            it != to_delete.end(); it++)
+      {
+        if ((*it)->remove_valid_reference())
+        {
+          if ((*it)->is_deferred_view())
+          {
+            DeferredView *def_view = (*it)->as_deferred_view();
+            if (def_view->is_composite_view())
+              legion_delete(def_view->as_composite_view());
+            else
+              legion_delete(def_view->as_fill_view());
+          }
+          else
+            legion_delete((*it)->as_materialized_view());
+        }
+        state->valid_views.erase(*it);
+      }
+      release_physical_state(state);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeNode::pack_send_state(ContextID ctx, Serializer &rez,
                              AddressSpaceID target, const FieldMask &send_mask,
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
@@ -15830,20 +16330,14 @@ namespace LegionRuntime {
       // All privileges are based on the parent logical region
       RegionRequirement req(handle, READ_WRITE, EXCLUSIVE, 
                             trace_info.req.parent);
-      // Check to see if this region requirement needs to be restricted
-      if (restrict_info.is_restricted() &&
-          !restrict_info.is_coherent(closing_mask))
-        req.restricted = true;
-      else
-        req.restricted = false;
       // Compute the set of fields that we need
       column_source->get_field_set(closing_mask, 
                                    trace_info.req.privilege_fields,
                                    req.privilege_fields);
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
-                     next_child, trace_info.trace,
-                     trace_info.req_idx, closing_mask, creator);
+                     next_child, trace_info.trace, trace_info.req_idx, 
+                     restrict_info, closing_mask, creator);
       return op;
     }
 
@@ -16474,6 +16968,45 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef RegionNode::attach_file(ContextID ctx, 
+                                        const FieldMask &attach_mask,
+                                        const RegionRequirement &req,
+                                        AttachOp *attach_op)
+    //--------------------------------------------------------------------------
+    {
+      // First do any invalidations from this node for the fields that 
+      // are being written to because this is the new version
+      PhysicalInvalidator invalidator(ctx, attach_mask,
+                                      false/*force invalidate*/);
+      visit_node(&invalidator);
+      // Create a new instance view based on the file
+      InstanceManager *manager = 
+        column_source->create_file_instance(req.privilege_fields,
+                                            attach_mask, this, attach_op);
+      // Wrap it in a view
+      MaterializedView *view = manager->create_top_view(row_source->depth);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view != NULL);
+#endif
+      // Update the physical state with the new instance
+      PhysicalState *state = acquire_physical_state(ctx, true/*exclusive*/);
+      update_valid_views(state, attach_mask, false/*dirty*/, view);
+      release_physical_state(state);
+      // Return the resulting instance
+      return InstanceRef(Event::NO_EVENT, ViewHandle(view));
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::detach_file(ContextID ctx, const FieldMask &detach_mask,
+                                 PhysicalManager *detach_target)
+    //--------------------------------------------------------------------------
+    {
+      // Detach any instance views from this node down
+      PhysicalDetacher detacher(ctx, detach_mask, detach_target);
+      visit_node(&detacher);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionNode::send_state(ContextID ctx, UniqueID remote_owner_uid, 
                                 AddressSpaceID target,
                                 const FieldMask &send_mask, bool invalidate,
@@ -16657,7 +17190,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = *(logical_states.lookup_entry(ctx));
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);  
       }
       else
@@ -16958,7 +17491,7 @@ namespace LegionRuntime {
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
-        print_logical_state(*logical_states.lookup_entry(ctx), capture_mask,
+        print_logical_state(get_logical_state(ctx), capture_mask,
                             to_traverse, logger);
       else
         logger->log("No state");
@@ -17428,19 +17961,14 @@ namespace LegionRuntime {
       // Make it a projection requirement so we walk to a partition
       RegionRequirement req(handle, 0/*projection id */,
                             READ_WRITE, EXCLUSIVE, trace_info.req.parent);
-      // Check to see if this region requirement needs to be restricted
-      if (res_info.is_restricted() && !res_info.is_coherent(closing_mask))
-        req.restricted = true;
-      else
-        req.restricted = false;
       // Compute the set of fields that we need
       column_source->get_field_set(closing_mask, 
                                    trace_info.req.privilege_fields,
                                    req.privilege_fields);
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, leave_open, 
-                     next_child, trace_info.trace,
-                     trace_info.req_idx, closing_mask, creator);
+                     next_child, trace_info.trace, trace_info.req_idx, 
+                     res_info, closing_mask, creator);
       return op;
     }
 
@@ -17817,7 +18345,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = *(logical_states.lookup_entry(ctx));
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);    
       }
       else
@@ -18130,7 +18658,7 @@ namespace LegionRuntime {
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
-        LogicalState &state = *(logical_states.lookup_entry(ctx));
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);
       }
       else

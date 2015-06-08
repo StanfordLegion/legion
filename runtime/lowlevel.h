@@ -581,6 +581,8 @@ namespace LegionRuntime {
 
       bool exists(void) const { return id != 0; }
 
+      Memory get_location(void) const;
+
       void destroy(Event wait_on = Event::NO_EVENT) const;
 
       AddressSpace address_space(void) const;
@@ -1318,13 +1320,10 @@ namespace LegionRuntime {
 				     const std::vector<size_t> &field_sizes,
 				     size_t block_size,
 				     ReductionOpID redop_id = 0) const;
-#ifdef USE_HDF
-      RegionInstance mmap_instance(Memory memory,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<std::string> &field_paths,
-                                   std::string file_name,
-                                   ReductionOpID redop_id = 0) const;
-#endif
+      RegionInstance create_hdf5_instance(const char *file_name,
+                                          const std::vector<size_t> &field_sizes,
+                                          const std::vector<const char*> &field_files,
+                                          bool read_only) const;
       struct CopySrcDstField {
       public:
         CopySrcDstField(void) 

@@ -96,6 +96,7 @@ namespace LegionRuntime {
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
     public:
       virtual Event defer_mapping(void) = 0;
       virtual void check_state(UserEvent ready_event) = 0;
@@ -107,6 +108,11 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+    protected:
+      void pack_restrict_infos(Serializer &rez, 
+                               std::vector<RestrictInfo> &infos);
+      void unpack_restrict_infos(Deserializer &derez,
+                                 std::vector<RestrictInfo> &infos);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -353,6 +359,11 @@ namespace LegionRuntime {
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);
+      int has_conflicting_regions(AttachOp *attach, bool &parent_conflict,
+                                  bool &inline_conflict);
+      int has_conflicting_internal(const RegionRequirement &req, 
+                                   bool &parent_conflict,
+                                   bool &inline_conflict);
       void find_conflicting_regions(TaskOp *task,
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(CopyOp *copy,
@@ -384,10 +395,11 @@ namespace LegionRuntime {
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, 
                                       bool skip_privileges = false) const; 
-      bool has_simultaneous_coherence(void);
-      bool is_simultaneous_restricted(unsigned index);
       bool has_created_region(LogicalRegion handle) const;
       bool has_created_field(FieldSpace handle, FieldID fid) const;
+    public:
+      bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
+      void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
     public:
       void check_index_subspace(IndexSpace handle, const char *caller);
       void check_index_subpartition(IndexPartition handle, const char *caller);
@@ -438,6 +450,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void) = 0;
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual bool is_stealable(void) const = 0;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(UserEvent &chain_event) = 0;
     public:
       virtual Event defer_mapping(void) = 0;
@@ -520,9 +533,6 @@ namespace LegionRuntime {
       FenceOp *current_fence;
       GenerationID fence_gen;
     protected:
-      // For handling simultaneous coherence cases
-      bool simultaneous_checked, has_simultaneous;
-    protected:
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
       LegionDeque<Barrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
@@ -531,6 +541,9 @@ namespace LegionRuntime {
     protected:
       // Some help for performing fast safe casts
       std::map<IndexSpace,Domain> safe_cast_domains;
+    protected:
+      // Information for tracking restrictions
+      LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
     protected:
       // Support for serializing premapping operations.  Note
       // we make it possible for operations accessing different
@@ -576,6 +589,7 @@ namespace LegionRuntime {
       virtual bool perform_mapping(bool mapper_invoked = false) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool map_and_launch(void) = 0;
     public:
       virtual Event defer_mapping(void) = 0;
@@ -613,12 +627,13 @@ namespace LegionRuntime {
     public:
       void initialize_reduction_state(void);
       void fold_reduction_future(const void *result, size_t result_size,
-                                 bool owner, bool exclusive);
+                                 bool owner, bool exclusive); 
     protected:
       bool sliced;
       Barrier must_barrier; // for must parallelism
       ArgumentMap argument_map;
       std::list<SliceTask*> slices;
+      std::vector<RestrictInfo> restrict_infos;
     protected:
       ReductionOpID redop;
       const ReductionOp *reduction_op;
@@ -668,6 +683,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
     public:
       virtual Event defer_mapping(void);
@@ -715,6 +731,7 @@ namespace LegionRuntime {
       Future result; 
       std::set<Operation*> child_operations;
       std::vector<RegionTreePath> privilege_paths;
+      std::vector<RestrictInfo>   restrict_infos;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -762,6 +779,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
     public:
       virtual Event defer_mapping(void);
@@ -823,6 +841,7 @@ namespace LegionRuntime {
       virtual bool distribute_task(void);
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual RemoteTask* find_outermost_physical_context(void) = 0;
     public:
@@ -1006,6 +1025,7 @@ namespace LegionRuntime {
       virtual bool perform_mapping(bool mapper_invoked = false);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool map_and_launch(void);
     public:
       virtual Event defer_mapping(void);
@@ -1099,6 +1119,7 @@ namespace LegionRuntime {
       virtual bool perform_mapping(bool mapper_invoke = false);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool map_and_launch(void);
     public:
       virtual Event defer_mapping(void);

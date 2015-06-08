@@ -3453,6 +3453,7 @@ namespace LegionRuntime {
         const DomainLinearization& get_linearization(void) const { return linearization; }
         void fill_field(unsigned offset, unsigned size, const void *fill_value,
                         size_t fill_value_size, const Domain &domain);
+        inline Memory get_location(void) const { return memory; }
     private:
 	char *base_ptr;	
 	size_t elmt_size;
@@ -3508,6 +3509,12 @@ namespace LegionRuntime {
     private:
       RegionInstance::Impl *impl;
     };
+
+    Memory RegionInstance::get_location(void) const
+    {
+      RegionInstance::Impl *impl = Runtime::Impl::get_runtime()->get_instance_impl(*this);
+      return impl->get_location();
+    }
 
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
@@ -4335,6 +4342,16 @@ namespace LegionRuntime {
 	  return IndexSpace::Impl::create_instance(memory, field_sizes, block_size, 
 				                   dl, count, redop_id);
 	}
+    }
+
+    RegionInstance Domain::create_hdf5_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                const std::vector<const char*> &field_files,
+                                                bool ready_only) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return RegionInstance::NO_INST;
     }
 
 #if 0

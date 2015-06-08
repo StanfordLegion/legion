@@ -76,6 +76,7 @@ namespace LegionRuntime {
     typedef ::legion_partition_kind_t PartitionKind;
     typedef ::legion_dependence_type_t DependenceType;
     typedef ::legion_index_space_kind_t IndexSpaceKind;
+    typedef ::legion_file_mode_t LegionFileMode;
 
     enum OpenState {
       NOT_OPEN            = 0,
@@ -215,6 +216,8 @@ namespace LegionRuntime {
     class PendingPartitionOp;
     class DependentPartitionOp;
     class FillOp;
+    class AttachOp;
+    class DetachOp;
     class TaskOp;
 
     // legion_tasks.h
@@ -250,7 +253,9 @@ namespace LegionRuntime {
     class PathTraverser;
     class NodeTraverser;
     class PremapTraverser;
+    template<bool RESTRICTED>
     class MappingTraverser;
+    class RestrictInfo;
 
     struct LogicalState;
     class PhysicalVersion;
@@ -530,6 +535,8 @@ namespace LegionRuntime {
     friend class PendingPartitionOp;              \
     friend class DependentPartitionOp;            \
     friend class FillOp;                          \
+    friend class AttachOp;                        \
+    friend class DetachOp;                        \
     friend class TaskOp;                          \
     friend class SingleTask;                      \
     friend class MultiTask;                       \

@@ -1440,6 +1440,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      if (!leaf_region && reference.has_ref())
+        reference.remove_valid_reference();
+      reference = ref;
+      if (!leaf_region && reference.has_ref())
+        reference.add_valid_reference();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegion::Impl::reset_reference(const InstanceRef &ref,
                                                UserEvent term_event)
     //--------------------------------------------------------------------------
@@ -4815,7 +4826,9 @@ namespace LegionRuntime {
         epoch_op_lock(Reservation::create_reservation()),
         pending_partition_op_lock(Reservation::create_reservation()),
         dependent_partition_op_lock(Reservation::create_reservation()),
-        fill_op_lock(Reservation::create_reservation())
+        fill_op_lock(Reservation::create_reservation()),
+        attach_op_lock(Reservation::create_reservation()),
+        detach_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -5304,6 +5317,24 @@ namespace LegionRuntime {
       available_fill_ops.clear();
       fill_op_lock.destroy_reservation();
       fill_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<AttachOp*>::const_iterator it = 
+            available_attach_ops.begin(); it !=
+            available_attach_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_attach_ops.clear();
+      attach_op_lock.destroy_reservation();
+      attach_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<DetachOp*>::const_iterator it = 
+            available_detach_ops.begin(); it !=
+            available_detach_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_detach_ops.clear();
+      detach_op_lock.destroy_reservation();
+      detach_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -9028,7 +9059,7 @@ namespace LegionRuntime {
                             ",%x,%x) that conflicts with mapped region (" 
                             IDFMT ",%x,%x) at index %d of parent task %s "
                             "(ID %lld) that would ultimately result in "
-                            "deadlock.  Instead you receive this error "
+                            "deadlock. Instead you receive this error "
                             "message.",
                             launcher.requirement.region.index_space.id,
                             launcher.requirement.region.field_space.id,
@@ -9420,6 +9451,127 @@ namespace LegionRuntime {
                                            mapped_event);
         }
 #endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_hdf5(Context ctx, const char *file_name,
+                                        LogicalRegion handle, 
+                                        LogicalRegion parent,
+                                  const std::map<FieldID,const char*> field_map,
+                                        LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *attach_op = get_available_attach_op(); 
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context attach hdf5 file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal attach hdf5 file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
+                       handle, parent, field_map, mode, check_privileges); 
+#else
+      PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
+               handle, parent, field_map, mode, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(attach_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region (" 
+                      IDFMT ",%x,%x) that conflicts with mapped region (" 
+                      IDFMT ",%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->regions[index].region.index_space.id,
+                      ctx->regions[index].region.field_space.id,
+                      ctx->regions[index].region.tree_id, index, 
+                      ctx->variants->name, ctx->get_unique_task_id(), 
+                      file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region (" 
+                      IDFMT ",%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->variants->name, 
+                      ctx->get_unique_task_id(), file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_executiong)
+        result.wait_until_valid();
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context detach hdf5 file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal detach hdf5 file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      
+      // Then issue the detach operation
+      Processor proc = ctx->get_executing_processor();
+      DetachOp *detach_op = get_available_detach_op();
+      detach_op->initialize_detach(ctx, region);
+#ifdef INORDER_EXECUTION
+      Event term_event = detach_op->get_completion_event();
+#endif
+      add_to_dependence_queue(proc, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        ctx->unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -14038,6 +14190,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    AttachOp* Runtime::get_available_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *result = NULL;
+      {
+        AutoLock a_lock(attach_op_lock);
+        if (!available_attach_ops.empty())
+        {
+          result = available_attach_ops.front();
+          available_attach_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<AttachOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DetachOp* Runtime::get_available_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      DetachOp *result = NULL;
+      {
+        AutoLock d_lock(detach_op_lock);
+        if (!available_detach_ops.empty())
+        {
+          result = available_detach_ops.front();
+          available_detach_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<DetachOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -14286,6 +14482,22 @@ namespace LegionRuntime {
     {
       AutoLock f_lock(fill_op_lock);
       available_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_attach_op(AttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      available_attach_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_detach_op(DetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      available_detach_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -14671,6 +14883,10 @@ namespace LegionRuntime {
           return "Dependent Partition Op";
         case FILL_OP_ALLOC:
           return "Fill Op";
+        case ATTACH_OP_ALLOC:
+          return "Attach Op";
+        case DETACH_OP_ALLOC:
+          return "Detach Op";
         case MESSAGE_BUFFER_ALLOC:
           return "Message Buffer";
         case EXECUTING_CHILD_ALLOC:

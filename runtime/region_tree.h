@@ -228,9 +228,9 @@ namespace LegionRuntime {
       size_t get_domain_volume(LogicalRegion handle);
     public:
       // Logical analysis methods
-      void perform_dependence_analysis(RegionTreeContext ctx, 
-                                       Operation *op, unsigned idx,
+      void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
+                                       RestrictInfo &restrict_info,
                                        RegionTreePath &path);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
@@ -251,12 +251,14 @@ namespace LegionRuntime {
                                       LogicalRegion handle);
       void invalidate_logical_context(RegionTreeContext ctx,
                                       LogicalRegion handle);
-      void acquire_user_coherence(RegionTreeContext ctx,
+      void restrict_user_coherence(SingleTask *parent_ctx,
+                                   LogicalRegion handle,
+                                   const std::set<FieldID> &fields);
+      void acquire_user_coherence(SingleTask *parent_ctx,
                                   LogicalRegion handle,
                                   const std::set<FieldID> &fields);
-      void release_user_coherence(RegionTreeContext ctx,
-                                  LogicalRegion handle,
-                                  const std::set<FieldID> &fields);
+      bool has_restrictions(LogicalRegion handle, const RestrictInfo &info,
+                            const std::set<FieldID> &fields);
     public:
       // Physical analysis methods
       bool premap_physical_region(RegionTreeContext ctx,
@@ -301,7 +303,18 @@ namespace LegionRuntime {
       MappingRef map_restricted_region(RegionTreeContext ctx,
                                        RegionRequirement &req,
                                        unsigned index,
-                                       const InstanceRef &parent_ref
+                                       Processor target_proc
+#ifdef DEBUG_HIGH_LEVEL
+                                       , const char *log_name
+                                       , UniqueID uid
+#endif
+                                       );
+      // Same as the call above, but with a mapping path
+      MappingRef map_restricted_region(RegionTreeContext ctx,
+                                       RegionTreePath &path,
+                                       RegionRequirement &req,
+                                       unsigned index,
+                                       Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
                                        , UniqueID uid
@@ -374,6 +387,12 @@ namespace LegionRuntime {
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
                        const void *value, size_t value_size);
+      InstanceRef attach_file(RegionTreeContext ctx,
+                              const RegionRequirement &req,
+                              AttachOp *attach_op);
+      void detach_file(RegionTreeContext ctx, 
+                       const RegionRequirement &req,
+                       const InstanceRef &ref);
     public:
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
@@ -1309,6 +1328,10 @@ namespace LegionRuntime {
       unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::set<FieldID> &fields,
                              std::map<unsigned,FieldID> &indexes) const;
+    protected:
+      void compute_create_offsets(const std::set<FieldID> &create_fields,
+                                  std::vector<size_t> &field_sizes,
+                                  std::vector<unsigned> &indexes);
     public:
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
@@ -1317,6 +1340,10 @@ namespace LegionRuntime {
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop);
+    public:
+      InstanceManager* create_file_instance(const std::set<FieldID> &fields,
+                                            const FieldMask &attach_mask,
+                                            RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &mask,
                                                  const Domain &domain,
@@ -1425,22 +1452,56 @@ namespace LegionRuntime {
     };
 
     /**
-     * \struct RestrictInfo
-     * Information about whether this region requirement
-     * needs to be restricted for certain fields
+     * \class RestrictInfo
+     * A class for tracking mapping restrictions based 
+     * on region usage.
      */
-    struct RestrictInfo {
+    class RestrictInfo {
     public:
-      RestrictInfo(bool res) : restricted(res) { }
+      RestrictInfo(void)
+        : perform_check(false), projection(false) { }
+      RestrictInfo(const RestrictInfo &rhs) 
+        { assert(false); }
+      ~RestrictInfo(void) { }
     public:
-      inline bool is_restricted(void) const { return restricted; }
-      inline void record_coherence(const FieldMask &m)
-        { coherence_mask |= m; }
-      inline bool is_coherent(const FieldMask &m) const
-        { return !(m - coherence_mask); }
+      RestrictInfo& operator=(const RestrictInfo &rhs)
+      {
+        // Only need to copy over perform_check and restrictions
+        perform_check = rhs.perform_check;
+        restrictions = rhs.restrictions;
+        return *this;
+      }
+    public:
+      inline bool needs_check(void) const { return perform_check; }
+      inline void set_check(void) { perform_check = true; } 
+      inline bool is_projection(void) const { return projection; }
+      inline void set_projection(void) { projection = true; }
+      inline void add_restriction(LogicalRegion handle, const FieldMask &mask)
+      {
+        LegionMap<LogicalRegion,FieldMask>::aligned::iterator finder = 
+          restrictions.find(handle);
+        if (finder == restrictions.end())
+          restrictions[handle] = mask;
+        else
+          finder->second |= mask;
+      }
+      inline bool has_restrictions(void) const { return !restrictions.empty(); }
+      bool has_restrictions(LogicalRegion handle, RegionNode *node,
+                            const std::set<FieldID> &fields) const;
+      inline void clear(void)
+      {
+        perform_check = false;
+        projection = false;
+        restrictions.clear();
+      }
+    public:
+      void pack_info(Serializer &rez);
+      void unpack_info(Deserializer &derez, AddressSpaceID source, 
+                       RegionTreeForest *forest);
     protected:
-      FieldMask coherence_mask;
-      bool restricted;
+      bool perform_check;
+      bool projection;
+      LegionMap<LogicalRegion,FieldMask>::aligned restrictions;
     };
 
     /**
@@ -1557,7 +1618,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = LOGICAL_STATE_ALLOC;
     public:
-      LogicalState(void);
+      LogicalState(RegionTreeNode *owner, ContextID ctx);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
     public:
@@ -1577,7 +1638,7 @@ namespace LegionRuntime {
                                                             prev_epoch_users;
       // Fields on which the user has 
       // asked for explicit coherence
-      FieldMask user_level_coherence;
+      FieldMask restricted_fields;
     };
 
     typedef DynamicTableAllocator<LogicalState, 10, 8> LogicalStateAllocator;
@@ -1914,6 +1975,7 @@ namespace LegionRuntime {
       virtual ~RegionTreeNode(void);
     public:
       LogicalState& get_logical_state(ContextID ctx);
+      void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       PhysicalState* acquire_physical_state(ContextID ctx, bool exclusive);
       void acquire_physical_state(PhysicalState *state, bool exclusive);
       bool release_physical_state(PhysicalState *state);
@@ -1935,6 +1997,7 @@ namespace LegionRuntime {
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
+                             RestrictInfo &restrict_info,
                              const bool already_traced);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
@@ -1966,10 +2029,10 @@ namespace LegionRuntime {
       template<bool DOMINATE>
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
-      void acquire_user_coherence(ContextID ctx, 
-                                  const FieldMask &coherence_mask);
-      void release_user_coherence(ContextID ctx, 
-                                  const FieldMask &coherence_mask);
+      void add_restriction(ContextID ctx, const FieldMask &restricted_mask);
+      void release_restriction(ContextID ctx, const FieldMask &restricted_mask);
+      void record_logical_restrictions(ContextID ctx, RestrictInfo &info,
+                                       const FieldMask &mask);
     public:
       // Physical traversal operations
       // Entry
@@ -2111,6 +2174,9 @@ namespace LegionRuntime {
       void invalidate_physical_state(PhysicalState *state,
                                      const FieldMask &invalid_mask,
                                      bool force);
+      // Entry
+      void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
+                                 PhysicalManager *target);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual const ColorPoint& get_color(void) const = 0;
@@ -2350,6 +2416,10 @@ namespace LegionRuntime {
                                   std::set<Event> &preconditions);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size);
+      InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
+                             const RegionRequirement &req, AttachOp *attach_op);
+      void detach_file(ContextID ctx, const FieldMask &detach_mask,
+                       PhysicalManager *detach_target);
     public:
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
                       AddressSpaceID target,
@@ -2660,6 +2730,41 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class RestrictionMutator
+     * A class for mutating the state of restrction fields
+     */
+    template<bool ADD_RESTRICT>
+    class RestrictionMutator : public NodeTraverser {
+    public:
+      RestrictionMutator(ContextID ctx, const FieldMask &mask);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const FieldMask &restrict_mask;
+    };
+
+    /**
+     * \class RestrictionRecorder
+     * A class for recording rerstrictions of logical regions
+     */
+    class RestrictionRecorder : public NodeTraverser {
+    public:
+      RestrictionRecorder(ContextID ctx, RestrictInfo &res_info,
+                          const FieldMask &mask);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      RestrictInfo &restrict_info;
+      FieldMask user_mask;
+    };
+
+    /**
      * \class PhysicalInitializer
      * A class for initializing physical contexts
      */
@@ -2700,6 +2805,25 @@ namespace LegionRuntime {
       const bool total;
       const bool force;
       const FieldMask invalid_mask;
+    };
+
+    /**
+     * \class PhysicalDetacher
+     * A class for detaching physical instances normally associated
+     * with files that have been attached.
+     */
+    class PhysicalDetacher : public NodeTraverser {
+    public:
+      PhysicalDetacher(ContextID ctx, const FieldMask &detach_mask,
+                       PhysicalManager *to_detach);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const FieldMask &detach_mask;
+      PhysicalManager *const target;
     };
 
     /**
@@ -3655,7 +3779,7 @@ namespace LegionRuntime {
       // Deferred views never have managers
       virtual bool has_manager(void) const { return false; }
       virtual PhysicalManager* get_manager(void) const
-      { assert(false); return NULL; }
+      { return NULL; }
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       // Deferred views are never persistent
@@ -4361,6 +4485,7 @@ namespace LegionRuntime {
      * A traverser of the physical region tree for
      * performing the mapping operation.
      */
+    template<bool RESTRICTED>
     class MappingTraverser : public PathTraverser {
     public:
       MappingTraverser(RegionTreePath &path, const MappableInfo &info,
@@ -4379,6 +4504,8 @@ namespace LegionRuntime {
       void traverse_node(RegionTreeNode *node);
       bool map_physical_region(RegionNode *node);
       bool map_reduction_region(RegionNode *node);
+      bool map_restricted_physical(RegionNode *node);
+      bool map_restricted_reduction(RegionNode *node);
     public:
       const MappableInfo &info;
       const RegionUsage usage;

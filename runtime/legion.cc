@@ -2946,6 +2946,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalRegion HighLevelRuntime::attach_hdf5(Context ctx, 
+                                                 const char *file_name,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_hdf5(ctx, file_name, handle, 
+                                  parent, field_map, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::detach_hdf5(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_hdf5(ctx, region);
+    }
+
+    //--------------------------------------------------------------------------
     void HighLevelRuntime::issue_copy_operation(Context ctx, 
                                                 const CopyLauncher &launcher)
     //--------------------------------------------------------------------------

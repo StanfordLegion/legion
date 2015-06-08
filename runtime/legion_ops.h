@@ -26,7 +26,7 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     // Special typedef for predicates
-    typedef Predicate::Impl PredicateOp;
+    typedef Predicate::Impl PredicateOp; 
 
     /**
      * \class Operation
@@ -444,6 +444,8 @@ namespace LegionRuntime {
                                 MapperID id, MappingTagID tag,
                                 bool check_privileges);
       void initialize(SingleTask *ctx, const PhysicalRegion &region);
+      inline const RegionRequirement& get_requirement(void) const
+        { return requirement; }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -471,6 +473,7 @@ namespace LegionRuntime {
       RegionTreePath privilege_path;
       RegionTreePath mapping_path;
       unsigned parent_req_index;
+      RestrictInfo restrict_info;
     };
 
     /**
@@ -525,6 +528,8 @@ namespace LegionRuntime {
       std::vector<RegionTreePath> dst_mapping_paths;
       std::vector<unsigned>       src_parent_indexes;
       std::vector<unsigned>       dst_parent_indexes;
+      std::vector<RestrictInfo>   src_restrictions;
+      std::vector<RestrictInfo>   dst_restrictions;
     };
 
     /**
@@ -686,6 +691,7 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      RestrictInfo restrict_info;
     };
 
     /**
@@ -706,6 +712,7 @@ namespace LegionRuntime {
                       const std::set<ColorPoint> &targets, 
                       bool leave_open, const ColorPoint &next_child, 
                       LegionTrace *trace, int close_idx, 
+                      const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       const RegionRequirement& get_region_requirement(void) const;
@@ -813,6 +820,7 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreePath    mapping_path;
@@ -864,6 +872,7 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      RestrictInfo      restrict_info;
       unsigned parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreePath    mapping_path;
@@ -1470,6 +1479,7 @@ namespace LegionRuntime {
       UserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
+      RestrictInfo restrict_info;
       IndexPartition partition_handle;
       Domain color_space;
       IndexPartition projection; /* for pre-image only*/
@@ -1521,9 +1531,88 @@ namespace LegionRuntime {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       RegionTreePath mapping_path;
+      RestrictInfo restrict_info;
       unsigned parent_req_index;
       void *value;
       size_t value_size;
+    };
+
+    /**
+     * \class AttachOp
+     * Operation for attaching a file to a physical instance
+     */
+    class AttachOp : public Operation {
+    public:
+      static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+    public:
+      AttachOp(Runtime *rt);
+      AttachOp(const AttachOp &rhs);
+      virtual ~AttachOp(void);
+    public:
+      AttachOp& operator=(const AttachOp &rhs);
+    public:
+      PhysicalRegion initialize_hdf5(SingleTask *ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                 LegionFileMode mode, bool check_privileges);
+      inline const RegionRequirement& get_requirement(void) const 
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      PhysicalInstance create_instance(const Domain &dom, 
+                                       const std::vector<size_t> &field_sizes);
+    protected:
+      void check_privilege(void);
+      void compute_parent_index(void);
+    public:
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      RestrictInfo restrict_info;
+      const char *file_name;
+      std::map<FieldID,const char*> field_map;
+      LegionFileMode file_mode;
+      PhysicalRegion region;
+      unsigned parent_req_index;
+    };
+
+    /**
+     * \class Detach Op
+     * Operation for detaching a file from a physical instance
+     */
+    class DetachOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DETACH_OP_ALLOC;
+    public:
+      DetachOp(Runtime *rt);
+      DetachOp(const DetachOp &rhs);
+      virtual ~DetachOp(void);
+    public:
+      DetachOp& operator=(const DetachOp &rhs);
+    public:
+      void initialize_detach(SingleTask *ctx, PhysicalRegion region);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      void compute_parent_index(void);
+    public:
+      InstanceRef reference;
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      RestrictInfo restrict_info;
+      unsigned parent_req_index;
     };
 
   }; //namespace HighLevel
