@@ -66,6 +66,18 @@ function std.all(list)
   return true
 end
 
+function std.range(start, stop) -- zero-based, exclusive (as in Python)
+  if stop == nil then
+    stop = start
+    start = 0
+  end
+  local result = terralib.newlist()
+  for i = start, stop - 1, 1 do
+    result:insert(i)
+  end
+  return result
+end
+
 function std.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do

@@ -316,11 +316,10 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     local dim = index_type.dim
     local expected_stride = terralib.sizeof(field_type)
 
-    local dims = terralib.newlist()
+    local dims = std.range(2, dim + 1)
     local strides = terralib.newlist()
     strides:insert(expected_stride)
     for i = 2, dim do
-      dims:insert(i)
       strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
     end
 
@@ -340,10 +339,28 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       var [base_pointer] = [&field_type]([raw_rect_ptr](
           accessor, rect, &subrect, &(offsets[0])))
 
+      -- Sanity check the outputs.
       std.assert(base_pointer ~= nil, "base pointer is nil")
-      -- std.assert(subrect == rect, "subrect not equal to rect")
+      [std.range(dim):map(
+         function(i)
+           return quote
+             std.assert(subrect.lo.x[i] == rect.lo.x[i], "subrect not equal to rect")
+             std.assert(subrect.hi.x[i] == rect.hi.x[i], "subrect not equal to rect")
+           end
+         end)]
       std.assert(offsets[0].offset == [expected_stride],
                  "stride does not match expected value")
+
+      -- Fix up the base pointer so it points to the origin (zero),
+      -- regardless of where rect is located. This allows us to do
+      -- pointer arithmetic later oblivious to what sort of a subrect
+      -- we are working with.
+      [std.range(dim):map(
+         function(i)
+           return quote
+             [base_pointer] = [&field_type](([&int8]([base_pointer])) - rect.lo.x[i] * offsets[i].offset)
+           end
+         end)]
 
       [dims:map(
          function(i)
