@@ -274,16 +274,16 @@ function region:physical_region(field_path)
   return physical_region
 end
 
-function region:accessor(field_path)
-  local accessor = self.accessors[field_path:hash()]
-  assert(accessor)
-  return accessor
-end
-
 function region:base_pointer(field_path)
   local base_pointer = self.base_pointers[field_path:hash()]
   assert(base_pointer)
   return base_pointer
+end
+
+function region:stride(field_path)
+  local stride = self.strides[field_path:hash()]
+  assert(stride)
+  return stride
 end
 
 local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
@@ -585,11 +585,17 @@ function ref:new(value_expr, value_type, field_path)
   return values.ref(value_expr, value_type, field_path)
 end
 
-local function get_element_pointer(base_pointer, index_type, index)
-  assert(index_type.dim <= 1)
+local function get_element_pointer(index_type, field_type, base_pointer, strides, index)
   if index_type.fields then
-    local field = index_type.fields[1]
-    return `(base_pointer[ [index].__ptr.[ field ] ])
+    local offset
+    for i, field in ipairs(index_type.fields) do
+      if offset then
+        offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
+      else
+        offset = `([index].__ptr.[ field ] * [ strides[i] ])
+      end
+    end
+    return `(@([&field_type](&(([&int8](base_pointer))[offset]))))
   else
     return `(base_pointer[ [index].__ptr ])
   end
@@ -613,25 +619,46 @@ function ref:__ref(cx, expr_type)
           return cx:region(region_type):base_pointer(field_path)
         end)
     end)
+  local strides_by_region = region_types:map(
+    function(region_type)
+      return absolute_field_paths:map(
+        function(field_path)
+          return cx:region(region_type):stride(field_path)
+        end)
+    end)
 
-  local base_pointers
+  local base_pointers, strides
 
   if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     base_pointers = base_pointers_by_region[1]
+    strides = strides_by_region[1]
   else
     base_pointers = std.zip(absolute_field_paths, field_types):map(
       function(field)
         local field_path, field_type = unpack(field)
         return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
       end)
+    strides = absolute_field_paths:map(
+      function(field_path)
+        return cx:region(region_type):stride(field_path):map(
+          function(_)
+            return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+          end)
+      end)
 
     local cases
     for i = #region_types, 1, -1 do
       local region_base_pointers = base_pointers_by_region[i]
-      local case = std.zip(base_pointers, region_base_pointers):map(
+      local region_strides = strides_by_region[i]
+      local case = std.zip(base_pointers, region_base_pointers, strides, region_strides):map(
         function(pair)
-          local base_pointer, region_base_pointer = unpack(pair)
-          return quote [base_pointer] = [region_base_pointer] end
+          local base_pointer, region_base_pointer, stride, region_stride = unpack(pair)
+          local setup = quote [base_pointer] = [region_base_pointer] end
+          for i, stridei in ipairs(strides) do
+            local region_stridei = region_strides[i]
+            setup = quote [setup]; [stridei] = [region_stridesi] end
+          end
+          return setup
         end)
 
       if cases then
@@ -651,23 +678,26 @@ function ref:__ref(cx, expr_type)
       [actions];
       [base_pointers:map(
          function(base_pointer) return quote var [base_pointer] end end)];
+      [strides:map(
+         function(stride) return quote [stride:map(function(s) return quote var [s] end end)] end end)];
       [cases]
     end
   end
 
   local values
   if not expr_type or std.as_read(expr_type) == value_type then
-    values = base_pointers:map(
-      function(base_pointer)
-        return get_element_pointer(base_pointer, self.value_type, value)
+    values = std.zip(field_types, base_pointers, strides):map(
+      function(field)
+        local field_type, base_pointer, stride = unpack(field)
+        return get_element_pointer(self.value_type, field_type, base_pointer, stride, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
-    values = std.zip(base_pointers, field_types):map(
+    values = std.zip(field_types, base_pointers, strides):map(
       function(field)
-        local base_pointer, field_type = unpack(field)
+        local field_type, base_pointer, stride = unpack(field)
         local vec = vector(field_type, std.as_read(expr_type).N)
-        return `(@[&vec](&[get_element_pointer(base_pointer, self.value_type, value)]))
+        return `(@[&vec](&[get_element_pointer(self.value_type, field_type, base_pointer, stride, value)]))
       end)
     value_type = expr_type
   end
