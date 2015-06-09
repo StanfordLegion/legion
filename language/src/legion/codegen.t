@@ -193,8 +193,8 @@ end
 
 function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
-                                 field_ids, physical_regions, accessors,
-                                 base_pointers)
+                                 field_ids, physical_regions,
+                                 base_pointers, strides)
   if not self.regions then
     error("not in task context", 2)
   end
@@ -217,8 +217,8 @@ function context:add_region_root(region_type, logical_region, field_paths,
         field_types = field_types,
         field_ids = field_ids,
         physical_regions = physical_regions,
-        accessors = accessors,
         base_pointers = base_pointers,
+        strides = strides,
         root_region_type = region_type,
       }, region))
 end
@@ -250,8 +250,8 @@ function context:add_region_subregion(region_type, logical_region,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
         physical_regions = self:region(parent_region_type).physical_regions,
-        accessors = self:region(parent_region_type).accessors,
         base_pointers = self:region(parent_region_type).base_pointers,
+        strides = self:region(parent_region_type).strides,
         root_region_type = self:region(parent_region_type).root_region_type,
       }, region))
 end
@@ -286,46 +286,71 @@ function region:base_pointer(field_path)
   return base_pointer
 end
 
-local function accessor_generic_get_base_pointer(field_type, index_type)
-  if index_type:is_opaque() then
-    return terra(runtime : c.legion_runtime_t,
-                 context : c.legion_context_t,
-                 physical : c.legion_physical_region_t,
-                 accessor : c.legion_accessor_generic_t)
+local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
+  local get_accessor = c.legion_physical_region_get_field_accessor_generic
+  local accessor_args = terralib.newlist({physical_region})
+  if std.is_reduction_op(privilege) then
+    get_accessor = c.legion_physical_region_get_accessor_generic
+  else
+    accessor_args:insert(field_id)
+  end
 
-      var base_pointer : &opaque = nil
-      var stride : c.size_t = terralib.sizeof(field_type)
+  local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+  if index_type:is_opaque() then
+    local expected_stride = terralib.sizeof(field_type)
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
+
+      var [base_pointer] = nil
+      var stride : c.size_t = [expected_stride]
       var ok = c.legion_accessor_generic_get_soa_parameters(
-        accessor, &base_pointer, &stride)
+        [accessor], [&&opaque](&[base_pointer]), &stride)
 
       std.assert(ok, "failed to get base pointer")
-      std.assert(base_pointer ~= nil, "base pointer is nil")
-      std.assert(stride == terralib.sizeof(field_type),
+      std.assert([base_pointer] ~= nil, "base pointer is nil")
+      std.assert(stride == [expected_stride],
                  "stride does not match expected value")
-
-      return [&field_type](base_pointer)
     end
+    return actions, base_pointer, terralib.newlist({expected_stride})
   else
-    assert(index_type.dim == 1)
-    return terra(runtime : c.legion_runtime_t,
-                 context : c.legion_context_t,
-                 physical : c.legion_physical_region_t,
-                 accessor : c.legion_accessor_generic_t)
-      var region = c.legion_physical_region_get_logical_region(physical)
-      var domain = c.legion_index_space_get_domain(runtime, context, region.index_space)
-      var rect = c.legion_domain_get_rect_1d(domain)
+    local dim = index_type.dim
+    local expected_stride = terralib.sizeof(field_type)
 
-      var subrect : c.legion_rect_1d_t
-      var stride : c.legion_byte_offset_t
-      var base_pointer = c.legion_accessor_generic_raw_rect_ptr_1d(
-        accessor, rect, &subrect, &stride)
+    local dims = terralib.newlist()
+    local strides = terralib.newlist()
+    strides:insert(expected_stride)
+    for i = 2, dim do
+      dims:insert(i)
+      strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+    end
+
+    local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
+    local domain_get_rect = c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
+    local raw_rect_ptr = c["legion_accessor_generic_raw_rect_ptr_" .. tostring(dim) .. "d"]
+
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
+
+      var region = c.legion_physical_region_get_logical_region([physical_region])
+      var domain = c.legion_index_space_get_domain([cx.runtime], [cx.context], region.index_space)
+      var rect = [domain_get_rect](domain)
+
+      var subrect : rect_t
+      var offsets : c.legion_byte_offset_t[dim]
+      var [base_pointer] = [&field_type]([raw_rect_ptr](
+          accessor, rect, &subrect, &(offsets[0])))
 
       std.assert(base_pointer ~= nil, "base pointer is nil")
-      std.assert(stride.offset == terralib.sizeof(field_type),
+      -- std.assert(subrect == rect, "subrect not equal to rect")
+      std.assert(offsets[0].offset == [expected_stride],
                  "stride does not match expected value")
 
-      return [&field_type](base_pointer)
+      [dims:map(
+         function(i)
+           return quote var [ strides[i] ] = offsets[i-1].offset end
+         end)]
     end
+    return actions, base_pointer, strides
   end
 end
 
@@ -2152,15 +2177,14 @@ function codegen.expr_region(cx, node)
       return field_id
     end)
   local physical_regions = field_paths:map(function(_) return pr end)
-  local accessors = field_paths:map(
-    function(field_path)
-      return terralib.newsymbol(c.legion_accessor_generic_t, "accessor_" .. field_path:hash())
-    end)
-  local base_pointers = std.zip(field_paths, field_types):map(
-    function(field)
-      local field_path, field_type = unpack(field)
-      return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
-    end)
+
+  local pr_actions, base_pointers, strides = unpack(std.zip(unpack(
+    std.zip(field_types, field_ids, field_privileges):map(
+      function(field)
+        local field_type, field_id, field_privilege = unpack(field)
+        return terralib.newlist({
+            physical_region_get_base_pointer(cx, index_type, field_type, field_id, field_privilege, pr)})
+  end))))
 
   cx:add_region_root(region_type, r,
                      field_paths,
@@ -2169,8 +2193,8 @@ function codegen.expr_region(cx, node)
                      std.dict(std.zip(field_paths:map(std.hash), field_types)),
                      std.dict(std.zip(field_paths:map(std.hash), field_ids)),
                      std.dict(std.zip(field_paths:map(std.hash), physical_regions)),
-                     std.dict(std.zip(field_paths:map(std.hash), accessors)),
-                     std.dict(std.zip(field_paths:map(std.hash), base_pointers)))
+                     std.dict(std.zip(field_paths:map(std.hash), base_pointers)),
+                     std.dict(std.zip(field_paths:map(std.hash), strides)))
 
   actions = quote
     [actions]
@@ -2194,17 +2218,7 @@ function codegen.expr_region(cx, node)
     var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
     c.legion_inline_launcher_destroy(il)
     c.legion_physical_region_wait_until_valid([pr])
-    [std.zip(field_ids, field_types, accessors, base_pointers):map(
-       function(field)
-         local field_id, field_type, accessor, base_pointer = unpack(field)
-         local get_base_pointer = accessor_generic_get_base_pointer(
-           field_type, index_type)
-         return quote
-           var [accessor] = c.legion_physical_region_get_field_accessor_generic([pr], [field_id])
-           var [base_pointer] = [get_base_pointer](
-             [cx.runtime], [cx.context], [pr], [accessor])
-         end
-       end)]
+    [pr_actions]
     var [r] = [region_type]{ impl = [lr] }
   end
 
@@ -3735,11 +3749,13 @@ function codegen.stat_task(cx, node)
       local physical_regions = terralib.newlist()
       local physical_regions_by_field_path = {}
       local physical_regions_index = terralib.newlist()
-      local accessors = terralib.newlist()
-      local accessors_by_field_path = {}
+      local physical_region_actions = terralib.newlist()
       local base_pointers = terralib.newlist()
       local base_pointers_by_field_path = {}
+      local strides = terralib.newlist()
+      local strides_by_field_path = {}
       for i, field_paths in ipairs(privilege_field_paths) do
+        local privilege = privileges[i]
         local field_types = privilege_field_types[i]
         local physical_region = terralib.newsymbol(
           c.legion_physical_region_t,
@@ -3749,28 +3765,22 @@ function codegen.stat_task(cx, node)
         physical_regions_index:insert(physical_region_i)
         physical_region_i = physical_region_i + 1
 
-        local physical_region_accessors = field_paths:map(
-          function(field_path)
-            return terralib.newsymbol(
-              c.legion_accessor_generic_t,
-              "accessor_" .. field_path:hash())
-          end)
-        accessors:insert(physical_region_accessors)
-
-        local physical_region_base_pointers = std.zip(field_paths, field_types):map(
-          function(field)
-            local field_path, field_type = unpack(field)
-            return terralib.newsymbol(
-              &field_type,
-              "base_pointer_" .. field_path:hash())
-          end)
-        base_pointers:insert(physical_region_base_pointers)
+        local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
+          std.zip(field_paths, field_types):map(
+            function(field)
+              local field_path, field_type = unpack(field)
+              local field_id = field_ids_by_field_path[field_path:hash()]
+              return terralib.newlist({
+                  physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
+        end))))
+        physical_region_actions:insertall(pr_actions or {})
+        base_pointers:insert(pr_base_pointers)
 
         for i, field_path in ipairs(field_paths) do
           physical_regions_by_field_path[field_path:hash()] = physical_region
           if privileges_by_field_path[field_path:hash()] ~= "none" then
-            accessors_by_field_path[field_path:hash()] = physical_region_accessors[i]
-            base_pointers_by_field_path[field_path:hash()] = physical_region_base_pointers[i]
+            base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
+            strides_by_field_path[field_path:hash()] = pr_strides[i]
           end
         end
       end
@@ -3802,41 +3812,11 @@ function codegen.stat_task(cx, node)
         local physical_region = physical_regions[i]
         local physical_region_index = physical_regions_index[i]
 
-        local get_accessor
-        if std.is_reduction_op(privilege) then
-          get_accessor = c.legion_physical_region_get_accessor_generic
-        else
-          get_accessor = c.legion_physical_region_get_field_accessor_generic
-        end
-        assert(get_accessor)
-
         region_args_setup:insert(quote
           var [physical_region] = [c_regions][ [physical_region_index] ]
         end)
-
-        for j, field_path in ipairs(field_paths) do
-          local field_type = field_types[j]
-          local accessor = accessors[i][j]
-          local base_pointer = base_pointers[i][j]
-          local field_id = field_ids_by_field_path[field_path:hash()]
-          assert(accessor and base_pointer and field_id)
-
-          local accessor_args = terralib.newlist({physical_region})
-          if not std.is_reduction_op(privilege) then
-            accessor_args:insert(field_id)
-          end
-
-          if privileges_by_field_path[field_path:hash()] ~= "none" then
-            local get_base_pointer = accessor_generic_get_base_pointer(
-              field_type, index_type)
-            region_args_setup:insert(quote
-              var [accessor] = [get_accessor]([accessor_args])
-              var [base_pointer] = [get_base_pointer](
-                [cx.runtime], [cx.context], [physical_region], [accessor])
-            end)
-          end
-        end
       end
+      region_args_setup:insertall(physical_region_actions)
 
       if not cx:has_ispace(region_type:ispace()) then
         cx:add_ispace_root(region_type:ispace(), is, isa, it)
@@ -3848,8 +3828,8 @@ function codegen.stat_task(cx, node)
                          std.dict(std.zip(field_paths:map(std.hash), field_types)),
                          field_ids_by_field_path,
                          physical_regions_by_field_path,
-                         accessors_by_field_path,
-                         base_pointers_by_field_path)
+                         base_pointers_by_field_path,
+                         strides_by_field_path)
     end
   end
 

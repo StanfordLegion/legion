@@ -100,7 +100,7 @@ end
 
 function std.zip(...)
   local lists = terralib.newlist({...})
-  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end))
+  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end)) or 0
   local result = terralib.newlist()
   for i = 1, len do
     result:insert(lists:map(function(list) return list[i] end))
