@@ -727,9 +727,9 @@ namespace LegionRuntime {
     public:
         // For creation of normal processors when there is no utility processors
         ProcessorImpl(pthread_barrier_t *init, const Processor::TaskIDTable &table, 
-                      Processor p, size_t stacksize) 
+                      Processor p, size_t stacksize, Processor::Kind kind) 
           : init_bar(init), task_table(table), proc(p), 
-            proc_kind(Processor::LOC_PROC), utility_proc(this),
+            proc_kind(kind), utility_proc(this),
             shutdown(false), shutdown_trigger(false), 
             stack_size(stacksize), running_thread(NULL)
         {
@@ -907,9 +907,9 @@ namespace LegionRuntime {
       static const Processor::id_t FIRST_PROC_GROUP_ID = 1000;
 
       ProcessorGroup(Processor p) 
-	: ProcessorImpl(0 /*init*/, Processor::TaskIDTable(), p, 0 /*stacksize*/), next_target(0)
+	: ProcessorImpl(0 /*init*/, Processor::TaskIDTable(), p, 0 /*stacksize*/, 
+                        Processor::PROC_GROUP), next_target(0)
       {
-	proc_kind = Processor::PROC_GROUP;
       }
 
       void add_member(ProcessorImpl *new_member) {
@@ -6110,7 +6110,7 @@ namespace LegionRuntime {
             p.id = num_cpus+idx+1;
             procs.insert(p);
             temp_utils[idx] = new ProcessorImpl(init_barrier, task_table, 
-                                                p, cpu_stack_size);
+                                p, cpu_stack_size, Processor::UTIL_PROC);
           }
           // Now we can make the processors themselves
           for (unsigned idx = 0; idx < num_cpus; idx++)
@@ -6147,7 +6147,7 @@ namespace LegionRuntime {
             p.id = idx + 1;
             procs.insert(p);
             ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, 
-                                                    cpu_stack_size);
+                                            cpu_stack_size, Processor::LOC_PROC);
             processors.push_back(impl);
           }
         }
