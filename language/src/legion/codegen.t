@@ -657,7 +657,7 @@ function ref:__ref(cx, expr_type)
       end)
     strides = absolute_field_paths:map(
       function(field_path)
-        return cx:region(region_type):stride(field_path):map(
+        return cx:region(region_types[1]):stride(field_path):map(
           function(_)
             return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
           end)
@@ -669,11 +669,11 @@ function ref:__ref(cx, expr_type)
       local region_strides = strides_by_region[i]
       local case = std.zip(base_pointers, region_base_pointers, strides, region_strides):map(
         function(pair)
-          local base_pointer, region_base_pointer, stride, region_stride = unpack(pair)
+          local base_pointer, region_base_pointer, field_strides, field_region_strides = unpack(pair)
           local setup = quote [base_pointer] = [region_base_pointer] end
-          for i, stridei in ipairs(strides) do
-            local region_stridei = region_strides[i]
-            setup = quote [setup]; [stridei] = [region_stridesi] end
+          for i, stride in ipairs(field_strides) do
+            local region_stride = field_region_strides[i]
+            setup = quote [setup]; [stride] = [region_stride] end
           end
           return setup
         end)
