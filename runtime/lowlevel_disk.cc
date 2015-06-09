@@ -166,9 +166,10 @@ namespace LegionRuntime {
                      ReductionOpID redopid,
                      off_t list_size,
                      RegionInstance parent_inst,
-                     std::string file,
-                     const std::vector<std::string>& path_names,
-                     Domain domain)
+                     const char* file,
+                     const std::vector<const char*>& path_names,
+                     Domain domain,
+                     bool read_only)
 
     {
       RegionInstance inst = create_instance_local(is,
@@ -182,9 +183,14 @@ namespace LegionRuntime {
         new_hdf->lo[i] = domain.rect_data[i];
         new_hdf->dims[i] = domain.rect_data[i + domain.get_dim()] - domain.rect_data[i];
       }
-      new_hdf->file_id = H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+      unsigned flags;
+      if (read_only)
+        flags = H5F_ACC_RDONLY;
+      else
+        flags = H5F_ACC_RDWR;
+      new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
       for (IDType idx = 0; idx < path_names.size(); idx ++) {
-        new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx].c_str(), H5P_DEFAULT));
+        new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx], H5P_DEFAULT));
         new_hdf->datatype_ids.push_back(H5Dget_type(new_hdf->dataset_ids[idx]));
       }
 

@@ -1440,9 +1440,10 @@ namespace LegionRuntime {
                                      ReductionOpID redopid,
                                      off_t list_size,
                                      RegionInstance parent_inst,
-                                     std::string file,
-                                     const std::vector<std::string>& path_names,
-                                     Domain domain);
+                                     const char* file,
+                                     const std::vector<const char*>& path_names,
+                                     Domain domain,
+                                     bool read_only);
 
       virtual void destroy_instance(RegionInstance i,
                                     bool local_destroy);

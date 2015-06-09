@@ -6640,21 +6640,23 @@ namespace LegionRuntime {
     RegionInstance Domain::create_hdf5_instance(const char *file_name,
                                                 const std::vector<size_t> &field_sizes,
                                                 const std::vector<const char*> &field_files,
-                                                bool ready_only) const
+                                                bool read_only) const
     {
+#ifndef USE_HDF
       // TODO: Implement this
       assert(false);
       return RegionInstance::NO_INST;
-    }
-
-#ifdef USE_HDF
-    RegionInstance Domain::mmap_instance(Memory memory,
-                                 const std::vector<size_t> &field_sizes,
-                                 const std::vector<std::string> &field_paths,
-                                 std::string file_name,
-                                 ReductionOpID redop_id) const
-    {
-      assert(field_sizes.size() == field_paths.size());
+#else
+      assert(field_sizes.size() == field_files.size());
+      Memory memory = Memory::NO_MEMORY;
+      Machine machine = Machine::get_machine();
+      std::set<Memory> mem;
+      machine.get_all_memories(mem);
+      for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++) {
+        if (it->kind() == Memory::HDF_MEM) {
+          memory = *it;
+        }
+      }
       assert(memory.kind() == Memory::HDF_MEM);
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       HDFMemory* hdf_mem = (HDFMemory*) get_runtime()->get_memory_impl(memory);
@@ -6706,13 +6708,13 @@ namespace LegionRuntime {
       size_t inst_bytes = elem_size * num_elements;
       RegionInstance i = hdf_mem->create_instance(get_index_space(), linearization_bits, inst_bytes, 
                                                   1/*block_size*/, elem_size, field_sizes,
-                                                  redop_id, -1/*list_size*/, RegionInstance::NO_INST,
-                                                  file_name, field_paths, *this);
+                                                  0 /*redop_id*/, -1/*list_size*/, RegionInstance::NO_INST,
+                                                  file_name, field_files, *this, read_only);
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
       return i;
-    }
 #endif
+    }
 
 #if 0
     RegionInstance IndexSpace::create_instance_untyped(Memory memory,
@@ -8959,7 +8961,7 @@ namespace LegionRuntime {
       stack_size_in_mb = 2;
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
-      unsigned cpu_worker_threads = 1;
+      //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
       unsigned active_msg_handler_threads = 1;
@@ -9003,7 +9005,7 @@ namespace LegionRuntime {
         INT_ARG("-ll:stack", stack_size_in_mb);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
-	INT_ARG("-ll:workers", cpu_worker_threads);
+	//INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
 	INT_ARG("-ll:ahandlers", active_msg_handler_threads);
