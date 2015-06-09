@@ -1091,6 +1091,47 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
+      void DMAThread::dma_therad_loop() {
+        while (!is_stopped) {
+          bool is_empty = true;
+          std::map<Channel*, PriorityXferDesQueue*>::iterator it;
+          for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
+            if(!it->second->empty()) {
+              is_empty = false;
+              break;
+            }
+          }
+          xd_queue->dequeue_xferDes(this, is_empty);
+
+          for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
+            it->first->pull();
+            long nr = it->first->available();
+            if (nr > max_nr)
+              nr = max_nr;
+            if (nr == 0)
+              continue;
+            std::vector<XferDes*> finish_xferdes;
+            PriorityXferDesQueue::iterator it2;
+            for (it2 = it->second->begin(); it2 != it->second->end(); it2++) {
+              assert((*it2)->channel == it->first);
+              long nr_got = (*it2)->get_requests(requests, nr);
+              long nr_submitted = it->first->submit(requests, nr_got);
+              nr -= nr_submitted;
+              assert(nr_got == nr_submitted);
+              if ((*it2)->is_done()) {
+                finish_xferdes.push_back(*it2);
+              }
+              if (nr ==0)
+                break;
+            }
+            while(!finish_xferdes.empty()) {
+              delete finish_xferdes.back();
+              it->second->erase(finish_xferdes.back());
+              finish_xferdes.pop_back();
+            }
+          }
+        }
+      }
 
 #ifdef OLD_DMA_THREAD_CODE
       void* DMAThread::start(void* arg)

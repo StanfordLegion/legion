@@ -4146,6 +4146,8 @@ namespace LegionRuntime {
       dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
       worker_threads = new pthread_t[num_threads];
       for (int i = 0; i < num_threads; i++) {
+        // register dma thread to XferDesQueue
+        xferDes_queue->register_dma_thread(dma_threads[i]);
         pthread_attr_t attr;
         CHECK_PTHREAD( pthread_attr_init(&attr) );
         if (proc_assignment)

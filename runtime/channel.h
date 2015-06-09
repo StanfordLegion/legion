@@ -800,159 +800,40 @@ namespace LegionRuntime{
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
-    //TODO: the entire queue lock could be replaced by per Channel lock
-    class XferDesQueue {
-    private:
-      void lock_free_enqueue_xferDes(XferDes* xd) {
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        it2 = queues.find(xd->channel);
-        if (it2 == queues.end()) {
-          // nothing with this channel, create a new one
-          PriorityXferDesQueue* pq = new PriorityXferDesQueue;
-          pq->insert(xd);
-          queues[xd->channel] = pq;
-        }
-        else {
-          // push ourself into the priority queue
-          it2->second->insert(xd);
-        }
-      }
-    public:
-      XferDesQueue() {
-        pthread_mutex_init(&queue_mutex, NULL);
-      }
-
-      ~XferDesQueue() {
-        pthread_mutex_destroy(&queue_mutex);
-        // clean up the priority queues
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        for (it2 = queues.begin(); it2 != queues.end(); it2++) {
-          delete it2->second;
-        }
-      }
-
-      void enqueue_xferDes(XferDes* xd) {
-        pthread_mutex_lock(&queue_mutex);
-        lock_free_enqueue_xferDes(xd);
-        pthread_mutex_unlock(&queue_mutex);
-      }
-
-      void enqueue_xferDes_path(std::vector<XferDes*>& path) {
-        fprintf(stderr, "[Enqueue] Before get lock\n");
-        pthread_mutex_lock(&queue_mutex);
-        fprintf(stderr, "[Enqueue] After get lock\n");
-        XferDes* pre = NULL;
-        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
-          if (pre == NULL)
-            pre = *it;
-          else {
-            pre->update_next_XferDes(*it);
-            (*it)->update_pre_XferDes(pre);
-            pre = *it;
-          }
-        }
-        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
-          lock_free_enqueue_xferDes(*it);
-        }
-        pthread_mutex_unlock(&queue_mutex);
-      }
-
-      // Note that getting the XferDes doesn't remove it from priority queue
-      bool dequeue_xferDes(Channel* channel, PriorityXferDesQueue* xd) {
-        //fprintf(stderr, "[Dequeue]Before get lock\n");
-        pthread_mutex_lock(&queue_mutex);
-        //fprintf(stderr, "[Dequeue]After get lock\n");
-        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
-        it2 = queues.find(channel);
-        if (it2 == queues.end()) {
-          pthread_mutex_unlock(&queue_mutex);
-          return false;
-        }
-        else {
-          PriorityXferDesQueue::iterator it;
-          for (it = it2->second->begin(); it != it2->second->end(); it++) {
-            assert((*it)->channel == channel);
-            xd->insert(*it);
-          }
-          it2->second->clear();
-          pthread_mutex_unlock(&queue_mutex);
-          return true;
-        }
-      }
-    protected:
-      pthread_mutex_t queue_mutex;
-      std::map<Channel*, PriorityXferDesQueue*> queues;
-    };
-
+    class XferDesQueue;
     class DMAThread {
     public:
       DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels) {
-        channels = _channels;
-        for (std::vector<Channel*>::iterator it = channels.begin(); it != channels.end(); it ++) {
-          PriorityXferDesQueue* xd_pool = new PriorityXferDesQueue;
-          xferDes_pools.push_back(xd_pool);
+        for (std::vector<Channel*>::iterator it = _channels.begin(); it != _channels.end(); it ++) {
+          channel_to_xd_pool[*it] = new PriorityXferDesQueue;
         }
         xd_queue = _xd_queue;
         max_nr = _max_nr;
         is_stopped = false;
         requests = (Request**) calloc(max_nr, sizeof(Request*));
+        sleep = false;
+        pthread_mutex_init(&enqueue_lock, NULL);
+        pthread_cond_init(&enqueue_cond, NULL);
       }
       DMAThread(long _max_nr, XferDesQueue* _xd_queue, Channel* _channel) {
-        channels.push_back(_channel);
-        for (std::vector<Channel*>::iterator it = channels.begin(); it != channels.end(); it ++) {
-          PriorityXferDesQueue* xd_pool = new PriorityXferDesQueue;
-          xferDes_pools.push_back(xd_pool);
-        }
+        channel_to_xd_pool[_channel] = new PriorityXferDesQueue;
         xd_queue = _xd_queue;
         max_nr = _max_nr;
         is_stopped = false;
         requests = (Request**) calloc(max_nr, sizeof(Request*));
+        sleep = false;
+        pthread_mutex_init(&enqueue_lock, NULL);
+        pthread_cond_init(&enqueue_cond, NULL);
       }
       ~DMAThread() {
-        std::vector<PriorityXferDesQueue*>::iterator it;
-        for (it = xferDes_pools.begin(); it != xferDes_pools.end(); it++) {
-          delete *it;
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
+        for (it = channel_to_xd_pool.begin(); it != channel_to_xd_pool.end(); it++) {
+          delete it->second;
         }
         free(requests);
+        pthread_mutex_destroy(&enqueue_lock);
       }
-      void dma_therad_loop() {
-        while (!is_stopped) {
-          std::vector<Channel*>::iterator c_it;
-          std::vector<PriorityXferDesQueue*>::iterator pq_it = xferDes_pools.begin();
-          for (c_it = channels.begin(); c_it != channels.end(); c_it++) {
-            (*c_it)->pull();
-            long nr = (*c_it)->available();
-            if (nr > max_nr)
-              nr = max_nr;
-            if (nr == 0) {
-              pq_it++;
-              continue;
-            }
-            xd_queue->dequeue_xferDes(*c_it, *pq_it);
-            std::vector<XferDes*> finish_xferdes;
-            PriorityXferDesQueue::iterator it2;
-            for (it2 = (*pq_it)->begin(); it2 != (*pq_it)->end(); it2++) {
-              assert((*it2)->channel == (*c_it));
-              long nr_got = (*it2)->get_requests(requests, nr);
-              long nr_submitted = (*c_it)->submit(requests, nr_got);
-              nr -= nr_submitted;
-              assert(nr_got == nr_submitted);
-              if ((*it2)->is_done()) {
-                finish_xferdes.push_back(*it2);
-              }
-              if (nr ==0)
-                break;
-            }
-            while(!finish_xferdes.empty()) {
-              delete finish_xferdes.back();
-              (*pq_it)->erase(finish_xferdes.back());
-              finish_xferdes.pop_back();
-            }
-            pq_it++;
-          }
-        }
-      }
-
+      void dma_therad_loop();
       // Thread start function that takes an input of DMAThread
       // instance, and start to execute the requests from XferDes
       // by using its channels.
@@ -965,15 +846,117 @@ namespace LegionRuntime{
       void stop() {
         is_stopped = true;
       }
+    public:
+      pthread_mutex_t enqueue_lock;
+      pthread_cond_t enqueue_cond;
+      std::map<Channel*, PriorityXferDesQueue*> channel_to_xd_pool;
+      bool sleep;
     private:
       // maximum allowed num of requests for a single
       long max_nr;
       bool is_stopped;
       Request** requests;
-      pthread_mutex_t channel_lock, xferDes_lock;
-      std::vector<Channel*> channels;
-      std::vector<PriorityXferDesQueue*> xferDes_pools;
       XferDesQueue* xd_queue;
+    };
+
+    class XferDesQueue {
+    public:
+      XferDesQueue() {
+      }
+
+      ~XferDesQueue() {
+        // clean up the priority queues
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+        for (it2 = queues.begin(); it2 != queues.end(); it2++) {
+          delete it2->second;
+        }
+      }
+
+      void register_dma_thread(DMAThread* dma_thread)
+      {
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
+        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
+          channel_to_dma_thread[it->first] = dma_thread;
+          queues[it->first] = new PriorityXferDesQueue;
+        }
+      }
+
+      void enqueue_xferDes(XferDes* xd) {
+        std::map<Channel*, DMAThread*>::iterator it;
+        it = channel_to_dma_thread.find(xd->channel);
+        assert(it != channel_to_dma_thread.end());
+        DMAThread* dma_thread = it->second;
+        pthread_mutex_lock(&dma_thread->enqueue_lock);
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+        it2 = queues.find(xd->channel);
+        if (it2 == queues.end()) {
+          // nothing with this channel, create a new one
+          PriorityXferDesQueue* pq = new PriorityXferDesQueue;
+          pq->insert(xd);
+          queues[xd->channel] = pq;
+        }
+        else {
+          // push ourself into the priority queue
+          it2->second->insert(xd);
+        }
+        if (dma_thread->sleep) {
+          dma_thread->sleep = false;
+          pthread_cond_signal(&dma_thread->enqueue_cond);
+        }
+        pthread_mutex_unlock(&dma_thread->enqueue_lock);
+      }
+
+      void enqueue_xferDes_path(std::vector<XferDes*>& path) {
+        XferDes* pre = NULL;
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
+          if (pre == NULL)
+            pre = *it;
+          else {
+            pre->update_next_XferDes(*it);
+            (*it)->update_pre_XferDes(pre);
+            pre = *it;
+          }
+        }
+        for (std::vector<XferDes*>::iterator it = path.begin(); it != path.end(); it++) {
+          enqueue_xferDes(*it);
+        }
+      }
+
+      // Note that getting the XferDes doesn't remove it from priority queue
+      bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
+        pthread_mutex_lock(&dma_thread->enqueue_lock);
+        std::map<Channel*, PriorityXferDesQueue*>::iterator it;
+        if (wait_on_empty) {
+          bool empty = true;
+          for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
+            std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+            it2 = queues.find(it->first);
+            assert(it2 != queues.end());
+            if (it2->second->size() > 0) {
+              empty = false;
+              break;
+            }
+          }
+
+          if (empty) {
+            dma_thread->sleep = true;
+            pthread_cond_wait(&dma_thread->enqueue_cond, &dma_thread->enqueue_lock);
+          }
+        }
+
+        for(it = dma_thread->channel_to_xd_pool.begin(); it != dma_thread->channel_to_xd_pool.end(); it++) {
+          std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
+          it2 = queues.find(it->first);
+          assert(it2 != queues.end());
+          it->second->insert(it2->second->begin(), it2->second->end());
+          it2->second->clear();
+        }
+        pthread_mutex_unlock(&dma_thread->enqueue_lock);
+        return true;
+      }
+    protected:
+      std::map<Channel*, DMAThread*> channel_to_dma_thread;
+      std::map<Channel*, PriorityXferDesQueue*> queues;
     };
 
   }  // namespace LowLevel
