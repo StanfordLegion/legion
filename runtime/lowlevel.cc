@@ -5675,25 +5675,29 @@ namespace LegionRuntime {
       // pill. If we didn't then wait for it. This is how
       // we distinguish deadlock from just normal termination
       // from all the processors being idle
+      std::vector<LocalThread*> to_shutdown;
       gasnet_hsl_lock(&mutex);
       if (!shutdown_trigger)
         gasnett_cond_wait(&condvar, &mutex.lock);
       assert(shutdown_trigger);
       shutdown = true;
-      assert(running_thread == 0);
+      to_shutdown = available_threads;
+      if (running_thread)
+        to_shutdown.push_back(running_thread);
       assert(resumable_threads.empty());
       assert(paused_threads.empty());
       gasnet_hsl_unlock(&mutex);
       //printf("Processor " IDFMT " needed %ld threads\n", 
-      //        proc.id, available_threads.size());
+      //        proc.id, to_shutdown.size());
       // We can now read this outside the lock since we know
       // that the threads are all asleep and are all about to exit
-      for (unsigned idx = 0; idx < available_threads.size(); idx++)
+      assert(!to_shutdown.empty());
+      for (unsigned idx = 0; idx < to_shutdown.size(); idx++)
       {
         if (idx == 0)
-          available_threads[idx]->do_finalize();
-        available_threads[idx]->shutdown();
-        delete available_threads[idx];
+          to_shutdown[idx]->do_finalize();
+        to_shutdown[idx]->shutdown();
+        delete to_shutdown[idx];
       }
     }
 
