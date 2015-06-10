@@ -2658,6 +2658,7 @@ function std.start(main_task)
       end
     end)
   if terralib.cudacompile then
+    cudahelper.link_driver_library()
     tasks:map(function(task)
       if task:getcuda() then
         local kernels = task:getcudakernels()

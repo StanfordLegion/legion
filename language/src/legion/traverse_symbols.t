@@ -217,6 +217,11 @@ function traverse_symbols.terra_expr(defined, undefined, exp)
       traverse_symbols.terra_expr(defined, undefined, operand)
     end)
 
+  elseif exp:is "apply" then
+    exp.arguments:map(function(argument)
+      traverse_symbols.terra_expr(defined, undefined, argument)
+    end)
+
   elseif exp:is "constant" then
 
   else

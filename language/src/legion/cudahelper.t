@@ -16,6 +16,24 @@ local cudahelper = {}
 
 if not terralib.cudacompile then return cudahelper end
 
+-- copied and modified from cudalib.lua in Terra interpreter
+
+local ffi = require('ffi')
+
+local cudapaths = { OSX = "/usr/local/cuda/lib/libcuda.dylib";
+                    Linux =  "libcuda.so";
+                    Windows = "nvcuda.dll"; }
+
+local cudaruntimelinked = false
+function cudahelper.link_driver_library()
+    if cudaruntimelinked then return end
+    local path = assert(cudapaths[ffi.os],"unknown OS?")
+    terralib.linklibrary(path)
+    cudaruntimelinked = true
+end
+
+--
+
 local ef = terralib.externfunction
 
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
@@ -56,37 +74,59 @@ local CU_JIT_TARGET = 9
 local DeviceAPI = {
   cuInit = ef("cuInit", {uint32} -> uint32);
   cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
+  cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
   cuDeviceGet = ef("cuDeviceGet",{&int32,int32} -> uint32);
   cuCtxCreate_v2 = ef("cuCtxCreate_v2",{&&CUctx_st,uint32,int32} -> uint32);
-  cuCtxGetDevice = ef("cuCtxGetDevice", {&CUdevice} -> uint32);
+  cuDeviceComputeCapability = ef("cuDeviceComputeCapability",
+    {&int32,&int32,int32} -> uint32);
   cuLinkCreate_v2 = ef("cuLinkCreate_v2",
     {uint32,&uint32,&&opaque,&&CUlinkState_st} -> uint32);
   cuLinkAddData_v2 = ef("cuLinkAddData_v2",
     {&CUlinkState_st,uint32,&opaque,uint64,&int8,uint32,&uint32,&&opaque} -> uint32);
   cuLinkComplete = ef("cuLinkComplete",
     {&CUlinkState_st,&&opaque,&uint64} -> uint32);
-  cuLinkDestroy = ef("cuLinkDestroy",
-    {&CUlinkState_st} -> uint32);
+  cuLinkDestroy = ef("cuLinkDestroy", {&CUlinkState_st} -> uint32);
 }
 
-local terra compile_ptx(ptxc : rawstring, ptxSize : uint32) : &&opaque
-  DeviceAPI.cuInit(0)
+-- copied and modified from cudalib.lua in Terra interpreter
+
+local terra init_cuda() : int32
+  var r = DeviceAPI.cuInit(0)
+  assert(r == 0, "CUDA error in cuInit")
   var cx : &CUctx_st
-  DeviceAPI.cuCtxGetCurrent(&cx)
-  if cx == nil then
+  r = DeviceAPI.cuCtxGetCurrent(&cx)
+  assert(r == 0, "CUDA error in cuCtxGetCurrent")
+  var d : int32
+  if cx ~= nil then
+    r = DeviceAPI.cuCtxGetDevice(&d)
+    assert(r == 0, "CUDA error in cuCtxGetDevice")
+  else
     C.printf("new cuda context created\n")
-    var d : int32
-    DeviceAPI.cuDeviceGet(&d, 0)
-    DeviceAPI.cuCtxCreate_v2(&cx, 0, d)
+    r = DeviceAPI.cuDeviceGet(&d, 0)
+    assert(r == 0, "CUDA error in cuDeviceGet")
+    r = DeviceAPI.cuCtxCreate_v2(&cx, 0, d)
+    assert(r == 0, "CUDA error in cuCtxCreate_v2")
   end
 
+  return d
+end
+
+local terra get_cuda_version(device : int) : uint64
+  var major : int, minor : int
+  var r = DeviceAPI.cuDeviceComputeCapability(&major, &minor, device)
+  assert(r == 0, "CUDA error in cuDeviceComputeCapability")
+  return [uint64](major * 10 + minor)
+end
+
+--
+
+local terra compile_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
   var linkState : &CUlinkState_st
   var cubin : &opaque
   var cubinSize : uint64
   var options = arrayof(CUjit_option, CU_JIT_TARGET, CU_JIT_ERROR_LOG_BUFFER, CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES)
   var error_str : rawstring
   var error_sz : uint64
-  var version = [cudalib.localversion()]
   var option_values = arrayof([&opaque], [&opaque](version), error_str, [&opaque](error_sz))
   var r = DeviceAPI.cuLinkCreate_v2(3, options, option_values, &linkState)
   assert(r == 0, "CUDA error in creating linker")
@@ -113,10 +153,12 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   for k, v in pairs(kernels) do
     module[v.name] = v.kernel
   end
-  local ptx = cudalib.toptx(module, nil, cudalib.localversion())
+  local device = init_cuda()
+  local version = get_cuda_version(device)
+  local ptx = cudalib.toptx(module, nil, version)
   local ptxc = terralib.constant(ptx)
   local ptxSize = ptx:len() + 1
-  local handle = compile_ptx(ptx, ptxSize)
+  local handle = compile_ptx(ptx, ptxSize, version)
 
   for k, v in pairs(kernels) do
     register_function(handle, k, v.name)
