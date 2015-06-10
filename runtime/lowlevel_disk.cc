@@ -209,11 +209,12 @@ namespace LegionRuntime {
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
-        H5Dclose(new_hdf->datatype_ids[idx]);
+        H5Tclose(new_hdf->datatype_ids[idx]);
       }
+      H5Fclose(new_hdf->file_id);
       new_hdf->dataset_ids.clear();
       new_hdf->datatype_ids.clear();
-      free(new_hdf);
+      delete new_hdf;
       destroy_instance_local(i, local_destroy);
     }
 
@@ -249,6 +250,8 @@ namespace LegionRuntime {
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
       hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
       H5Dread(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, dst);
+      H5Sclose(dataspace_id);
+      H5Sclose(memspace_id);
     }
 
     void HDFMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -268,7 +271,10 @@ namespace LegionRuntime {
       count[0] = count[1] = count[2] = 1;
       hid_t dataspace_id = H5Dget_space(metadata->dataset_ids[fid]);
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
-      H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], H5S_ALL, dataspace_id, H5P_DEFAULT, src);
+      hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
+      H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, src);
+      H5Sclose(dataspace_id);
+      H5Sclose(memspace_id);
     }
 
     void HDFMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
