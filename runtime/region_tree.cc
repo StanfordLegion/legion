@@ -6815,6 +6815,16 @@ namespace LegionRuntime {
     IndexSpaceAllocator* IndexSpaceNode::get_allocator(void)
     //--------------------------------------------------------------------------
     {
+      if (kind != UNSTRUCTURED_KIND)
+      {
+        log_run.error("Illegal request for an allocator on a structured "
+                      "index space! Only unstructured index spaces are "
+                      "permitted to have allocators.");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_ALLOCATOR_REQUEST);
+      }
       if (allocator == NULL)
       {
         AutoLock n_lock(node_lock);

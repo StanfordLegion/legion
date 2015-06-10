@@ -66,6 +66,18 @@ function std.all(list)
   return true
 end
 
+function std.range(start, stop) -- zero-based, exclusive (as in Python)
+  if stop == nil then
+    stop = start
+    start = 0
+  end
+  local result = terralib.newlist()
+  for i = start, stop - 1, 1 do
+    result:insert(i)
+  end
+  return result
+end
+
 function std.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do
@@ -100,7 +112,7 @@ end
 
 function std.zip(...)
   local lists = terralib.newlist({...})
-  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end))
+  local len = std.reduce(std.min, lists:map(function(list) return #list or 0 end)) or 0
   local result = terralib.newlist()
   for i = 1, len do
     result:insert(lists:map(function(list) return list[i] end))
