@@ -401,13 +401,6 @@ namespace LegionRuntime {
       bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
       void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
     public:
-      void check_index_subspace(IndexSpace handle, const char *caller);
-      void check_index_subpartition(IndexPartition handle, const char *caller);
-      void check_field_space(FieldSpace handle, const char *caller);
-      void check_logical_subregion(LogicalRegion handle, const char *caller);
-      void check_logical_subpartition(LogicalPartition handle,
-                                      const char *caller);
-    public:
       void unmap_all_regions(void);
       void clear_physical_instances(void);
     protected:

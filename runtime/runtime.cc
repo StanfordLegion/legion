@@ -7698,10 +7698,6 @@ namespace LegionRuntime {
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(parent, "get_index_partition");
-#endif
       IndexPartition result = forest->get_index_partition(parent, 
                                                           ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
@@ -7728,10 +7724,6 @@ namespace LegionRuntime {
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subpartition(p, "get_index_subspace");
-#endif
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
@@ -7756,10 +7748,6 @@ namespace LegionRuntime {
     bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "has_multiple_domains");
-#endif
       return forest->has_multiple_domains(handle);
     }
 
@@ -7774,10 +7762,6 @@ namespace LegionRuntime {
     Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "get_index_space_domain");
-#endif
       Domain result = forest->get_index_space_domain(handle);
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
@@ -7804,10 +7788,6 @@ namespace LegionRuntime {
                                           std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "get_index_space_domains");
-#endif
       forest->get_index_space_domains(handle, domains);
     }
 
@@ -7824,10 +7804,6 @@ namespace LegionRuntime {
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subpartition(p, "get_index_partition_color_space");
-#endif
       Domain result = forest->get_index_partition_color_space(p);
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
@@ -7853,10 +7829,6 @@ namespace LegionRuntime {
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(sp, "get_index_space_partition_colors");
-#endif
       std::set<ColorPoint> color_points;
       forest->get_index_space_partition_colors(sp, color_points);
       for (std::set<ColorPoint>::const_iterator it = color_points.begin();
@@ -7884,10 +7856,6 @@ namespace LegionRuntime {
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subpartition(p, "is_index_partition_disjoint");
-#endif
       return forest->is_index_partition_disjoint(p);
     }
 
@@ -7902,10 +7870,6 @@ namespace LegionRuntime {
     Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "get_index_space_color");
-#endif
       return forest->get_index_space_color(handle).get_index();
     }
 
@@ -7921,10 +7885,6 @@ namespace LegionRuntime {
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subpartition(handle, "get_index_partition_color");
-#endif
       return forest->get_index_partition_color(handle).get_index();
     }
 
@@ -7940,10 +7900,6 @@ namespace LegionRuntime {
                                                IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subpartition(handle, "get_parent_index_space");
-#endif
       return forest->get_parent_index_space(handle);
     }
 
@@ -7958,10 +7914,6 @@ namespace LegionRuntime {
     bool Runtime::has_parent_index_partition(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "has_parent_index_partition");
-#endif
       return forest->has_parent_index_partition(handle);
     }
 
@@ -7977,10 +7929,6 @@ namespace LegionRuntime {
                                                        IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_index_subspace(handle, "get_parent_index_partition");
-#endif
       return forest->get_parent_index_partition(handle);
     }
 
@@ -7996,10 +7944,6 @@ namespace LegionRuntime {
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(region, "safe_cast");
-#endif
       if (pointer.is_null())
         return pointer;
       return ctx->perform_safe_cast(region.get_index_space(), pointer);
@@ -8010,10 +7954,6 @@ namespace LegionRuntime {
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(region, "safe_cast");
-#endif
       if (point.is_null())
         return point;
       return ctx->perform_safe_cast(region.get_index_space(), point);
@@ -8096,10 +8036,6 @@ namespace LegionRuntime {
     size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_field_space(handle, "get_field_size");
-#endif
       return forest->get_field_size(handle, fid);
     }
 
@@ -8277,10 +8213,6 @@ namespace LegionRuntime {
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(parent, "get_logical_partition");
-#endif
       return forest->get_logical_partition(parent, handle);
     }
 
@@ -8297,10 +8229,6 @@ namespace LegionRuntime {
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(parent, "get_logical_partition_by_color");
-#endif
       return forest->get_logical_partition_by_color(parent, ColorPoint(c));
     }
 
@@ -8318,13 +8246,6 @@ namespace LegionRuntime {
                                             FieldSpace fspace, RegionTreeID tid) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-      {
-        ctx->check_index_subpartition(handle, "get_logical_partition_by_tree");
-        ctx->check_field_space(fspace, "get_logical_partition_by_tree");
-      }
-#endif
       return forest->get_logical_partition_by_tree(handle, fspace, tid);
     }
 
@@ -8342,10 +8263,6 @@ namespace LegionRuntime {
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subpartition(parent, "get_logical_subregion");
-#endif
       return forest->get_logical_subregion(parent, handle);
     }
 
@@ -8362,11 +8279,6 @@ namespace LegionRuntime {
                                              LogicalPartition parent, Color c)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subpartition(parent, 
-                                        "get_logical_subregion_by_color");
-#endif
       return forest->get_logical_subregion_by_color(parent, ColorPoint(c));
     }
 
@@ -8383,13 +8295,6 @@ namespace LegionRuntime {
                         IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-      {
-        ctx->check_index_subspace(handle, "get_logical_subregion_by_tree");
-        ctx->check_field_space(fspace, "get_logical_subregion_by_tree");
-      }
-#endif
       return forest->get_logical_subregion_by_tree(handle, fspace, tid);
     }
 
@@ -8407,10 +8312,6 @@ namespace LegionRuntime {
                                                   LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(handle, "get_logical_region_color");
-#endif
       return forest->get_logical_region_color(handle).get_index();
     }
 
@@ -8426,10 +8327,6 @@ namespace LegionRuntime {
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subpartition(handle, "get_logical_partition_color");
-#endif
       return forest->get_logical_partition_color(handle).get_index();
     }
 
@@ -8445,10 +8342,6 @@ namespace LegionRuntime {
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subpartition(handle, "get_parent_logical_region");
-#endif
       return forest->get_parent_logical_region(handle);
     }
 
@@ -8464,10 +8357,6 @@ namespace LegionRuntime {
                                                LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(handle, "has_parent_logical_partition");
-#endif
       return forest->has_parent_logical_partition(handle);
     }
 
@@ -8483,10 +8372,6 @@ namespace LegionRuntime {
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (ctx != DUMMY_CONTEXT)
-        ctx->check_logical_subregion(handle, "get_parent_logical_partition");
-#endif
       return forest->get_parent_logical_partition(handle);
     }
 
