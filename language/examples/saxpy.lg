@@ -14,8 +14,7 @@
 
 import "legion"
 
--- This is a hacky version of SAXPY written for unstructured regions
--- rather than arrays.
+-- This code has not been optimized and is not high performance.
 
 local int1d = index_type(int, "int1d")
 
