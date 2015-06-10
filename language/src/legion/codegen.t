@@ -1531,6 +1531,30 @@ function expr_call_setup_future_arg(cx, task, arg, arg_type, param_type,
   return future_args_setup
 end
 
+function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
+                                    index, ispace_args_setup)
+  local parent_ispace =
+    cx:ispace(cx:ispace(arg_type).root_ispace_type).index_space
+
+  local add_requirement
+  if index then
+      add_requirement = c.legion_index_launcher_add_index_requirement
+  else
+      add_requirement = c.legion_task_launcher_add_index_requirement
+  end
+  assert(add_requirement)
+
+  local requirement = terralib.newsymbol("requirement")
+  local requirement_args = terralib.newlist({
+      launcher, `([cx:ispace(arg_type).index_space].impl),
+      c.ALL_MEMORY, `([parent_ispace].impl), false})
+
+  ispace_args_setup:insert(
+    quote
+      var [requirement] = [add_requirement]([requirement_args])
+    end)
+end
+
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
                                     index, region_args_setup)
   local privileges, privilege_field_paths, privilege_field_types =
@@ -1721,6 +1745,17 @@ function codegen.expr_call(cx, node)
       end
     end
 
+    -- Pass index spaces through index requirements.
+    local ispace_args_setup = terralib.newlist()
+    for i, arg_type in ipairs(arg_types) do
+      if std.is_ispace(arg_type) then
+        local param_type = param_types[i]
+
+        expr_call_setup_ispace_arg(
+          cx, fn.value, arg_type, param_type, launcher, false, ispace_args_setup)
+      end
+    end
+
     -- Pass regions through region requirements.
     local region_args_setup = terralib.newlist()
     for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
@@ -1742,6 +1777,7 @@ function codegen.expr_call(cx, node)
         [fn.value:gettaskid()], t_args,
         c.legion_predicate_true(), 0, 0)
       [future_args_setup]
+      [ispace_args_setup]
       [region_args_setup]
       var [future] = c.legion_task_launcher_execute(
         [cx.runtime], [cx.context], [launcher])
@@ -3190,6 +3226,27 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
+  -- Pass index spaces through index requirements.
+  local ispace_args_setup = terralib.newlist()
+  for i, arg_type in ipairs(arg_types) do
+    if std.is_ispace(arg_type) then
+      local param_type = param_types[i]
+
+      if not node.args_provably.variant[i] then
+        expr_call_setup_ispace_arg(
+          cx, fn.value, arg_type, param_type, launcher, true, ispace_args_setup)
+      else
+        assert(false) -- FIXME: Implement index partitions
+
+        -- local partition = args_partitions[i]
+        -- assert(partition)
+        -- expr_call_setup_ispace_partition_arg(
+        --   cx, fn.value, arg_type, param_type, partition.value, launcher, true,
+        --   ispace_args_setup)
+      end
+    end
+  end
+
   -- Pass regions through region requirements.
   local region_args_setup = terralib.newlist()
   for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
@@ -3236,6 +3293,7 @@ function codegen.stat_index_launch(cx, node)
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
     [future_args_setup]
+    [ispace_args_setup]
     [region_args_setup]
   end
 
