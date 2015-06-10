@@ -20,7 +20,7 @@
 import "legion"
 
 task f() : int
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var c : legionlib.c.legion_coloring_t
   var p = partition(int, r, c)
 end

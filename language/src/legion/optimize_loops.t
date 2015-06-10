@@ -81,7 +81,7 @@ function analyze_noninterference_previous(cx, task, region_type,
       op = "*"
     }
 
-    if std.type_maybe_eq(region_type.element_type, other_region_type.element_type) and
+    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
       not check_privilege_noninterference(cx, task, region_type, other_region_type, mapping)
     then
@@ -121,7 +121,7 @@ function analyze_is_side_effect_free.expr_field_access(cx, node)
   if not analyze_is_side_effect_free.expr(cx, node.value) then
     return false
   end
-  if std.is_ptr(std.as_read(node.value.expr_type)) or
+  if std.is_bounded_type(std.as_read(node.value.expr_type)) or
     std.is_ref(node.value.expr_type)
   then
     return false
@@ -504,8 +504,8 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   --  1. Determine whether the argument is provably loop-invariant or
   --     provably loop-variant (i.e., NOT loop-invariant). This is
   --     important because index space task launches are restricted in
-  --     the forms of region requirements they can accept. All regions
-  --     must be one of:
+  --     the forms of region (and index space) requirements they can
+  --     accept. All regions (and index spaces) must be one of:
   --
   --      a. Provably loop-invariant.
   --      b. Provably loop-variant, with indexing which can be
@@ -547,9 +547,9 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     local arg_variant = false
     local partition_type
 
-    local region_type = std.as_read(arg.expr_type)
-    mapping[region_type] = param_types[i]
-    if std.is_region(region_type) then
+    local arg_type = std.as_read(arg.expr_type)
+    mapping[arg_type] = param_types[i]
+    if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.ExprIndexAccess) and
         std.is_partition(std.as_read(arg.value.expr_type)) and
         arg.index:is(ast.typed.ExprID) and
@@ -563,10 +563,12 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
         log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
         return node
       end
+    end
 
+    if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
-          cx, task, region_type, regions_previously_used, mapping)
+          cx, task, arg_type, regions_previously_used, mapping)
         if not passed then
           log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
           return node
@@ -575,7 +577,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
 
       do
         local passed = analyze_noninterference_self(
-          cx, task, region_type, partition_type, mapping)
+          cx, task, arg_type, partition_type, mapping)
         if not passed then
           log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
           return node
@@ -587,8 +589,8 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     args_provably.variant[i] = arg_variant
 
     regions_previously_used[i] = nil
-    if std.is_region(region_type) then
-      regions_previously_used[i] = region_type
+    if std.is_region(arg_type) then
+      regions_previously_used[i] = arg_type
     end
   end
 

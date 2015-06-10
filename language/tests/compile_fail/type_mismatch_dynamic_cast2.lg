@@ -20,7 +20,7 @@
 import "legion"
 
 task f()
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var x = 5
   var y = dynamic_cast(ptr(int, r), x)
 end

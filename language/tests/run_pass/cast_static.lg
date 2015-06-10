@@ -17,7 +17,7 @@ import "legion"
 local c = legionlib.c
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var rc = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc, 0)
   c.legion_coloring_ensure_color(rc, 1)

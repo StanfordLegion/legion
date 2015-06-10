@@ -194,12 +194,12 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.ExprIspace) then
-    if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.ExprRegion) then
-    if get_num_accessed_fields(node.element_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
@@ -462,13 +462,15 @@ end
 
 function specialize.expr_new(cx, node)
   local pointer_type = node.pointer_type_expr(cx.env:env())
-  assert(std.is_ptr(pointer_type))
-  local regions = pointer_type.points_to_region_symbols
-  if #regions ~= 1 then
-   log.error(node, "new requires pointer type with exactly one region, got " .. tostring(pointer_type))
+  if not std.is_bounded_type(pointer_type) then
+    log.error(node, "new requires bounded type, got " .. tostring(pointer_type))
+  end
+  local bounds = pointer_type.bounds_symbols
+  if #bounds ~= 1 then
+    log.error(node, "new requires bounded type with exactly one region, got " .. tostring(pointer_type))
   end
   local region = ast.specialized.ExprID {
-    value = regions[1],
+    value = bounds[1],
     span = node.span,
   }
   return ast.specialized.ExprNew {
@@ -508,22 +510,34 @@ end
 
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
+  if not std.is_index_type(index_type) then
+    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
+  end
+
   local expr_type = std.ispace(index_type)
   return ast.specialized.ExprIspace {
     index_type = index_type,
-    lower_bound = specialize.expr(cx, node.lower_bound),
-    upper_bound = node.upper_bound and specialize.expr(cx, node.upper_bound),
+    extent = specialize.expr(cx, node.extent),
+    start = node.start and specialize.expr(cx, node.start),
     expr_type = expr_type,
     span = node.span,
   }
 end
 
 function specialize.expr_region(cx, node)
-  local element_type = node.element_type_expr(cx.env:env())
-  local expr_type = std.region(element_type)
+  local ispace = specialize.expr(cx, node.ispace)
+  local ispace_symbol
+  if ispace:is(ast.specialized.ExprID) then
+    ispace_symbol = ispace.value
+  else
+    ispace_symbol = terralib.newsymbol()
+  end
+  local fspace_type = node.fspace_type_expr(cx.env:env())
+  local expr_type = std.region(ispace_symbol, fspace_type)
   return ast.specialized.ExprRegion {
-    element_type = element_type,
-    size = specialize.expr(cx, node.size),
+    ispace = ispace,
+    ispace_symbol = ispace_symbol,
+    fspace_type = fspace_type,
     expr_type = expr_type,
     span = node.span,
   }
@@ -1006,6 +1020,7 @@ end
 function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
+  proto:setinline(node.inline)
   cx.env:insert(node, node.name, proto)
   cx = cx:new_local_scope()
 

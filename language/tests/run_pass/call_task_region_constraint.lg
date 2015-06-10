@@ -31,7 +31,7 @@ do
 end
 
 task main()
-  var a = region(int, 5)
+  var a = region(ispace(ptr, 5), int)
 
   var ac = c.legion_coloring_create()
   c.legion_coloring_ensure_color(ac, 0)

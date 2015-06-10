@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -346,7 +346,11 @@ namespace LegionRuntime {
               it != memories.end(); it++)
         {
           std::vector<Machine::ProcessorMemoryAffinity> affinity; 
-          assert(machine.get_proc_mem_affinity(affinity, proc, *it) == 1);
+#ifndef NDEBUG
+          bool result = 
+#endif
+          machine.get_proc_mem_affinity(affinity, proc, *it);
+          assert(result == 1);
           bool inserted = false;
           if (latency)
           {

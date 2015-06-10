@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -87,6 +87,8 @@ namespace LegionRuntime {
       PENDING_PARTITION_OP_ALLOC,
       DEPENDENT_PARTITION_OP_ALLOC,
       FILL_OP_ALLOC,
+      ATTACH_OP_ALLOC,
+      DETACH_OP_ALLOC,
       MESSAGE_BUFFER_ALLOC,
       EXECUTING_CHILD_ALLOC,
       EXECUTED_CHILD_ALLOC,

@@ -12,14 +12,32 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_ispace3.lg:23: non-opaque ispace expected 3 arguments but got 2
---   var r = ispace(int, 5)
---                ^
-
 import "legion"
 
-task f()
-  var r = ispace(int, 5)
+task inc1(x : int) : int
+  return x + 1
 end
-f:compile()
+
+__demand(__inline)
+task dec1(x : int) : int
+  return x - 1
+end
+
+__demand(__inline)
+task f(x : int) : int
+  return dec1(inc1(x + 5))
+end
+
+task g(x : int) : int
+  return x + 5
+end
+
+task main()
+  for i = 0, 10 do
+    var a = f(i)
+    var b = g(i)
+    legionlib.assert(a == b, "test failed")
+  end
+end
+
+legionlib.start(main)

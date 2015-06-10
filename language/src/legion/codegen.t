@@ -44,12 +44,6 @@ local codegen = {}
 -- load Legion dynamic library
 local c = std.c
 
-local regions = {}
-regions.__index = function(t, k) error("context: no such region " .. tostring(k), 2) end
-
-local region = setmetatable({}, { __index = function(t, k) error("region has no field " .. tostring(k), 2) end})
-region.__index = region
-
 local context = {}
 context.__index = context
 
@@ -66,7 +60,8 @@ function context:new_local_scope(div)
     divergence = div,
     context = self.context,
     runtime = self.runtime,
-    regions = self.regions:new_local_scope()
+    ispaces = self.ispaces:new_local_scope(),
+    regions = self.regions:new_local_scope(),
   }, context)
 end
 
@@ -81,7 +76,8 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     divergence = nil,
     context = ctx,
     runtime = runtime,
-    regions = symbol_table.new_global_scope({})
+    ispaces = symbol_table.new_global_scope({}),
+    regions = symbol_table.new_global_scope({}),
   }, context)
 end
 
@@ -115,6 +111,72 @@ function context:check_divergence(region_types, field_paths)
   return false
 end
 
+local ispace = setmetatable({}, { __index = function(t, k) error("ispace has no field " .. tostring(k), 2) end})
+ispace.__index = ispace
+
+function context:has_ispace(ispace_type)
+  if not rawget(self, "ispaces") then
+    error("not in task context", 2)
+  end
+  return self.ispaces:safe_lookup(ispace_type)
+end
+
+function context:ispace(ispace_type)
+  if not rawget(self, "ispaces") then
+    error("not in task context", 2)
+  end
+  return self.ispaces:lookup(nil, ispace_type)
+end
+
+function context:add_ispace_root(ispace_type, index_space, index_allocator,
+                                 index_iterator)
+  if not self.ispaces then
+    error("not in task context", 2)
+  end
+  if self:has_ispace(ispace_type) then
+    error("ispace " .. tostring(ispace_type) .. " already defined in this context", 2)
+  end
+  self.ispaces:insert(
+    nil,
+    ispace_type,
+    setmetatable(
+      {
+        index_space = index_space,
+        index_partition = nil,
+        index_allocator = index_allocator,
+        index_iterator = index_iterator,
+        root_ispace_type = ispace_type,
+      }, ispace))
+end
+
+function context:add_ispace_subispace(ispace_type, index_space,
+                                      index_partition, index_allocator,
+                                      index_iterator, parent_ispace_type)
+  if not self.ispaces then
+    error("not in task context", 2)
+  end
+  if self:has_ispace(ispace_type) then
+    error("ispace " .. tostring(ispace_type) .. " already defined in this context", 2)
+  end
+  if not self:ispace(parent_ispace_type) then
+    error("parent to ispace " .. tostring(ispace_type) .. " not defined in this context", 2)
+  end
+  self.ispaces:insert(
+    nil,
+    ispace_type,
+    setmetatable(
+      {
+        index_space = index_space,
+        index_partition = index_partition,
+        index_allocator = index_allocator,
+        index_iterator = index_iterator,
+        root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
+      }, ispace))
+end
+
+local region = setmetatable({}, { __index = function(t, k) error("region has no field " .. tostring(k), 2) end})
+region.__index = region
+
 function context:has_region(region_type)
   if not rawget(self, "regions") then
     error("not in task context", 2)
@@ -129,16 +191,18 @@ function context:region(region_type)
   return self.regions:lookup(nil, region_type)
 end
 
-function context:add_region_root(region_type, logical_region, index_allocator,
-                                 index_iterator, field_paths,
+function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
-                                 field_ids, physical_regions, accessors,
-                                 base_pointers)
+                                 field_ids, physical_regions,
+                                 base_pointers, strides)
   if not self.regions then
     error("not in task context", 2)
   end
   if self:has_region(region_type) then
     error("region " .. tostring(region_type) .. " already defined in this context", 2)
+  end
+  if not self:has_ispace(region_type:ispace()) then
+    error("ispace of region " .. tostring(region_type) .. " not defined in this context", 2)
   end
   self.regions:insert(
     nil,
@@ -147,28 +211,28 @@ function context:add_region_root(region_type, logical_region, index_allocator,
       {
         logical_region = logical_region,
         logical_partition = nil,
-        index_allocator = index_allocator,
-        index_iterator = index_iterator,
         field_paths = field_paths,
         privilege_field_paths = privilege_field_paths,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
         physical_regions = physical_regions,
-        accessors = accessors,
         base_pointers = base_pointers,
+        strides = strides,
         root_region_type = region_type,
       }, region))
 end
 
 function context:add_region_subregion(region_type, logical_region,
-                                      logical_partition, index_allocator,
-                                      index_iterator, parent_region_type)
+                                      logical_partition, parent_region_type)
   if not self.regions then
     error("not in task context", 2)
   end
   if self:has_region(region_type) then
     error("region " .. tostring(region_type) .. " already defined in this context", 2)
+  end
+  if not self:has_ispace(region_type:ispace()) then
+    error("ispace of region " .. tostring(region_type) .. " not defined in this context", 2)
   end
   if not self:region(parent_region_type) then
     error("parent to region " .. tostring(region_type) .. " not defined in this context", 2)
@@ -180,16 +244,14 @@ function context:add_region_subregion(region_type, logical_region,
       {
         logical_region = logical_region,
         logical_partition = logical_partition,
-        index_allocator = index_allocator,
-        index_iterator = index_iterator,
         field_paths = self:region(parent_region_type).field_paths,
         privilege_field_paths = self:region(parent_region_type).privilege_field_paths,
         field_privileges = self:region(parent_region_type).field_privileges,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
         physical_regions = self:region(parent_region_type).physical_regions,
-        accessors = self:region(parent_region_type).accessors,
         base_pointers = self:region(parent_region_type).base_pointers,
+        strides = self:region(parent_region_type).strides,
         root_region_type = self:region(parent_region_type).root_region_type,
       }, region))
 end
@@ -212,33 +274,100 @@ function region:physical_region(field_path)
   return physical_region
 end
 
-function region:accessor(field_path)
-  local accessor = self.accessors[field_path:hash()]
-  assert(accessor)
-  return accessor
-end
-
 function region:base_pointer(field_path)
   local base_pointer = self.base_pointers[field_path:hash()]
   assert(base_pointer)
   return base_pointer
 end
 
-local function accessor_generic_get_base_pointer(field_type)
-  return terra(physical : c.legion_physical_region_t,
-             accessor : c.legion_accessor_generic_t)
+function region:stride(field_path)
+  local stride = self.strides[field_path:hash()]
+  assert(stride)
+  return stride
+end
 
-    var base_pointer : &opaque = nil
-    var stride : c.size_t = terralib.sizeof(field_type)
-    var ok = c.legion_accessor_generic_get_soa_parameters(
-      accessor, &base_pointer, &stride)
+local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
+  local get_accessor = c.legion_physical_region_get_field_accessor_generic
+  local accessor_args = terralib.newlist({physical_region})
+  if std.is_reduction_op(privilege) then
+    get_accessor = c.legion_physical_region_get_accessor_generic
+  else
+    accessor_args:insert(field_id)
+  end
 
-    std.assert(ok, "failed to get base pointer")
-    std.assert(base_pointer ~= nil, "base pointer is nil")
-    std.assert(stride == terralib.sizeof(field_type),
-               "stride does not match expected value")
+  local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
+  if index_type:is_opaque() then
+    local expected_stride = terralib.sizeof(field_type)
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
 
-    return [&field_type](base_pointer)
+      var [base_pointer] = nil
+      var stride : c.size_t = [expected_stride]
+      var ok = c.legion_accessor_generic_get_soa_parameters(
+        [accessor], [&&opaque](&[base_pointer]), &stride)
+
+      std.assert(ok, "failed to get base pointer")
+      std.assert([base_pointer] ~= nil, "base pointer is nil")
+      std.assert(stride == [expected_stride],
+                 "stride does not match expected value")
+    end
+    return actions, base_pointer, terralib.newlist({expected_stride})
+  else
+    local dim = index_type.dim
+    local expected_stride = terralib.sizeof(field_type)
+
+    local dims = std.range(2, dim + 1)
+    local strides = terralib.newlist()
+    strides:insert(expected_stride)
+    for i = 2, dim do
+      strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
+    end
+
+    local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
+    local domain_get_rect = c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
+    local raw_rect_ptr = c["legion_accessor_generic_raw_rect_ptr_" .. tostring(dim) .. "d"]
+
+    local actions = quote
+      var accessor = [get_accessor]([accessor_args])
+
+      var region = c.legion_physical_region_get_logical_region([physical_region])
+      var domain = c.legion_index_space_get_domain([cx.runtime], [cx.context], region.index_space)
+      var rect = [domain_get_rect](domain)
+
+      var subrect : rect_t
+      var offsets : c.legion_byte_offset_t[dim]
+      var [base_pointer] = [&field_type]([raw_rect_ptr](
+          accessor, rect, &subrect, &(offsets[0])))
+
+      -- Sanity check the outputs.
+      std.assert(base_pointer ~= nil, "base pointer is nil")
+      [std.range(dim):map(
+         function(i)
+           return quote
+             std.assert(subrect.lo.x[i] == rect.lo.x[i], "subrect not equal to rect")
+             std.assert(subrect.hi.x[i] == rect.hi.x[i], "subrect not equal to rect")
+           end
+         end)]
+      std.assert(offsets[0].offset == [expected_stride],
+                 "stride does not match expected value")
+
+      -- Fix up the base pointer so it points to the origin (zero),
+      -- regardless of where rect is located. This allows us to do
+      -- pointer arithmetic later oblivious to what sort of a subrect
+      -- we are working with.
+      [std.range(dim):map(
+         function(i)
+           return quote
+             [base_pointer] = [&field_type](([&int8]([base_pointer])) - rect.lo.x[i] * offsets[i].offset)
+           end
+         end)]
+
+      [dims:map(
+         function(i)
+           return quote var [ strides[i] ] = offsets[i-1].offset end
+         end)]
+    end
+    return actions, base_pointer, strides
   end
 end
 
@@ -276,7 +405,8 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   assert(not cx:has_region(region_type))
 
   local r = terralib.newsymbol(region_type, "r")
-  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local isa = false
   if not cx.leaf then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -295,9 +425,9 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   if not cx.leaf then
     actions = quote
       [actions]
+      var [is] = [lr].index_space
       var [isa] = c.legion_index_allocator_create(
-        [cx.runtime], [cx.context],
-        [lr].index_space)
+        [cx.runtime], [cx.context], [is])
     end
   end
 
@@ -305,7 +435,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     actions = quote
       [actions]
       var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [lr].index_space)
+        [cx.runtime], [cx.context], [is])
     end
   end
 
@@ -318,7 +448,8 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     error("failed to find appropriate for region " .. tostring(region_type) .. " in unpack", 2)
   end
 
-  cx:add_region_subregion(region_type, r, false, isa, it, parent_region_type)
+  cx:add_ispace_subispace(region_type:ispace(), is, false, isa, it, parent_region_type:ispace())
+  cx:add_region_subregion(region_type, r, false, parent_region_type)
 
   return expr.just(actions, r)
 end
@@ -373,8 +504,15 @@ end
 function value:__get_field(cx, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(self:read(cx), value_type, std.newtuple(field_name))
-  elseif std.is_ptr(value_type) then
-    return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+  elseif std.is_index_type(value_type) then
+    return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
+  elseif std.is_bounded_type(value_type) then
+    if std.get_field(value_type.index_type.base_type, field_name) then
+      return self:new(self.expr, self.value_type, self.field_path .. std.newtuple("__ptr", field_name))
+    else
+      assert(value_type:is_ptr())
+      return values.ref(self:read(cx, value_type), value_type, std.newtuple(field_name))
+    end
   elseif std.is_vptr(value_type) then
     return values.vref(self:read(cx, value_type), value_type, std.newtuple(field_name))
   else
@@ -405,8 +543,9 @@ function value:unpack(cx, value_type, field_name, field_type)
     region_expr = unpack_region(cx, region_expr, unpack_type, static_region_type)
     region_expr = expr.just(region_expr.actions, self.expr.value)
     return self:new(region_expr, self.value_type, self.field_path)
-  elseif std.is_ptr(unpack_type) then
-    local region_types = unpack_type:points_to_regions()
+  elseif std.is_bounded_type(unpack_type) then
+    assert(unpack_type:is_ptr())
+    local region_types = unpack_type:bounds()
 
     do
       local has_all_regions = true
@@ -426,7 +565,7 @@ function value:unpack(cx, value_type, field_name, field_type)
     local region_type = region_types[1]
 
     local static_ptr_type = std.get_field(value_type, field_name)
-    local static_region_types = static_ptr_type:points_to_regions()
+    local static_region_types = static_ptr_type:bounds()
     assert(#static_region_types == 1)
     local static_region_type = static_region_types[1]
 
@@ -453,7 +592,7 @@ ref.__index = ref
 
 function values.ref(value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or
-    not (std.is_ptr(value_type) or std.is_vptr(value_type)) then
+    not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
   end
   return setmetatable(values.value(value_expr, value_type, field_path), ref)
@@ -461,6 +600,22 @@ end
 
 function ref:new(value_expr, value_type, field_path)
   return values.ref(value_expr, value_type, field_path)
+end
+
+local function get_element_pointer(index_type, field_type, base_pointer, strides, index)
+  if index_type.fields then
+    local offset
+    for i, field in ipairs(index_type.fields) do
+      if offset then
+        offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
+      else
+        offset = `([index].__ptr.[ field ] * [ strides[i] ])
+      end
+    end
+    return `(@([&field_type](&(([&int8](base_pointer))[offset]))))
+  else
+    return `(base_pointer[ [index].__ptr ])
+  end
 end
 
 function ref:__ref(cx, expr_type)
@@ -473,7 +628,7 @@ function ref:__ref(cx, expr_type)
   local absolute_field_paths = field_paths:map(
     function(field_path) return self.field_path .. field_path end)
 
-  local region_types = self.value_type:points_to_regions()
+  local region_types = self.value_type:bounds()
   local base_pointers_by_region = region_types:map(
     function(region_type)
       return absolute_field_paths:map(
@@ -481,25 +636,46 @@ function ref:__ref(cx, expr_type)
           return cx:region(region_type):base_pointer(field_path)
         end)
     end)
+  local strides_by_region = region_types:map(
+    function(region_type)
+      return absolute_field_paths:map(
+        function(field_path)
+          return cx:region(region_type):stride(field_path)
+        end)
+    end)
 
-  local base_pointers
+  local base_pointers, strides
 
   if cx.check_divergence(region_types, field_paths) or #region_types == 1 then
     base_pointers = base_pointers_by_region[1]
+    strides = strides_by_region[1]
   else
     base_pointers = std.zip(absolute_field_paths, field_types):map(
       function(field)
         local field_path, field_type = unpack(field)
         return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
       end)
+    strides = absolute_field_paths:map(
+      function(field_path)
+        return cx:region(region_types[1]):stride(field_path):map(
+          function(_)
+            return terralib.newsymbol(c.size_t, "stride_" .. field_path:hash())
+          end)
+      end)
 
     local cases
     for i = #region_types, 1, -1 do
       local region_base_pointers = base_pointers_by_region[i]
-      local case = std.zip(base_pointers, region_base_pointers):map(
+      local region_strides = strides_by_region[i]
+      local case = std.zip(base_pointers, region_base_pointers, strides, region_strides):map(
         function(pair)
-          local base_pointer, region_base_pointer = unpack(pair)
-          return quote [base_pointer] = [region_base_pointer] end
+          local base_pointer, region_base_pointer, field_strides, field_region_strides = unpack(pair)
+          local setup = quote [base_pointer] = [region_base_pointer] end
+          for i, stride in ipairs(field_strides) do
+            local region_stride = field_region_strides[i]
+            setup = quote [setup]; [stride] = [region_stride] end
+          end
+          return setup
         end)
 
       if cases then
@@ -519,23 +695,26 @@ function ref:__ref(cx, expr_type)
       [actions];
       [base_pointers:map(
          function(base_pointer) return quote var [base_pointer] end end)];
+      [strides:map(
+         function(stride) return quote [stride:map(function(s) return quote var [s] end end)] end end)];
       [cases]
     end
   end
 
   local values
   if not expr_type or std.as_read(expr_type) == value_type then
-    values = base_pointers:map(
-      function(base_pointer)
-        return `(base_pointer[ [value].__ptr.value ])
+    values = std.zip(field_types, base_pointers, strides):map(
+      function(field)
+        local field_type, base_pointer, stride = unpack(field)
+        return get_element_pointer(self.value_type, field_type, base_pointer, stride, value)
       end)
   else
     assert(expr_type:isvector() or std.is_vptr(expr_type) or std.is_sov(expr_type))
-    values = std.zip(base_pointers, field_types):map(
+    values = std.zip(field_types, base_pointers, strides):map(
       function(field)
-        local base_pointer, field_type = unpack(field)
+        local field_type, base_pointer, stride = unpack(field)
         local vec = vector(field_type, std.as_read(expr_type).N)
-        return `(@[&vec](&base_pointer[ [value].__ptr.value ]))
+        return `(@[&vec](&[get_element_pointer(self.value_type, field_type, base_pointer, stride, value)]))
       end)
     value_type = expr_type
   end
@@ -700,7 +879,7 @@ function vref:__unpack(cx)
   local absolute_field_paths = field_paths:map(
     function(field_path) return self.field_path .. field_path end)
 
-  local region_types = self.value_type:points_to_regions()
+  local region_types = self.value_type:bounds()
   local base_pointers_by_region = region_types:map(
     function(region_type)
       return absolute_field_paths:map(
@@ -1159,9 +1338,7 @@ function codegen.expr_index_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
-  if std.is_partition(value_type) or std.is_cross_product(value_type) or
-    (std.is_region(value_type) and value_type:has_default_partition())
-  then
+  if std.is_partition(value_type) or std.is_cross_product(value_type) then
     local value = codegen.expr(cx, node.value):read(cx)
     local index = codegen.expr(cx, node.index):read(cx)
 
@@ -1199,6 +1376,7 @@ function codegen.expr_index_access(cx, node)
 
     local r = terralib.newsymbol(expr_type, "r")
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+    local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
     if not cx.leaf then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -1212,6 +1390,7 @@ function codegen.expr_index_access(cx, node)
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
         [cx.runtime], [cx.context],
         [partition], [index.value])
+      var [is] = [lr].index_space
       var [r] = [expr_type] { impl = [lr] }
     end
 
@@ -1219,8 +1398,7 @@ function codegen.expr_index_access(cx, node)
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
-          [cx.runtime], [cx.context],
-          [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
 
@@ -1228,26 +1406,32 @@ function codegen.expr_index_access(cx, node)
       actions = quote
         [actions]
         var [it] = c.legion_terra_cached_index_iterator_create(
-          [cx.runtime], [cx.context], [lr].index_space)
+          [cx.runtime], [cx.context], [is])
       end
     end
 
     local lp = false
+    local ip = false
     if std.is_cross_product(value_type) then
       lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+      ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
       actions = quote
         [actions]
-        var ip = c.legion_terra_index_cross_product_get_subpartition_by_color(
+        var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color(
           [cx.runtime], [cx.context],
           [value.value].product, [index.value])
         var [lp] = c.legion_logical_partition_create(
-          [cx.runtime], [cx.context], [lr], ip)
+          [cx.runtime], [cx.context], [lr], [ip])
       end
     end
 
-    cx:add_region_subregion(expr_type, r, lp, isa, it, parent_region_type)
+    cx:add_ispace_subispace(expr_type:ispace(), is, ip, isa, it, parent_region_type:ispace())
+    cx:add_region_subregion(expr_type, r, lp, parent_region_type)
 
     return values.value(expr.just(actions, r), expr_type)
+  elseif std.is_region(value_type) then
+    local index = codegen.expr(cx, node.index):read(cx)
+    return values.ref(index, node.expr_type.pointer_type)
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, index, expr_type)
@@ -1320,7 +1504,7 @@ function expr_call_setup_task_args(cx, task, args, arg_types, param_types,
       local arg_type = arg_types[i]
       local param_type = param_types[i]
 
-      local field_paths, _ = std.flatten_struct_fields(param_type.element_type)
+      local field_paths, _ = std.flatten_struct_fields(param_type.fspace_type)
       for _, field_path in pairs(field_paths) do
         local arg_field_id = cx:region(arg_type):field_id(field_path)
         local param_field_id = param_field_ids[param_field_id_i]
@@ -1345,6 +1529,30 @@ function expr_call_setup_future_arg(cx, task, arg, arg_type, param_type,
   end)
 
   return future_args_setup
+end
+
+function expr_call_setup_ispace_arg(cx, task, arg_type, param_type, launcher,
+                                    index, ispace_args_setup)
+  local parent_ispace =
+    cx:ispace(cx:ispace(arg_type).root_ispace_type).index_space
+
+  local add_requirement
+  if index then
+      add_requirement = c.legion_index_launcher_add_index_requirement
+  else
+      add_requirement = c.legion_task_launcher_add_index_requirement
+  end
+  assert(add_requirement)
+
+  local requirement = terralib.newsymbol("requirement")
+  local requirement_args = terralib.newlist({
+      launcher, `([cx:ispace(arg_type).index_space].impl),
+      c.ALL_MEMORY, `([parent_ispace].impl), false})
+
+  ispace_args_setup:insert(
+    quote
+      var [requirement] = [add_requirement]([requirement_args])
+    end)
 end
 
 function expr_call_setup_region_arg(cx, task, arg_type, param_type, launcher,
@@ -1537,6 +1745,17 @@ function codegen.expr_call(cx, node)
       end
     end
 
+    -- Pass index spaces through index requirements.
+    local ispace_args_setup = terralib.newlist()
+    for i, arg_type in ipairs(arg_types) do
+      if std.is_ispace(arg_type) then
+        local param_type = param_types[i]
+
+        expr_call_setup_ispace_arg(
+          cx, fn.value, arg_type, param_type, launcher, false, ispace_args_setup)
+      end
+    end
+
     -- Pass regions through region requirements.
     local region_args_setup = terralib.newlist()
     for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
@@ -1558,6 +1777,7 @@ function codegen.expr_call(cx, node)
         [fn.value:gettaskid()], t_args,
         c.legion_predicate_true(), 0, 0)
       [future_args_setup]
+      [ispace_args_setup]
       [region_args_setup]
       var [future] = c.legion_task_launcher_execute(
         [cx.runtime], [cx.context], [launcher])
@@ -1756,7 +1976,12 @@ function codegen.expr_new(cx, node)
   local pointer_type = node.pointer_type
   local region = codegen.expr(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
-  local isa = cx:region(region_type).index_allocator
+  local ispace_type = region_type
+  if std.is_region(region_type) then
+    ispace_type = region_type:ispace()
+  end
+  assert(std.is_ispace(ispace_type))
+  local isa = cx:ispace(ispace_type).index_allocator
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
@@ -1792,7 +2017,7 @@ function codegen.expr_dynamic_cast(cx, node)
   end
   local input = `([value.value].__ptr)
   local result
-  local regions = expr_type:points_to_regions()
+  local regions = expr_type:bounds()
   if #regions == 1 then
     local region = regions[1]
     assert(cx:has_region(region))
@@ -1840,9 +2065,9 @@ function codegen.expr_static_cast(cx, node)
   end
   local input = value.value
   local result
-  if #(expr_type:points_to_regions()) == 1 then
+  if #(expr_type:bounds()) == 1 then
     result = terralib.newsymbol(expr_type)
-    local input_regions = value_type:points_to_regions()
+    local input_regions = value_type:bounds()
     local result_last = node.parent_region_map[#input_regions]
     local cases
     if result_last then
@@ -1878,7 +2103,7 @@ function codegen.expr_static_cast(cx, node)
     actions = quote [actions]; var [result]; [cases] end
   else
     result = terralib.newsymbol(expr_type)
-    local input_regions = value_type:points_to_regions()
+    local input_regions = value_type:bounds()
     local result_last = node.parent_region_map[#input_regions]
     local cases
     if result_last then
@@ -1931,21 +2156,79 @@ end
 
 function codegen.expr_ispace(cx, node)
   local index_type = node.index_type
-  assert(std.type_eq(index_type, opaque))
-  local lower_bound = codegen.expr(cx, node.lower_bound):read(cx)
-  local upper_bound = node.upper_bound and codegen.expr(cx, node.upper_bound):read(cx)
+  local extent = codegen.expr(cx, node.extent):read(cx)
+  local extent_type = std.as_read(node.extent.expr_type)
+  local start = node.start and codegen.expr(cx, node.start):read(cx)
   local ispace_type = std.as_read(node.expr_type)
   local actions = quote
-    [lower_bound.actions];
-    [node.upper_bound and upper_bound.actions or (quote end)];
+    [extent.actions];
+    [start and start.actions or (quote end)];
     [emit_debuginfo(node)]
   end
 
+  local extent_value = `([std.implicit_cast(extent_type, index_type, extent.value)].__ptr)
+  if index_type:is_opaque() then
+    extent_value = `([extent_value].value)
+  end
+
+  local start_value = start and `([std.implicit_cast(start_type, index_type, start.value)].__ptr)
+  if index_type:is_opaque() then
+    start_value = start and `([start_value].value)
+  end
+
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local i = terralib.newsymbol(ispace_type, "i")
+
+  -- FIXME: Runtime does not understand how to make multi-dimensional
+  -- index spaces allocable.
+  local isa = false
+  if ispace_type.dim == 0 then
+    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
+  end
+  local it = false
+  if cache_index_iterator then
+    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+  end
+
+  cx:add_ispace_root(ispace_type, i, isa, it)
+
+  if ispace_type.dim == 0 then
+    if start then
+      actions = quote
+        [actions]
+        legionlib.assert([start_value] == 0, "opaque ispaces must start at 0 right now")
+      end
+    end
+    actions = quote
+      [actions]
+      var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
+      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+    end
+
+    if cache_index_iterator then
+      actions = quote
+        [actions]
+        var [it] = c.legion_terra_cached_index_iterator_create(
+          [cx.runtime], [cx.context], [lr].index_space)
+      end
+    end
+  else
+    if not start then
+      start_value = index_type:zero()
+    end
+
+    local domain_from_bounds = std["domain_from_bounds_" .. tostring(ispace_type.dim) .. "d"]
+    actions = quote
+      [actions]
+      var domain = [domain_from_bounds](
+        [index_type:to_point(`([index_type](start_value)))],
+        [index_type:to_point(`([index_type](extent_value)))])
+      var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context], domain)
+    end
+  end
+
   actions = quote
     [actions]
-    var capacity = [lower_bound.value]
-    var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
     var [i] = [ispace_type]{ impl = [is] }
   end
 
@@ -1953,25 +2236,22 @@ function codegen.expr_ispace(cx, node)
 end
 
 function codegen.expr_region(cx, node)
-  local element_type = node.element_type
-  local size = codegen.expr(cx, node.size):read(cx)
+  local fspace_type = node.fspace_type
+  local ispace = codegen.expr(cx, node.ispace):read(cx)
   local region_type = std.as_read(node.expr_type)
+  local index_type = region_type:ispace().index_type
   local actions = quote
-    [size.actions];
+    [ispace.actions];
     [emit_debuginfo(node)]
   end
 
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
-  local isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-  local it = false
-  if cache_index_iterator then
-    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
-  end
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
-  local field_paths, field_types = std.flatten_struct_fields(element_type)
+  local field_paths, field_types = std.flatten_struct_fields(fspace_type)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id = 100
   local field_ids = field_paths:map(
@@ -1980,31 +2260,29 @@ function codegen.expr_region(cx, node)
       return field_id
     end)
   local physical_regions = field_paths:map(function(_) return pr end)
-  local accessors = field_paths:map(
-    function(field_path)
-      return terralib.newsymbol(c.legion_accessor_generic_t, "accessor_" .. field_path:hash())
-    end)
-  local base_pointers = std.zip(field_paths, field_types):map(
-    function(field)
-      local field_path, field_type = unpack(field)
-      return terralib.newsymbol(&field_type, "base_pointer_" .. field_path:hash())
-    end)
 
-  cx:add_region_root(region_type, r, isa, it,
+  local pr_actions, base_pointers, strides = unpack(std.zip(unpack(
+    std.zip(field_types, field_ids, field_privileges):map(
+      function(field)
+        local field_type, field_id, field_privilege = unpack(field)
+        return terralib.newlist({
+            physical_region_get_base_pointer(cx, index_type, field_type, field_id, field_privilege, pr)})
+  end))))
+
+  cx:add_region_root(region_type, r,
                      field_paths,
                      terralib.newlist({field_paths}),
                      std.dict(std.zip(field_paths:map(std.hash), field_privileges)),
                      std.dict(std.zip(field_paths:map(std.hash), field_types)),
                      std.dict(std.zip(field_paths:map(std.hash), field_ids)),
                      std.dict(std.zip(field_paths:map(std.hash), physical_regions)),
-                     std.dict(std.zip(field_paths:map(std.hash), accessors)),
-                     std.dict(std.zip(field_paths:map(std.hash), base_pointers)))
+                     std.dict(std.zip(field_paths:map(std.hash), base_pointers)),
+                     std.dict(std.zip(field_paths:map(std.hash), strides)))
 
   actions = quote
     [actions]
-    var capacity = [size.value]
-    var is = c.legion_index_space_create([cx.runtime], [cx.context], capacity)
-    var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
+    var capacity = [ispace.value]
+    var [is] = [ispace.value].impl
     var fs = c.legion_field_space_create([cx.runtime], [cx.context])
     var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
     [std.zip(field_types, field_ids):map(
@@ -2013,7 +2291,7 @@ function codegen.expr_region(cx, node)
          return `(c.legion_field_allocator_allocate_field(
                     [fsa], terralib.sizeof([field_type]), [field_id]))
        end)]
-    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], is, fs)
+    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], fs)
     var il = c.legion_inline_launcher_create_logical_region(
       [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
     [field_ids:map(
@@ -2023,23 +2301,8 @@ function codegen.expr_region(cx, node)
     var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
     c.legion_inline_launcher_destroy(il)
     c.legion_physical_region_wait_until_valid([pr])
-    [std.zip(field_ids, field_types, accessors, base_pointers):map(
-       function(field)
-         local field_id, field_type, accessor, base_pointer = unpack(field)
-         return quote
-           var [accessor] = c.legion_physical_region_get_field_accessor_generic([pr], [field_id])
-           var [base_pointer] = [accessor_generic_get_base_pointer(field_type)]([pr], [accessor])
-         end
-       end)]
+    [pr_actions]
     var [r] = [region_type]{ impl = [lr] }
-  end
-
-  if cache_index_iterator then
-    actions = quote
-      [actions]
-      var [it] = c.legion_terra_cached_index_iterator_create(
-        [cx.runtime], [cx.context], [lr].index_space)
-    end
   end
 
   return values.value(expr.just(actions, r), region_type)
@@ -2326,7 +2589,8 @@ function codegen.expr_deref(cx, node)
 
   if value_type:ispointer() then
     return values.rawptr(value, value_type)
-  elseif std.is_ptr(value_type) then
+  elseif std.is_bounded_type(value_type) then
+    assert(value_type:is_ptr())
     return values.ref(value, value_type)
   else
     assert(false)
@@ -2594,41 +2858,55 @@ function codegen.stat_for_list(cx, node)
   local cx = cx:new_local_scope()
   local block = codegen.block(cx, node.block)
 
-  assert(cx:has_region(value_type))
-  local lr = cx:region(value_type).logical_region
-  local it = cx:region(value_type).index_iterator
+  local ispace_type, is, it
+  if std.is_region(value_type) then
+    ispace_type = value_type:ispace()
+    assert(cx:has_ispace(ispace_type))
+    is = `([value.value].impl.index_space)
+    it = cx:ispace(ispace_type).index_iterator
+  else
+    ispace_type = value_type
+    is = `([value.value].impl)
+  end
 
   local actions = quote
     [value.actions]
   end
   local cleanup_actions = quote end
 
-  local iterator_has_next
-  local iterator_next_span
-  if cache_index_iterator then
-    iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-    iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-    actions = quote
-      [actions]
-      c.legion_terra_cached_index_iterator_reset(it)
+  local iterator_has_next, iterator_next_span -- For unstructured
+  local domain -- For structured
+  if ispace_type.dim == 0 then
+    if it and cache_index_iterator then
+      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
+      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
+      actions = quote
+        [actions]
+        c.legion_terra_cached_index_iterator_reset(it)
+      end
+    else
+      iterator_has_next = c.legion_index_iterator_has_next
+      iterator_next_span = c.legion_index_iterator_next_span
+      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+      actions = quote
+        [actions]
+        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
+      end
+      cleanup_actions = quote
+        c.legion_index_iterator_destroy([it])
+      end
     end
   else
-    iterator_has_next = c.legion_index_iterator_has_next
-    iterator_next_span = c.legion_index_iterator_next_span
-    it = terralib.newsymbol(c.legion_index_iterator_t, "it")
+    domain = terralib.newsymbol(c.legion_domain_t, "domain")
     actions = quote
       [actions]
-      var is = [lr].impl.index_space
-      var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], is)
-    end
-    cleanup_actions = quote
-      c.legion_index_iterator_destroy([it])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
   end
 
   if not cx.task_meta:getcuda() then
-    return quote
-      do
+    if ispace_type.dim == 0 then
+      return quote
         [actions]
         while iterator_has_next([it]) do
           var count : c.size_t = 0
@@ -2645,6 +2923,45 @@ function codegen.stat_for_list(cx, node)
           end
         end
         [cleanup_actions]
+      end
+    else
+      local fields = ispace_type.index_type.fields
+      if fields then
+        local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
+        local rect = terralib.newsymbol("rect")
+        local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
+        local body = quote
+          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+          do
+            [block]
+          end
+        end
+        for i = ispace_type.dim, 1, -1 do
+          local rect_i = i - 1 -- C is zero-based, Lua is one-based
+          body = quote
+            for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
+              [body]
+            end
+          end
+        end
+        return quote
+          [actions]
+          var [rect] = [domain_get_rect]([domain])
+          [body]
+          [cleanup_actions]
+        end
+      else
+        return quote
+          [actions]
+          var rect = c.legion_domain_get_rect_1d([domain])
+          for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+            var [symbol] = [symbol.type]{ __ptr = i }
+            do
+              [block]
+            end
+          end
+          [cleanup_actions]
+        end
       end
     end
   else
@@ -2698,6 +3015,16 @@ function codegen.stat_for_list(cx, node)
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
+  if cx.task_meta:getcuda() then
+    return codegen.stat_for_list(cx,
+      ast.typed.StatForList {
+        symbol = node.symbol,
+        value = node.value,
+        block = node.orig_block,
+        vectorize = false,
+        span = node.span,
+      })
+  end
   local symbol = node.symbol
   local cx = cx:new_local_scope()
   local value = codegen.expr(cx, node.value):read(cx)
@@ -2709,7 +3036,7 @@ function codegen.stat_for_list_vectorized(cx, node)
 
   assert(cx:has_region(value_type))
   local lr = cx:region(value_type).logical_region
-  local it = cx:region(value_type).index_iterator
+  local it = cx:ispace(value_type:ispace()).index_iterator
 
   local actions = quote
     [value.actions]
@@ -2899,6 +3226,27 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
+  -- Pass index spaces through index requirements.
+  local ispace_args_setup = terralib.newlist()
+  for i, arg_type in ipairs(arg_types) do
+    if std.is_ispace(arg_type) then
+      local param_type = param_types[i]
+
+      if not node.args_provably.variant[i] then
+        expr_call_setup_ispace_arg(
+          cx, fn.value, arg_type, param_type, launcher, true, ispace_args_setup)
+      else
+        assert(false) -- FIXME: Implement index partitions
+
+        -- local partition = args_partitions[i]
+        -- assert(partition)
+        -- expr_call_setup_ispace_partition_arg(
+        --   cx, fn.value, arg_type, param_type, partition.value, launcher, true,
+        --   ispace_args_setup)
+      end
+    end
+  end
+
   -- Pass regions through region requirements.
   local region_args_setup = terralib.newlist()
   for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
@@ -2945,6 +3293,7 @@ function codegen.stat_index_launch(cx, node)
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
     [future_args_setup]
+    [ispace_args_setup]
     [region_args_setup]
   end
 
@@ -3321,10 +3670,8 @@ end
 
 function codegen.stat_task(cx, node)
   local task = node.prototype
-  task:setcuda(node.cuda)
   -- we temporaily turn off generating two task versions for cuda tasks
   if node.cuda then node.region_divergence = false end
-  std.register_task(task)
 
   task:set_config_options(node.config_options)
 
@@ -3361,7 +3708,7 @@ function codegen.stat_task(cx, node)
   local param_field_ids = terralib.newlist()
   for _, region in ipairs(param_regions) do
     local field_paths, field_types =
-      std.flatten_struct_fields(region.element_type)
+      std.flatten_struct_fields(region.fspace_type)
     local field_ids = field_paths:map(
       function(field_path)
         return terralib.newsymbol("field_" .. field_path:hash())
@@ -3478,7 +3825,9 @@ function codegen.stat_task(cx, node)
     local param_field_id_i = 1
     for _, region_i in ipairs(std.fn_param_regions_by_index(task:gettype())) do
       local region_type = param_types[region_i]
+      local index_type = region_type:ispace().index_type
       local r = params[region_i]
+      local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
       if not cx.leaf then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
@@ -3495,7 +3844,7 @@ function codegen.stat_task(cx, node)
         privileges, privilege_field_paths)
 
       local field_paths, field_types =
-        std.flatten_struct_fields(region_type.element_type)
+        std.flatten_struct_fields(region_type.fspace_type)
       local field_ids_by_field_path = {}
       for _, field_path in ipairs(field_paths) do
         field_ids_by_field_path[field_path:hash()] = param_field_ids[param_field_id_i]
@@ -3505,11 +3854,13 @@ function codegen.stat_task(cx, node)
       local physical_regions = terralib.newlist()
       local physical_regions_by_field_path = {}
       local physical_regions_index = terralib.newlist()
-      local accessors = terralib.newlist()
-      local accessors_by_field_path = {}
+      local physical_region_actions = terralib.newlist()
       local base_pointers = terralib.newlist()
       local base_pointers_by_field_path = {}
+      local strides = terralib.newlist()
+      local strides_by_field_path = {}
       for i, field_paths in ipairs(privilege_field_paths) do
+        local privilege = privileges[i]
         local field_types = privilege_field_types[i]
         local physical_region = terralib.newsymbol(
           c.legion_physical_region_t,
@@ -3519,28 +3870,22 @@ function codegen.stat_task(cx, node)
         physical_regions_index:insert(physical_region_i)
         physical_region_i = physical_region_i + 1
 
-        local physical_region_accessors = field_paths:map(
-          function(field_path)
-            return terralib.newsymbol(
-              c.legion_accessor_generic_t,
-              "accessor_" .. field_path:hash())
-          end)
-        accessors:insert(physical_region_accessors)
-
-        local physical_region_base_pointers = std.zip(field_paths, field_types):map(
-          function(field)
-            local field_path, field_type = unpack(field)
-            return terralib.newsymbol(
-              &field_type,
-              "base_pointer_" .. field_path:hash())
-          end)
-        base_pointers:insert(physical_region_base_pointers)
+        local pr_actions, pr_base_pointers, pr_strides = unpack(std.zip(unpack(
+          std.zip(field_paths, field_types):map(
+            function(field)
+              local field_path, field_type = unpack(field)
+              local field_id = field_ids_by_field_path[field_path:hash()]
+              return terralib.newlist({
+                  physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)})
+        end))))
+        physical_region_actions:insertall(pr_actions or {})
+        base_pointers:insert(pr_base_pointers)
 
         for i, field_path in ipairs(field_paths) do
           physical_regions_by_field_path[field_path:hash()] = physical_region
           if privileges_by_field_path[field_path:hash()] ~= "none" then
-            accessors_by_field_path[field_path:hash()] = physical_region_accessors[i]
-            base_pointers_by_field_path[field_path:hash()] = physical_region_base_pointers[i]
+            base_pointers_by_field_path[field_path:hash()] = pr_base_pointers[i]
+            strides_by_field_path[field_path:hash()] = pr_strides[i]
           end
         end
       end
@@ -3550,8 +3895,8 @@ function codegen.stat_task(cx, node)
       if not cx.leaf then
         actions = quote
           [actions]
-          var is = [r].impl.index_space
-          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  is)
+          var [is] = [r].impl.index_space
+          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
         end
       end
 
@@ -3572,49 +3917,24 @@ function codegen.stat_task(cx, node)
         local physical_region = physical_regions[i]
         local physical_region_index = physical_regions_index[i]
 
-        local get_accessor
-        if std.is_reduction_op(privilege) then
-          get_accessor = c.legion_physical_region_get_accessor_generic
-        else
-          get_accessor = c.legion_physical_region_get_field_accessor_generic
-        end
-        assert(get_accessor)
-
         region_args_setup:insert(quote
           var [physical_region] = [c_regions][ [physical_region_index] ]
         end)
-
-        for j, field_path in ipairs(field_paths) do
-          local field_type = field_types[j]
-          local accessor = accessors[i][j]
-          local base_pointer = base_pointers[i][j]
-          local field_id = field_ids_by_field_path[field_path:hash()]
-          assert(accessor and base_pointer and field_id)
-
-          local accessor_args = terralib.newlist({physical_region})
-          if not std.is_reduction_op(privilege) then
-            accessor_args:insert(field_id)
-          end
-
-          if privileges_by_field_path[field_path:hash()] ~= "none" then
-            region_args_setup:insert(quote
-              var [accessor] = [get_accessor]([accessor_args])
-              var [base_pointer] = [accessor_generic_get_base_pointer(field_type)](
-                [physical_region], [accessor])
-            end)
-          end
-        end
       end
+      region_args_setup:insertall(physical_region_actions)
 
-      cx:add_region_root(region_type, r, isa, it,
+      if not cx:has_ispace(region_type:ispace()) then
+        cx:add_ispace_root(region_type:ispace(), is, isa, it)
+      end
+      cx:add_region_root(region_type, r,
                          field_paths,
                          privilege_field_paths,
                          privileges_by_field_path,
                          std.dict(std.zip(field_paths:map(std.hash), field_types)),
                          field_ids_by_field_path,
                          physical_regions_by_field_path,
-                         accessors_by_field_path,
-                         base_pointers_by_field_path)
+                         base_pointers_by_field_path,
+                         strides_by_field_path)
     end
   end
 
@@ -3729,7 +4049,24 @@ end
 
 function codegen.stat_top(cx, node)
   if node:is(ast.typed.StatTask) then
-    return codegen.stat_task(cx, node)
+    if not node.cuda then
+      local cpu_task = codegen.stat_task(cx, node)
+      std.register_task(cpu_task)
+      return cpu_task
+    else
+      node.cuda = false
+      local cpu_task = codegen.stat_task(cx, node)
+      local cuda_task = cpu_task:make_variant()
+      cuda_task:setcuda(true)
+      local new_node = node {
+        cuda = true,
+        prototype = cuda_task,
+      }
+      cuda_task = codegen.stat_task(cx, new_node)
+      std.register_task(cpu_task)
+      std.register_task(cuda_task)
+      return cpu_task
+    end
 
   elseif node:is(ast.typed.StatFspace) then
     return codegen.stat_fspace(cx, node)

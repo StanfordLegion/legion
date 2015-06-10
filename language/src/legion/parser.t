@@ -330,29 +330,29 @@ function parser.expr_simple(p)
     p:expect("(")
     local index_type_expr = p:luaexpr()
     p:expect(",")
-    local lower_bound = p:expr()
-    local upper_bound = false
+    local extent = p:expr()
+    local start_at = false
     if not p:matches(")") then
       p:expect(",")
-      upper_bound = p:expr()
+      start_at = p:expr()
     end
     p:expect(")")
     return ast.unspecialized.ExprIspace {
       index_type_expr = index_type_expr,
-      lower_bound = lower_bound,
-      upper_bound = upper_bound,
+      extent = extent,
+      start = start_at,
       span = ast.span(start, p),
     }
 
   elseif p:nextif("region") then
     p:expect("(")
-    local element_type_expr = p:luaexpr()
+    local ispace = p:expr()
     p:expect(",")
-    local size = p:expr()
+    local fspace_type_expr = p:luaexpr()
     p:expect(")")
     return ast.unspecialized.ExprRegion {
-      element_type_expr = element_type_expr,
-      size = size,
+      ispace = ispace,
+      fspace_type_expr = fspace_type_expr,
       span = ast.span(start, p),
     }
 

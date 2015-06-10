@@ -20,7 +20,7 @@ where reads(r) do
 end
 
 task f() : int
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var p = new(ptr(int, r))
   @p = 5
   return g(r, p)

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2943,6 +2943,26 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->fill_fields(ctx, handle, parent, fields, value, size, pred);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion HighLevelRuntime::attach_hdf5(Context ctx, 
+                                                 const char *file_name,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::map<FieldID,const char*> &field_map,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_hdf5(ctx, file_name, handle, 
+                                  parent, field_map, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void HighLevelRuntime::detach_hdf5(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_hdf5(ctx, region);
     }
 
     //--------------------------------------------------------------------------

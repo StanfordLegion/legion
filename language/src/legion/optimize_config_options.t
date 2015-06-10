@@ -359,7 +359,7 @@ local analyze_inner = {}
 
 function analyze_inner.expr_field_access(cx, node)
   return
-    not std.is_ptr(std.as_read(node.value.expr_type)) and
+    not std.is_bounded_type(std.as_read(node.value.expr_type)) and
     analyze_inner.expr(cx, node.value)
 end
 
@@ -411,12 +411,12 @@ function analyze_inner.expr_static_cast(cx, node)
 end
 
 function analyze_inner.expr_ispace(cx, node)
-  return analyze_inner.expr(cx, node.lower_bound) and
-    node.upper_bound and analyze_inner.expr(cx, node.upper_bound)
+  return analyze_inner.expr(cx, node.extent) and
+    node.start and analyze_inner.expr(cx, node.start)
 end
 
 function analyze_inner.expr_region(cx, node)
-  return analyze_inner.expr(cx, node.size)
+  return analyze_inner.expr(cx, node.ispace)
 end
 
 function analyze_inner.expr_partition(cx, node)
@@ -441,7 +441,7 @@ end
 
 function analyze_inner.expr_deref(cx, node)
   return
-    not std.is_ptr(std.as_read(node.value.expr_type)) and
+    not std.is_bounded_type(std.as_read(node.value.expr_type)) and
     analyze_inner.expr(cx, node.value)
 end
 

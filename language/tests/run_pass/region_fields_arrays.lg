@@ -23,7 +23,7 @@ fspace s {
 }
 
 task f()
-  var r = region(s, 5)
+  var r = region(ispace(ptr, 5), s)
   var p = new(ptr(s, r))
 
   for i = 0, 10 do

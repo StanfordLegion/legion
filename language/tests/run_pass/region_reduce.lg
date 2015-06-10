@@ -72,7 +72,7 @@ where reads(r), writes(r) do
 end
 
 task f() : int
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var p = new(ptr(int, r))
   @p = 1
   g_plus(r, p)

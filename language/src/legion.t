@@ -27,6 +27,7 @@ local specialize = require("legion/specialize")
 local std = require("legion/std")
 local type_check = require("legion/type_check")
 local vectorize_loops = require("legion/vectorize_loops")
+local inline_tasks = require("legion/inline_tasks")
 
 -- Add Language Builtins to Global Environment
 
@@ -47,6 +48,7 @@ function compile(lex)
     local env = environment_function()
     local ast = specialize.entry(env, node)
     ast = type_check.entry(ast)
+    if std.config["task-inlines"] then ast = inline_tasks.entry(ast) end
     if std.config["index-launches"] then ast = optimize_loops.entry(ast) end
     if std.config["futures"] then ast = optimize_futures.entry(ast) end
     if std.config["inlines"] then ast = optimize_inlines.entry(ast) end
@@ -86,6 +88,7 @@ local language = {
     "cross_product",
     "disjoint", -- reserved for future use
     "dynamic_cast",
+    "index_type", -- reserved for future use
     "isnull",
     "ispace",
     "max",

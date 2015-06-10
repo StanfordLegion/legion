@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -166,9 +166,10 @@ namespace LegionRuntime {
                      ReductionOpID redopid,
                      off_t list_size,
                      RegionInstance parent_inst,
-                     std::string file,
-                     const std::vector<std::string>& path_names,
-                     Domain domain)
+                     const char* file,
+                     const std::vector<const char*>& path_names,
+                     Domain domain,
+                     bool read_only)
 
     {
       RegionInstance inst = create_instance_local(is,
@@ -182,9 +183,14 @@ namespace LegionRuntime {
         new_hdf->lo[i] = domain.rect_data[i];
         new_hdf->dims[i] = domain.rect_data[i + domain.get_dim()] - domain.rect_data[i];
       }
-      new_hdf->file_id = H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+      unsigned flags;
+      if (read_only)
+        flags = H5F_ACC_RDONLY;
+      else
+        flags = H5F_ACC_RDWR;
+      new_hdf->file_id = H5Fopen(file, flags, H5P_DEFAULT);
       for (IDType idx = 0; idx < path_names.size(); idx ++) {
-        new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx].c_str(), H5P_DEFAULT));
+        new_hdf->dataset_ids.push_back(H5Dopen2(new_hdf->file_id, path_names[idx], H5P_DEFAULT));
         new_hdf->datatype_ids.push_back(H5Dget_type(new_hdf->dataset_ids[idx]));
       }
 
@@ -203,11 +209,12 @@ namespace LegionRuntime {
       assert(new_hdf->dataset_ids.size() == new_hdf->datatype_ids.size());
       for (size_t idx = 0; idx < new_hdf->dataset_ids.size(); idx++) {
         H5Dclose(new_hdf->dataset_ids[idx]);
-        H5Dclose(new_hdf->datatype_ids[idx]);
+        H5Tclose(new_hdf->datatype_ids[idx]);
       }
+      H5Fclose(new_hdf->file_id);
       new_hdf->dataset_ids.clear();
       new_hdf->datatype_ids.clear();
-      free(new_hdf);
+      delete new_hdf;
       destroy_instance_local(i, local_destroy);
     }
 
@@ -243,6 +250,8 @@ namespace LegionRuntime {
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
       hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
       H5Dread(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, dst);
+      H5Sclose(dataspace_id);
+      H5Sclose(memspace_id);
     }
 
     void HDFMemory::put_bytes(off_t offset, const void *src, size_t size)
@@ -262,7 +271,10 @@ namespace LegionRuntime {
       count[0] = count[1] = count[2] = 1;
       hid_t dataspace_id = H5Dget_space(metadata->dataset_ids[fid]);
       H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
-      H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], H5S_ALL, dataspace_id, H5P_DEFAULT, src);
+      hid_t memspace_id = H5Screate_simple(metadata->ndims, count, NULL);
+      H5Dwrite(metadata->dataset_ids[fid], metadata->datatype_ids[fid], memspace_id, dataspace_id, H5P_DEFAULT, src);
+      H5Sclose(dataspace_id);
+      H5Sclose(memspace_id);
     }
 
     void HDFMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,

@@ -66,7 +66,7 @@ function uses(cx, region_type, polarity)
       rhs = other_region_type,
       op = "*"
     }
-    if std.type_maybe_eq(region_type.element_type, other_region_type.element_type) and
+    if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint)
     then
       usage[other_region_type] = polarity
@@ -219,12 +219,12 @@ end
 
 function analyze_usage.expr_ispace(cx, node)
   return usage_meet(
-    analyze_usage.expr(cx, node.lower_bound),
-    node.upper_bound and analyze_usage.expr(cx, node.upper_bound))
+    analyze_usage.expr(cx, node.extent),
+    node.start and analyze_usage.expr(cx, node.start))
 end
 
 function analyze_usage.expr_region(cx, node)
-  return analyze_usage.expr(cx, node.size)
+  return analyze_usage.expr(cx, node.ispace)
 end
 
 function analyze_usage.expr_partition(cx, node)
@@ -249,7 +249,7 @@ function analyze_usage.expr_deref(cx, node)
   local ptr_type = std.as_read(node.value.expr_type)
   return std.reduce(
     usage_meet,
-    ptr_type:points_to_regions():map(
+    ptr_type:bounds():map(
       function(region) return uses(cx, region, inline) end),
     analyze_usage.expr(cx, node.value))
 end

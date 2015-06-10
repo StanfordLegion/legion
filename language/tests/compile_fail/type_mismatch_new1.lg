@@ -13,14 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_new_multiregion.lg:25: new requires pointer type with exactly one region, got ptr(int32, $r, $s)
---   var x = new(ptr(int, r, s))
+-- type_mismatch_new1.lg:23: new requires bounded type, got int32
+--   var x = new(int)
 --             ^
 
 import "legion"
 
 task f()
-  var r = region(int, 5)
-  var s = region(int, 5)
-  var x = new(ptr(int, r, s))
+  var x = new(int)
 end
+f:compile()

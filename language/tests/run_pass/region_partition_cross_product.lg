@@ -25,7 +25,7 @@ where reads(r, s), r * s do
 end
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   var x0 = new(ptr(int, r))
   var x1 = new(ptr(int, r))
   var x2 = new(ptr(int, r))
@@ -51,10 +51,10 @@ task main()
   var r0 = prod[0]
   var r1 = prod[1]
   assert_disjoint(r0, r1)
-  var r00 = prod[0][0]
-  var r01 = prod[0][1]
-  var r10 = prod[1][0]
-  var r11 = prod[1][1]
+  var r00 = prod[0].partition[0]
+  var r01 = prod[0].partition[1]
+  var r10 = prod[1].partition[0]
+  var r11 = prod[1].partition[1]
   assert_disjoint(r00, r01)
   assert_disjoint(r00, r10)
   assert_disjoint(r00, r11)

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -228,9 +228,9 @@ namespace LegionRuntime {
       size_t get_domain_volume(LogicalRegion handle);
     public:
       // Logical analysis methods
-      void perform_dependence_analysis(RegionTreeContext ctx, 
-                                       Operation *op, unsigned idx,
+      void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
+                                       RestrictInfo &restrict_info,
                                        RegionTreePath &path);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
@@ -251,12 +251,14 @@ namespace LegionRuntime {
                                       LogicalRegion handle);
       void invalidate_logical_context(RegionTreeContext ctx,
                                       LogicalRegion handle);
-      void acquire_user_coherence(RegionTreeContext ctx,
+      void restrict_user_coherence(SingleTask *parent_ctx,
+                                   LogicalRegion handle,
+                                   const std::set<FieldID> &fields);
+      void acquire_user_coherence(SingleTask *parent_ctx,
                                   LogicalRegion handle,
                                   const std::set<FieldID> &fields);
-      void release_user_coherence(RegionTreeContext ctx,
-                                  LogicalRegion handle,
-                                  const std::set<FieldID> &fields);
+      bool has_restrictions(LogicalRegion handle, const RestrictInfo &info,
+                            const std::set<FieldID> &fields);
     public:
       // Physical analysis methods
       bool premap_physical_region(RegionTreeContext ctx,
@@ -301,7 +303,18 @@ namespace LegionRuntime {
       MappingRef map_restricted_region(RegionTreeContext ctx,
                                        RegionRequirement &req,
                                        unsigned index,
-                                       const InstanceRef &parent_ref
+                                       Processor target_proc
+#ifdef DEBUG_HIGH_LEVEL
+                                       , const char *log_name
+                                       , UniqueID uid
+#endif
+                                       );
+      // Same as the call above, but with a mapping path
+      MappingRef map_restricted_region(RegionTreeContext ctx,
+                                       RegionTreePath &path,
+                                       RegionRequirement &req,
+                                       unsigned index,
+                                       Processor target_proc
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
                                        , UniqueID uid
@@ -374,6 +387,12 @@ namespace LegionRuntime {
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
                        const void *value, size_t value_size);
+      InstanceRef attach_file(RegionTreeContext ctx,
+                              const RegionRequirement &req,
+                              AttachOp *attach_op);
+      void detach_file(RegionTreeContext ctx, 
+                       const RegionRequirement &req,
+                       const InstanceRef &ref);
     public:
       // Methods for sending and returning state information
       void send_physical_state(RegionTreeContext ctx,
@@ -921,6 +940,7 @@ namespace LegionRuntime {
       virtual ~IndexTreeNode(void);
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
+      virtual size_t get_num_elmts(void) = 0;
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       void attach_semantic_information(SemanticTag tag, const NodeSet &mask,
@@ -960,7 +980,7 @@ namespace LegionRuntime {
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     protected:
-      std::set<std::pair<ColorPoint,ColorPoint> > pending_tests;
+      std::map<std::pair<ColorPoint,ColorPoint>,Event> pending_tests;
     };
 
     /**
@@ -995,6 +1015,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
+      virtual size_t get_num_elmts(void);
     public:
       virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
@@ -1009,10 +1030,13 @@ namespace LegionRuntime {
       size_t get_num_children(void) const;
       void get_children(std::map<ColorPoint,IndexPartNode*> &children);
     public:
-      const Domain& get_domain(bool app_query = false);
-      const Domain& get_domain_no_wait(Event &ready_event);
+      Event get_domain_precondition(void);
+      const Domain& get_domain_blocking(void);
+      const Domain& get_domain(Event &ready_event);
+      const Domain& get_domain_no_wait(void);
       void set_domain(const Domain &dom);
-      void get_domains(std::vector<Domain> &domains, bool app_query = false);
+      void get_domains_blocking(std::vector<Domain> &domains);
+      void get_domains(std::vector<Domain> &domains, Event &precondition);
       size_t get_domain_volume(bool app_query = false);
     public:
       bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2); 
@@ -1028,9 +1052,10 @@ namespace LegionRuntime {
     public:
       bool has_component_domains(void) const;
       void update_component_domains(const std::set<Domain> &domains);
-      const std::set<Domain>& get_component_domains(void) const;
-      bool intersects_with(IndexSpaceNode *other, bool compute);
-      bool intersects_with(IndexPartNode *other, bool compute);
+      const std::set<Domain>& get_component_domains_blocking(void) const;
+      const std::set<Domain>& get_component_domains(Event &precondition) const;
+      bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -1084,6 +1109,7 @@ namespace LegionRuntime {
       std::map<ColorPoint,IndexPartNode*> valid_map;
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subsets;
+      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subsets;
       // If we have component domains keep track of those as well
       std::set<Domain> component_domains;
     private:
@@ -1123,6 +1149,7 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
     public:
       virtual IndexTreeNode* get_parent(void) const;
+      virtual size_t get_num_elmts(void);
     public:
       virtual void send_semantic_info(const NodeSet &targets, SemanticTag tag,
                                       const void *buffer, size_t size,
@@ -1166,9 +1193,10 @@ namespace LegionRuntime {
       Event create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
                                 LowLevel::IndexSpace::IndexSpaceOperation op);
     public:
+      void get_subspace_domain_preconditions(std::set<Event> &preconditions);
       void get_subspace_domains(std::set<Domain> &subspaces);
-      bool intersects_with(IndexSpaceNode *other, bool compute);
-      bool intersects_with(IndexPartNode *other, bool compute);
+      bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
       const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
       bool dominates(IndexSpaceNode *other);
@@ -1204,6 +1232,7 @@ namespace LegionRuntime {
       std::map<ColorPoint,IndexSpaceNode*> valid_map;
       std::set<PartitionNode*> logical_nodes;
       std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subspaces;
+      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subspaces;
     protected:
       // Support for pending child spaces that still need to be computed
       std::map<ColorPoint,std::pair<UserEvent,UserEvent> > pending_children;
@@ -1299,6 +1328,10 @@ namespace LegionRuntime {
       unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::set<FieldID> &fields,
                              std::map<unsigned,FieldID> &indexes) const;
+    protected:
+      void compute_create_offsets(const std::set<FieldID> &create_fields,
+                                  std::vector<size_t> &field_sizes,
+                                  std::vector<unsigned> &indexes);
     public:
       InstanceManager* create_instance(Memory location, Domain dom,
                                        const std::set<FieldID> &fields,
@@ -1307,6 +1340,10 @@ namespace LegionRuntime {
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop);
+    public:
+      InstanceManager* create_file_instance(const std::set<FieldID> &fields,
+                                            const FieldMask &attach_mask,
+                                            RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &mask,
                                                  const Domain &domain,
@@ -1415,22 +1452,60 @@ namespace LegionRuntime {
     };
 
     /**
-     * \struct RestrictInfo
-     * Information about whether this region requirement
-     * needs to be restricted for certain fields
+     * \class RestrictInfo
+     * A class for tracking mapping restrictions based 
+     * on region usage.
      */
-    struct RestrictInfo {
+    class RestrictInfo {
     public:
-      RestrictInfo(bool res) : restricted(res) { }
+      RestrictInfo(void)
+        : perform_check(false), projection(false) { }
+      RestrictInfo(const RestrictInfo &rhs) 
+      {
+        perform_check = rhs.perform_check;
+        projection = rhs.projection;
+        restrictions = rhs.restrictions;
+      }
+      ~RestrictInfo(void) { }
     public:
-      inline bool is_restricted(void) const { return restricted; }
-      inline void record_coherence(const FieldMask &m)
-        { coherence_mask |= m; }
-      inline bool is_coherent(const FieldMask &m) const
-        { return !(m - coherence_mask); }
+      RestrictInfo& operator=(const RestrictInfo &rhs)
+      {
+        // Only need to copy over perform_check and restrictions
+        perform_check = rhs.perform_check;
+        restrictions = rhs.restrictions;
+        return *this;
+      }
+    public:
+      inline bool needs_check(void) const { return perform_check; }
+      inline void set_check(void) { perform_check = true; } 
+      inline bool is_projection(void) const { return projection; }
+      inline void set_projection(void) { projection = true; }
+      inline void add_restriction(LogicalRegion handle, const FieldMask &mask)
+      {
+        LegionMap<LogicalRegion,FieldMask>::aligned::iterator finder = 
+          restrictions.find(handle);
+        if (finder == restrictions.end())
+          restrictions[handle] = mask;
+        else
+          finder->second |= mask;
+      }
+      inline bool has_restrictions(void) const { return !restrictions.empty(); }
+      bool has_restrictions(LogicalRegion handle, RegionNode *node,
+                            const std::set<FieldID> &fields) const;
+      inline void clear(void)
+      {
+        perform_check = false;
+        projection = false;
+        restrictions.clear();
+      }
+    public:
+      void pack_info(Serializer &rez);
+      void unpack_info(Deserializer &derez, AddressSpaceID source, 
+                       RegionTreeForest *forest);
     protected:
-      FieldMask coherence_mask;
-      bool restricted;
+      bool perform_check;
+      bool projection;
+      LegionMap<LogicalRegion,FieldMask>::aligned restrictions;
     };
 
     /**
@@ -1547,7 +1622,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = LOGICAL_STATE_ALLOC;
     public:
-      LogicalState(void);
+      LogicalState(RegionTreeNode *owner, ContextID ctx);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
     public:
@@ -1567,7 +1642,7 @@ namespace LegionRuntime {
                                                             prev_epoch_users;
       // Fields on which the user has 
       // asked for explicit coherence
-      FieldMask user_level_coherence;
+      FieldMask restricted_fields;
     };
 
     typedef DynamicTableAllocator<LogicalState, 10, 8> LogicalStateAllocator;
@@ -1876,17 +1951,17 @@ namespace LegionRuntime {
     };
 
     /**
-     * \struct PreconditionSet
+     * \struct EventSet 
      * A helper class for building sets of fields with 
      * a common set of preconditions for doing copies.
      */
-    struct PreconditionSet {
+    struct EventSet {
     public:
-      PreconditionSet(void) { }
-      PreconditionSet(const FieldMask &m)
-        : pre_mask(m) { }
+      EventSet(void) { }
+      EventSet(const FieldMask &m)
+        : set_mask(m) { }
     public:
-      FieldMask pre_mask;
+      FieldMask set_mask;
       std::set<Event> preconditions;
     };
 
@@ -1904,6 +1979,7 @@ namespace LegionRuntime {
       virtual ~RegionTreeNode(void);
     public:
       LogicalState& get_logical_state(ContextID ctx);
+      void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
       PhysicalState* acquire_physical_state(ContextID ctx, bool exclusive);
       void acquire_physical_state(PhysicalState *state, bool exclusive);
       bool release_physical_state(PhysicalState *state);
@@ -1925,6 +2001,7 @@ namespace LegionRuntime {
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
+                             RestrictInfo &restrict_info,
                              const bool already_traced);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
@@ -1956,10 +2033,10 @@ namespace LegionRuntime {
       template<bool DOMINATE>
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask);
-      void acquire_user_coherence(ContextID ctx, 
-                                  const FieldMask &coherence_mask);
-      void release_user_coherence(ContextID ctx, 
-                                  const FieldMask &coherence_mask);
+      void add_restriction(ContextID ctx, const FieldMask &restricted_mask);
+      void release_restriction(ContextID ctx, const FieldMask &restricted_mask);
+      void record_logical_restrictions(ContextID ctx, RestrictInfo &info,
+                                       const FieldMask &mask);
     public:
       // Physical traversal operations
       // Entry
@@ -2054,14 +2131,15 @@ namespace LegionRuntime {
                                        MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
+                                       Event copy_domains_precondition,
                                        const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                            LegionMap<Event,FieldMask>::aligned &postconditions,
                                        CopyTracker *tracker = NULL);
       // Note this function can mutate the preconditions set
-      static void compute_precondition_sets(FieldMask update_mask,
+      static void compute_event_sets(FieldMask update_mask,
           const LegionMap<Event,FieldMask>::aligned &preconditions,
-          LegionList<PreconditionSet>::aligned &precondition_sets);
+          LegionList<EventSet>::aligned &event_sets);
       Event perform_copy_operation(Event precondition,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -2100,32 +2178,40 @@ namespace LegionRuntime {
       void invalidate_physical_state(PhysicalState *state,
                                      const FieldMask &invalid_mask,
                                      bool force);
+      // Entry
+      void detach_instance_views(ContextID ctx, const FieldMask &detach_mask,
+                                 PhysicalManager *target);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual const ColorPoint& get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
-      virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0;
-      virtual bool are_children_disjoint(const ColorPoint &c1, 
-                                         const ColorPoint &c2) = 0;
-      virtual bool are_all_children_disjoint(void) = 0;
+      virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0; 
       virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
       virtual RegionNode* as_region_node(void) const = 0;
       virtual PartitionNode* as_partition_node(void) const = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
+    public:
+      virtual bool are_children_disjoint(const ColorPoint &c1, 
+                                         const ColorPoint &c2) = 0;
+      virtual bool are_all_children_disjoint(void) = 0;
       virtual bool has_component_domains(void) const = 0;
-      virtual const std::set<Domain>& get_component_domains(void) const = 0;
-      virtual const Domain& get_domain(void) const = 0;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const = 0;
+      virtual const std::set<Domain>&
+                        get_component_domains_blocking(void) const = 0;
+      virtual const std::set<Domain>& 
+                        get_component_domains(Event &ready) const = 0;
+      virtual const Domain& get_domain_blocking(void) const = 0;
+      virtual const Domain& get_domain(Event &precondition) const = 0;
+      virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
-      virtual bool intersects_with(RegionTreeNode *other, 
-                                   bool compute = true) = 0;
+      virtual bool intersects_with(RegionTreeNode *other) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
       virtual const std::set<Domain>& 
-                            get_intersection_domains(RegionTreeNode *other) = 0;
+                      get_intersection_domains(RegionTreeNode *other) = 0;
+    public:
       virtual size_t get_num_children(void) const = 0;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
@@ -2245,11 +2331,14 @@ namespace LegionRuntime {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& get_component_domains(void) const;
-      virtual const Domain& get_domain(void) const;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const;
+      virtual const std::set<Domain>& 
+                                     get_component_domains_blocking(void) const;
+      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
+      virtual const Domain& get_domain_blocking(void) const;
+      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
+      virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -2331,6 +2420,10 @@ namespace LegionRuntime {
                                   std::set<Event> &preconditions);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size);
+      InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
+                             const RegionRequirement &req, AttachOp *attach_op);
+      void detach_file(ContextID ctx, const FieldMask &detach_mask,
+                       PhysicalManager *detach_target);
     public:
       bool send_state(ContextID ctx, UniqueID remote_owner_uid,
                       AddressSpaceID target,
@@ -2395,11 +2488,14 @@ namespace LegionRuntime {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& get_component_domains(void) const;
-      virtual const Domain& get_domain(void) const;
-      virtual const Domain& get_domain_no_wait(Event &precondition) const;
+      virtual const std::set<Domain>& 
+                                     get_component_domains_blocking(void) const;
+      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
+      virtual const Domain& get_domain_blocking(void) const;
+      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
+      virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual const std::set<Domain>& 
                                 get_intersection_domains(RegionTreeNode *other);
@@ -2638,6 +2734,41 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class RestrictionMutator
+     * A class for mutating the state of restrction fields
+     */
+    template<bool ADD_RESTRICT>
+    class RestrictionMutator : public NodeTraverser {
+    public:
+      RestrictionMutator(ContextID ctx, const FieldMask &mask);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const FieldMask &restrict_mask;
+    };
+
+    /**
+     * \class RestrictionRecorder
+     * A class for recording rerstrictions of logical regions
+     */
+    class RestrictionRecorder : public NodeTraverser {
+    public:
+      RestrictionRecorder(ContextID ctx, RestrictInfo &res_info,
+                          const FieldMask &mask);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      RestrictInfo &restrict_info;
+      FieldMask user_mask;
+    };
+
+    /**
      * \class PhysicalInitializer
      * A class for initializing physical contexts
      */
@@ -2678,6 +2809,25 @@ namespace LegionRuntime {
       const bool total;
       const bool force;
       const FieldMask invalid_mask;
+    };
+
+    /**
+     * \class PhysicalDetacher
+     * A class for detaching physical instances normally associated
+     * with files that have been attached.
+     */
+    class PhysicalDetacher : public NodeTraverser {
+    public:
+      PhysicalDetacher(ContextID ctx, const FieldMask &detach_mask,
+                       PhysicalManager *to_detach);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const FieldMask &detach_mask;
+      PhysicalManager *const target;
     };
 
     /**
@@ -3278,10 +3428,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc) = 0;
+                                 const FieldMask &mask, bool reading) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
@@ -3369,10 +3517,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) = 0;
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc) = 0;
+                                 const FieldMask &mask, bool reading) = 0;
+      virtual InstanceRef add_user(PhysicalUser &user) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields) = 0;
@@ -3490,10 +3636,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc);
+                                 const FieldMask &mask, bool reading);
+      virtual InstanceRef add_user(PhysicalUser &user);
     public:
       virtual void notify_activate(void);
       virtual void garbage_collect(void);
@@ -3618,17 +3762,17 @@ namespace LegionRuntime {
      */
     class DeferredView : public InstanceView {
     public:
-      struct ReduceInfo {
+      struct ReductionEpoch {
       public:
-        ReduceInfo(void) { }
-        ReduceInfo(const FieldMask &valid, const Domain &dom)
-          : valid_fields(valid) { intersections.insert(dom); }
-        ReduceInfo(const FieldMask &valid, 
-                   const std::set<Domain> &inters)
-          : valid_fields(valid), intersections(inters) { }
+        ReductionEpoch(void)
+          : redop(0) { }
+        ReductionEpoch(ReductionView *v, ReductionOpID r, const FieldMask &m)
+          : valid_fields(m), redop(r) { views.insert(v); }
       public:
         FieldMask valid_fields;
-        std::set<Domain> intersections;
+        ReductionOpID redop;
+        std::set<ReductionView*> views;
+        NodeSet remote_nodes;
       };
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
@@ -3639,7 +3783,7 @@ namespace LegionRuntime {
       // Deferred views never have managers
       virtual bool has_manager(void) const { return false; }
       virtual PhysicalManager* get_manager(void) const
-      { assert(false); return NULL; }
+      { return NULL; }
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
       // Deferred views are never persistent
@@ -3651,9 +3795,9 @@ namespace LegionRuntime {
                       LegionMap<Event,FieldMask>::aligned &preconditions)
         { assert(false); }
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc) { assert(false); }
-      virtual InstanceRef add_user(PhysicalUser &user, Processor exec_proc);
+                                 const FieldMask &mask, bool reading)
+                                 { assert(false); }
+      virtual InstanceRef add_user(PhysicalUser &user);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &reduce_mask,
                              std::vector<Domain::CopySrcDstField> &src_fields)
         { assert(false); return false; }
@@ -3707,6 +3851,22 @@ namespace LegionRuntime {
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL) = 0;
+      void flush_reductions(const MappableInfo &info,
+                            MaterializedView *dst,
+                            const FieldMask &reduce_mask,
+                            LegionMap<Event,FieldMask>::aligned &conditions);
+      void flush_reductions_across(const MappableInfo &info,
+                                   MaterializedView *dst,
+                                   FieldID src_field, FieldID dst_field,
+                                   Event dst_precondition,
+                                   std::set<Event> &conditions);
+      Event find_component_domains(ReductionView *reduction_view,
+                                   std::set<Domain> &component_domains);
+    protected:
+      void activate_deferred(void);
+      void garbage_collect_deferred(void);
+      void validate_deferred(void);
+      void invalidate_deferred(void);
     public:
       virtual void issue_deferred_copies(const MappableInfo &info,
                                          MaterializedView *dst,
@@ -3764,18 +3924,18 @@ namespace LegionRuntime {
       virtual void send_back_packed_view(AddressSpaceID target,
                                          Serializer &rez) = 0;
     public:
-      void pack_valid_reductions(Serializer &rez, const FieldMask &update_mask,
+      bool pack_valid_reductions(Serializer &rez, const FieldMask &update_mask,
                                  AddressSpaceID target, 
                        LegionMap<LogicalView*,FieldMask>::aligned &needed_views,
-                                 std::set<PhysicalManager*> &needed_managers,
-                 LegionMap<ReductionView*,FieldMask>::aligned &send_reductions);
-      void unpack_valid_reductions(Deserializer &derez, size_t num_reductions,
-                                   FieldSpaceNode *field_node, 
-                                   AddressSpaceID source);
+                                 std::set<PhysicalManager*> &needed_managers);
+      void unpack_valid_reductions(Deserializer &derez, FieldSpaceNode *field_node, 
+                                   AddressSpaceID source, bool need_lock);
     protected:
       // Track the set of reduction views which need to be applied here
       FieldMask reduction_mask;
-      LegionMap<ReductionView*,ReduceInfo>::aligned valid_reductions;
+      // We need to keep these in order because there may be multiple
+      // generations of reductions applied to this instance
+      LegionDeque<ReductionEpoch>::aligned reduction_epochs;
     };
 
     /**
@@ -3881,12 +4041,6 @@ namespace LegionRuntime {
                                                 Event precondition,
                                          std::set<Event> &postconditions);
     protected:
-      void flush_reductions(const MappableInfo &info,
-                            MaterializedView *dst,
-                            const FieldMask &event_mask,
-                    const LegionMap<Event,FieldMask>::aligned &preconditions,
-                            std::set<Event> &event_set);
-    protected:
       void unpack_composite_view(Deserializer &derez, AddressSpaceID source,
                                  bool send_back, bool need_lock);
     public:
@@ -3968,7 +4122,7 @@ namespace LegionRuntime {
                                std::set<Event> &preconditions,
                                std::set<Event> &postconditions);
     public:
-      bool intersects_with(RegionTreeNode *dst, bool compute = true);
+      bool intersects_with(RegionTreeNode *dst);
       const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
@@ -4143,18 +4297,18 @@ namespace LegionRuntime {
     public:
       void perform_reduction(LogicalView *target, const FieldMask &copy_mask, 
                              Processor local_proc, CopyTracker *tracker = NULL);
-      Event perform_composite_reduction(MaterializedView *target,
+      Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
-                                        Processor local_proc,
                                         const std::set<Event> &preconditions,
-                                        const std::set<Domain> &reduce_domains);
-      Event perform_composite_across_reduction(MaterializedView *target,
-                                               FieldID dst_field,
-                                               FieldID src_field,
-                                               unsigned src_index,
-                                               Processor local_proc,
+                                        const std::set<Domain> &reduce_domains,
+                                        Event domain_precondition);
+      Event perform_deferred_across_reduction(MaterializedView *target,
+                                              FieldID dst_field,
+                                              FieldID src_field,
+                                              unsigned src_index,
                                        const std::set<Event> &preconditions,
-                                       const std::set<Domain> &reduce_domains);
+                                       const std::set<Domain> &reduce_domains,
+                                       Event domain_precondition);
     public:
       virtual bool is_reduction_view(void) const;
       virtual InstanceView* as_instance_view(void) const;
@@ -4169,10 +4323,8 @@ namespace LegionRuntime {
                                            const FieldMask &copy_mask,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
-                                 const FieldMask &mask, bool reading,
-                                 Processor exec_proc);
-      virtual InstanceRef add_user(PhysicalUser &user,
-                                   Processor exec_proc);
+                                 const FieldMask &mask, bool reading);
+      virtual InstanceRef add_user(PhysicalUser &user);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
     public:
@@ -4337,6 +4489,7 @@ namespace LegionRuntime {
      * A traverser of the physical region tree for
      * performing the mapping operation.
      */
+    template<bool RESTRICTED>
     class MappingTraverser : public PathTraverser {
     public:
       MappingTraverser(RegionTreePath &path, const MappableInfo &info,
@@ -4355,6 +4508,8 @@ namespace LegionRuntime {
       void traverse_node(RegionTreeNode *node);
       bool map_physical_region(RegionNode *node);
       bool map_reduction_region(RegionNode *node);
+      bool map_restricted_physical(RegionNode *node);
+      bool map_restricted_reduction(RegionNode *node);
     public:
       const MappableInfo &info;
       const RegionUsage usage;

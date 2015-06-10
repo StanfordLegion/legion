@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -754,8 +754,7 @@ void HandlerThread::thread_main(void)
   }
 }
 
-void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for,
-                                   bool block/* = false*/)
+void HandlerThread::sleep_on_event(LegionRuntime::LowLevel::Event wait_for)
 {
   while (!wait_for.has_triggered()) {
     // Try handling the next message

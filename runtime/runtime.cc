@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1027,7 +1027,7 @@ namespace LegionRuntime {
       if (valid)
       {
         Event lock_event = lock.acquire(0, true/*exclusive*/);
-        lock_event.wait(true/*block*/);
+        lock_event.wait();
         // Check to see if we already have a future for the point
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
@@ -1440,6 +1440,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegion::Impl::set_reference(const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      if (!leaf_region && reference.has_ref())
+        reference.remove_valid_reference();
+      reference = ref;
+      if (!leaf_region && reference.has_ref())
+        reference.add_valid_reference();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegion::Impl::reset_reference(const InstanceRef &ref,
                                                UserEvent term_event)
     //--------------------------------------------------------------------------
@@ -1711,7 +1722,7 @@ namespace LegionRuntime {
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
       // low-level runtime here
-      legion_ready.wait(false/*block*/);
+      legion_ready.wait();
 #ifdef DEBUG_HIGH_LEVEL
       assert(state == IN_LEGION);
 #endif
@@ -1897,7 +1908,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -1941,7 +1952,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -1986,7 +1997,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2032,7 +2043,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2078,7 +2089,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2124,7 +2135,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2170,7 +2181,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2216,7 +2227,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[map_id]);
         inside_mapper_call[map_id] = true;
@@ -2286,7 +2297,7 @@ namespace LegionRuntime {
           // Always send messages before waiting
           if (!messages.empty())
             send_mapper_messages(task->map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[task->map_id]);
         inside_mapper_call[task->map_id] = true;
@@ -2411,7 +2422,7 @@ namespace LegionRuntime {
         {
           if (!messages.empty())
             send_mapper_messages(mappable->map_id, messages);
-          wait_on.wait(false/*block*/);
+          wait_on.wait();
         }
         AutoLock m_lock(mapper_locks[mappable->map_id]);
         inside_mapper_call[mappable->map_id] = true;
@@ -4815,7 +4826,9 @@ namespace LegionRuntime {
         epoch_op_lock(Reservation::create_reservation()),
         pending_partition_op_lock(Reservation::create_reservation()),
         dependent_partition_op_lock(Reservation::create_reservation()),
-        fill_op_lock(Reservation::create_reservation())
+        fill_op_lock(Reservation::create_reservation()),
+        attach_op_lock(Reservation::create_reservation()),
+        detach_op_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -5304,6 +5317,24 @@ namespace LegionRuntime {
       available_fill_ops.clear();
       fill_op_lock.destroy_reservation();
       fill_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<AttachOp*>::const_iterator it = 
+            available_attach_ops.begin(); it !=
+            available_attach_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_attach_ops.clear();
+      attach_op_lock.destroy_reservation();
+      attach_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<DetachOp*>::const_iterator it = 
+            available_detach_ops.begin(); it !=
+            available_detach_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_detach_ops.clear();
+      detach_op_lock.destroy_reservation();
+      detach_op_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -5366,7 +5397,7 @@ namespace LegionRuntime {
         if (count == total_ranks)
           Runtime::mpi_rank_event.trigger();
         // Wait on the event
-        mpi_rank_event.wait(false/*block*/);
+        mpi_rank_event.wait();
         // Once we've triggered, then we can build the maps
         for (unsigned local_rank = 0; local_rank < count; local_rank++)
         {
@@ -5844,7 +5875,7 @@ namespace LegionRuntime {
 #endif
       ColorPoint partition_color;
       // If we have a valid color, set it now
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      new_index_spaces, color_space, part_kind, 
@@ -6029,7 +6060,7 @@ namespace LegionRuntime {
         validate_structured_disjointness(pid, coloring);
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      coloring, color_space, 
@@ -6155,7 +6186,7 @@ namespace LegionRuntime {
         validate_multi_structured_disjointness(pid, coloring);
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       forest->create_index_partition(pid, parent, partition_color, 
                                      convex_hulls, coloring,
@@ -6696,7 +6727,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       part_op->initialize_equal_partition(ctx, pid, granularity);
@@ -6751,7 +6782,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       part_op->initialize_weighted_partition(ctx, pid, granularity, weights);
@@ -6824,7 +6855,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -6901,7 +6932,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -6978,7 +7009,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
@@ -7044,7 +7075,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint partition_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = get_available_pending_partition_op();
       Event handle_ready = part_op->get_handle_ready();
@@ -7100,7 +7131,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7205,7 +7236,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7311,7 +7342,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       // Allocate the partition operation
       DependentPartitionOp *part_op = get_available_dependent_partition_op();
@@ -7412,7 +7443,7 @@ namespace LegionRuntime {
       }
 #endif
       ColorPoint part_color;
-      if (color != AUTO_GENERATE_ID)
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
         part_color = ColorPoint(color);
       forest->create_pending_partition(pid, parent, color_space, part_color,
                                        part_kind, allocable, Event::NO_EVENT,
@@ -9028,7 +9059,7 @@ namespace LegionRuntime {
                             ",%x,%x) that conflicts with mapped region (" 
                             IDFMT ",%x,%x) at index %d of parent task %s "
                             "(ID %lld) that would ultimately result in "
-                            "deadlock.  Instead you receive this error "
+                            "deadlock. Instead you receive this error "
                             "message.",
                             launcher.requirement.region.index_space.id,
                             launcher.requirement.region.field_space.id,
@@ -9420,6 +9451,127 @@ namespace LegionRuntime {
                                            mapped_event);
         }
 #endif
+      }
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_hdf5(Context ctx, const char *file_name,
+                                        LogicalRegion handle, 
+                                        LogicalRegion parent,
+                                  const std::map<FieldID,const char*> field_map,
+                                        LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *attach_op = get_available_attach_op(); 
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context attach hdf5 file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal attach hdf5 file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
+                       handle, parent, field_map, mode, check_privileges); 
+#else
+      PhysicalRegion result = attach_op->initialize_hdf5(ctx, file_name,
+               handle, parent, field_map, mode, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = ctx->has_conflicting_regions(attach_op, parent_conflict,
+                                               inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region (" 
+                      IDFMT ",%x,%x) that conflicts with mapped region (" 
+                      IDFMT ",%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->regions[index].region.index_space.id,
+                      ctx->regions[index].region.field_space.id,
+                      ctx->regions[index].region.tree_id, index, 
+                      ctx->variants->name, ctx->get_unique_task_id(), 
+                      file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region (" 
+                      IDFMT ",%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      handle.index_space.id, handle.field_space.id, 
+                      handle.tree_id, ctx->variants->name, 
+                      ctx->get_unique_task_id(), file_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_executiong)
+        result.wait_until_valid();
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context detach hdf5 file!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal detach hdf5 file operation performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+#endif
+      
+      // Then issue the detach operation
+      Processor proc = ctx->get_executing_processor();
+      DetachOp *detach_op = get_available_detach_op();
+      detach_op->initialize_detach(ctx, region);
+#ifdef INORDER_EXECUTION
+      Event term_event = detach_op->get_completion_event();
+#endif
+      add_to_dependence_queue(proc, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        ctx->unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -14038,6 +14190,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    AttachOp* Runtime::get_available_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      AttachOp *result = NULL;
+      {
+        AutoLock a_lock(attach_op_lock);
+        if (!available_attach_ops.empty())
+        {
+          result = available_attach_ops.front();
+          available_attach_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<AttachOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DetachOp* Runtime::get_available_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      DetachOp *result = NULL;
+      {
+        AutoLock d_lock(detach_op_lock);
+        if (!available_detach_ops.empty())
+        {
+          result = available_detach_ops.front();
+          available_detach_ops.pop_front();
+        }
+      }
+      if (result == NULL)
+        result = legion_new<DetachOp>(this);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -14286,6 +14482,22 @@ namespace LegionRuntime {
     {
       AutoLock f_lock(fill_op_lock);
       available_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_attach_op(AttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      available_attach_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_detach_op(DetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      available_detach_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -14671,6 +14883,10 @@ namespace LegionRuntime {
           return "Dependent Partition Op";
         case FILL_OP_ALLOC:
           return "Fill Op";
+        case ATTACH_OP_ALLOC:
+          return "Attach Op";
+        case DETACH_OP_ALLOC:
+          return "Detach Op";
         case MESSAGE_BUFFER_ALLOC:
           return "Message Buffer";
         case EXECUTING_CHILD_ALLOC:

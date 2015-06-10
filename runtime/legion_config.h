@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -292,6 +292,8 @@ typedef enum legion_error_t {
   ERROR_INDEX_TREE_MISMATCH = 125,
   ERROR_INDEX_PARTITION_ANCESTOR = 126,
   ERROR_INVALID_PENDING_CHILD = 127,
+  ERROR_ILLEGAL_FILE_ATTACH = 128,
+  ERROR_ILLEGAL_ALLOCATOR_REQUEST = 129,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -360,6 +362,11 @@ enum {
   NAME_SEMANTIC_TAG = 0,
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
+
+typedef enum legion_file_mode_t {
+  LEGION_FILE_READ_ONLY,
+  LEGION_FILE_READ_WRITE,
+} legion_file_mode_t;
 
 //==========================================================================
 //                                Types

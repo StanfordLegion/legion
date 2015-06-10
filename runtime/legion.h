@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4179,6 +4179,60 @@ namespace LegionRuntime {
                        const std::set<FieldID> &fields, 
                        const void *value, size_t value_size,
                        Predicate pred = Predicate::TRUE_PRED);
+    public:
+      //------------------------------------------------------------------------
+      // File Operations
+      //------------------------------------------------------------------------
+      /**
+       * Attach an HDF5 file as a physical region. The file must already 
+       * exist. Legion will defer the attach operation until all other
+       * operations on the logical region are finished. After the attach
+       * operation succeeds, then all other physical instances for the 
+       * logical region will be invalidated, making the physical instance
+       * the only valid version of the logical region. The resulting physical 
+       * instance is attached with restricted coherence (the same as logical 
+       * regions mapped with simultaneous coherence). All operations using 
+       * the logical region will be required to use the physical instance
+       * until the restricted coherence is removed using an acquire 
+       * operation. The restricted coherence can be reinstated by
+       * performing a release operation. Just like other physical regions,
+       * the HDF5 file can be both mapped and unmapped after it is created.
+       * The runtime will report an error for an attempt to attach an file
+       * to a logical region which is already mapped in the enclosing
+       * parent task's context. The runtime will also report an error if
+       * the task launching the attach operation does not have the 
+       * necessary privileges (read-write) on the logical region.
+       * The resulting physical region is unmapped, but can be mapped
+       * using the standard inline mapping calls.
+       * @param ctx enclosing task context
+       * @param file_name the path to an existing HDF5 file
+       * @param handle the logical region with which to associate the file
+       * @param parent the parent logical region containing privileges
+       * @param field_map mapping for field IDs to HDF5 dataset names
+       * @param mode the access mode for attaching the file
+       * @return a new physical instance corresponding to the HDF5 file
+       */
+      PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent, 
+                                 const std::map<FieldID,const char*> &field_map,
+                                 LegionFileMode mode);
+
+      /**
+       * Detach an HDF5 file. This can only be performed on a physical
+       * region that was created by calling attach_hdf5. The runtime
+       * will properly defer the detach call until all other operations
+       * on the logical region are complete. It is the responsibility of
+       * the user to perform the necessary operations to flush any data
+       * back to the physical instance before detaching (e.g. releasing
+       * coherence, etc). If the physical region is still mapped when
+       * this function is called, then it will be unmapped by this call.
+       * Note that this file may not actually get detached until much 
+       * later in the execution of the program due to Legion's deferred 
+       * execution model.
+       * @param ctx enclosing task context 
+       * @param region the physical region for an HDF5 file to detach
+       */
+      void detach_hdf5(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations

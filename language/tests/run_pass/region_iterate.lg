@@ -15,7 +15,7 @@
 import "legion"
 
 task f() : int
-  var r = region(int, 10)
+  var r = region(ispace(ptr, 10), int)
 
   var p0 = new(ptr(int, r))
   var p1 = new(ptr(int, r))

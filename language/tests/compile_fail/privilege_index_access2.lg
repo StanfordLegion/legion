@@ -12,15 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- privilege_index_access2.lg:25: invalid privilege writes($r) for dereference of i1d(int32, $r)
+--   r[p] = 0
+--   ^
+
 import "legion"
 
-task f(is : ispace(opaque))
-end
+local i1d = index_type(int, "i1d")
 
-task main()
-  var is0 = ispace(opaque, 5)
-  var is1 = ispace(opaque, [uint](5))
-  -- f(is0)
-  -- f(is1)
+task f(is : ispace(i1d), r : region(is, int), p : i1d)
+  r[p] = 0
 end
-legionlib.start(main)
+f:compile()

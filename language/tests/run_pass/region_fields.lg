@@ -41,7 +41,7 @@ where reads(r.{a, b}) do
 end
 
 task tf() : int
-  var r = region(p1, 1)
+  var r = region(ispace(ptr, 1), p1)
   var x = new(ptr(p1, r))
   x.a = 1
   x.b = 20
@@ -58,7 +58,7 @@ do
 end
 
 task tg()
-  var r = region(p2, 1)
+  var r = region(ispace(ptr, 1), p2)
   var x = new(ptr(p2, r))
   g(r, x)
   return x.e.a + x.f.a + x.f.b

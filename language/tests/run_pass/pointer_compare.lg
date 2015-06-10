@@ -15,7 +15,7 @@
 import "legion"
 
 task top() : bool
-  var r = region(int, 6)
+  var r = region(ispace(ptr, 6), int)
   var x = new(ptr(int, r))
   var y = new(ptr(int, r))
   return (x == x) and (x ~= y)

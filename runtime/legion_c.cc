@@ -1288,6 +1288,24 @@ legion_task_launcher_add_field(legion_task_launcher_t launcher_,
   launcher->add_field(idx, fid, inst);
 }
 
+unsigned
+legion_task_launcher_add_index_requirement(
+  legion_task_launcher_t launcher_,
+  legion_index_space_t handle_,
+  legion_allocate_mode_t priv,
+  legion_index_space_t parent_,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->index_requirements.size();
+  launcher->add_index_requirement(
+    IndexSpaceRequirement(handle, priv, parent, verified));
+  return idx;
+}
+
 void
 legion_task_launcher_add_future(legion_task_launcher_t launcher_,
                                 legion_future_t future_)
@@ -1447,6 +1465,24 @@ legion_index_launcher_add_field(legion_index_launcher_t launcher_,
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_field(idx, fid, inst);
+}
+
+unsigned
+legion_index_launcher_add_index_requirement(
+  legion_index_launcher_t launcher_,
+  legion_index_space_t handle_,
+  legion_allocate_mode_t priv,
+  legion_index_space_t parent_,
+  bool verified /* = false*/)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+
+  unsigned idx = launcher->index_requirements.size();
+  launcher->add_index_requirement(
+    IndexSpaceRequirement(handle, priv, parent, verified));
+  return idx;
 }
 
 void

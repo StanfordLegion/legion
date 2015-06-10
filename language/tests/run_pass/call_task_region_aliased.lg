@@ -23,7 +23,7 @@ where reads(s), writes(s) do
 end
 
 task main()
-  var r = region(int, 5)
+  var r = region(ispace(ptr, 5), int)
   f(r, r)
 end
 legionlib.start(main)

@@ -1341,6 +1341,17 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
+   * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
+   */
+  unsigned
+  legion_task_launcher_add_index_requirement(
+    legion_task_launcher_t launcher,
+    legion_index_space_t handle,
+    legion_allocate_mode_t priv,
+    legion_index_space_t parent,
+    bool verified /* = false*/);
+
+  /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_future()
    */
   void
@@ -1456,6 +1467,17 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
+   */
+  unsigned
+  legion_index_launcher_add_index_requirement(
+    legion_index_launcher_t launcher,
+    legion_index_space_t handle,
+    legion_allocate_mode_t priv,
+    legion_index_space_t parent,
+    bool verified /* = false*/);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_future()

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2015 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,7 +90,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Event lock_event = logger_lock.acquire(0, true/*exclusive*/);
-      lock_event.wait(true/*block*/);
+      lock_event.wait();
       va_list args;
       va_start(args, fmt);
       vsnprintf(block_buffer, 127, fmt, args);
