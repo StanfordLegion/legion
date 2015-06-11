@@ -389,6 +389,7 @@ namespace LegionRuntime {
         TOC_PROC = ::TOC_PROC, // Throughput core
         LOC_PROC = ::LOC_PROC, // Latency core
         UTIL_PROC = ::UTIL_PROC, // Utility core
+        IO_PROC = ::IO_PROC, // I/O core
         PROC_GROUP = ::PROC_GROUP, // Processor group
       };
 

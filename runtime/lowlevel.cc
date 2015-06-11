@@ -8379,6 +8379,7 @@ namespace LegionRuntime {
 
     static std::vector<LocalProcessor *> local_cpus;
     static std::vector<LocalProcessor *> local_util_procs;
+    static std::vector<LocalProcessor *> local_io_procs;
     static size_t stack_size_in_mb;
 #ifdef USE_CUDA
     static std::vector<GPUProcessor *> local_gpus;
@@ -8965,6 +8966,7 @@ namespace LegionRuntime {
       stack_size_in_mb = 2;
       unsigned num_local_cpus = 1;
       unsigned num_util_procs = 1;
+      unsigned num_io_procs = 0;
       //unsigned cpu_worker_threads = 1;
       unsigned dma_worker_threads = 1;
       unsigned active_msg_worker_threads = 1;
@@ -9009,6 +9011,7 @@ namespace LegionRuntime {
         INT_ARG("-ll:stack", stack_size_in_mb);
 	INT_ARG("-ll:cpu", num_local_cpus);
 	INT_ARG("-ll:util", num_util_procs);
+        INT_ARG("-ll:io", num_io_procs);
 	//INT_ARG("-ll:workers", cpu_worker_threads);
 	INT_ARG("-ll:dma", dma_worker_threads);
 	INT_ARG("-ll:amsg", active_msg_worker_threads);
@@ -9257,7 +9260,7 @@ namespace LegionRuntime {
       unsigned apos = 0;
 
       announce_data.node_id = gasnet_mynode();
-      announce_data.num_procs = num_local_cpus + num_util_procs;
+      announce_data.num_procs = num_local_cpus + num_util_procs + num_io_procs;
       announce_data.num_memories = (1 + 
 				    (reg_mem_size_in_mb > 0 ? 1 : 0) +
 				    (disk_mem_size_in_mb > 0 ? 1 : 0));
@@ -9282,6 +9285,21 @@ namespace LegionRuntime {
           adata[apos++] = NODE_ANNOUNCE_PROC;
           adata[apos++] = up->me.id;
           adata[apos++] = Processor::UTIL_PROC;
+        }
+      }
+      // create i/o processors (if any)
+      if (num_io_procs > 0)
+      {
+        for (unsigned i = 0; i < num_io_procs; i++) {
+          LocalProcessor *io = new LocalProcessor(ID(ID::ID_PROCESSOR, gasnet_mynode(),
+                                            n->processors.size()).convert<Processor>(),
+                                            Processor::IO_PROC,
+                                            stack_size_in_mb << 20, "io worker");
+          n->processors.push_back(io);
+          local_io_procs.push_back(io);
+          adata[apos++] = NODE_ANNOUNCE_PROC;
+          adata[apos++] = io->me.id;
+          adata[apos++] = Processor::IO_PROC;
         }
       }
 
@@ -9420,6 +9438,51 @@ namespace LegionRuntime {
 	  it != local_util_procs.end();
 	  it++) {
 	if(cpu_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = cpumem->me.id;
+	  adata[apos++] = 100;  // "large" bandwidth
+	  adata[apos++] = 1;    // "small" latency
+	}
+
+	if(reg_mem_size_in_mb > 0) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = regmem->me.id;
+	  adata[apos++] = 80;  // "large" bandwidth
+	  adata[apos++] = 5;    // "small" latency
+	}
+
+        if(disk_mem_size_in_mb > 0) {
+          adata[apos++] = NODE_ANNOUNCE_PMA;
+          adata[apos++] = (*it)->me.id;
+          adata[apos++] = diskmem->me.id;
+          adata[apos++] = 5;  // "low" bandwidth
+          adata[apos++] = 100;  // "high" latency
+        }
+
+#ifdef USE_HDF
+         adata[apos++] = NODE_ANNOUNCE_PMA;
+         adata[apos++] = (*it)->me.id;
+         adata[apos++] = hdfmem->me.id;
+         adata[apos++] = 5; // "low" bandwidth
+         adata[apos++] = 100; // "high" latency
+#endif
+
+	if(global_memory) {
+	  adata[apos++] = NODE_ANNOUNCE_PMA;
+	  adata[apos++] = (*it)->me.id;
+	  adata[apos++] = global_memory->me.id;
+	  adata[apos++] = 10;  // "lower" bandwidth
+	  adata[apos++] = 50;    // "higher" latency
+	}
+      }
+
+      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+          it != local_io_procs.end();
+          it++)
+      {
+        if(cpu_mem_size_in_mb > 0) {
 	  adata[apos++] = NODE_ANNOUNCE_PMA;
 	  adata[apos++] = (*it)->me.id;
 	  adata[apos++] = cpumem->me.id;
@@ -9790,6 +9853,11 @@ namespace LegionRuntime {
 	  it++)
 	(*it)->start_processor();
 
+      for (std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+            it != local_io_procs.end();
+            it++)
+        (*it)->start_processor();
+
       for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
 	  it++)
@@ -9860,6 +9928,11 @@ namespace LegionRuntime {
 	  it != local_util_procs.end();
 	  it++)
 	(*it)->shutdown_processor();
+
+      for(std::vector<LocalProcessor *>::iterator it = local_io_procs.begin();
+          it != local_io_procs.end();
+          it++)
+        (*it)->shutdown_processor();
 
       for(std::vector<LocalProcessor *>::iterator it = local_cpus.begin();
 	  it != local_cpus.end();
