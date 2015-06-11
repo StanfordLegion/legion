@@ -2428,8 +2428,11 @@ namespace LegionRuntime {
       FieldMask detach_mask = 
         detach_node->column_source->get_field_mask(req.privilege_fields);
       LogicalView *view = ref.get_handle().get_view();
-      detach_node->detach_file(ctx.get_id(), detach_mask, 
-                               view->get_manager());
+      PhysicalManager *manager = view->get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!manager->is_reduction_manager()); 
+#endif
+      detach_node->detach_file(ctx.get_id(), detach_mask, manager); 
     }
 
     //--------------------------------------------------------------------------
@@ -8919,7 +8922,8 @@ namespace LegionRuntime {
                                          context->runtime->address_space,
                                          context->runtime->address_space,
                                          location, inst, node, layout,
-                                         Event::NO_EVENT, node->get_depth());
+                                         Event::NO_EVENT, node->get_depth(),
+                                         InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -19336,10 +19340,10 @@ namespace LegionRuntime {
                                      Memory mem, PhysicalInstance inst,
                                      RegionNode *node, 
                                      LayoutDescription *desc, Event u_event, 
-                                     unsigned dep, bool persist)
+                                     unsigned dep, InstanceFlag flags)
       : PhysicalManager(ctx, did, owner_space, local_space, mem, inst), 
         region_node(node), layout(desc), use_event(u_event), 
-        depth(dep), recycled(false), persistent(persist)
+        depth(dep), recycled(false), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
       // Tell the runtime so it can update the per memory data structures
@@ -19702,7 +19706,7 @@ namespace LegionRuntime {
       rez.serialize(region_node->handle);
       rez.serialize(use_event);
       rez.serialize(depth);
-      rez.serialize(persistent);
+      rez.serialize(instance_flags);
       layout->pack_layout_description(rez, target);
     }
 
@@ -19725,8 +19729,8 @@ namespace LegionRuntime {
       derez.deserialize(use_event);
       unsigned depth;
       derez.deserialize(depth);
-      bool persistent;
-      derez.deserialize(persistent);
+      InstanceFlag flags;
+      derez.deserialize(flags);
       RegionNode *node = context->get_node(handle);
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, 
@@ -19738,7 +19742,7 @@ namespace LegionRuntime {
         return legion_new<InstanceManager>(context, did, owner_space,
                                    context->runtime->address_space,
                                    mem, inst, node, layout,
-                                   use_event, depth, persistent);
+                                   use_event, depth, flags);
       else
         return NULL;
     }
@@ -19808,7 +19812,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // No need to hold any locks as this is a monotonic variable
-      return persistent;
+      return (instance_flags & PERSISTENT_FLAG);
     }
 
     //--------------------------------------------------------------------------
@@ -19816,9 +19820,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Only need to do this if we weren't persistent to begin with
-      if (!persistent)
+      if (instance_flags & PERSISTENT_FLAG)
       {
-        persistent = true;
+        instance_flags = (InstanceFlag)(instance_flags | PERSISTENT_FLAG);
         // Now notify others about the update
         AutoLock gc(gc_lock,1,false/*exclusive*/);
         if (owner)
@@ -19862,6 +19866,13 @@ namespace LegionRuntime {
       assert(manager != NULL);
 #endif
       manager->make_persistent(source);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceManager::is_attached_file(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (instance_flags & ATTACH_FILE_FLAG);
     }
 
     /////////////////////////////////////////////////////////////

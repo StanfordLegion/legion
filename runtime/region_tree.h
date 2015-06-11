@@ -3184,11 +3184,17 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
+      enum InstanceFlag {
+        NO_INSTANCE_FLAG = 0x00000000,
+        PERSISTENT_FLAG  = 0x00000001,
+        ATTACH_FILE_FLAG = 0x00000002,
+      };
+    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       Memory mem, PhysicalInstance inst, RegionNode *node,
                       LayoutDescription *desc, Event use_event, 
-                      unsigned depth, bool persistent = false);
+                      unsigned depth, InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -3242,6 +3248,8 @@ namespace LegionRuntime {
                                          RegionTreeForest *context,
                                          AddressSpaceID source);
     public:
+      bool is_attached_file(void) const;
+    public:
       RegionNode *const region_node;
       LayoutDescription *const layout;
       // Event that needs to trigger before we can start using
@@ -3259,7 +3267,7 @@ namespace LegionRuntime {
       // If set to true, it should prevent the instance from ever
       // being collected before the context in which it was created
       // is destroyed.
-      bool persistent;
+      InstanceFlag instance_flags;
     };
 
     /**

@@ -294,6 +294,7 @@ typedef enum legion_error_t {
   ERROR_INVALID_PENDING_CHILD = 127,
   ERROR_ILLEGAL_FILE_ATTACH = 128,
   ERROR_ILLEGAL_ALLOCATOR_REQUEST = 129,
+  ERROR_ILLEGAL_DETACH_OPERATION = 130,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

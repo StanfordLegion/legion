@@ -8760,6 +8760,22 @@ namespace LegionRuntime {
       // able to attach in the first place anyway.
       requirement.copy_without_mapping_info(region.impl->get_requirement());
       initialize_privilege_path(privilege_path, requirement);
+      // Check that this is actually a file
+      LogicalView *view = reference.get_handle().get_view();
+      PhysicalManager *manager = view->get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!manager->is_reduction_manager()); 
+#endif
+      InstanceManager *inst_manager = manager->as_instance_manager(); 
+      if (!inst_manager->is_attached_file())
+      {
+        log_run.error("Illegal detach operation on a physical region which "
+                      "was not attached!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_DETACH_OPERATION);
+      }
     }
 
     //--------------------------------------------------------------------------
