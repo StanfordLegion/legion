@@ -1469,7 +1469,6 @@ namespace LegionRuntime {
         int lo[3];
         hsize_t dims[3];
         int ndims;
-        hid_t type_id;
         hid_t file_id;
         std::vector<hid_t> dataset_ids;
         std::vector<hid_t> datatype_ids;

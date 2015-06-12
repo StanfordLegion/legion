@@ -62,7 +62,8 @@ namespace LegionRuntime {
                     Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
                     Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dso,
                     Rect<1> &irect, Rect<1> &orect,
-                    int &done, int &offset_idx, int &block_start, int &total, int available_slots)
+                    int &done, int &offset_idx, int &block_start, int &total, int available_slots,
+                    bool disable_batch)
       {
         src_start = calc_mem_loc(src_buf->alloc_offset, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
                                  src_buf->elmt_size, src_buf->block_size, done + irect.lo);
@@ -92,7 +93,7 @@ namespace LegionRuntime {
           //printf("todo = %d, size = %d\n", todo, oas_vec[offset_idx].size);
           nbytes += todo * oas_vec[offset_idx].size;
           // see if we can batch more
-          if (todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
+          if (!disable_batch && todo == src_in_block && todo == dst_in_block && offset_idx + 1 < oas_vec.size()
           && src_buf->block_size == dst_buf->block_size && todo + done >= src_buf->block_size
           && oas_vec[offset_idx + 1].src_offset == oas_vec[offset_idx].src_offset + oas_vec[offset_idx].size
           && oas_vec[offset_idx + 1].dst_offset == oas_vec[offset_idx].dst_offset + oas_vec[offset_idx].size) {
@@ -139,7 +140,7 @@ namespace LegionRuntime {
                   if (dso->any_left) {
                     dsi->step();
                     if (dsi->any_left) {
-                      free(dso);
+                      delete dso;
                       dso = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dsi->subrect, *(dst_buf->linearization.get_mapping<DIM>()));
                     }
                   }
@@ -162,7 +163,7 @@ namespace LegionRuntime {
                   if (!dsi->any_left) {
                     dso->step();
                     if (dso->any_left) {
-                      free(dsi);
+                      delete dsi;
                       dsi = new Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >(dso->subrect, *(src_buf->linearization.get_mapping<DIM>()));
                     }
                   }
@@ -298,7 +299,7 @@ namespace LegionRuntime {
       {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi && dso) {
+        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
@@ -436,7 +437,7 @@ namespace LegionRuntime {
       long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi && dso) {
+        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
@@ -644,7 +645,7 @@ namespace LegionRuntime {
       long GPUXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         long idx = 0;
-        while (idx < nr && !available_reqs.empty() && dsi && dso) {
+        while (idx < nr && !available_reqs.empty() && dsi->any_left && dso->any_left) {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, dsi, dso, irect, orect, done, offset_idx, block_start, total, min(available_reqs.size(), nr - idx));
@@ -770,6 +771,215 @@ namespace LegionRuntime {
       }
 #endif
 
+#ifdef USE_HDF
+      template<unsigned DIM>
+      HDFXferDes<DIM>::HDFXferDes(Channel* _channel, bool has_pre_XferDes,
+                                  Buffer* _src_buf, Buffer* _dst_buf,
+                                  char* _mem_base, HDFMemory::HDFMetadata* _hdf_metadata,
+                                  Domain _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                                  long max_nr, XferOrder _order, XferKind _kind)
+      {
+        kind = _kind;
+        order = _order;
+        bytes_read = bytes_write = 0;
+        pre_XferDes = NULL;
+        next_XferDes = NULL;
+        next_bytes_read = 0;
+        src_buf = _src_buf;
+        dst_buf = _dst_buf;
+        // for now, we didn't consider HDF transfer for intermediate buffer
+        // since ib may involve a different address space model
+        assert(!src_buf->is_ib);
+        assert(!dst_buf->is_ib);
+        assert(!has_pre_XferDes);
+        mem_base = _mem_base;
+        hdf_metadata = _hdf_metadata;
+        domain = _domain;
+        size_t total_field_size = 0;
+        for (int i = 0; i < _oas_vec.size(); i++) {
+          OffsetsAndSize oas;
+          oas.src_offset = _oas_vec[i].src_offset;
+          oas.dst_offset = _oas_vec[i].dst_offset;
+          oas.size = _oas_vec[i].size;
+          total_field_size += oas.size;
+          oas_vec.push_back(oas);
+        }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (!has_pre_XferDes) ? bytes_total : 0;
+        complete_event = GenEventImpl::create_genevent()->current_event();
+
+        Rect<DIM> subrect_check;
+        switch (kind) {
+          case XferDes::XFER_HDF_READ:
+          {
+            HDFReadRequest* hdf_read_reqs = (HDFReadRequest*) calloc(max_nr, sizeof(HDFReadRequest));
+            for (int i = 0; i < max_nr; i++) {
+              hdf_read_reqs[i].xd = this;
+              available_reqs.push(&hdf_read_reqs[i]);
+            }
+            requests = hdf_read_reqs;
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), dst_buf->linearization);
+            // Make sure instance involves FortranArrayLinearization
+            assert(lsi->strides[0] == 1);
+            // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
+            // we change the src/dst offset to hdf dataset idx
+            for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
+              off_t offset = 0;
+              int idx = 0;
+              while (offset < (*fit).src_offset) {
+                offset += H5Tget_size(hdf_metadata->datatype_ids[idx]);
+                idx++;
+              }
+              assert(offset == (*fit).src_offset);
+              (*fit).src_offset = idx;
+            }
+            fit = oas_vec.begin();
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+            break;
+          }
+          case XferDes::XFER_HDF_WRITE:
+          {
+            HDFWriteRequest* hdf_write_reqs = (HDFWriteRequest*) calloc(max_nr, sizeof(HDFWriteRequest));
+            for (int i = 0; i < max_nr; i++) {
+              hdf_write_reqs[i].xd = this;
+              available_reqs.push(&hdf_write_reqs[i]);
+            }
+            requests = hdf_write_reqs;
+            lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), src_buf->linearization);
+            // Make sure instance involves FortranArrayLinearization
+            assert(lsi->strides[0] == 1);
+            // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
+            // we change the src/dst offset to hdf dataset idx
+            for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
+              off_t offset = 0;
+              int idx = 0;
+              while (offset < (*fit).dst_offset) {
+                offset += H5Tget_size(hdf_metadata->datatype_ids[idx]);
+                idx++;
+              }
+              assert(offset == (*fit).dst_offset);
+              (*fit).dst_offset = idx;
+            }
+            fit = oas_vec.begin();
+            pir = new GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+            break;
+          }
+          default:
+            assert(0);
+        }
+      }
+
+      template<unsigned DIM>
+      long HDFXferDes<DIM>::get_requests(Request** requests, long nr)
+      {
+        long ns = 0;
+        while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
+          off_t src_start, dst_start;
+          requests[ns] = available_reqs.front();
+          available_reqs.pop();
+          requests[ns]->is_read_done = false;
+          requests[ns]->is_write_done = false;
+          int todo;
+          switch (kind) {
+            case XferDes::XFER_HDF_READ:
+            {
+              // Recall that src_offset means the index of the involving dataset in hdf file
+              off_t hdf_idx = fit->src_offset;
+              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
+              todo = min(pir->r.hi[0] - pir->p[0], dst_buf->block_size - lsi->mapping.image(pir->p) % dst_buf->block_size);
+              HDFReadRequest* hdf_read_req = (HDFReadRequest*) requests[ns];
+              hdf_read_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
+              hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
+              int count[DIM];
+              for (int i = 0; i < DIM; i++) count[i] = 1;
+              count[0] = todo;
+              hdf_read_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
+              // HDF dimension always start with zero, but Legion::Domain may start with any integer
+              // We need to deal with the offset between them here
+              Point<DIM> offset(hdf_metadata->lo);
+              herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id, H5S_SELECT_SET, pir->p - offset, NULL, count, NULL);
+              hdf_read_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
+              off_t dst_offset = calc_mem_loc(dst_buf->alloc_offset, fit->dst_offset, fit->size,
+                                              dst_buf->elmt_size, dst_buf->block_size, lsi->mapping.image(pir->p));
+              hdf_read_req->dst = mem_base + dst_offset;
+              hdf_read_req->nbytes = todo * elemnt_size;
+              break;
+            }
+            case XferDes::XFER_HDF_WRITE:
+            {
+              // Recall that src_offset means the index of the involving dataset in hdf file
+              off_t hdf_idx = fit->dst_offset;
+              size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
+              int todo = min(pir->r.hi[0] - pir->p[0], src_buf->block_size - lsi->mapping.image(pir->p) % src_buf->block_size);
+              HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) requests[ns];
+              hdf_write_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
+              hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
+              int count[DIM];
+              for (int i = 0; i < DIM; i++) count[i] = 1;
+              count[0] = todo;
+              hdf_write_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
+              // HDF dimension always start with zero, but Legion::Domain may start with any integer
+              // We need to deal with the offset between them here
+              Point<DIM> offset(hdf_metadata->lo);
+              herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, pir->p - offset, NULL, count, NULL);
+              hdf_write_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
+              off_t src_offset = calc_mem_loc(src_buf->alloc_offset, fit->src_offset, fit->size,
+                                              src_buf->elmt_size, src_buf->block_size, lsi->mapping.image(pir->p));
+              hdf_write_req->src = mem_base + src_offset;
+              hdf_write_req->nbytes = todo * elemnt_size;
+              break;
+            }
+            default:
+              assert(0);
+          }
+          while(todo > 0) pir++;
+          if(!pir) {
+            fit++;
+            delete pir;
+            pir = GenericPointInRectIterator<DIM>(domain.get_rect<DIM>());
+          }
+          ns ++;
+        }
+        return ns;
+      }
+
+      template<unsigned DIM>
+      void HDFXferDes<DIM>::notify_request_read_done(Request* req)
+      {
+        req->is_read_done = true;
+        // currently we don't support ib case
+        assert(!pre_XferDes);
+        switch (kind) {
+          case XferDes::XFER_HDF_READ:
+            bytes_read += ((HDFReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_HDF_WRITE:
+            bytes_read += ((HDFWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+      }
+
+      template<unsigned DIM>
+      void HDFXferDes<DIM>::notify_request_write_done(Request* req)
+      {
+        req->is_write_done = true;
+        // currently we don't support ib case
+        assert(!next_XferDes);
+        switch (kind) {
+          case XferDes::XFER_HDF_READ:
+            bytes_write += ((HDFReadRequest*)req)->nbytes;
+            break;
+          case XferDes::XFER_HDF_WRITE:
+            bytes_write += ((HDFWriteRequest*)req)->nbytes;
+            break;
+          default:
+            assert(0);
+        }
+      }
+#endif
+
       MemcpyChannel::MemcpyChannel(long max_nr)
       {
         kind = XferDes::XFER_MEM_CPY;
@@ -788,7 +998,7 @@ namespace LegionRuntime {
         for (int i = 0; i < nr; i++) {
           memcpy(mem_cpy_reqs[i]->dst_buf, mem_cpy_reqs[i]->src_buf, mem_cpy_reqs[i]->nbytes);
           mem_cpy_reqs[i]->xd->notify_request_read_done(mem_cpy_reqs[i]);
-          mem_cpy_reqs[i]->xd->notify_request_read_done(mem_cpy_reqs[i]);
+          mem_cpy_reqs[i]->xd->notify_request_write_done(mem_cpy_reqs[i]);
         }
         return nr;
       }
@@ -1054,7 +1264,51 @@ namespace LegionRuntime {
 #endif
 
 #ifdef USE_HDF
+      HDFChannel::HDFChannel(long max_nr, XferDes::XferKind _kind)
+      {
+        kind = _kind;
+        capacity = max_nr;
+      }
 
+      HDFChannel::~HDFChannel() {}
+
+      long HDFChannel::submit(Request** requests, long nr)
+      {
+        switch (kind) {
+          case XferDes::XFER_HDF_READ:
+          {
+            HDFReadRequest** hdf_read_reqs = (HDFReadRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              HDFReadRequest* request = hdf_read_reqs[i];
+              H5Dread(request->dataset_id, request->mem_type_id, request->mem_space_id, request->file_space_id, H5P_DEFAULT, request->dst);
+              request->xd->notify_request_read_done(request);
+              request->xd->notify_request_write_done(request);
+            }
+            break;
+          }
+          case XferDes::XFER_HDF_WRITE:
+          {
+            HDFWriteRequest** hdf_read_reqs = (HDFWriteRequest**) requests;
+            for (int i = 0; i < nr; i++) {
+              HDFWriteRequest* request = hdf_read_reqs[i];
+              H5Dwrite(request->dataset_id, request->mem_type_id, request->mem_space_id, request->file_space_id, H5P_DEFAULT, request->src);
+              request->xd->notify_request_read_done(request);
+              request->xd->notify_request_write_done(request);
+            }
+            break;
+          }
+          default:
+            assert(false);
+        }
+        return nr;
+      }
+
+      void HDFChannel::pull() {}
+
+      long HDFChannel::available()
+      {
+        return capacity;
+      }
 #endif
 
 #ifdef MEMCPY_THREAD_CODE

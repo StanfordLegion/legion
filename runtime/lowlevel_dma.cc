@@ -4112,9 +4112,9 @@ namespace LegionRuntime {
       terminate_flag = false;
     }
 
-    void start_dma_system(int count, int max_nr,
+    void start_dma_system(int count, int max_nr
 #ifdef USE_CUDA
-                          std::vector<GPUProcessor*> &local_gpus
+                          ,std::vector<GPUProcessor*> &local_gpus
 #endif
                          )
     {
@@ -4122,28 +4122,32 @@ namespace LegionRuntime {
       xferDes_queue = new XferDesQueue;
       channel_manager = new ChannelManager;
       num_threads = 2;
+#ifdef USE_HDF
+      // Need a dedicated thread for handling HDF requests
+      num_threads ++;
+#endif
       dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
       MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
-      DiskChannel* disk_read_channel =  channel_manager->create_disk_read_channel(max_nr);
-      DiskChannel* disk_write_channel = channel_manager->create_disk_write_channel(max_nr);
       dma_threads[0] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
       std::vector<Channel*> async_channels;
-      async_channels.push_back(disk_read_channel);
-      async_channels.push_back(disk_write_channel);
+      async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
+      async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
 #ifdef USE_CUDA
       std::vector<GPUProcessor*>::iterator it;
       for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
-        GPUChannel* gpu_to_fb_channel = channel_manager->create_gpu_to_fb_channel(max_nr, *it);
-        GPUChannel* gpu_from_fb_channel = channel_manager->create_gpu_from_fb_channel(max_nr, *it);
-        GPUChannel* gpu_in_fb_channel = channel_manager->create_gpu_in_fb_channel(max_nr, *it);
-        GPUChannel* gpu_peer_fb_channel = channel_manager->create_gpu_peer_fb_channel(max_nr, *it);
-        async_channels.push_back(gpu_to_fb_channel);
-        async_channels.push_back(gpu_from_fb_channel);
-        async_channels.push_back(gpu_in_fb_channel);
-        async_channels.push_back(gpu_peer_fb_channel);
+        async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));
+        async_channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
       }
 #endif
       dma_threads[1] = new DMAThread(max_nr, xferDes_queue, async_channels);
+#ifdef USE_HDF
+      std::vector<Channel*> hdf_channels;
+      hdf_channels.push_back(channel_manager->create_hdf_read_channel(max_nr));
+      hdf_channels.push_back(channel_manager->create_hdf_write_channel(max_nr));
+      dma_threads[2] = new DMAThread(max_nr, xferDes_queue, hdf_channels);
+#endif
       worker_threads = new pthread_t[num_threads];
       for (int i = 0; i < num_threads; i++) {
         // register dma thread to XferDesQueue

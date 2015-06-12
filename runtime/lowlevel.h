@@ -29,6 +29,7 @@
 #include "accessor.h"
 #include "arrays.h"
 
+#define USE_HDF
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif

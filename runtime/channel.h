@@ -30,6 +30,9 @@
 #include <pthread.h>
 #include <string.h>
 #include "lowlevel.h"
+#include "lowlevel_impl.h"
+#include "activemsg.h"
+
 #ifdef USE_CUDA
 #include "lowlevel_gpu.h"
 #endif
@@ -231,6 +234,18 @@ namespace LegionRuntime{
 #ifdef USE_HDF
     class HDFReadRequest : public Request {
     public:
+      hid_t dataset_id, mem_type_id;
+      char* dst;
+      hid_t mem_space_id, file_space_id;
+      size_t nbytes;
+    };
+
+    class HDFWriteRequest : public Request {
+    public:
+      hid_t dataset_id, mem_type_id;
+      char* src;
+      hid_t mem_space_id, file_space_id;
+      size_t nbytes;
     };
 #endif
 
@@ -245,7 +260,9 @@ namespace LegionRuntime{
         XFER_GPU_FROM_FB,
         XFER_GPU_IN_FB,
         XFER_GPU_PEER_FB,
-        XFER_MEM_CPY
+        XFER_MEM_CPY,
+        XFER_HDF_READ,
+        XFER_HDF_WRITE
       };
       enum XferOrder {
         SRC_FIFO,
@@ -294,7 +311,8 @@ namespace LegionRuntime{
                               Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
                               Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dso,
                               Rect<1> &irect, Rect<1> &orect,
-                              int &done, int &offset_idx, int &block_start, int &total, int available_slots);
+                              int &done, int &offset_idx, int &block_start, int &total, int available_slots,
+                              bool disable_batch = false);
       void simple_update_bytes_read(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_read);
       void simple_update_bytes_write(int64_t offset, uint64_t size, std::map<int64_t, uint64_t>& segments_write);
 
@@ -493,6 +511,8 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
+        delete dsi;
+        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -527,6 +547,8 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
+        delete dsi;
+        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -563,6 +585,8 @@ namespace LegionRuntime{
         if(!next_XferDes)
           delete dst_buf;
         free(requests);
+        delete dsi;
+        delete dso;
         // trigger complete event
         get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
@@ -587,15 +611,22 @@ namespace LegionRuntime{
     template<unsigned DIM>
     class HDFXferDes : public XferDes {
     public:
-      HDFXferDes(Channel* _channel,
-                 bool has_pre_XferDes, bool has_next_XferDes,
+      HDFXferDes(Channel* _channel, bool has_pre_XferDes,
                  Buffer* src_buf, Buffer* _dst_buf,
                  char* _mem_base, HDFMemory::HDFMetadata* hdf_metadata,
                  Domain domain, const std::vector<OffsetsAndSize>& oas_vec,
-                 XferOrder _order, XferKind _kind);
+                 long max_nr, XferOrder _order, XferKind _kind);
       ~HDFXferDes()
       {
-
+        //deallocate buffers
+        delete src_buf;
+        if(!next_XferDes)
+          delete dst_buf;
+        free(requests);
+        delete pir;
+        delete lsi;
+        // trigger complete event
+        get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
       }
 
       long get_requests(Request** requests, long nr);
@@ -604,6 +635,11 @@ namespace LegionRuntime{
 
     private:
       Request* requests;
+      char *mem_base;
+      HDFMemory::HDFMetadata *hdf_metadata;
+      std::vector<OffsetsAndSize>::iterator fit;
+      GenericPointInRectIterator<DIM>* pir;
+      GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
     };
 #endif
 
@@ -685,6 +721,19 @@ namespace LegionRuntime{
     };
 #endif
 
+#ifdef USE_HDF
+    class HDFChannel : public Channel {
+    public:
+      HDFChannel(long max_nr, XferDes::XferKind _kind);
+      ~HDFChannel();
+      long submit(Request** requests, long nr);
+      void pull();
+      long available();
+    private:
+      long capacity;
+    };
+#endif
+
     class ChannelManager {
     public:
       ChannelManager(void) {
@@ -748,6 +797,18 @@ namespace LegionRuntime{
         return gpu_in_fb_channels[src_gpu];
       }
 #endif
+#ifdef USE_HDF
+      HDFChannel* create_hdf_read_channel(long max_nr) {
+        assert(hdf_read_channel == NULL);
+        hdf_read_channel = new HDFChannel(max_nr, XferDes::XFER_HDF_READ);
+        return hdf_read_channel;
+      }
+      HDFChannel* create_hdf_write_channel(long max_nr) {
+        assert(hdf_write_channel == NULL);
+        hdf_write_channel = new HDFChannel(max_nr, XferDes::XFER_HDF_WRITE);
+        return hdf_write_channel;
+      }
+#endif
       MemcpyChannel* get_memcpy_channel() {
         return memcpy_channel;
       }
@@ -783,11 +844,22 @@ namespace LegionRuntime{
         return (it->second);
       }
 #endif
+#ifdef USE_HDF
+      HDFChannel* get_hdf_read_channel() {
+        return hdf_read_channel;
+      }
+      HDFChannel* get_hdf_write_channel() {
+        return hdf_write_channel;
+      }
+#endif
     public:
       MemcpyChannel* memcpy_channel;
       DiskChannel *disk_read_channel, *disk_write_channel;
 #ifdef USE_CUDA
       std::map<GPUProcessor*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
+#endif
+#ifdef USE_HDF
+      HDFChannel *hdf_read_channel, *hdf_write_channel;
 #endif
     };
 
