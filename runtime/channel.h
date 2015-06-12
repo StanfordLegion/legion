@@ -47,56 +47,6 @@ namespace LegionRuntime{
       int size;
     };
 
-    struct Copy_1D {
-      int64_t src_offset, dst_offset;
-      uint64_t nbytes;
-    };
-
-    struct Copy_2D {
-      int64_t src_offset, dst_offset, src_stride, dst_stride;
-      uint64_t nbytes, nlines;
-    };
-
-    template<class T>
-    class CopyPool {
-    public:
-      CopyPool(long in_num) {
-        num = in_num;
-        arr = (T*) calloc(num, sizeof(T));
-        for (long i = 0; i < num; i++)
-          queue.push(&arr[i]);
-      }
-
-      T* get_one() {
-        assert(!queue.empty());
-        T* ret = queue.front();
-        queue.pop();
-        return ret;
-      }
-
-      void free_one(T* elmnt) {
-        queue.push(elmnt);
-      }
-
-      void free_multiple(std::deque<T*> list) {
-        typename std::deque<T*>::iterator it;
-        for (it = list.begin(); it != list.end(); it++) {
-          free_one(*it);
-        }
-      }
-
-      ~CopyPool() {
-        free(arr);
-      }
-    private:
-      long num;
-      T* arr;
-      std::queue<T*> queue;
-    };
-
-    static CopyPool<Copy_1D> copy_pool_1d(1000);
-    static CopyPool<Copy_2D> copy_pool_2d(1000);
-
     class Buffer {
     public:
       enum MemoryKind {
@@ -108,19 +58,22 @@ namespace LegionRuntime{
       Buffer(RegionInstance::Impl::Metadata* metadata)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
-              buf_size(metadata->size), linearization(metadata->linearization){}
+              buf_size(metadata->size), linearization(metadata->linearization),
+              memory(Memory::NO_MEMORY), ib_offset(0) {}
 
       Buffer(off_t _alloc_offset, bool _is_ib,
              int _block_size, int _elmt_size, size_t _buf_size,
-             DomainLinearization _linearization)
+             DomainLinearization _linearization, Memory _memory, off_t _ib_offset)
             : alloc_offset(_alloc_offset),
               is_ib(_is_ib), block_size(_block_size), elmt_size(_elmt_size),
-              buf_size(_buf_size), linearization(_linearization){}
+              buf_size(_buf_size), linearization(_linearization),
+              memory(_memory), ib_offset(_ib_offset) {}
 
       ~Buffer() {
         // If this is intermediate buffer,
         // we need to free the buffer
     	if (is_ib) {
+    	  memory.impl()->free_bytes(ib_offset, buf_size);
         }
       }
 
@@ -159,6 +112,13 @@ namespace LegionRuntime{
 
       DomainLinearization linearization;
 
+      // Only useful when this is an intermediate buffer
+      // memory that contains the ib
+      Memory memory;
+
+      // Only useful when this is an intermediate buffer
+      // offset of the starting address of the ib
+      off_t ib_offset;
     };
 
     class Request {
@@ -1035,6 +995,58 @@ namespace LegionRuntime{
 } // namespace LegionRuntime
 #endif
 
+#ifdef COPY_POOL
+struct Copy_1D {
+   int64_t src_offset, dst_offset;
+   uint64_t nbytes;
+ };
+
+ struct Copy_2D {
+   int64_t src_offset, dst_offset, src_stride, dst_stride;
+   uint64_t nbytes, nlines;
+ };
+
+ template<class T>
+ class CopyPool {
+ public:
+   CopyPool(long in_num) {
+     num = in_num;
+     arr = (T*) calloc(num, sizeof(T));
+     for (long i = 0; i < num; i++)
+       queue.push(&arr[i]);
+   }
+
+   T* get_one() {
+     assert(!queue.empty());
+     T* ret = queue.front();
+     queue.pop();
+     return ret;
+   }
+
+   void free_one(T* elmnt) {
+     queue.push(elmnt);
+   }
+
+   void free_multiple(std::deque<T*> list) {
+     typename std::deque<T*>::iterator it;
+     for (it = list.begin(); it != list.end(); it++) {
+       free_one(*it);
+     }
+   }
+
+   ~CopyPool() {
+     free(arr);
+   }
+ private:
+   long num;
+   T* arr;
+   std::queue<T*> queue;
+ };
+
+ static CopyPool<Copy_1D> copy_pool_1d(1000);
+ static CopyPool<Copy_2D> copy_pool_2d(1000);
+
+#endif
 
 /*
     class MemcpyThread {

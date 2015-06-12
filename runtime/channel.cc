@@ -947,14 +947,21 @@ namespace LegionRuntime {
       void HDFXferDes<DIM>::notify_request_read_done(Request* req)
       {
         req->is_read_done = true;
+        // close and release HDF resources
         // currently we don't support ib case
         assert(!pre_XferDes);
         switch (kind) {
           case XferDes::XFER_HDF_READ:
-            bytes_read += ((HDFReadRequest*)req)->nbytes;
+            HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
+            bytes_read += hdf_read_req->nbytes;
+            H5Sclose(hdf_read_req->mem_space_id);
+            H5Sclose(hdf_read_req->file_space_id);
             break;
           case XferDes::XFER_HDF_WRITE:
-            bytes_read += ((HDFWriteRequest*)req)->nbytes;
+            HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
+            bytes_read += hdf_write_req->nbytes;
+            H5Sclose(hdf_write_req->mem_space_id);
+            H5Sclose(hdf_write_req->file_space_id);
             break;
           default:
             assert(0);
@@ -969,10 +976,16 @@ namespace LegionRuntime {
         assert(!next_XferDes);
         switch (kind) {
           case XferDes::XFER_HDF_READ:
-            bytes_write += ((HDFReadRequest*)req)->nbytes;
+            HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
+            bytes_write += hdf_read_req->nbytes;
+            H5Sclose(hdf_read_req->mem_space_id);
+            H5Sclose(hdf_read_req->file_space_id);
             break;
           case XferDes::XFER_HDF_WRITE:
-            bytes_write += ((HDFWriteRequest*)req)->nbytes;
+            HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
+            bytes_write += hdf_write_req->nbytes;
+            H5Sclose(hdf_write_req->mem_space_id);
+            H5Sclose(hdf_write_req->file_space_id);
             break;
           default:
             assert(0);

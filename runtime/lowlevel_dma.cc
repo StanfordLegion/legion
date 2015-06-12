@@ -2792,7 +2792,7 @@ namespace LegionRuntime {
               oasvec_src.push_back(oas_src);
               oasvec_dst.push_back(oas_dst);
             }
-            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization);
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization, cpu_mem, ib_offset);
             XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
@@ -2837,7 +2837,7 @@ namespace LegionRuntime {
               oasvec_src.push_back(oas_src);
               oasvec_dst.push_back(oas_dst);
             }
-            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization);
+            Buffer* ib_buf = new Buffer(0, true, dst_buf->block_size, ib_elmnt_size, ib_size, dst_buf->linearization, cpu_mem, ib_offset);
             XferDes* xd1 = new DiskXferDes<DIM>(channel_manager->get_disk_read_channel(), false,
                                            src_buf, ib_buf, ib_mem_base, src_fd,
                                            domain, oasvec_src, 16 * 1024/*max_req_size (bytes)*/,
