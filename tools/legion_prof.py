@@ -488,8 +488,17 @@ class TimeRange(object):
 
     def non_cummulative_time(self):
         total_time = self.cummulative_time()
+        start_subrange = 0
+        end_subrange = 0
         for r in self.subranges:
-            total_time = total_time - r.cummulative_time()
+            # the following does not work because of overlapping subranges
+            #total_time = total_time - r.cummulative_time()
+            if end_subrange <= r.start_event.abs_time:
+                total_time = total_time - (end_subrange - start_subrange)
+                start_subrange = r.start_event.abs_time
+            end_subrange = r.end_event.abs_time
+        total_time = total_time - (end_subrange - start_subrange)
+
         assert total_time >= 0
         return total_time
 
@@ -589,7 +598,7 @@ class EventRange(TimeRange):
             title = "Message Handler"
         elif self.range_kind == COPY_RANGE:
             color = "#8B0000" # Dark Red
-            title = "Low-Level Copy"
+            title = "Low-Level Copy "+repr(self)
         else:
             assert False
         printer.emit_timing_range(color, level, self.start_event.abs_time, self.end_event.abs_time, title)
