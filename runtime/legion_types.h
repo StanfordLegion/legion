@@ -255,6 +255,7 @@ namespace LegionRuntime {
     class PremapTraverser;
     template<bool RESTRICTED>
     class MappingTraverser;
+    class VersionInfo;
     class RestrictInfo;
 
     struct LogicalState;

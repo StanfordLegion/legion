@@ -230,6 +230,7 @@ namespace LegionRuntime {
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
+                                       VersionInfo &version_info,
                                        RestrictInfo &restrict_info,
                                        RegionTreePath &path);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
@@ -1452,6 +1453,43 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class VersionInfo
+     * A class for tracking version information about region usage
+     */
+    class VersionInfo {
+    public:
+      typedef LegionMap<VerionsID,FieldMask>::aligned RegionVersions;
+    public:
+      VersionInfo(void)
+        : projection(false) { }
+      VersionInfo(const VersionInfo &rhs)
+      {
+        region_versions = rhs.region_versions;
+        projection = rhs.projection;
+      }
+      ~VersionInfo(void) { }
+    public:
+      VersionInfo& operator=(const VersionInfo &rhs)
+      {
+        region_versions = rhs.region_versions;
+        projection = rhs.projection;
+        return *this;
+      }
+    public:
+      inline RegionVersions& find_region(RegionTreeNode *node)
+        { return region_versions[node]; }
+      inline void remove_region(RegionTreeNode *node)
+        { region_versions.erase(node); }
+      inline void set_projection(void) { projection = true; }
+      inline bool is_projection(void) const { return projection; }
+      inline void clear(void)
+        { region_versions.clear(); projection = false; }
+    protected:
+      std::map<RegionTreeNode*,RegionVersions> region_versions;
+      bool projection;
+    };
+
+    /**
      * \class RestrictInfo
      * A class for tracking mapping restrictions based 
      * on region usage.
@@ -1640,6 +1678,8 @@ namespace LegionRuntime {
                                                             curr_epoch_users;
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
+      LegionMap<VersionID,FieldMask,VERSION_ID_ALLOC>::track_aligned
+                                                            field_versions;
       // Fields on which the user has 
       // asked for explicit coherence
       FieldMask restricted_fields;
@@ -1996,11 +2036,13 @@ namespace LegionRuntime {
       void register_logical_node(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
+                                 VersionInfo &version_info,
                                  RestrictInfo &restrict_info,
                                  const TraceInfo &trace_info);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
+                             VersionInfo &version_info,
                              RestrictInfo &restrict_info,
                              const bool already_traced);
       void close_logical_node(LogicalCloser &closer,
@@ -2027,6 +2069,9 @@ namespace LegionRuntime {
                             const LegionDeque<FieldState>::aligned &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
+      void record_version_numbers(LogicalState &state, const FieldMask &mask,
+                                  VersionInfo &info);
+      void update_version_numbers(LogicalState &state, const FieldMask &mask);
       void sanity_check_logical_state(LogicalState &state);
       void initialize_logical_state(ContextID ctx);
       void invalidate_logical_state(ContextID ctx);
@@ -2765,7 +2810,21 @@ namespace LegionRuntime {
     protected:
       const ContextID ctx;
       RestrictInfo &restrict_info;
-      FieldMask user_mask;
+      const FieldMask &user_mask;
+    };
+
+    class VersionRecorder : public NodeTraverser {
+    public:
+      VersionRecorder(ContextID ctx, VersionInfo &version_info,
+                      const FieldMask &mask);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      VersionInfo &version_info;
+      const FieldMask &user_mask;
     };
 
     /**

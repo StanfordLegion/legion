@@ -626,6 +626,7 @@ namespace LegionRuntime {
       Barrier must_barrier; // for must parallelism
       ArgumentMap argument_map;
       std::list<SliceTask*> slices;
+      std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
     protected:
       ReductionOpID redop;
@@ -722,8 +723,9 @@ namespace LegionRuntime {
       void *future_store;
       size_t future_size;
       Future result; 
-      std::set<Operation*> child_operations;
+      std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
+      std::vector<VersionInfo>    version_infos;
       std::vector<RestrictInfo>   restrict_infos;
     protected:
       // Information for remotely executing task

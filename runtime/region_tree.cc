@@ -1335,6 +1335,7 @@ namespace LegionRuntime {
     void RegionTreeForest::perform_dependence_analysis(
                                                   Operation *op, unsigned idx,
                                                   RegionRequirement &req,
+                                                  VersionInfo &version_info,
                                                   RestrictInfo &restrict_info,
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
@@ -1375,7 +1376,7 @@ namespace LegionRuntime {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_node(ctx.get_id(), user, path, 
+      parent_node->register_logical_node(ctx.get_id(), user, path, version_info,
                                          restrict_info, trace_info);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
@@ -9777,7 +9778,7 @@ namespace LegionRuntime {
     bool RestrictionRecorder::visit_only_valid(void) const
     //--------------------------------------------------------------------------
     {
-      return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9793,6 +9794,43 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Skip partitions because there are no restrictions
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // RestrictionRecorder 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VersionRecorder::VersionRecorder(ContextID c, VersionInfo &info,
+                                     const FieldMask &mask)
+      : ctx(c), version_info(info), user_mask(mask)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionRecorder::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionRecorder::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = node->get_logical_state(ctx);
+      node->record_version_numbers(state, user_mask, version_info);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionRecorder::visit_partition(void)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = node->get_logical_state(ctx);
+      node->record_version_numbers(state, user_mask, version_info);
       return true;
     }
 
@@ -12489,6 +12527,7 @@ namespace LegionRuntime {
     void RegionTreeNode::register_logical_node(ContextID ctx, 
                                                const LogicalUser &user,
                                                RegionTreePath &path,
+                                               VersionInfo &version_info,
                                                RestrictInfo &restrict_info,
                                                const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -12530,6 +12569,9 @@ namespace LegionRuntime {
         const FieldMask &closed_mask = closer.get_closed_mask();
         filter_prev_epoch_users(state, closed_mask);
         filter_curr_epoch_users(state, closed_mask);
+        // We also need to update the version numbers because close
+        // operations definitely write to a logical region
+        update_version_numbers(state, closed_mask);
         // Now we can add the close operations to the current epoch
         closer.register_close_operations(state.curr_epoch_users);
       }
@@ -12550,6 +12592,13 @@ namespace LegionRuntime {
                                   true/*record*/, false/*has skip*/>(user,
             state.prev_epoch_users, non_dominated_mask, arrived/*validates*/);
       }
+
+      // We also need to record the needed version numbers for this node
+      // Note that we do this after the close operations have been registered
+      // so we get the any updates to version numbers performed by close
+      // operations on which we will depend.
+      record_version_numbers(state, user.field_mask, version_info);
+
       if (arrived)
       {
         // If we dominated and this is our final destination then we 
@@ -12565,6 +12614,12 @@ namespace LegionRuntime {
           // them to prev epoch users.  If all fields masked off, then remove
           // them from the list of current epoch users.
           filter_curr_epoch_users(state, dominator_mask);
+          // We only update the version numbers for fields which were dominated
+          // when doing a write because if we didn't dominate, that means there
+          // is another writer already registered which has already updated the 
+          // version number for us. Don't count reductions as writes here.
+          if (IS_WRITE(user.usage))
+            update_version_numbers(state, dominator_mask);
         }
         // Here is the only difference with tracing.  If we already
         // traced then we don't need to register ourselves as a user
@@ -12594,15 +12649,22 @@ namespace LegionRuntime {
             }
           }
         }
+        // If this is a projection requirement, we also need to record any
+        // version numbers from farther down in the tree as well. 
+        if (version_info.is_projection())
+        {
+          VersionRecorder recorder(ctx, version_info, user.field_mask);
+          visit_node(&recorder);
+        }
       }
       else // We're still not there, so keep going
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         if (open_only)
-          child->open_logical_node(ctx, user, path, restrict_info, 
-                                   trace_info.already_traced);
+          child->open_logical_node(ctx, user, path, version_info,
+                        restrict_info, trace_info.already_traced);
         else
-          child->register_logical_node(ctx, user, path, 
+          child->register_logical_node(ctx, user, path, version_info, 
                                        restrict_info, trace_info);
       }
     }
@@ -12611,6 +12673,7 @@ namespace LegionRuntime {
     void RegionTreeNode::open_logical_node(ContextID ctx,
                                              const LogicalUser &user,
                                              RegionTreePath &path,
+                                             VersionInfo &version_info,
                                              RestrictInfo &restrict_info,
                                              const bool already_traced)
     //--------------------------------------------------------------------------
@@ -12619,9 +12682,21 @@ namespace LegionRuntime {
       PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
 #endif
       LogicalState &state = get_logical_state(ctx);
+      // First record any version information that we need
+      record_version_numbers(state, user.field_mask, version_info);
       const unsigned depth = get_depth();
       if (!path.has_child(depth))
       {
+        // If this is a write, then update our version numbers
+        if (IS_WRITE(user.usage))
+          update_version_numbers(state, user.field_mask);
+        // If this is a projection then we do need to capture any 
+        // child version information because it might change
+        if (version.is_projection())
+        {
+          VersionRecorder recorder(ctx, version_info, user.field_mask);
+          visit_node(&recorder);
+        }
         // No need to record ourselves if we've already traced
         if (!already_traced)
         {
@@ -12661,7 +12736,7 @@ namespace LegionRuntime {
 #endif
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
-        child_node->open_logical_node(ctx, user, path, 
+        child_node->open_logical_node(ctx, user, path, version_info, 
                                       restrict_info, already_traced);
       }
     }
@@ -12710,6 +12785,8 @@ namespace LegionRuntime {
       }
       // Merge any new field states
       merge_new_field_states(state, new_states);
+      // Finally update the version numbers for the closed fields
+      update_version_numbers(state, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -13245,6 +13322,84 @@ namespace LegionRuntime {
         }
         else
           it++; // not empty so keep going
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::record_version_numbers(LogicalState &state,
+                                                const FieldMask &mask,
+                                                VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      // Capture the version information for this logical region  
+      VersionInfo::RegionVersions &versions = version_info.find_region(this);
+      bool found = false;
+      LegionMap<VersionID,FieldMask,
+               VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            current.begin(); it != current.end(); it++)
+      {
+        FieldMask overlap = it->second & mask; 
+        if (!overlap)
+          continue;
+        versions.insert(*it);
+        found = true;
+      }
+      if (!found)
+        version_info.remove_region(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::update_version_numbers(LogicalState &state,
+                                                const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      std::set<VersionID> to_delete;
+      LegionMap<VersionID,FieldMask>::aligned to_add; 
+      LegionMap<VersionID,FieldMask,
+               VERSION_ID_ALLOC>::track_aligned &current = state.field_versions;
+      // Do this in reverse order so we can always push updates ahead
+      for (LegionMap<VersionID,FieldMask>::aligned::reverse_iterator it = 
+            current.rbegin(); it != current.rend(); it++)
+      {
+        FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        // We can't add or delete anything, but we can propagate updates 
+        // Find the next version number
+        VersionID next_version = it->first + 1;
+        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          current.find(next_version);
+        if (finder != current.end())
+        {
+          finder->second |= overlap;
+          // If we propagated remove that entry from the delete list
+          to_delete.erase(next_version);
+        }
+        else
+          to_add[next_version] = overlap;
+        // Remove the overlap fields
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.insert(it->first);
+      }
+      // Remove any deleted version numbers
+      for (std::set<VersionID>::const_iterator it = to_delete.begin();
+            it != to_delete.end(); it++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!current[*it]); // Should be empty
+#endif
+        current.erase(*it);
+      }
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            to_add.begin(); it != to_add.end(); it++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        // The entry should not already exist
+        assert(current.find(it->first) == current.end());
+#endif
+        current.insert(*it);
       }
     }
 

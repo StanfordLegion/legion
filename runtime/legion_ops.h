@@ -473,6 +473,7 @@ namespace LegionRuntime {
       RegionTreePath privilege_path;
       RegionTreePath mapping_path;
       unsigned parent_req_index;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
     };
 
@@ -528,6 +529,8 @@ namespace LegionRuntime {
       std::vector<RegionTreePath> dst_mapping_paths;
       std::vector<unsigned>       src_parent_indexes;
       std::vector<unsigned>       dst_parent_indexes;
+      std::vector<VersionInfo>    src_versions;
+      std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrictions;
       std::vector<RestrictInfo>   dst_restrictions;
     };
@@ -691,6 +694,7 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo  version_info;
       RestrictInfo restrict_info;
     };
 
@@ -712,6 +716,7 @@ namespace LegionRuntime {
                       const std::set<ColorPoint> &targets, 
                       bool leave_open, const ColorPoint &next_child, 
                       LegionTrace *trace, int close_idx, 
+                      const VersionInfo &version_info,
                       const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
@@ -820,6 +825,7 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
@@ -872,8 +878,9 @@ namespace LegionRuntime {
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
+      VersionInfo       version_info;
       RestrictInfo      restrict_info;
-      unsigned parent_req_index;
+      unsigned          parent_req_index;
 #ifdef DEBUG_HIGH_LEVEL
       RegionTreePath    mapping_path;
 #endif
@@ -1479,6 +1486,7 @@ namespace LegionRuntime {
       UserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       IndexPartition partition_handle;
       Domain color_space;
@@ -1531,6 +1539,7 @@ namespace LegionRuntime {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       RegionTreePath mapping_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
       void *value;
@@ -1574,6 +1583,7 @@ namespace LegionRuntime {
     public:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
@@ -1611,6 +1621,7 @@ namespace LegionRuntime {
       InstanceRef reference;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
+      VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
     };

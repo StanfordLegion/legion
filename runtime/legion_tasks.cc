@@ -5165,6 +5165,7 @@ namespace LegionRuntime {
       // Remove our reference to any argument maps
       argument_map = ArgumentMap();
       slices.clear(); 
+      version_infos.clear();
       restrict_infos.clear();
     }
 
@@ -5692,6 +5693,7 @@ namespace LegionRuntime {
       result = Future();
       predicate_false_future = Future();
       privilege_paths.clear();
+      version_infos.clear();
       restrict_infos.clear();
       // Read this before freeing the task
       // Should be safe, but we'll be careful
@@ -5937,10 +5939,12 @@ namespace LegionRuntime {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
+                                                     version_infos[idx],
                                                      restrict_infos[idx],
                                                      privilege_paths[idx]);
       }
@@ -8257,10 +8261,12 @@ namespace LegionRuntime {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
+                                                     version_infos[idx],
                                                      restrict_infos[idx],
                                                      privilege_paths[idx]);
       }

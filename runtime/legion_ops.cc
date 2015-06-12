@@ -1744,6 +1744,7 @@ namespace LegionRuntime {
       region = PhysicalRegion();
       privilege_path.clear();
       mapping_path.clear();
+      version_info.clear();
       restrict_info.clear();
       // Now return this operation to the queue
       runtime->free_map_op(this);
@@ -1772,6 +1773,7 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -2270,6 +2272,8 @@ namespace LegionRuntime {
                              launcher.predicate);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
+      src_versions.resize(launcher.src_requirements.size());
+      dst_versions.resize(launcher.dst_requirements.size());
       src_restrictions.resize(launcher.src_requirements.size());
       dst_restrictions.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -2572,6 +2576,8 @@ namespace LegionRuntime {
       dst_mapping_paths.clear();
       src_parent_indexes.clear();
       dst_parent_indexes.clear();
+      src_versions.clear();
+      dst_versions.clear();
       src_restrictions.clear();
       dst_restrictions.clear();
       // Return this operation to the runtime
@@ -2605,6 +2611,7 @@ namespace LegionRuntime {
       {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
+                                                     src_versions[idx],
                                                      src_restrictions[idx],
                                                      src_privilege_paths[idx]);
       }
@@ -2613,6 +2620,7 @@ namespace LegionRuntime {
         unsigned index = src_requirements.size()+idx;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
+                                                     dst_versions[idx],
                                                      dst_restrictions[idx],
                                                      dst_privilege_paths[idx]);
       }
@@ -4063,6 +4071,7 @@ namespace LegionRuntime {
     {
       deactivate_operation();
       privilege_path.clear();
+      version_info.clear();
       restrict_info.clear();
     } 
 
@@ -4132,6 +4141,7 @@ namespace LegionRuntime {
                                   const std::set<ColorPoint> &targets,
                                   bool open, const ColorPoint &next, 
                                   LegionTrace *trace, int close, 
+                                  const VersionInfo &ver_info,
                                   const RestrictInfo &res_info,
                                   const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------
@@ -4147,6 +4157,7 @@ namespace LegionRuntime {
       requirement.copy_without_mapping_info(req);
       requirement.initialize_mapping_fields();
       initialize_privilege_path(privilege_path, requirement);
+      version_info = ver_info;
       restrict_info = res_info;
       target_children = targets;
       leave_open = open;
@@ -4452,6 +4463,7 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -4734,6 +4746,7 @@ namespace LegionRuntime {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      version_info.clear();
       restrict_info.clear();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
@@ -4756,6 +4769,7 @@ namespace LegionRuntime {
       // First register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       // Now tell the forest that we have user-level coherence
@@ -5294,6 +5308,7 @@ namespace LegionRuntime {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      version_info.clear();
       restrict_info.clear();
       // Return this operation to the runtime
       runtime->free_release_op(this);
@@ -5316,6 +5331,7 @@ namespace LegionRuntime {
       // First register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       // Now tell the forest that we are relinquishing user-level coherence
@@ -7816,6 +7832,7 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -7948,6 +7965,7 @@ namespace LegionRuntime {
       privilege_path = RegionTreePath();
       if (!handle_ready.has_triggered())
         handle_ready.trigger();
+      version_info.clear();
       restrict_info.clear();
       runtime->free_dependent_partition_op(this);
     }
@@ -8082,6 +8100,7 @@ namespace LegionRuntime {
         free(value);
         value = NULL;
       }
+      version_info.clear();
       restrict_info.clear();
       runtime->free_fill_op(this);
     }
@@ -8111,6 +8130,7 @@ namespace LegionRuntime {
       register_predicate_dependence();
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -8450,6 +8470,7 @@ namespace LegionRuntime {
       field_map.clear();
       region = PhysicalRegion();
       privilege_path.clear();
+      version_info.clear();
       restrict_info.clear();
       runtime->free_attach_op(this);
     }
@@ -8477,6 +8498,7 @@ namespace LegionRuntime {
       begin_dependence_analysis();
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
+                                                   version_info,
                                                    restrict_info, 
                                                    privilege_path);
       // If we have any restriction on ourselves, that is very bad
@@ -8792,6 +8814,7 @@ namespace LegionRuntime {
       deactivate_operation();
       reference = InstanceRef();
       privilege_path.clear();
+      version_info.clear();
       restrict_info.clear();
       runtime->free_detach_op(this);
     }
@@ -8823,6 +8846,7 @@ namespace LegionRuntime {
                                               requirement.privilege_fields);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
+                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
       end_dependence_analysis();
