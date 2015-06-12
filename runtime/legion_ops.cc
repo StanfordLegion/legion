@@ -8882,8 +8882,8 @@ namespace LegionRuntime {
       }
       if (!requirement.premapped)
         return false;
-      complete_mapping();
       runtime->forest->detach_file(physical_ctx, requirement, reference);
+      complete_mapping();
       complete_execution();
       // This should always succeed
       return true;

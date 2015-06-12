@@ -294,7 +294,7 @@ class UniqueOp(object):
     def waiting_time(self):
         result = 0
         for w in self.waits:
-            result = result + w.cummulative_time()
+            result = result + w.cumulative_time()
         return result
 
 class UniqueTask(UniqueOp):
@@ -483,13 +483,22 @@ class TimeRange(object):
 
         self.subranges = [s for s in self.subranges if s not in removed]
 
-    def cummulative_time(self):
+    def cumulative_time(self):
         return self.end_event.abs_time - self.start_event.abs_time
 
-    def non_cummulative_time(self):
-        total_time = self.cummulative_time()
+    def non_cumulative_time(self):
+        total_time = self.cumulative_time()
+        start_subrange = 0
+        end_subrange = 0
         for r in self.subranges:
-            total_time = total_time - r.cummulative_time()
+            # the following does not work because of overlapping subranges
+            #total_time = total_time - r.cumulative_time()
+            if end_subrange <= r.start_event.abs_time:
+                total_time = total_time - (end_subrange - start_subrange)
+                start_subrange = r.start_event.abs_time
+            end_subrange = r.end_event.abs_time
+        total_time = total_time - (end_subrange - start_subrange)
+
         assert total_time >= 0
         return total_time
 
@@ -509,7 +518,7 @@ class TimeRange(object):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
             self.start_event.abs_time,
             self.end_event.abs_time,
-            self.cummulative_time())
+            self.cumulative_time())
 
 class BaseRange(TimeRange):
     def __init__(self, proc, start_event, end_event):
@@ -589,7 +598,7 @@ class EventRange(TimeRange):
             title = "Message Handler"
         elif self.range_kind == COPY_RANGE:
             color = "#8B0000" # Dark Red
-            title = "Low-Level Copy"
+            title = "Low-Level Copy "+repr(self)
         else:
             assert False
         printer.emit_timing_range(color, level, self.start_event.abs_time, self.end_event.abs_time, title)
@@ -598,13 +607,13 @@ class EventRange(TimeRange):
 
     def update_task_stats(self, stat, proc):
         if self.range_kind == SCHEDULE_RANGE:
-            stat.update_scheduler(self.cummulative_time(), self.non_cummulative_time(), proc)
+            stat.update_scheduler(self.cumulative_time(), self.non_cumulative_time(), proc)
         elif self.range_kind == GC_RANGE:
-            stat.update_gc(self.cummulative_time(), self.non_cummulative_time(), proc)
+            stat.update_gc(self.cumulative_time(), self.non_cumulative_time(), proc)
         elif self.range_kind <> WAIT_RANGE:
             variant = self.op.get_variant()
-            cum_time = self.cummulative_time()
-            non_cum_time = self.non_cummulative_time()
+            cum_time = self.cumulative_time()
+            non_cum_time = self.non_cumulative_time()
             if self.range_kind == DEPENDENCE_RANGE:
                 if self.op.is_mapping():
                     stat.update_inline_dep_analysis(variant, cum_time, non_cum_time, proc)
@@ -636,7 +645,7 @@ class EventRange(TimeRange):
 
     def active_time(self):
         if self.range_kind == EXECUTION_RANGE:
-            result = self.cummulative_time() - self.op.waiting_time()
+            result = self.cumulative_time() - self.op.waiting_time()
             for subrange in self.subranges:
                 result = result + subrange.active_time()
             return result
@@ -646,11 +655,11 @@ class EventRange(TimeRange):
                 result = result + subrange.active_time()
             return result
         else:
-            return self.cummulative_time()
+            return self.cumulative_time()
 
     def application_time(self):
         if self.range_kind == EXECUTION_RANGE:
-            result = self.cummulative_time() - self.op.waiting_time()
+            result = self.cumulative_time() - self.op.waiting_time()
             for subrange in self.subranges:
                 result = result + subrange.application_time()
             return result
@@ -674,7 +683,7 @@ class EventRange(TimeRange):
                 result = result + subrange.meta_time()
             return result
         else:
-            return self.cummulative_time()
+            return self.cumulative_time()
 
 class Processor(object):
     def __init__(self, proc_id, utility, kind):
@@ -712,7 +721,7 @@ class Processor(object):
         # The amount of time the processor was active
         # The amount of time spent on application tasks
         # The amount of time spent on meta tasks
-        total_time = self.full_range.cummulative_time()
+        total_time = self.full_range.cumulative_time()
         active_time = self.full_range.active_time()
         application_time = self.full_range.application_time()
         meta_time = self.full_range.meta_time()
@@ -1047,8 +1056,8 @@ class CallTracker(object):
                 stddev = sqrt(stddev)
                 max_dev = (float(self.max_time) - avg) / stddev if stddev != 0 else 0.0
                 min_dev = (float(self.min_time) - avg) / stddev if stddev != 0 else 0.0
-            print "                Cummulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
-            print "                Non-Cummulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
+            print "                Cumulative Time: %d us (%.3f%%)" % (self.cum_time,100.0*float(self.cum_time)/float(total_time))
+            print "                Non-Cumulative Time: %d us (%.3f%%)" % (self.non_cum_time,100.0*float(self.non_cum_time)/float(total_time))
             print "                Average Cum Time: %.3f us" % (float(self.cum_time)/float(self.invocations))
             print "                Average Non-Cum Time: %.3f us" % (float(self.non_cum_time)/float(self.invocations))
             print "                Maximum Cum Time: %.3f us (%.3f sig) on processor %s" % (float(self.max_time),max_dev,hex(self.max_proc))
@@ -1106,7 +1115,7 @@ class StatVariant(object):
     def update_trigger(self, cum, non_cum, proc):
         self.triggers.increment(cum, non_cum, proc)
 
-    def cummulative_time(self):
+    def cumulative_time(self):
         time = 0
         time = time + self.invocations.cum_time
         time = time + self.inline_dep_analysis.cum_time
@@ -1122,7 +1131,7 @@ class StatVariant(object):
         time = time + self.triggers.cum_time
         return time
 
-    def non_cummulative_time(self):
+    def non_cumulative_time(self):
         time = 0
         time = time + self.invocations.non_cum_time
         time = time + self.inline_dep_analysis.non_cum_time
@@ -1138,15 +1147,15 @@ class StatVariant(object):
         time = time + self.triggers.non_cum_time
         return time
 
-    def print_stats(self, total_time, cummulative, verbose):
+    def print_stats(self, total_time, cumulative, verbose):
         title_str = repr(self.var)
         to_add = 50 - len(title_str)
         if to_add > 0:
             for idx in range(to_add):
                 title_str = title_str+' '
-        cum_time = self.cummulative_time()
-        non_cum_time = self.non_cummulative_time()
-        if cummulative:
+        cum_time = self.cumulative_time()
+        non_cum_time = self.non_cumulative_time()
+        if cumulative:
             cum_per = 100.0*(float(cum_time)/float(total_time))
             title_str = title_str+("%d us (%.3f%%)" % (cum_time,cum_per))
         else:
@@ -1162,9 +1171,9 @@ class StatVariant(object):
             print "          Executions (APP):"
             self.invocations.print_stats(total_time)
             print "          Meta Execution Time (META):"
-            print "                Cummulative Time: %d us (%.3f%%)" % \
+            print "                Cumulative Time: %d us (%.3f%%)" % \
                 (meta_cum_time,100.0*float(meta_cum_time)/float(total_time))
-            print "                Non-Cummulative Time: %d us (%.3f%%)" % \
+            print "                Non-Cumulative Time: %d us (%.3f%%)" % \
                 (meta_non_cum_time,100.0*float(meta_non_cum_time)/float(total_time))
         else:
             self.emit_call_stat(self.invocations,"Executions (APP):",total_time)
@@ -1261,22 +1270,22 @@ class StatGatherer(object):
     def update_gc(self, cum, non_cum, proc):
         self.gcs.increment(cum, non_cum, proc)
 
-    def print_stats(self, total_time, cummulative, verbose):
+    def print_stats(self, total_time, cumulative, verbose):
         print "  -------------------------"
         print "  Task Statistics"
         print "  -------------------------"
-        # Sort the tasks based on either their cummulative
-        # or non-cummulative time
+        # Sort the tasks based on either their cumulative
+        # or non-cumulative time
         task_list = list()
         for v,var in self.variants.iteritems():
             task_list.append(var)
-        if cummulative:
-            task_list.sort(key=lambda t: t.cummulative_time())
+        if cumulative:
+            task_list.sort(key=lambda t: t.cumulative_time())
         else:
-            task_list.sort(key=lambda t: t.non_cummulative_time())
+            task_list.sort(key=lambda t: t.non_cumulative_time())
         task_list.reverse()
         for t in task_list:
-            t.print_stats(total_time, cummulative, verbose)
+            t.print_stats(total_time, cumulative, verbose)
         print "  -------------------------"
         print "  Meta-Task Statistics"
         print "  -------------------------"
@@ -1430,7 +1439,7 @@ class State(object):
             mem.print_stats()
         print
 
-    def print_task_stats(self, cummulative, verbose):
+    def print_task_stats(self, cumulative, verbose):
         print '****************************************************'
         print '   TASK STATS'
         print '****************************************************'
@@ -1441,7 +1450,7 @@ class State(object):
             proc.update_task_stats(stat)
         # Total time is the overall execution time multiplied by the number of processors
         total_time = self.last_time * len(self.processors)
-        stat.print_stats(total_time, cummulative, verbose)
+        stat.print_stats(total_time, cumulative, verbose)
         print
 
     def generate_svg_picture(self, file_name, html_file):
@@ -1624,7 +1633,7 @@ def parse_log_file(file_name, state):
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-c] [-p] [-v] <file_name>'
-    print '  -c : perform cummulative analysis'
+    print '  -c : perform cumulative analysis'
     print '  -p : generate HTML and SVG files for pictures'
     print '  -v : print verbose profiling information'
     print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
@@ -1637,12 +1646,12 @@ def main():
     if len(args) == 0:
         usage()
     file_names = args
-    cummulative = False
+    cumulative = False
     generate_pictures = False
     generate_instance = False
     verbose = False
     if '-c' in opts:
-        cummulative = True
+        cumulative = True
     if '-p' in opts:
         generate_pictures = True
     if '-v' in opts:
@@ -1678,7 +1687,7 @@ def main():
     state.print_memory_stats()
 
     # Print the per-task statistics
-    state.print_task_stats(cummulative, verbose)
+    state.print_task_stats(cumulative, verbose)
 
     # Generate the svg profiling picture
     if generate_pictures:
